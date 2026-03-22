@@ -335,8 +335,33 @@ int main() {
             bool isFileSelected = (std::find(selectedFiles.begin(), selectedFiles.end(), file) != selectedFiles.end());
             
             if (isFileSelected) {
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.4f, 0.8f, 0.8f)); // Brighter blue
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.5f, 0.9f, 0.9f)); // Lighter on hover
+                // Find the index of this file in the selectedFiles vector to determine its color
+                auto it = std::find(selectedFiles.begin(), selectedFiles.end(), file);
+                size_t fileIndex = std::distance(selectedFiles.begin(), it);
+                
+                // Get the color matching the plot curve color
+                ImVec4 buttonColor;
+                ImVec4 hoverColor;
+                
+                if (fileIndex == 0) {
+                    buttonColor = ImVec4(0.6f, 0.5f, 0.1f, 0.8f); // Dark yellow - matches plot
+                    hoverColor = ImVec4(0.7f, 0.6f, 0.2f, 0.9f); // Lighter yellow on hover
+                } else if (fileIndex == 1) {
+                    buttonColor = ImVec4(0.75f, 0.05f, 0.05f, 0.8f); // #C00E0E - Red
+                    hoverColor = ImVec4(0.85f, 0.15f, 0.15f, 0.9f); // Lighter red on hover
+                } else if (fileIndex == 2) {
+                    buttonColor = ImVec4(0.15f, 0.45f, 0.28f, 0.8f); // #257448 - Green
+                    hoverColor = ImVec4(0.25f, 0.55f, 0.38f, 0.9f); // Lighter green on hover
+                } else if (fileIndex == 3) {
+                    buttonColor = ImVec4(0.07f, 0.29f, 0.59f, 0.8f); // #114A97 - Blue
+                    hoverColor = ImVec4(0.17f, 0.39f, 0.69f, 0.9f); // Lighter blue on hover
+                } else if (fileIndex == 4) {
+                    buttonColor = ImVec4(0.5f, 0.5f, 0.5f, 0.8f); // Grey
+                    hoverColor = ImVec4(0.6f, 0.6f, 0.6f, 0.9f); // Lighter grey on hover
+                }
+                
+                ImGui::PushStyleColor(ImGuiCol_Button, buttonColor);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, hoverColor);
                 ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f)); // White text
                 stylesPushed = 3; // Selected: push 3 styles
             } else {
