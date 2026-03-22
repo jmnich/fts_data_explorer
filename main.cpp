@@ -188,6 +188,220 @@ public:
     }
 };
 
+/**
+ * Initialize GLFW, ImGui, and application state
+ * @param config Application configuration
+ * @param window Reference to GLFW window pointer
+ * @return true if initialization successful, false otherwise
+ */
+bool initializeApplication(AppConfig& config, GLFWwindow*& window) {
+    std::cout << "FTS Data Explorer - Starting application..." << std::endl;
+
+    // Initialize GLFW
+    if (!glfwInit()) {
+        std::cerr << "Failed to initialize GLFW" << std::endl;
+        return false;
+    }
+
+    // Configure OpenGL context for better performance
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+
+    // Enable hardware acceleration and prefer dedicated GPU
+    glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GL_TRUE);
+
+    // Create window with saved settings
+    window = glfwCreateWindow(config.windowWidth, config.windowHeight, "FTS Data Explorer", nullptr, nullptr);
+    if (!window) {
+        std::cerr << "Failed to create GLFW window" << std::endl;
+        glfwTerminate();
+        return false;
+    }
+
+    // Set window position if saved (not centered)
+    if (config.windowPosX != -1 && config.windowPosY != -1) {
+        glfwSetWindowPos(window, config.windowPosX, config.windowPosY);
+    }
+
+    glfwMakeContextCurrent(window);
+
+    // Initialize ImGui
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+
+    // Enable docking
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+
+    ImGui::StyleColorsDark();
+
+    // Initialize ImPlot context
+    ImPlot::CreateContext();
+
+    return true;
+}
+
+/**
+ * Configure ImGui style and colors
+ * @param io ImGuiIO reference for DPI scaling
+ * @param config Application configuration for UI settings
+ * @param uiScale UI scale factor
+ */
+void setupUIStyle(ImGuiIO& io, const AppConfig& config, float& uiScale, const std::string& currentUiSize) {
+    // Initialize ImGui context
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    
+    // Enable docking
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    
+    ImGui::StyleColorsDark();
+    
+    // Customize colors to use black background
+    ImGuiStyle& style = ImGui::GetStyle();
+    style.Colors[ImGuiCol_WindowBg] = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
+    style.Colors[ImGuiCol_ChildBg] = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
+    style.Colors[ImGuiCol_PopupBg] = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
+
+    // Customize plot colors
+    ImVec4 yellow_color = ImVec4(1.0f, 1.0f, 0.0f, 1.0f); // Bright yellow
+    ImVec4 background_color = ImVec4(0.0f, 0.0f, 0.0f, 1.0f); // Black background
+
+    // Set plot colors
+    style.Colors[ImGuiCol_PlotLines] = yellow_color;
+    style.Colors[ImGuiCol_PlotLinesHovered] = yellow_color;
+    style.Colors[ImGuiCol_PlotHistogram] = yellow_color;
+    style.Colors[ImGuiCol_PlotHistogramHovered] = yellow_color;
+
+    // Initialize ImPlot context
+    ImPlot::CreateContext();
+
+    // Set up for high DPI displays AFTER backend initialization
+    // Apply scaling based on UI size setting
+    float dpi_scale = io.DisplayFramebufferScale.x;
+
+    // Update scale based on UI size
+    if (currentUiSize == "tiny") {
+        uiScale = 0.75f;
+    } else if (currentUiSize == "small") {
+        uiScale = 0.9f;
+    } else if (currentUiSize == "normal") {
+        uiScale = 1.0f;
+    } else if (currentUiSize == "large") {
+        uiScale = 1.25f;
+    } else if (currentUiSize == "huge") {
+        uiScale = 1.5f;
+    }
+
+    // Apply the scaling (font only initially to avoid UI issues)
+    io.FontGlobalScale = dpi_scale * uiScale;
+}
+
+/**
+ * Process window events and update configuration
+ * @param window GLFW window pointer
+ * @param config Application configuration
+ */
+void handleWindowEvents(GLFWwindow* window, AppConfig& config) {
+    // Track window state changes
+    int newWidth, newHeight;
+    glfwGetWindowSize(window, &newWidth, &newHeight);
+    if (newWidth != config.windowWidth || newHeight != config.windowHeight) {
+        config.windowWidth = newWidth;
+        config.windowHeight = newHeight;
+    }
+
+    int newPosX, newPosY;
+    glfwGetWindowPos(window, &newPosX, &newPosY);
+    if (newPosX != config.windowPosX || newPosY != config.windowPosY) {
+        config.windowPosX = newPosX;
+        config.windowPosY = newPosY;
+    }
+
+    // Check if window is maximized
+    config.windowMaximized = glfwGetWindowAttrib(window, GLFW_MAXIMIZED);
+}
+
+/**
+ * Handle keyboard navigation for file selection
+ * @param csvFiles List of available CSV files
+ * @param currentSortedFileIndex Current file index reference
+ * @param filesChanged Reference to files changed flag
+ * @param keyboardNavigation Reference to keyboard navigation flag
+ */
+void handleKeyboardNavigation(const std::vector<std::string>& csvFiles, 
+                             size_t& currentSortedFileIndex, 
+                             bool& filesChanged, 
+                             bool& keyboardNavigation) {
+    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) && !csvFiles.empty()) {
+        if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
+            // Navigate up in file list (with wrapping)
+            if (currentSortedFileIndex > 0) {
+                currentSortedFileIndex--;
+            } else {
+                currentSortedFileIndex = csvFiles.size() - 1; // Wrap to bottom
+            }
+            filesChanged = true;
+            keyboardNavigation = true;
+        } else if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
+            // Navigate down in file list (with wrapping)
+            if (currentSortedFileIndex < csvFiles.size() - 1) {
+                currentSortedFileIndex++;
+            } else {
+                currentSortedFileIndex = 0; // Wrap to top
+            }
+            filesChanged = true;
+            keyboardNavigation = true;
+        }
+    }
+}
+
+/**
+ * Handle UI scaling changes
+ * @param io ImGuiIO reference for DPI scaling
+ * @param uiScale UI scale factor reference
+ * @param currentUiSize Current UI size setting
+ * @param uiSizeChanged Reference to UI size changed flag
+ */
+void handleUIScaling(ImGuiIO& io, float& uiScale, const std::string& currentUiSize, bool& uiSizeChanged) {
+    if (uiSizeChanged) {
+        float dpi_scale = io.DisplayFramebufferScale.x;
+        
+        // Update scale based on new UI size
+        if (currentUiSize == "tiny") {
+            uiScale = 0.75f;
+        } else if (currentUiSize == "small") {
+            uiScale = 0.9f;
+        } else if (currentUiSize == "normal") {
+            uiScale = 1.0f;
+        } else if (currentUiSize == "large") {
+            uiScale = 1.25f;
+        } else if (currentUiSize == "huge") {
+            uiScale = 1.5f;
+        }
+        
+        // Reapply scaling (font only to avoid UI issues)
+        io.FontGlobalScale = dpi_scale * uiScale;
+        
+        uiSizeChanged = false; // Reset flag
+    }
+}
+
+/**
+ * Clean up application resources
+ * @param window GLFW window pointer
+ */
+void cleanupApplication(GLFWwindow* window) {
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+    
+    glfwDestroyWindow(window);
+    glfwTerminate();
+}
+
 int main() {
     // Set environment variables to prefer dedicated GPU on NVIDIA systems
     #ifdef _WIN32
@@ -218,35 +432,11 @@ int main() {
     float uiScale = 1.0f; // Default scale
     bool uiSizeChanged = false; // Flag to track UI size changes
     
-    // Initialize GLFW
-    if (!glfwInit()) {
-        std::cerr << "Failed to initialize GLFW" << std::endl;
+    // Initialize application
+    GLFWwindow* window = nullptr;
+    if (!initializeApplication(config, window)) {
         return -1;
     }
-    
-    // Configure OpenGL context for better performance
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-    
-    // Enable hardware acceleration and prefer dedicated GPU
-    glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GL_TRUE);
-    
-    // Create window with saved settings
-    GLFWwindow* window = glfwCreateWindow(config.windowWidth, config.windowHeight, "FTS Data Explorer", nullptr, nullptr);
-    if (!window) {
-        std::cerr << "Failed to create GLFW window" << std::endl;
-        glfwTerminate();
-        return -1;
-    }
-    
-    // Set window position if saved (not centered)
-    if (config.windowPosX != -1 && config.windowPosY != -1) {
-        glfwSetWindowPos(window, config.windowPosX, config.windowPosY);
-    }
-    
-    glfwMakeContextCurrent(window);
     
     // Initialize ImGui
     IMGUI_CHECKVERSION();
@@ -360,70 +550,13 @@ int main() {
         multiSelectMode = ImGui::GetIO().KeyCtrl;
         
         // Reapply UI scaling if size changed
-        if (uiSizeChanged) {
-            ImGuiIO& io = ImGui::GetIO();
-            float dpi_scale = io.DisplayFramebufferScale.x;
-            
-            // Update scale based on new UI size
-            if (currentUiSize == "tiny") {
-                uiScale = 0.75f;
-            } else if (currentUiSize == "small") {
-                uiScale = 0.9f;
-            } else if (currentUiSize == "normal") {
-                uiScale = 1.0f;
-            } else if (currentUiSize == "large") {
-                uiScale = 1.25f;
-            } else if (currentUiSize == "huge") {
-                uiScale = 1.5f;
-            }
-            
-            // Reapply scaling (font only to avoid UI issues)
-            io.FontGlobalScale = dpi_scale * uiScale;
-            // Note: We don't call ScaleAllSizes here to avoid UI element issues
-            
-            uiSizeChanged = false; // Reset flag
-        }
+        handleUIScaling(io, uiScale, currentUiSize, uiSizeChanged);
         
         // Track window state changes
-        int newWidth, newHeight;
-        glfwGetWindowSize(window, &newWidth, &newHeight);
-        if (newWidth != config.windowWidth || newHeight != config.windowHeight) {
-            config.windowWidth = newWidth;
-            config.windowHeight = newHeight;
-        }
-        
-        int newPosX, newPosY;
-        glfwGetWindowPos(window, &newPosX, &newPosY);
-        if (newPosX != config.windowPosX || newPosY != config.windowPosY) {
-            config.windowPosX = newPosX;
-            config.windowPosY = newPosY;
-        }
-        
-        // Check if window is maximized
-        config.windowMaximized = glfwGetWindowAttrib(window, GLFW_MAXIMIZED);
+        handleWindowEvents(window, config);
         
         // Handle keyboard navigation for file selection
-        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) && !csvFiles.empty() && dataLoaded) {
-            if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
-                // Navigate up in file list (with wrapping)
-                if (currentSortedFileIndex > 0) {
-                    currentSortedFileIndex--;
-                } else {
-                    currentSortedFileIndex = csvFiles.size() - 1; // Wrap to bottom
-                }
-                filesChanged = true;
-                keyboardNavigation = true;
-            } else if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
-                // Navigate down in file list (with wrapping)
-                if (currentSortedFileIndex < csvFiles.size() - 1) {
-                    currentSortedFileIndex++;
-                } else {
-                    currentSortedFileIndex = 0; // Wrap to top
-                }
-                filesChanged = true;
-                keyboardNavigation = true;
-            }
-        }
+        handleKeyboardNavigation(csvFiles, currentSortedFileIndex, filesChanged, keyboardNavigation);
         
         // Handle ESC key to reset zoom (works independently of file navigation)
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) && dataLoaded) {
@@ -886,26 +1019,6 @@ int main() {
         // Graphing panel (main) - now using ImPlot
         ImGui::Begin("Graphing Panel");
         if (dataLoaded) {
-            // Show info for multi-select mode
-            if (selectedFiles.size() > 1) {
-                ImGui::Text("Displaying %zu datasets", selectedFiles.size());
-            } else {
-                ImGui::Text("Reference Detector: %zu samples", loadedData[0].referenceDetector.size());
-                ImGui::Text("Primary Detector: %zu samples", loadedData[0].primaryDetector.size());
-            }
-            
-            // Add zoom controls
-            if (isZoomed) {
-                if (ImGui::Button("Reset Zoom")) {
-                    isZoomed = false;
-                    zoomRange = {0, 0};
-                }
-                ImGui::SameLine();
-                ImGui::Text("Zoomed: %zu-%zu", zoomRange.first, zoomRange.second);
-            }
-            
-
-            
             // Y-axis limits are now handled by the auto-fit toggle
             // When autoFitYAxis is true, ImPlot will auto-calculate Y-axis limits
             // When autoFitYAxis is false, we use the manually calculated limits
@@ -1438,12 +1551,7 @@ int main() {
     }
     
     // Cleanup
-    ImGui_ImplOpenGL3_Shutdown();
-    ImGui_ImplGlfw_Shutdown();
-    ImGui::DestroyContext();
-    
-    glfwDestroyWindow(window);
-    glfwTerminate();
+    cleanupApplication(window);
     
     // Save configuration before exiting
     config.autoFitYAxis = autoFitYAxis;
