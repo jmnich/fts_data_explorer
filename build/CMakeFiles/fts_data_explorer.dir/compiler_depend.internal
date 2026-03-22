@@ -2134,7 +2134,6 @@ fts_data_explorer
  /usr/lib/i386-linux-gnu/libbsd.so.0
  /usr/lib/i386-linux-gnu/libmd.so.0
  /usr/lib/i386-linux-gnu/libxcb.so.1
- /usr/lib/x86_64-linux-gnu/libGLU.so
  /usr/lib/x86_64-linux-gnu/libGLX.so
  /usr/lib/x86_64-linux-gnu/libOpenGL.so
  /usr/lib/x86_64-linux-gnu/libc_nonshared.a

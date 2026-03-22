@@ -242,7 +242,6 @@ fts_data_explorer: CMakeFiles/fts_data_explorer.dir/build.make
 fts_data_explorer: CMakeFiles/fts_data_explorer.dir/compiler_depend.ts
 fts_data_explorer: /usr/lib/x86_64-linux-gnu/libOpenGL.so
 fts_data_explorer: /usr/lib/x86_64-linux-gnu/libGLX.so
-fts_data_explorer: /usr/lib/x86_64-linux-gnu/libGLU.so
 fts_data_explorer: /usr/lib/x86_64-linux-gnu/libglfw.so.3.3
 fts_data_explorer: CMakeFiles/fts_data_explorer.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/guowa/Documents/Repos/fts_data_explorer/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_11) "Linking CXX executable fts_data_explorer"

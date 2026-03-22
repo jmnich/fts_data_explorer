@@ -2123,7 +2123,6 @@ fts_data_explorer: /lib/i386-linux-gnu/libGLdispatch.so.0 \
   /usr/lib/i386-linux-gnu/libbsd.so.0 \
   /usr/lib/i386-linux-gnu/libmd.so.0 \
   /usr/lib/i386-linux-gnu/libxcb.so.1 \
-  /usr/lib/x86_64-linux-gnu/libGLU.so \
   /usr/lib/x86_64-linux-gnu/libGLX.so \
   /usr/lib/x86_64-linux-gnu/libOpenGL.so \
   /usr/lib/x86_64-linux-gnu/libc_nonshared.a \
@@ -2293,8 +2292,6 @@ CMakeFiles/fts_data_explorer.dir/_deps/imgui-src/imgui_widgets.cpp.o:
 /usr/include/c++/13/istream:
 
 /usr/include/c++/13/iostream:
-
-/usr/lib/x86_64-linux-gnu/libGLU.so:
 
 /usr/include/c++/13/ios:
 

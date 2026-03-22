@@ -189,6 +189,16 @@ public:
 };
 
 int main() {
+    // Set environment variables to prefer dedicated GPU on NVIDIA systems
+    #ifdef _WIN32
+    _putenv("D3D12_ENABLE_LAYERED_DRIVER_QUERY=1");
+    _putenv("D3D12_ENABLE_EXPERIMENTAL_FEATURES=1");
+    #else
+    setenv("__NV_PRIME_RENDER_OFFLOAD", "1", 1);
+    setenv("__GLX_VENDOR_LIBRARY_NAME", "nvidia", 1);
+    setenv("__VK_LAYER_NV_optimus", "NVIDIA_only", 1);
+    #endif
+    
     std::cout << "FTS Data Explorer - Starting application..." << std::endl;
     
     // Initialize configuration
@@ -208,6 +218,15 @@ int main() {
         std::cerr << "Failed to initialize GLFW" << std::endl;
         return -1;
     }
+    
+    // Configure OpenGL context for better performance
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+    
+    // Enable hardware acceleration and prefer dedicated GPU
+    glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GL_TRUE);
     
     // Create window with saved settings
     GLFWwindow* window = glfwCreateWindow(config.windowWidth, config.windowHeight, "FTS Data Explorer", nullptr, nullptr);
@@ -254,7 +273,7 @@ int main() {
     style.Colors[ImGuiCol_PlotHistogramHovered] = yellow_color;
     
     ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init("#version 130");
+    ImGui_ImplOpenGL3_Init("#version 460");
     
     // Initialize ImPlot context
     ImPlot::CreateContext();
@@ -287,6 +306,10 @@ int main() {
     bool multiSelectMode = false; // Track if Ctrl is held for multi-select
     const size_t MAX_SELECTABLE_FILES = 5; // Limit to 5 files for simultaneous display
     bool alignPeaks = config.alignPeaks; // Use config setting for peak alignment
+    
+    // Performance optimization: downsampling for large datasets
+    bool enableDownsampling = true;
+    const size_t maxPointsBeforeDownsampling = 50000; // Downsample if dataset exceeds this
     
     // Zoom state
     bool isZooming = false;
@@ -366,6 +389,8 @@ int main() {
             }
         }
         
+
+        
         // Handle Ctrl+H to return to welcome screen
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) && ImGui::IsKeyPressed(ImGuiKey_H) && ImGui::GetIO().KeyCtrl) {
             // Reset to welcome screen state
@@ -393,6 +418,24 @@ int main() {
                 // Load the currently selected file
                 InterferogramData data = CSVAdapter::loadFromCSV(sortedFiles[currentSortedFileIndex]);
                 
+
+                
+                // Apply downsampling if enabled and dataset is large
+                if (enableDownsampling && data.referenceDetector.size() > maxPointsBeforeDownsampling) {
+                    size_t localDownsampleFactor = data.referenceDetector.size() / maxPointsBeforeDownsampling + 1;
+                    
+                    // Downsample both reference and primary detectors
+                    std::vector<float> downsampledRef, downsampledPrim;
+                    for (size_t i = 0; i < data.referenceDetector.size(); i += localDownsampleFactor) {
+                        downsampledRef.push_back(data.referenceDetector[i]);
+                        downsampledPrim.push_back(data.primaryDetector[i]);
+                    }
+                    data.referenceDetector = downsampledRef;
+                    data.primaryDetector = downsampledPrim;
+                    std::cout << "Downsampled dataset from " << (downsampledRef.size() * localDownsampleFactor) 
+                              << " to " << downsampledRef.size() << " points (factor: " << localDownsampleFactor << ")" << std::endl;
+                }
+                
                 // For single selection (no Ctrl), replace current selection
                 loadedData.clear();
                 selectedFiles.clear();
@@ -400,6 +443,7 @@ int main() {
                 
                 // Always load the current file
                 loadedData.push_back(data);
+
                 selectedFiles.push_back(sortedFiles[currentSortedFileIndex]);
                 
                 // Extract filename for legend
@@ -722,6 +766,22 @@ int main() {
                         if (selectedFiles.size() < MAX_SELECTABLE_FILES) {
                             try {
                                 InterferogramData data = CSVAdapter::loadFromCSV(fullPath);
+        
+                                
+                                // Apply downsampling to multi-selected files too
+                                if (enableDownsampling && data.referenceDetector.size() > maxPointsBeforeDownsampling) {
+                                    size_t localDownsampleFactor = data.referenceDetector.size() / maxPointsBeforeDownsampling + 1;
+                                    
+                                    // Downsample both reference and primary detectors
+                                    std::vector<float> downsampledRef, downsampledPrim;
+                                    for (size_t j = 0; j < data.referenceDetector.size(); j += localDownsampleFactor) {
+                                        downsampledRef.push_back(data.referenceDetector[j]);
+                                        downsampledPrim.push_back(data.primaryDetector[j]);
+                                    }
+                                    data.referenceDetector = downsampledRef;
+                                    data.primaryDetector = downsampledPrim;
+                                }
+                                
                                 loadedData.push_back(data);
                                 selectedFiles.push_back(fullPath);
                                 selectedFilenames.push_back(filename);
@@ -776,6 +836,50 @@ int main() {
             // Y-axis limits are now handled by the auto-fit toggle
             // When autoFitYAxis is true, ImPlot will auto-calculate Y-axis limits
             // When autoFitYAxis is false, we use the manually calculated limits
+            
+            // Handle mouse scroll zoom
+            float scroll = ImGui::GetIO().MouseWheel;
+            if (scroll != 0.0f && ImGui::IsWindowHovered()) {
+                // Get mouse position relative to plot area
+                ImVec2 mousePos = ImGui::GetMousePos();
+                ImVec2 plotMin = ImGui::GetItemRectMin();
+                ImVec2 plotMax = ImGui::GetItemRectMax();
+                
+                if (mousePos.x >= plotMin.x && mousePos.x <= plotMax.x && 
+                    mousePos.y >= plotMin.y && mousePos.y <= plotMax.y) {
+                    
+                    // Calculate zoom factor based on scroll direction
+                    float zoomFactor = scroll > 0 ? 0.8f : 1.25f; // Scroll up = zoom in, scroll down = zoom out
+                    
+                    // Get current visible range
+                    size_t current_start = isZoomed ? zoomRange.first : 0;
+                    size_t current_end = isZoomed ? zoomRange.second : loadedData[0].referenceDetector.size();
+                    size_t current_width = current_end - current_start;
+                    
+                    // Calculate new zoom range centered on mouse position
+                    size_t new_width = static_cast<size_t>(current_width * zoomFactor);
+                    size_t mouse_data_pos = static_cast<size_t>(((mousePos.x - plotMin.x) / (plotMax.x - plotMin.x)) * loadedData[0].referenceDetector.size());
+                    
+                    // Apply zoom with constraints
+                    size_t new_start = mouse_data_pos - new_width / 2;
+                    size_t new_end = mouse_data_pos + new_width / 2;
+                    
+                    // Clamp to valid range
+                    size_t data_size = loadedData[0].referenceDetector.size();
+                    new_start = std::max(size_t(0), new_start);
+                    new_end = std::min(data_size, new_end);
+                    new_end = std::max(new_start + 1, new_end);
+                    
+                    // Apply the zoom
+                    zoomRange.first = new_start;
+                    zoomRange.second = new_end;
+                    isZoomed = true;
+                    shouldAutoscale = false;
+                    
+                    std::cout << "Scroll zoom: " << zoomRange.first << "-" << zoomRange.second 
+                              << " (center: " << mouse_data_pos << ", width: " << new_width << ")" << std::endl;
+                }
+            }
             
             // Determine zoom range
             size_t ref_start = isZoomed ? zoomRange.first : 0;
@@ -883,6 +987,29 @@ int main() {
             // Create ImPlot subplots - two vertically stacked plots with custom height ratio
             // Reference plot: 1 unit height, Primary plot: 2 units height (2x taller)
             float row_ratios[2] = {1.0f, 2.0f}; // Reference:Primary height ratio
+            
+            // Pre-allocate plot specs to avoid repeated construction in rendering loop
+            std::vector<ImPlotSpec> plotSpecs;
+            if (dataLoaded) {
+                plotSpecs.resize(loadedData.size());
+                for (size_t i = 0; i < loadedData.size(); i++) {
+                    plotSpecs[i].LineWeight = 2.0f;
+                    
+                    // Assign specific colors based on the requested scheme (yellow first)
+                    if (i == 0) {
+                        plotSpecs[i].LineColor = ImVec4(0.6f, 0.5f, 0.1f, 1.0f); // Dark yellow - FIRST
+                    } else if (i == 1) {
+                        plotSpecs[i].LineColor = ImVec4(0.75f, 0.05f, 0.05f, 1.0f); // #C00E0E - Red
+                    } else if (i == 2) {
+                        plotSpecs[i].LineColor = ImVec4(0.15f, 0.45f, 0.28f, 1.0f); // #257448 - Green
+                    } else if (i == 3) {
+                        plotSpecs[i].LineColor = ImVec4(0.07f, 0.29f, 0.59f, 1.0f); // #114A97 - Blue
+                    } else if (i == 4) {
+                        plotSpecs[i].LineColor = ImVec4(0.5f, 0.5f, 0.5f, 1.0f); // Grey
+                    }
+                }
+            }
+            
             if (ImPlot::BeginSubplots("Detector Plots", 2, 1, ImVec2(-1, -1), ImPlotSubplotFlags_NoTitle | ImPlotSubplotFlags_LinkAllX | ImPlotSubplotFlags_NoLegend, row_ratios)) {
                 
                 // Reference detector plot (top)
@@ -914,30 +1041,12 @@ int main() {
                             ImPlot::SetupAxisLimits(ImAxis_X1, 0, loadedData[0].referenceDetector.size(), ImPlotCond_Always);
                         }
                     }
-                    ImPlotSpec spec;
-                    spec.LineColor = ImVec4(1.0f, 1.0f, 0.0f, 1.0f); // Yellow color
-                    // Plot all selected datasets with specific colors and legend
+                    // Plot all selected datasets with pre-allocated specs
                     for (size_t i = 0; i < loadedData.size(); i++) {
-                        ImPlotSpec spec;
-                        spec.LineWeight = 2.0f;
-                        
-                        // Assign specific colors based on the requested scheme (yellow first)
-                        if (i == 0) {
-                            spec.LineColor = ImVec4(0.6f, 0.5f, 0.1f, 1.0f); // Dark yellow - FIRST
-                        } else if (i == 1) {
-                            spec.LineColor = ImVec4(0.75f, 0.05f, 0.05f, 1.0f); // #C00E0E - Red
-                        } else if (i == 2) {
-                            spec.LineColor = ImVec4(0.15f, 0.45f, 0.28f, 1.0f); // #257448 - Green
-                        } else if (i == 3) {
-                            spec.LineColor = ImVec4(0.07f, 0.29f, 0.59f, 1.0f); // #114A97 - Blue
-                        } else if (i == 4) {
-                            spec.LineColor = ImVec4(0.5f, 0.5f, 0.5f, 1.0f); // Grey
-                        }
-                        
                         const auto& dataToPlot = alignPeaks ? alignedData[i] : loadedData[i];
                         ImPlot::PlotLine("", 
                                        &dataToPlot.referenceDetector[ref_start], 
-                                       ref_end - ref_start, 1.0, 0.0, spec);
+                                       ref_end - ref_start, 1.0, 0.0, plotSpecs[i]);
                     }
                     ImPlot::EndPlot();
                     ImPlot::PopStyleColor(); // Pop grid color
@@ -972,30 +1081,13 @@ int main() {
                             ImPlot::SetupAxisLimits(ImAxis_X1, 0, loadedData[0].primaryDetector.size(), ImPlotCond_Always);
                         }
                     }
-                    ImPlotSpec spec2;
-                    spec2.LineColor = ImVec4(1.0f, 1.0f, 0.0f, 1.0f); // Yellow color
+                    // Reuse the same plot specs as reference plot (already pre-allocated)
                     // Plot all selected datasets with same colors as reference
                     for (size_t i = 0; i < loadedData.size(); i++) {
-                        ImPlotSpec spec;
-                        spec.LineWeight = 2.0f;
-                        
-                        // Use same specific colors as reference plot
-                        if (i == 0) {
-                            spec.LineColor = ImVec4(0.6f, 0.5f, 0.1f, 1.0f); // Dark yellow - FIRST
-                        } else if (i == 1) {
-                            spec.LineColor = ImVec4(0.75f, 0.05f, 0.05f, 1.0f); // #C00E0E - Red
-                        } else if (i == 2) {
-                            spec.LineColor = ImVec4(0.15f, 0.45f, 0.28f, 1.0f); // #257448 - Green
-                        } else if (i == 3) {
-                            spec.LineColor = ImVec4(0.07f, 0.29f, 0.59f, 1.0f); // #114A97 - Blue
-                        } else if (i == 4) {
-                            spec.LineColor = ImVec4(0.5f, 0.5f, 0.5f, 1.0f); // Grey
-                        }
-                        
                         const auto& dataToPlot = alignPeaks ? alignedData[i] : loadedData[i];
                         ImPlot::PlotLine("", 
                                        &dataToPlot.primaryDetector[ref_start], 
-                                       ref_end - ref_start, 1.0, 0.0, spec);
+                                       ref_end - ref_start, 1.0, 0.0, plotSpecs[i]);
                     }
                     ImPlot::EndPlot();
                     ImPlot::PopStyleColor(); // Pop grid color
@@ -1023,18 +1115,41 @@ int main() {
                 isZooming = false;
                 
                 // Calculate zoom based on pixel coordinates
-                // This is a simplified approach - in a real app you'd map pixels to data coordinates
+                // Map mouse selection to data coordinates
                 if (fabs(zoomEnd.x - zoomStart.x) > 20 && fabs(zoomEnd.y - zoomStart.y) > 20) {
-                    // For now, use a fixed zoom factor
-                    // In a production app, you'd calculate the actual data range
-                    size_t zoom_center = (ref_start + ref_end) / 2;
-                    size_t zoom_width = (ref_end - ref_start) / 4; // Zoom in by 4x
+                    // Get the plot boundaries and size
+                    ImVec2 plot_min = ImGui::GetItemRectMin();
+                    ImVec2 plot_max = ImGui::GetItemRectMax();
+                    float plot_width = plot_max.x - plot_min.x;
                     
-                    ref_start = std::max(size_t(0), zoom_center - zoom_width/2);
-                    ref_end = std::min(loadedData[0].referenceDetector.size(), zoom_center + zoom_width/2);
+                    // Calculate selection percentage
+                    float select_start_pct = (zoomStart.x - plot_min.x) / plot_width;
+                    float select_end_pct = (zoomEnd.x - plot_min.x) / plot_width;
+                    
+                    // Ensure proper ordering (left to right)
+                    if (select_start_pct > select_end_pct) {
+                        std::swap(select_start_pct, select_end_pct);
+                    }
+                    
+                    // Map percentage to data coordinates
+                    size_t data_size = loadedData[0].referenceDetector.size();
+                    ref_start = static_cast<size_t>(select_start_pct * data_size);
+                    ref_end = static_cast<size_t>(select_end_pct * data_size);
+                    
+                    // Ensure valid range
+                    ref_start = std::min(ref_start, data_size - 1);
+                    ref_end = std::min(ref_end, data_size);
+                    ref_end = std::max(ref_end, ref_start + 1);
+                    
                     prim_start = ref_start;
                     prim_end = ref_end;
+                    zoomRange.first = ref_start;
+                    zoomRange.second = ref_end;
                     isZoomed = true;
+                    
+                    std::cout << "Mouse zoom applied: " << zoomRange.first << "-" << zoomRange.second 
+                              << " (data size: " << data_size 
+                              << ", selection: " << select_start_pct*100 << "%-" << select_end_pct*100 << "%)" << std::endl;
                 }
             }
             
@@ -1158,6 +1273,47 @@ int main() {
                 prim_y_max = *prim_min_max.second;
             }
         }
+        
+
+        // Downsampling toggle
+        if (ImGui::Checkbox("Enable downsampling", &enableDownsampling)) {
+            if (dataLoaded) {
+                // Reload all selected files with new downsampling setting while preserving selection
+                std::vector<InterferogramData> reloadedData;
+                for (const auto& filePath : selectedFiles) {
+                    try {
+                        InterferogramData data = CSVAdapter::loadFromCSV(filePath);
+                        
+                        // Apply downsampling if enabled and dataset is large
+                        if (enableDownsampling && data.referenceDetector.size() > maxPointsBeforeDownsampling) {
+                            size_t localDownsampleFactor = data.referenceDetector.size() / maxPointsBeforeDownsampling + 1;
+                            
+                            // Downsample both reference and primary detectors
+                            std::vector<float> downsampledRef, downsampledPrim;
+                            for (size_t j = 0; j < data.referenceDetector.size(); j += localDownsampleFactor) {
+                                downsampledRef.push_back(data.referenceDetector[j]);
+                                downsampledPrim.push_back(data.primaryDetector[j]);
+                            }
+                            data.referenceDetector = downsampledRef;
+                            data.primaryDetector = downsampledPrim;
+                        }
+                        
+                        reloadedData.push_back(data);
+                    } catch (const std::exception& e) {
+                        std::cerr << "Error reloading file: " << e.what() << std::endl;
+                    }
+                }
+                
+                if (!reloadedData.empty()) {
+                    loadedData = reloadedData;
+                    shouldAutoscale = true; // Trigger plot update
+                    std::cout << "Reloaded " << loadedData.size() << " datasets with " 
+                              << (enableDownsampling ? "enabled" : "disabled") << " downsampling" << std::endl;
+                }
+            }
+        }
+        ImGui::SameLine();
+        ImGui::Text("(Max %zu points)", maxPointsBeforeDownsampling);
         
         ImGui::End();
         
