@@ -1793,6 +1793,7 @@ CMakeFiles/fts_data_explorer.dir/main.cpp.o
  /home/guowa/Documents/Repos/fts_data_explorer/build/_deps/imgui-src/imconfig.h
  /home/guowa/Documents/Repos/fts_data_explorer/build/_deps/imgui-src/imgui.h
  /home/guowa/Documents/Repos/fts_data_explorer/build/_deps/implot-src/implot.h
+ /home/guowa/Documents/Repos/fts_data_explorer/config.h
  /usr/include/GL/gl.h
  /usr/include/GL/glext.h
  /usr/include/GLFW/glfw3.h

@@ -1783,6 +1783,7 @@ CMakeFiles/fts_data_explorer.dir/main.cpp.o: /home/guowa/Documents/Repos/fts_dat
   _deps/imgui-src/imconfig.h \
   _deps/imgui-src/imgui.h \
   _deps/implot-src/implot.h \
+  /home/guowa/Documents/Repos/fts_data_explorer/config.h \
   /usr/include/GL/gl.h \
   /usr/include/GL/glext.h \
   /usr/include/GLFW/glfw3.h \
@@ -2494,6 +2495,8 @@ _deps/imgui-src/imgui_internal.h:
 /usr/lib/gcc/x86_64-linux-gnu/13/include/uintrintrin.h:
 
 /usr/lib/gcc/x86_64-linux-gnu/13/include/avxvnniint8intrin.h:
+
+/home/guowa/Documents/Repos/fts_data_explorer/config.h:
 
 /usr/include/x86_64-linux-gnu/c++/13/bits/os_defines.h:
 

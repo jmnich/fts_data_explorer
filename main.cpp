@@ -282,6 +282,10 @@ int main() {
     // Track if we should update recent datasets (only after successful load)
     bool shouldUpdateRecentDatasets = false;
     
+    // Welcome screen state
+    bool showWelcomeScreen = true;
+    bool welcomeScreenInitialized = false;
+    
     // No initialization needed for simple file dialog
     
     // Main loop
@@ -379,27 +383,148 @@ int main() {
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
         
-        // Set up docking
-        ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDocking;
-        ImGuiViewport* viewport = ImGui::GetMainViewport();
-        ImGui::SetNextWindowPos(viewport->Pos);
-        ImGui::SetNextWindowSize(viewport->Size);
-        ImGui::SetNextWindowViewport(viewport->ID);
+        // Show welcome screen if no data is loaded and we haven't initialized yet
+        if (showWelcomeScreen && !welcomeScreenInitialized) {
+            // Make welcome screen modal and block interaction with main window
+            ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+            ImGui::SetNextWindowSize(ImVec2(600, 400));
+            
+            // Create a modal popup that blocks all interaction
+            ImGui::OpenPopup("Welcome to FTS Data Explorer");
+            
+            // Darken the background to indicate modal state
+            ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f);
+            
+            if (ImGui::BeginPopupModal("Welcome to FTS Data Explorer", NULL, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove)) {
+                ImGui::PopStyleVar(); // Restore alpha
+                
+                // Welcome message
+                ImGui::TextColored(ImVec4(0.6f, 0.5f, 0.1f, 1.0f), "Welcome to FTS Data Explorer");
+                ImGui::Text("A tool for exploring Fourier spectrometer data");
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+                
+                // Recent datasets section
+                ImGui::Text("Recent Datasets:");
+                ImGui::Spacing();
+                
+                if (config.recentDatasets.empty()) {
+                    ImGui::Text("No recent datasets found.");
+                    ImGui::Text("Use the button below to select a dataset directory.");
+                } else {
+                    // Create a child window for scrollable recent datasets list
+                    if (ImGui::BeginChild("RecentDatasetsChild", ImVec2(0, 200), true)) {
+                        for (const auto& datasetPath : config.recentDatasets) {
+                            // Extract the parent directory name for display (skip "raw_data" if present)
+                            std::string displayName = datasetPath;
+                            size_t last_slash = displayName.find_last_of("/\\");
+                            if (last_slash != std::string::npos) {
+                                displayName = displayName.substr(last_slash + 1);
+                                // If this is "raw_data", get the parent directory name
+                                if (displayName == "raw_data" && last_slash > 0) {
+                                    size_t parent_slash = datasetPath.substr(0, last_slash).find_last_of("/\\");
+                                    if (parent_slash != std::string::npos) {
+                                        displayName = datasetPath.substr(parent_slash + 1, last_slash - parent_slash - 1);
+                                    }
+                                }
+                            }
+                            
+                            // Create a button for each recent dataset
+                            if (ImGui::Button(displayName.c_str(), ImVec2(-FLT_MIN, 0))) {
+                                if (std::filesystem::exists(datasetPath) && std::filesystem::is_directory(datasetPath)) {
+                                    // Check if there's a raw_data subdirectory
+                                    std::string rawDataPath = datasetPath + "/raw_data";
+                                    if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {
+                                        currentDirectory = rawDataPath; // Use the raw_data subdirectory
+                                    } else {
+                                        currentDirectory = datasetPath; // Fallback to the dataset directory itself
+                                    }
+                                    csvFiles = FileBrowser::getCSVFilesInDirectory(currentDirectory);
+                                    dataLoaded = false;
+                                    filesChanged = true;
+                                    currentSortedFileIndex = 0;
+                                    showWelcomeScreen = false;
+                                    welcomeScreenInitialized = true;
+                                    std::cout << "Opened recent dataset: " << datasetPath << std::endl;
+                                    ImGui::CloseCurrentPopup(); // Close the modal
+                                } else {
+                                    std::cerr << "Recent dataset path no longer exists: " << datasetPath << std::endl;
+                                }
+                            }
+                            
+                            // Add tooltip with full path
+                            if (ImGui::IsItemHovered()) {
+                                ImGui::SetTooltip("%s", datasetPath.c_str());
+                            }
+                        }
+                        ImGui::EndChild();
+                    }
+                }
+                
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+                
+                // Directory selection button
+                if (ImGui::Button("Select Dataset Directory", ImVec2(-FLT_MIN, 0))) {
+                    std::string selectedDirectory = FileBrowser::showDirectorySelectionDialog();
+                    if (!selectedDirectory.empty()) {
+                        // Check if the selected directory has a raw_data subdirectory
+                        std::string rawDataPath = selectedDirectory + "/raw_data";
+                        if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {
+                            currentDirectory = rawDataPath;
+                        } else {
+                            currentDirectory = selectedDirectory;
+                        }
+                        csvFiles = FileBrowser::getCSVFilesInDirectory(currentDirectory);
+                        dataLoaded = false;
+                        filesChanged = true;
+                        currentSortedFileIndex = 0;
+                        showWelcomeScreen = false;
+                        welcomeScreenInitialized = true;
+                        std::cout << "Working directory set to: " << currentDirectory << std::endl;
+                        ImGui::CloseCurrentPopup(); // Close the modal
+                    }
+                }
+                
+                ImGui::Spacing();
+                ImGui::TextWrapped("Tip: You can also access recent datasets from the Controls panel after loading data.");
+                
+                ImGui::EndPopup();
+                
+                // If welcome screen is closed manually, initialize the app
+                if (!showWelcomeScreen) {
+                    welcomeScreenInitialized = true;
+                }
+            } else {
+                ImGui::PopStyleVar(); // Clean up style if popup wasn't opened
+            }
+        }
         
-        // Push style variables for full viewport docking
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-        window_flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
-        window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
-        
-        // Create main dockspace window
-        ImGui::Begin("DockSpace", nullptr, window_flags);
-        ImGui::PopStyleVar(2);
-        
-        // Create docking space
-        ImGuiID dockspace_id = ImGui::GetID("MainDockSpace");
-        ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);
-        ImGui::End();
+        // Only render main docking interface if welcome screen is not active
+        if (!showWelcomeScreen || welcomeScreenInitialized) {
+            // Set up docking
+            ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDocking;
+            ImGuiViewport* viewport = ImGui::GetMainViewport();
+            ImGui::SetNextWindowPos(viewport->Pos);
+            ImGui::SetNextWindowSize(viewport->Size);
+            ImGui::SetNextWindowViewport(viewport->ID);
+            
+            // Push style variables for full viewport docking
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+            window_flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
+            window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
+            
+            // Create main dockspace window
+            ImGui::Begin("DockSpace", nullptr, window_flags);
+            ImGui::PopStyleVar(2);
+            
+            // Create docking space
+            ImGuiID dockspace_id = ImGui::GetID("MainDockSpace");
+            ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);
+            ImGui::End();
         
         // Files panel (left)
         ImGui::Begin("Files");
@@ -884,7 +1009,13 @@ int main() {
                             : datasetPath;
                         
                         if (std::filesystem::exists(datasetPath) && std::filesystem::is_directory(datasetPath)) {
-                            currentDirectory = datasetPath;
+                            // Check if there's a raw_data subdirectory
+                            std::string rawDataPath = datasetPath + "/raw_data";
+                            if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {
+                                currentDirectory = rawDataPath; // Use the raw_data subdirectory
+                            } else {
+                                currentDirectory = datasetPath; // Fallback to the dataset directory itself
+                            }
                             csvFiles = FileBrowser::getCSVFilesInDirectory(currentDirectory);
                             dataLoaded = false;
                             filesChanged = true;
@@ -915,6 +1046,9 @@ int main() {
         }
         
         ImGui::End();
+        
+        // Close the docking condition
+        }
         
         // Rendering
         ImGui::Render();
@@ -948,6 +1082,14 @@ int main() {
         size_t last_slash = datasetPath.find_last_of("/\\");
         if (last_slash != std::string::npos) {
             std::string parentDir = datasetPath.substr(0, last_slash);
+            // Check if this is a raw_data directory, if so, go up one more level
+            size_t raw_data_pos = parentDir.find_last_of("/\\");
+            if (raw_data_pos != std::string::npos) {
+                std::string dirName = parentDir.substr(raw_data_pos + 1);
+                if (dirName == "raw_data") {
+                    parentDir = parentDir.substr(0, raw_data_pos);
+                }
+            }
             config.addRecentDataset(parentDir);
         }
     }
