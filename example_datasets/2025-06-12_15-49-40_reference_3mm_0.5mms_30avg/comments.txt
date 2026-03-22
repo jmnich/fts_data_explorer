@@ -1,0 +1,9 @@
+NAME: reference_3mm_0.5mms_30avg
+TIMESTAMP: 2025-06-12_15-49-40
+
+reference
+0.5mms
+diamond BS
+combined source
+30 avg
+
