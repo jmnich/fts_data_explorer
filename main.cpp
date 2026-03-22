@@ -518,8 +518,15 @@ int main() {
                 ImGui::Separator();
                 ImGui::Spacing();
                 
-                // Directory selection button
-                if (ImGui::Button("Select Dataset Directory", ImVec2(-FLT_MIN, 0))) {
+                // Directory selection button with dark green background
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.1f, 0.3f, 0.1f, 0.8f)); // Dark green
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.15f, 0.35f, 0.15f, 0.9f)); // Lighter green on hover
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.05f, 0.25f, 0.05f, 1.0f)); // Even darker when active
+                
+                // Calculate available space for the button
+                float buttonHeight = ImGui::GetContentRegionAvail().y - ImGui::GetStyle().ItemSpacing.y * 2;
+                if (ImGui::Button("Select Dataset Directory", ImVec2(-FLT_MIN, buttonHeight))) {
+                    ImGui::PopStyleColor(3);
                     std::string selectedDirectory = FileBrowser::showDirectorySelectionDialog();
                     if (!selectedDirectory.empty()) {
                         // Check if the selected directory has a raw_data subdirectory
@@ -543,6 +550,7 @@ int main() {
                         ImGui::CloseCurrentPopup(); // Close the modal
                     }
                 }
+                ImGui::PopStyleColor(3); // Pop button styles
 
                 ImGui::EndPopup();
                 
