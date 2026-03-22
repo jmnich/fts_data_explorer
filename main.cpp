@@ -332,7 +332,9 @@ int main() {
             
             // Enhanced highlighting for the currently selected file
             int stylesPushed = 1; // Default: push 1 style
-            if (i == currentSortedIndex) {
+            bool isFileSelected = (std::find(selectedFiles.begin(), selectedFiles.end(), file) != selectedFiles.end());
+            
+            if (isFileSelected) {
                 ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.4f, 0.8f, 0.8f)); // Brighter blue
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.5f, 0.9f, 0.9f)); // Lighter on hover
                 ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f)); // White text
@@ -421,11 +423,43 @@ int main() {
             size_t prim_start = isZoomed ? zoomRange.first : 0;
             size_t prim_end = isZoomed ? zoomRange.second : loadedData[0].primaryDetector.size();
             
+            // Create common legend above both plots
+            if (loadedData.size() > 1) {
+                ImGui::Text("Datasets:");
+                ImGui::BeginGroup(); // Start horizontal group
+                for (size_t i = 0; i < loadedData.size(); i++) {
+                    ImVec4 color;
+                    // Assign same colors as used in plots
+                    if (i == 0) {
+                        color = ImVec4(0.6f, 0.5f, 0.1f, 1.0f); // Dark yellow - FIRST
+                    } else if (i == 1) {
+                        color = ImVec4(0.75f, 0.05f, 0.05f, 1.0f); // #C00E0E - Red
+                    } else if (i == 2) {
+                        color = ImVec4(0.15f, 0.45f, 0.28f, 1.0f); // #257448 - Green
+                    } else if (i == 3) {
+                        color = ImVec4(0.07f, 0.29f, 0.59f, 1.0f); // #114A97 - Blue
+                    } else if (i == 4) {
+                        color = ImVec4(0.5f, 0.5f, 0.5f, 1.0f); // Grey
+                    }
+                    
+                    ImGui::TextColored(color, "●");
+                    ImGui::SameLine();
+                    ImGui::Text("%s", selectedFilenames[i].c_str());
+                    if (i < loadedData.size() - 1) {
+                        ImGui::SameLine();
+                        ImGui::Text("  "); // Add some spacing between items
+                        ImGui::SameLine();
+                    }
+                }
+                ImGui::EndGroup(); // End horizontal group
+                ImGui::Separator();
+            }
+            
             // Create ImPlot subplots - two vertically stacked plots
-            if (ImPlot::BeginSubplots("Detector Plots", 2, 1, ImVec2(-1, -1), ImPlotSubplotFlags_NoTitle | ImPlotSubplotFlags_LinkAllX)) {
+            if (ImPlot::BeginSubplots("Detector Plots", 2, 1, ImVec2(-1, -1), ImPlotSubplotFlags_NoTitle | ImPlotSubplotFlags_LinkAllX | ImPlotSubplotFlags_NoLegend)) {
                 
                 // Reference detector plot (top)
-                if (ImPlot::BeginPlot("Reference", ImVec2(-1, -1), ImPlotFlags_NoTitle)) {
+                if (ImPlot::BeginPlot("Reference", ImVec2(-1, -1), ImPlotFlags_NoTitle | ImPlotFlags_NoLegend)) {
                     ImPlot::SetupAxes("Sample", "Voltage [V]", ImPlotAxisFlags_NoDecorations, ImPlotAxisFlags_AutoFit);
                     if (isZoomed) {
                         ImPlot::SetupAxesLimits(ref_start, ref_end, ref_y_min, ref_y_max, ImPlotCond_Always);
@@ -453,7 +487,7 @@ int main() {
                             spec.LineColor = ImVec4(0.5f, 0.5f, 0.5f, 1.0f); // Grey
                         }
                         
-                        ImPlot::PlotLine(selectedFilenames[i].c_str(), 
+                        ImPlot::PlotLine("", 
                                        &loadedData[i].referenceDetector[ref_start], 
                                        ref_end - ref_start, 1.0, 0.0, spec);
                     }
@@ -489,7 +523,7 @@ int main() {
                             spec.LineColor = ImVec4(0.5f, 0.5f, 0.5f, 1.0f); // Grey
                         }
                         
-                        ImPlot::PlotLine(selectedFilenames[i].c_str(), 
+                        ImPlot::PlotLine("", 
                                        &loadedData[i].primaryDetector[ref_start], 
                                        ref_end - ref_start, 1.0, 0.0, spec);
                     }
