@@ -125,30 +125,39 @@ public:
         std::string result;
         
         // Try using zenity if available (common on Ubuntu/GNOME)
-        FILE* pipe = popen("zenity --file-selection --directory --title='Select Dataset Directory'", "r");
+        FILE* pipe = popen("zenity --file-selection --directory --title='Select Dataset Directory' 2>/dev/null", "r");
         if (pipe) {
-            char buffer[1024];
+            char buffer[1024] = {0};
             if (fgets(buffer, sizeof(buffer), pipe) != NULL) {
                 // Remove trailing newline
                 buffer[strcspn(buffer, "\n")] = 0;
-                result = buffer;
+                // Only use the result if it's not empty and not just whitespace
+                if (strlen(buffer) > 0 && buffer[0] != '\0') {
+                    result = buffer;
+                }
             }
             pclose(pipe);
             
             // If zenity returned a valid path, use it
-            if (!result.empty() && result != "") {
+            if (!result.empty()) {
                 return result;
             }
         }
         
         // Fallback: use a simple ImGui-based directory selector
-        // This is a basic implementation - a production app would use a proper file dialog library
-        static char tempDirectoryBuffer[1024] = "/home"; // Default starting directory
-        static bool showDialog = true;
+        // Note: This is a basic implementation. For production use, consider:
+        // 1. Using a proper native file dialog library
+        // 2. Implementing a non-modal directory browser
+        // 3. Using a separate window for directory selection
         
-        if (showDialog) {
+        // For now, we'll use a simple approach that works within the modal context
+        static char tempDirectoryBuffer[1024] = "/home"; // Default starting directory
+        static bool directorySelectorActive = false;
+        
+        // Start directory selector if not already active
+        if (!directorySelectorActive) {
+            directorySelectorActive = true;
             ImGui::OpenPopup("Select Directory");
-            showDialog = false;
         }
         
         // Simple directory selector popup
@@ -161,6 +170,7 @@ public:
                 if (std::filesystem::exists(tempDirectoryBuffer) && std::filesystem::is_directory(tempDirectoryBuffer)) {
                     result = tempDirectoryBuffer;
                     ImGui::CloseCurrentPopup();
+                    directorySelectorActive = false;
                 } else {
                     ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Directory does not exist!");
                 }
@@ -168,6 +178,7 @@ public:
             ImGui::SameLine();
             if (ImGui::Button("Cancel")) {
                 ImGui::CloseCurrentPopup();
+                directorySelectorActive = false;
             }
             
             ImGui::EndPopup();
@@ -355,6 +366,15 @@ int main() {
             }
         }
         
+        // Handle Ctrl+H to return to welcome screen
+        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) && ImGui::IsKeyPressed(ImGuiKey_H) && ImGui::GetIO().KeyCtrl) {
+            // Reset to welcome screen state
+            showWelcomeScreen = true;
+            welcomeScreenInitialized = false;
+            dataLoaded = false;
+            filesChanged = false;
+        }
+        
         // Load file if navigation changed
         if (filesChanged && !csvFiles.empty()) {
             try {
@@ -430,12 +450,13 @@ int main() {
         
         // Show welcome screen if no data is loaded and we haven't initialized yet
         if (showWelcomeScreen && !welcomeScreenInitialized) {
-            // Set up welcome screen with dark background to match main window
-            ImVec4 darkBackground(0.1f, 0.1f, 0.1f, 1.0f); // Same as main window clear color
-            ImGui::PushStyleColor(ImGuiCol_PopupBg, darkBackground);
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(20, 20));
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 8.0f);
-            
+            // Safety check to prevent multiple welcome screen instances
+            static bool welcomeScreenActive = false;
+            if (welcomeScreenActive) {
+                std::cerr << "Warning: Attempted to show welcome screen while already active!" << std::endl;
+                showWelcomeScreen = false; // Prevent re-entry by disabling welcome screen
+            }
+            welcomeScreenActive = true;
             // Center the welcome screen
             ImVec2 center = ImGui::GetMainViewport()->GetCenter();
             ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
@@ -445,6 +466,9 @@ int main() {
             ImGui::OpenPopup("Welcome to FTS Data Explorer");
             
             if (ImGui::BeginPopupModal("Welcome to FTS Data Explorer", NULL, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove)) {
+                // Set up welcome screen with minimal styling to avoid style stack issues
+                ImVec4 darkBackground(0.1f, 0.1f, 0.1f, 1.0f); // Same as main window clear color
+                ImGui::PushStyleColor(ImGuiCol_PopupBg, darkBackground);
                 
                 // Welcome message
                 // ImGui::TextColored(ImVec4(0.6f, 0.5f, 0.1f, 1.0f), "Welcome to FTS Data Explorer");
@@ -525,8 +549,10 @@ int main() {
                 
                 // Calculate available space for the button
                 float buttonHeight = ImGui::GetContentRegionAvail().y - ImGui::GetStyle().ItemSpacing.y * 2;
-                if (ImGui::Button("Select Dataset Directory", ImVec2(-FLT_MIN, buttonHeight))) {
-                    ImGui::PopStyleColor(3);
+                bool buttonClicked = ImGui::Button("Select Dataset Directory", ImVec2(-FLT_MIN, buttonHeight));
+                ImGui::PopStyleColor(3); // Always pop styles after button
+                
+                if (buttonClicked) {
                     std::string selectedDirectory = FileBrowser::showDirectorySelectionDialog();
                     if (!selectedDirectory.empty()) {
                         // Check if the selected directory has a raw_data subdirectory
@@ -550,7 +576,8 @@ int main() {
                         ImGui::CloseCurrentPopup(); // Close the modal
                     }
                 }
-                ImGui::PopStyleColor(3); // Pop button styles
+                // Clean up welcome screen styles
+                ImGui::PopStyleColor(); // PopupBg only (removed other styles to simplify)
 
                 ImGui::EndPopup();
                 
@@ -558,15 +585,10 @@ int main() {
                 if (!showWelcomeScreen) {
                     welcomeScreenInitialized = true;
                 }
-            // Clean up styles
-            ImGui::PopStyleVar(); // WindowRounding
-            ImGui::PopStyleVar(); // WindowPadding
-            ImGui::PopStyleColor(); // PopupBg
+                welcomeScreenActive = false; // Reset the safety flag when welcome screen closes
             } else {
-                // Clean up styles if popup wasn't opened
-                ImGui::PopStyleVar(); // WindowRounding
-                ImGui::PopStyleVar(); // WindowPadding
-                ImGui::PopStyleColor(); // PopupBg
+                // Popup wasn't opened, no styles to clean up (they're pushed inside BeginPopupModal)
+                welcomeScreenActive = false; // Reset the safety flag if popup wasn't opened
             }
         }
         
