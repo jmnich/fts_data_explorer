@@ -272,6 +272,7 @@ int main() {
     std::string currentDatasetName = "No dataset selected"; // Track current dataset name
     size_t currentSortedFileIndex = 0; // Track currently selected file index in sorted list
     bool filesChanged = true; // Flag to indicate files list changed
+    bool keyboardNavigation = false; // Track if selection changed via keyboard
     bool multiSelectMode = false; // Track if Ctrl is held for multi-select
     const size_t MAX_SELECTABLE_FILES = 5; // Limit to 5 files for simultaneous display
     bool alignPeaks = config.alignPeaks; // Use config setting for peak alignment
@@ -331,6 +332,7 @@ int main() {
                     currentSortedFileIndex = csvFiles.size() - 1; // Wrap to bottom
                 }
                 filesChanged = true;
+                keyboardNavigation = true;
             } else if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
                 // Navigate down in file list (with wrapping)
                 if (currentSortedFileIndex < csvFiles.size() - 1) {
@@ -339,6 +341,7 @@ int main() {
                     currentSortedFileIndex = 0; // Wrap to top
                 }
                 filesChanged = true;
+                keyboardNavigation = true;
             }
         }
         
@@ -619,11 +622,13 @@ int main() {
         // Use the directly tracked sorted index
         size_t currentSortedIndex = currentSortedFileIndex;
         
-        // Calculate scroll position to keep selected file visible
-        if (currentSortedIndex > 0 && ImGui::GetScrollY() + ImGui::GetWindowHeight() < (currentSortedIndex + 1) * ImGui::GetTextLineHeightWithSpacing()) {
-            ImGui::SetScrollY((currentSortedIndex + 1) * ImGui::GetTextLineHeightWithSpacing() - ImGui::GetWindowHeight());
-        } else if (currentSortedIndex == 0) {
-            ImGui::SetScrollY(0);
+        // Only calculate scroll position when using keyboard navigation
+        if (keyboardNavigation) {
+            if (currentSortedIndex > 0 && ImGui::GetScrollY() + ImGui::GetWindowHeight() < (currentSortedIndex + 1) * ImGui::GetTextLineHeightWithSpacing()) {
+                ImGui::SetScrollY((currentSortedIndex + 1) * ImGui::GetTextLineHeightWithSpacing() - ImGui::GetWindowHeight());
+            } else if (currentSortedIndex == 0) {
+                ImGui::SetScrollY(0);
+            }
         }
         
         for (size_t i = 0; i < sortedFiles.size(); i++) {
@@ -710,8 +715,8 @@ int main() {
             // Pop the correct number of styles
             ImGui::PopStyleColor(stylesPushed);
             
-            // Auto-scroll to keep selected item visible
-            if (i == currentSortedFileIndex) {
+            // Auto-scroll to keep selected item visible only when selection changes via keyboard
+            if (i == currentSortedFileIndex && keyboardNavigation) {
                 ImGui::SetScrollHereY(0.5f); // Scroll to center the selected item
             }
         }
@@ -1142,6 +1147,9 @@ int main() {
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         
         glfwSwapBuffers(window);
+        
+        // Reset keyboard navigation flag after rendering
+        keyboardNavigation = false;
     }
     
     // Cleanup
