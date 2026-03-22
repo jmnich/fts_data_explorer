@@ -15,6 +15,7 @@ struct AppConfig {
     bool autoFitYAxis = true;
     bool alignPeaks = false;
     std::string lastWorkingDirectory;
+    std::string uiSize = "normal"; // tiny, small, normal, large, huge
     
     // Window state
     int windowWidth = 1280;
@@ -66,6 +67,7 @@ struct AppConfig {
             configFile << "auto_fit_y_axis=" << (autoFitYAxis ? "true" : "false") << "\n";
             configFile << "align_peaks=" << (alignPeaks ? "true" : "false") << "\n";
             configFile << "last_working_directory=" << lastWorkingDirectory << "\n";
+            configFile << "ui_size=" << uiSize << "\n";
             
             // Write window settings
             configFile << "\n[Window]\n";
@@ -133,6 +135,8 @@ struct AppConfig {
                             alignPeaks = (value == "true");
                         } else if (key == "last_working_directory") {
                             lastWorkingDirectory = value;
+                        } else if (key == "ui_size") {
+                            uiSize = value;
                         }
                     } else if (currentSection == "Window") {
                         if (key == "width") {

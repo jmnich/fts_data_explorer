@@ -212,6 +212,11 @@ int main() {
     } else {
         std::cout << "No existing config found, using defaults" << std::endl;
     }
+
+    // UI size settings
+    std::string currentUiSize = config.uiSize;
+    float uiScale = 1.0f; // Default scale
+    bool uiSizeChanged = false; // Flag to track UI size changes
     
     // Initialize GLFW
     if (!glfwInit()) {
@@ -279,10 +284,26 @@ int main() {
     ImPlot::CreateContext();
     
     // Set up for high DPI displays AFTER backend initialization
-    // Apply 1.5x scaling to all UI elements including fonts
+    // Apply scaling based on UI size setting
     float dpi_scale = io.DisplayFramebufferScale.x;
-    io.FontGlobalScale = dpi_scale * 1.5f;
-    ImGui::GetStyle().ScaleAllSizes(dpi_scale * 1.5f);
+    
+    // Apply UI scaling based on selected size
+    if (currentUiSize == "tiny") {
+        uiScale = 0.75f;
+    } else if (currentUiSize == "small") {
+        uiScale = 0.9f;
+    } else if (currentUiSize == "normal") {
+        uiScale = 1.0f;
+    } else if (currentUiSize == "large") {
+        uiScale = 1.25f;
+    } else if (currentUiSize == "huge") {
+        uiScale = 1.5f;
+    }
+    
+    // Apply the scaling (font only initially to avoid UI issues)
+    io.FontGlobalScale = dpi_scale * uiScale;
+    // Note: We don't call ScaleAllSizes here to avoid UI element issues
+    // The font scaling will handle most of the UI size adjustment
     
     // Main application state
     std::string currentDirectory;
@@ -337,6 +358,31 @@ int main() {
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
         multiSelectMode = ImGui::GetIO().KeyCtrl;
+        
+        // Reapply UI scaling if size changed
+        if (uiSizeChanged) {
+            ImGuiIO& io = ImGui::GetIO();
+            float dpi_scale = io.DisplayFramebufferScale.x;
+            
+            // Update scale based on new UI size
+            if (currentUiSize == "tiny") {
+                uiScale = 0.75f;
+            } else if (currentUiSize == "small") {
+                uiScale = 0.9f;
+            } else if (currentUiSize == "normal") {
+                uiScale = 1.0f;
+            } else if (currentUiSize == "large") {
+                uiScale = 1.25f;
+            } else if (currentUiSize == "huge") {
+                uiScale = 1.5f;
+            }
+            
+            // Reapply scaling (font only to avoid UI issues)
+            io.FontGlobalScale = dpi_scale * uiScale;
+            // Note: We don't call ScaleAllSizes here to avoid UI element issues
+            
+            uiSizeChanged = false; // Reset flag
+        }
         
         // Track window state changes
         int newWidth, newHeight;
@@ -584,6 +630,33 @@ int main() {
                 
                 ImGui::Spacing();
                 ImGui::Separator();
+                ImGui::Spacing();
+                
+                // UI Size selection dropdown
+                ImGui::Text("UI Size:");
+                if (ImGui::BeginCombo("##UISizeCombo", currentUiSize.c_str())) {
+                    if (ImGui::Selectable("tiny", currentUiSize == "tiny")) {
+                        currentUiSize = "tiny";
+                        uiSizeChanged = true;
+                    }
+                    if (ImGui::Selectable("small", currentUiSize == "small")) {
+                        currentUiSize = "small";
+                        uiSizeChanged = true;
+                    }
+                    if (ImGui::Selectable("normal", currentUiSize == "normal")) {
+                        currentUiSize = "normal";
+                        uiSizeChanged = true;
+                    }
+                    if (ImGui::Selectable("large", currentUiSize == "large")) {
+                        currentUiSize = "large";
+                        uiSizeChanged = true;
+                    }
+                    if (ImGui::Selectable("huge", currentUiSize == "huge")) {
+                        currentUiSize = "huge";
+                        uiSizeChanged = true;
+                    }
+                    ImGui::EndCombo();
+                }
                 ImGui::Spacing();
                 
                 // Directory selection button with dark green background
@@ -1275,6 +1348,32 @@ int main() {
         }
         
 
+        // UI Size selection dropdown
+        ImGui::Text("UI Size:");
+        if (ImGui::BeginCombo("##UISizeComboControls", currentUiSize.c_str())) {
+            if (ImGui::Selectable("tiny", currentUiSize == "tiny")) {
+                currentUiSize = "tiny";
+                uiSizeChanged = true;
+            }
+            if (ImGui::Selectable("small", currentUiSize == "small")) {
+                currentUiSize = "small";
+                uiSizeChanged = true;
+            }
+            if (ImGui::Selectable("normal", currentUiSize == "normal")) {
+                currentUiSize = "normal";
+                uiSizeChanged = true;
+            }
+            if (ImGui::Selectable("large", currentUiSize == "large")) {
+                currentUiSize = "large";
+                uiSizeChanged = true;
+            }
+            if (ImGui::Selectable("huge", currentUiSize == "huge")) {
+                currentUiSize = "huge";
+                uiSizeChanged = true;
+            }
+            ImGui::EndCombo();
+        }
+        
         // Downsampling toggle
         if (ImGui::Checkbox("Enable downsampling", &enableDownsampling)) {
             if (dataLoaded) {
@@ -1350,6 +1449,7 @@ int main() {
     config.autoFitYAxis = autoFitYAxis;
     config.alignPeaks = alignPeaks;
     config.lastWorkingDirectory = currentDirectory;
+    config.uiSize = currentUiSize;
     
     // Update recent datasets if we had a successful load
     if (shouldUpdateRecentDatasets && dataLoaded && !selectedFiles.empty()) {
