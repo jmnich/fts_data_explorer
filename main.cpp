@@ -422,9 +422,9 @@ int main() {
         
         // Show welcome screen if no data is loaded and we haven't initialized yet
         if (showWelcomeScreen && !welcomeScreenInitialized) {
-            // Set up welcome screen styling to match the main window background
-            ImVec4 backgroundColor = ImGui::GetStyle().Colors[ImGuiCol_WindowBg];
-            ImGui::PushStyleColor(ImGuiCol_PopupBg, backgroundColor);
+            // Set up welcome screen with dark background to match main window
+            ImVec4 darkBackground(0.1f, 0.1f, 0.1f, 1.0f); // Same as main window clear color
+            ImGui::PushStyleColor(ImGuiCol_PopupBg, darkBackground);
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(20, 20));
             ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 8.0f);
             
@@ -558,7 +558,7 @@ int main() {
         }
         
         // Only render main docking interface if welcome screen is not active
-        if (!showWelcomeScreen || welcomeScreenInitialized) {
+        if (welcomeScreenInitialized) {
             // Set up docking
             ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDocking;
             ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -569,6 +569,12 @@ int main() {
             // Push style variables for full viewport docking
             ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
             ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+            
+            // Make the dockspace background match the welcome screen when welcome screen is active
+            if (showWelcomeScreen && !welcomeScreenInitialized) {
+                ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.1f, 0.1f, 0.1f, 1.0f));
+            }
+            
             window_flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
             window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
             
@@ -579,6 +585,11 @@ int main() {
             // Create docking space
             ImGuiID dockspace_id = ImGui::GetID("MainDockSpace");
             ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);
+            
+            if (showWelcomeScreen && !welcomeScreenInitialized) {
+                ImGui::PopStyleColor(); // Restore window background color
+            }
+            
             ImGui::End();
         
         // Files panel (left)
@@ -1118,7 +1129,10 @@ int main() {
         int display_w, display_h;
         glfwGetFramebufferSize(window, &display_w, &display_h);
         glViewport(0, 0, display_w, display_h);
-        glClearColor(0.45f, 0.55f, 0.60f, 1.00f);
+        
+        // Use a darker background color to match the welcome screen
+        // This creates a consistent dark theme throughout the application
+        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         
