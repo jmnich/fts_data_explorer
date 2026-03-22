@@ -11,6 +11,9 @@
 #include <cstdio>
 #include <cstdlib>
 
+// Include config header
+#include "config.h"
+
 // Include imgui and other dependencies
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
@@ -177,6 +180,18 @@ public:
 int main() {
     std::cout << "FTS Data Explorer - Starting application..." << std::endl;
     
+    // Initialize configuration
+    AppConfig config;
+    std::string configFilePath = getConfigFilePath();
+    
+    // Load existing config if available
+    if (std::filesystem::exists(configFilePath)) {
+        config.loadFromFile(configFilePath);
+        std::cout << "Loaded configuration from " << configFilePath << std::endl;
+    } else {
+        std::cout << "No existing config found, using defaults" << std::endl;
+    }
+    
     // Initialize GLFW
     if (!glfwInit()) {
         std::cerr << "Failed to initialize GLFW" << std::endl;
@@ -230,7 +245,15 @@ int main() {
     ImGui::GetStyle().ScaleAllSizes(dpi_scale * 1.5f);
     
     // Main application state
-    std::string currentDirectory = "/home/guowa/Documents/Repos/fts_data_explorer/example_datasets/2025-06-12_15-17-10_reference_3mm_2.0mms_30avg/raw_data";
+    std::string currentDirectory;
+    
+    // Use config settings if available, otherwise use default
+    if (!config.lastWorkingDirectory.empty() && std::filesystem::exists(config.lastWorkingDirectory)) {
+        currentDirectory = config.lastWorkingDirectory;
+    } else {
+        currentDirectory = "/home/guowa/Documents/Repos/fts_data_explorer/example_datasets/2025-06-12_15-17-10_reference_3mm_2.0mms_30avg/raw_data";
+    }
+    
     std::vector<std::string> csvFiles = FileBrowser::getCSVFilesInDirectory(currentDirectory);
     std::vector<InterferogramData> loadedData; // Store multiple loaded datasets
     std::vector<std::string> selectedFiles; // Store selected file paths
@@ -241,7 +264,7 @@ int main() {
     bool filesChanged = true; // Flag to indicate files list changed
     bool multiSelectMode = false; // Track if Ctrl is held for multi-select
     const size_t MAX_SELECTABLE_FILES = 5; // Limit to 5 files for simultaneous display
-    bool alignPeaks = false; // Flag to enable peak alignment
+    bool alignPeaks = config.alignPeaks; // Use config setting for peak alignment
     
     // Zoom state
     bool isZooming = false;
@@ -254,7 +277,10 @@ int main() {
     // Y-axis limits for plots
     float ref_y_min = 0.0f, ref_y_max = 1.0f;
     float prim_y_min = 0.0f, prim_y_max = 1.0f;
-    bool autoFitYAxis = true; // Enable auto-fit by default
+    bool autoFitYAxis = config.autoFitYAxis; // Use config setting for auto-fit
+    
+    // Track if we should update recent datasets (only after successful load)
+    bool shouldUpdateRecentDatasets = false;
     
     // No initialization needed for simple file dialog
     
@@ -335,10 +361,16 @@ int main() {
                 zoomRange = {0, 0};
                 shouldAutoscale = true; // Trigger autoscale for new data
                 filesChanged = false;
+                
+                // Mark that we should update recent datasets after this successful load
+                shouldUpdateRecentDatasets = true;
+                
             } catch (const std::exception& e) {
                 std::cerr << "Error loading file: " << e.what() << std::endl;
                 dataLoaded = false;
                 filesChanged = false;
+                // Don't update recent datasets on failure
+                shouldUpdateRecentDatasets = false;
             }
         }
         
@@ -840,6 +872,33 @@ int main() {
             }
         }
         
+        // Recent datasets menu
+        if (!config.recentDatasets.empty()) {
+            if (ImGui::BeginMenu("Recent Datasets")) {
+                for (const auto& datasetPath : config.recentDatasets) {
+                    if (ImGui::MenuItem(datasetPath.c_str())) {
+                        // Extract just the directory name for display
+                        size_t last_slash = datasetPath.find_last_of("/\\");
+                        std::string displayName = (last_slash != std::string::npos) 
+                            ? datasetPath.substr(last_slash + 1) 
+                            : datasetPath;
+                        
+                        if (std::filesystem::exists(datasetPath) && std::filesystem::is_directory(datasetPath)) {
+                            currentDirectory = datasetPath;
+                            csvFiles = FileBrowser::getCSVFilesInDirectory(currentDirectory);
+                            dataLoaded = false;
+                            filesChanged = true;
+                            currentSortedFileIndex = 0;
+                            std::cout << "Opened recent dataset: " << datasetPath << std::endl;
+                        } else {
+                            std::cerr << "Recent dataset path no longer exists: " << datasetPath << std::endl;
+                        }
+                    }
+                }
+                ImGui::EndMenu();
+            }
+        }
+        
         ImGui::Checkbox("Align peaks", &alignPeaks);
         
         // Auto-fit Y-axis toggle
@@ -876,6 +935,29 @@ int main() {
     
     glfwDestroyWindow(window);
     glfwTerminate();
+    
+    // Save configuration before exiting
+    config.autoFitYAxis = autoFitYAxis;
+    config.alignPeaks = alignPeaks;
+    config.lastWorkingDirectory = currentDirectory;
+    
+    // Update recent datasets if we had a successful load
+    if (shouldUpdateRecentDatasets && dataLoaded && !selectedFiles.empty()) {
+        // Add the parent directory of the current dataset to recent datasets
+        std::string datasetPath = selectedFiles[0];
+        size_t last_slash = datasetPath.find_last_of("/\\");
+        if (last_slash != std::string::npos) {
+            std::string parentDir = datasetPath.substr(0, last_slash);
+            config.addRecentDataset(parentDir);
+        }
+    }
+    
+    // Save config to file
+    if (!config.saveToFile(configFilePath)) {
+        std::cerr << "Failed to save configuration to " << configFilePath << std::endl;
+    } else {
+        std::cout << "Configuration saved to " << configFilePath << std::endl;
+    }
     
     return 0;
 }
