@@ -1256,6 +1256,22 @@ int main() {
                         double y_min = ImPlot::GetPlotLimits().Y.Min;
                         double y_max = ImPlot::GetPlotLimits().Y.Max;
                         
+                        // Ensure proper ordering (left to right)
+                        double selection_left = std::min(selectionStartX, selectionEndX);
+                        double selection_right = std::max(selectionStartX, selectionEndX);
+                        
+                        // Create arrays for shaded region - need X array and two Y arrays (bottom and top)
+                        double shade_x[2] = {selection_left, selection_right};
+                        double shade_y1[2] = {y_min, y_min};  // Bottom edge
+                        double shade_y2[2] = {y_max, y_max};  // Top edge
+                        
+                        // Create spec for dark purple translucent fill
+                        ImPlotSpec fillSpec;
+                        fillSpec.FillColor = ImVec4(0.5f, 0.0f, 0.5f, 0.3f); // Dark purple with 30% opacity
+                        
+                        // Draw translucent dark purple fill between selection lines
+                        ImPlot::PlotShaded("##SelectionFill", shade_x, shade_y1, shade_y2, 2, fillSpec);
+                        
                         // Create arrays for vertical line points
                         double start_x[2] = {selectionStartX, selectionStartX};
                         double start_y[2] = {y_min, y_max};
@@ -1325,6 +1341,22 @@ int main() {
                         // Get current plot limits to draw vertical lines
                         double y_min = ImPlot::GetPlotLimits().Y.Min;
                         double y_max = ImPlot::GetPlotLimits().Y.Max;
+                        
+                        // Ensure proper ordering (left to right)
+                        double selection_left = std::min(selectionStartX, selectionEndX);
+                        double selection_right = std::max(selectionStartX, selectionEndX);
+                        
+                        // Create arrays for shaded region - need X array and two Y arrays (bottom and top)
+                        double shade_x[2] = {selection_left, selection_right};
+                        double shade_y1[2] = {y_min, y_min};  // Bottom edge
+                        double shade_y2[2] = {y_max, y_max};  // Top edge
+                        
+                        // Create spec for dark purple translucent fill
+                        ImPlotSpec fillSpec;
+                        fillSpec.FillColor = ImVec4(0.5f, 0.0f, 0.5f, 0.3f); // Dark purple with 30% opacity
+                        
+                        // Draw translucent dark purple fill between selection lines
+                        ImPlot::PlotShaded("##SelectionFill", shade_x, shade_y1, shade_y2, 2, fillSpec);
                         
                         // Create arrays for vertical line points
                         double start_x[2] = {selectionStartX, selectionStartX};
