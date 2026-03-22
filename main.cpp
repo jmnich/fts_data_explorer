@@ -442,7 +442,17 @@ int main() {
                         color = ImVec4(0.5f, 0.5f, 0.5f, 1.0f); // Grey
                     }
                     
-                    ImGui::TextColored(color, "●");
+                    // Draw colored square patch
+                    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+                    ImVec2 cursor_pos = ImGui::GetCursorScreenPos();
+                    ImVec2 square_size(12, 12); // Size of the color square
+                    
+                    // Draw square patch
+                    draw_list->AddRectFilled(cursor_pos, ImVec2(cursor_pos.x + square_size.x, cursor_pos.y + square_size.y), ImGui::ColorConvertFloat4ToU32(color));
+                    draw_list->AddRect(cursor_pos, ImVec2(cursor_pos.x + square_size.x, cursor_pos.y + square_size.y), ImGui::ColorConvertFloat4ToU32(ImVec4(0.2f, 0.2f, 0.2f, 1.0f))); // Border
+                    
+                    // Move cursor forward and add text
+                    ImGui::Dummy(square_size);
                     ImGui::SameLine();
                     ImGui::Text("%s", selectedFilenames[i].c_str());
                     if (i < loadedData.size() - 1) {
