@@ -39,3 +39,7 @@
 
 # debug information files
 *.dwo
+
+# ImGui configuration files
+imgui.ini
+build/imgui.ini
