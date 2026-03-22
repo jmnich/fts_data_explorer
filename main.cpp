@@ -217,6 +217,16 @@ int main() {
             }
         }
         
+        // Handle ESC key to reset zoom (works independently of file navigation)
+        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) && dataLoaded) {
+            if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+                // Reset X-axis zoom when ESC is pressed
+                isZoomed = false;
+                zoomRange = {0, 0};
+                shouldAutoscale = true; // Force redraw with full range
+            }
+        }
+        
         // Load file if navigation changed
         if (filesChanged && !csvFiles.empty()) {
             try {
