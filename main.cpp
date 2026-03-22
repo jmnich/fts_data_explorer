@@ -447,10 +447,10 @@ int main() {
             if (ImGui::BeginPopupModal("Welcome to FTS Data Explorer", NULL, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove)) {
                 
                 // Welcome message
-                ImGui::TextColored(ImVec4(0.6f, 0.5f, 0.1f, 1.0f), "Welcome to FTS Data Explorer");
-                ImGui::Text("A tool for exploring Fourier spectrometer data");
-                ImGui::Spacing();
-                ImGui::Separator();
+                // ImGui::TextColored(ImVec4(0.6f, 0.5f, 0.1f, 1.0f), "Welcome to FTS Data Explorer");
+                // ImGui::Text("A tool for exploring Fourier spectrometer data");
+                // ImGui::Spacing();
+                // ImGui::Separator();
                 ImGui::Spacing();
                 
                 // Recent datasets section
@@ -462,7 +462,7 @@ int main() {
                     ImGui::Text("Use the button below to select a dataset directory.");
                 } else {
                     // Create a child window for scrollable recent datasets list
-                    if (ImGui::BeginChild("RecentDatasetsChild", ImVec2(0, 200), true)) {
+                    if (ImGui::BeginChild("RecentDatasetsChild", ImVec2(0, 400), true)) {
                         for (const auto& datasetPath : config.recentDatasets) {
                             // Extract the parent directory name for display (skip "raw_data" if present)
                             std::string displayName = datasetPath;
@@ -543,10 +543,7 @@ int main() {
                         ImGui::CloseCurrentPopup(); // Close the modal
                     }
                 }
-                
-                ImGui::Spacing();
-                ImGui::TextWrapped("Tip: You can also access recent datasets from the Controls panel after loading data.");
-                
+
                 ImGui::EndPopup();
                 
                 // If welcome screen is closed manually, initialize the app
@@ -1073,6 +1070,7 @@ int main() {
                 }
                 csvFiles = FileBrowser::getCSVFilesInDirectory(currentDirectory);
                 dataLoaded = false;
+                shouldUpdateRecentDatasets = true; // Mark to update recent datasets
                 std::cout << "Working directory set to: " << currentDirectory << std::endl;
             }
         }
