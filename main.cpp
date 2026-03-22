@@ -171,11 +171,15 @@ int main() {
     // Main application state
     std::string currentDirectory = "/home/guowa/Documents/Repos/fts_data_explorer/example_datasets/2025-06-12_15-17-10_reference_3mm_2.0mms_30avg/raw_data";
     std::vector<std::string> csvFiles = FileBrowser::getCSVFilesInDirectory(currentDirectory);
-    InterferogramData currentData;
+    std::vector<InterferogramData> loadedData; // Store multiple loaded datasets
+    std::vector<std::string> selectedFiles; // Store selected file paths
+    std::vector<std::string> selectedFilenames; // Store selected filenames for legend
     bool dataLoaded = false;
     std::string currentDatasetName = "No dataset selected"; // Track current dataset name
     size_t currentSortedFileIndex = 0; // Track currently selected file index in sorted list
     bool filesChanged = true; // Flag to indicate files list changed
+    bool multiSelectMode = false; // Track if Ctrl is held for multi-select
+    const size_t MAX_SELECTABLE_FILES = 5; // Limit to 5 files for simultaneous display
     
     // Zoom state
     bool isZooming = false;
@@ -190,6 +194,7 @@ int main() {
     // Main loop
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
+        multiSelectMode = ImGui::GetIO().KeyCtrl;
         
         // Handle keyboard navigation for file selection
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) && !csvFiles.empty() && dataLoaded) {
@@ -227,7 +232,26 @@ int main() {
                     return naturalSortCompare(nameA, nameB);
                 });
                 
-                currentData = CSVAdapter::loadFromCSV(sortedFiles[currentSortedFileIndex]);
+                // Load the currently selected file
+                InterferogramData data = CSVAdapter::loadFromCSV(sortedFiles[currentSortedFileIndex]);
+                
+                // For single selection (no Ctrl), replace current selection
+                loadedData.clear();
+                selectedFiles.clear();
+                selectedFilenames.clear();
+                
+                // Always load the current file
+                loadedData.push_back(data);
+                selectedFiles.push_back(sortedFiles[currentSortedFileIndex]);
+                
+                // Extract filename for legend
+                std::string filename = sortedFiles[currentSortedFileIndex];
+                size_t last_slash = filename.find_last_of("/\\");
+                if (last_slash != std::string::npos) {
+                    filename = filename.substr(last_slash + 1);
+                }
+                selectedFilenames.push_back(filename);
+                
                 dataLoaded = true;
                 // Reset zoom when loading new file
                 isZoomed = false;
@@ -318,9 +342,37 @@ int main() {
             }
             
             if (ImGui::Button(filename.c_str())) {
-                // Update current sorted file index to match the clicked file
-                currentSortedFileIndex = i;
-                filesChanged = true;
+                // Handle multi-select with Ctrl key
+                if (multiSelectMode) {
+                    // Toggle selection for this file
+                    std::string fullPath = sortedFiles[i];
+                    auto it = std::find(selectedFiles.begin(), selectedFiles.end(), fullPath);
+                    if (it != selectedFiles.end()) {
+                        // File already selected, remove it
+                        size_t index = std::distance(selectedFiles.begin(), it);
+                        selectedFiles.erase(selectedFiles.begin() + index);
+                        selectedFilenames.erase(selectedFilenames.begin() + index);
+                        loadedData.erase(loadedData.begin() + index);
+                    } else {
+                        // Check if we would exceed the limit
+                        if (selectedFiles.size() < MAX_SELECTABLE_FILES) {
+                            try {
+                                InterferogramData data = CSVAdapter::loadFromCSV(fullPath);
+                                loadedData.push_back(data);
+                                selectedFiles.push_back(fullPath);
+                                selectedFilenames.push_back(filename);
+                            } catch (const std::exception& e) {
+                                std::cerr << "Error loading file: " << e.what() << std::endl;
+                            }
+                        } else {
+                            ImGui::OpenPopup("Selection Limit");
+                        }
+                    }
+                } else {
+                    // Single selection - replace current selection
+                    currentSortedFileIndex = i;
+                    filesChanged = true;
+                }
             }
             
             // Pop the correct number of styles
@@ -337,8 +389,13 @@ int main() {
         // Graphing panel (main) - now using ImPlot
         ImGui::Begin("Graphing Panel");
         if (dataLoaded) {
-            ImGui::Text("Reference Detector: %zu samples", currentData.referenceDetector.size());
-            ImGui::Text("Primary Detector: %zu samples", currentData.primaryDetector.size());
+            // Show info for multi-select mode
+            if (selectedFiles.size() > 1) {
+                ImGui::Text("Displaying %zu datasets", selectedFiles.size());
+            } else {
+                ImGui::Text("Reference Detector: %zu samples", loadedData[0].referenceDetector.size());
+                ImGui::Text("Primary Detector: %zu samples", loadedData[0].primaryDetector.size());
+            }
             
             // Add zoom controls
             if (isZoomed) {
@@ -351,8 +408,8 @@ int main() {
             }
             
             // Calculate min/max values for Y-axis for each dataset
-            auto ref_min_max = std::minmax_element(currentData.referenceDetector.begin(), currentData.referenceDetector.end());
-            auto prim_min_max = std::minmax_element(currentData.primaryDetector.begin(), currentData.primaryDetector.end());
+            auto ref_min_max = std::minmax_element(loadedData[0].referenceDetector.begin(), loadedData[0].referenceDetector.end());
+            auto prim_min_max = std::minmax_element(loadedData[0].primaryDetector.begin(), loadedData[0].primaryDetector.end());
             float ref_y_min = *ref_min_max.first;
             float ref_y_max = *ref_min_max.second;
             float prim_y_min = *prim_min_max.first;
@@ -360,9 +417,9 @@ int main() {
             
             // Determine zoom range
             size_t ref_start = isZoomed ? zoomRange.first : 0;
-            size_t ref_end = isZoomed ? zoomRange.second : currentData.referenceDetector.size();
+            size_t ref_end = isZoomed ? zoomRange.second : loadedData[0].referenceDetector.size();
             size_t prim_start = isZoomed ? zoomRange.first : 0;
-            size_t prim_end = isZoomed ? zoomRange.second : currentData.primaryDetector.size();
+            size_t prim_end = isZoomed ? zoomRange.second : loadedData[0].primaryDetector.size();
             
             // Create ImPlot subplots - two vertically stacked plots
             if (ImPlot::BeginSubplots("Detector Plots", 2, 1, ImVec2(-1, -1), ImPlotSubplotFlags_NoTitle | ImPlotSubplotFlags_LinkAllX)) {
@@ -374,11 +431,32 @@ int main() {
                         ImPlot::SetupAxesLimits(ref_start, ref_end, ref_y_min, ref_y_max, ImPlotCond_Always);
                     } else if (shouldAutoscale) {
                         // Set initial view to show all data when new data is loaded
-                        ImPlot::SetupAxesLimits(0, currentData.referenceDetector.size(), ref_y_min, ref_y_max, ImPlotCond_Always);
+                        ImPlot::SetupAxesLimits(0, loadedData[0].referenceDetector.size(), ref_y_min, ref_y_max, ImPlotCond_Always);
                     }
                     ImPlotSpec spec;
                     spec.LineColor = ImVec4(1.0f, 1.0f, 0.0f, 1.0f); // Yellow color
-                    ImPlot::PlotLine("Reference", &currentData.referenceDetector[ref_start], ref_end - ref_start, 1.0, 0.0, spec);
+                    // Plot all selected datasets with specific colors and legend
+                    for (size_t i = 0; i < loadedData.size(); i++) {
+                        ImPlotSpec spec;
+                        spec.LineWeight = 2.0f;
+                        
+                        // Assign specific colors based on the requested scheme (yellow first)
+                        if (i == 0) {
+                            spec.LineColor = ImVec4(0.6f, 0.5f, 0.1f, 1.0f); // Dark yellow - FIRST
+                        } else if (i == 1) {
+                            spec.LineColor = ImVec4(0.75f, 0.05f, 0.05f, 1.0f); // #C00E0E - Red
+                        } else if (i == 2) {
+                            spec.LineColor = ImVec4(0.15f, 0.45f, 0.28f, 1.0f); // #257448 - Green
+                        } else if (i == 3) {
+                            spec.LineColor = ImVec4(0.07f, 0.29f, 0.59f, 1.0f); // #114A97 - Blue
+                        } else if (i == 4) {
+                            spec.LineColor = ImVec4(0.5f, 0.5f, 0.5f, 1.0f); // Grey
+                        }
+                        
+                        ImPlot::PlotLine(selectedFilenames[i].c_str(), 
+                                       &loadedData[i].referenceDetector[ref_start], 
+                                       ref_end - ref_start, 1.0, 0.0, spec);
+                    }
                     ImPlot::EndPlot();
                 }
                 
@@ -389,11 +467,32 @@ int main() {
                         ImPlot::SetupAxesLimits(ref_start, ref_end, prim_y_min, prim_y_max, ImPlotCond_Always);
                     } else if (shouldAutoscale) {
                         // Set initial view to show all data when new data is loaded
-                        ImPlot::SetupAxesLimits(0, currentData.primaryDetector.size(), prim_y_min, prim_y_max, ImPlotCond_Always);
+                        ImPlot::SetupAxesLimits(0, loadedData[0].primaryDetector.size(), prim_y_min, prim_y_max, ImPlotCond_Always);
                     }
                     ImPlotSpec spec2;
                     spec2.LineColor = ImVec4(1.0f, 1.0f, 0.0f, 1.0f); // Yellow color
-                    ImPlot::PlotLine("Primary", &currentData.primaryDetector[prim_start], prim_end - prim_start, 1.0, 0.0, spec2);
+                    // Plot all selected datasets with same colors as reference
+                    for (size_t i = 0; i < loadedData.size(); i++) {
+                        ImPlotSpec spec;
+                        spec.LineWeight = 2.0f;
+                        
+                        // Use same specific colors as reference plot
+                        if (i == 0) {
+                            spec.LineColor = ImVec4(0.6f, 0.5f, 0.1f, 1.0f); // Dark yellow - FIRST
+                        } else if (i == 1) {
+                            spec.LineColor = ImVec4(0.75f, 0.05f, 0.05f, 1.0f); // #C00E0E - Red
+                        } else if (i == 2) {
+                            spec.LineColor = ImVec4(0.15f, 0.45f, 0.28f, 1.0f); // #257448 - Green
+                        } else if (i == 3) {
+                            spec.LineColor = ImVec4(0.07f, 0.29f, 0.59f, 1.0f); // #114A97 - Blue
+                        } else if (i == 4) {
+                            spec.LineColor = ImVec4(0.5f, 0.5f, 0.5f, 1.0f); // Grey
+                        }
+                        
+                        ImPlot::PlotLine(selectedFilenames[i].c_str(), 
+                                       &loadedData[i].primaryDetector[ref_start], 
+                                       ref_end - ref_start, 1.0, 0.0, spec);
+                    }
                     ImPlot::EndPlot();
                 }
                 
@@ -427,7 +526,7 @@ int main() {
                     size_t zoom_width = (ref_end - ref_start) / 4; // Zoom in by 4x
                     
                     ref_start = std::max(size_t(0), zoom_center - zoom_width/2);
-                    ref_end = std::min(currentData.referenceDetector.size(), zoom_center + zoom_width/2);
+                    ref_end = std::min(loadedData[0].referenceDetector.size(), zoom_center + zoom_width/2);
                     prim_start = ref_start;
                     prim_end = ref_end;
                     isZoomed = true;
@@ -450,7 +549,7 @@ int main() {
         ImGui::PushTextWrapPos(); // Enable text wrapping
         if (dataLoaded) {
             ImGui::Text("File: %s", csvFiles.empty() ? "None" : csvFiles[0].c_str());
-            ImGui::Text("Samples: %zu", currentData.referenceDetector.size());
+            ImGui::Text("Samples: %zu", loadedData[0].referenceDetector.size());
             
             // Display comments if comments.txt exists
             ImGui::Separator();
