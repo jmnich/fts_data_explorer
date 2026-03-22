@@ -529,6 +529,12 @@ int main() {
     std::pair<size_t, size_t> zoomRange = {0, 0};
     bool isZoomed = false;
     bool shouldAutoscale = false; // Flag to trigger autoscale on new data load
+
+    // X-range selection state
+    bool isSelectingXRange = false;
+    double selectionStartX = 0.0;
+    double selectionEndX = 0.0;
+    bool isMouseOverPlot = false;
     
     // Y-axis limits for plots
     float ref_y_min = 0.0f, ref_y_max = 1.0f;
@@ -1234,6 +1240,35 @@ int main() {
                                        &dataToPlot.referenceDetector[ref_start], 
                                        ref_end - ref_start, 1.0, 0.0, plotSpecs[i]);
                     }
+                    
+                    // Handle X-range selection within plot context
+                    if (isSelectingXRange) {
+                        // Get current mouse position in plot coordinates
+                        ImPlotPoint mousePos = ImPlot::GetPlotMousePos();
+                        
+                        // Initialize start position if not set
+                        if (selectionStartX == 0.0 && selectionEndX == 0.0) {
+                            selectionStartX = mousePos.x;
+                        }
+                        selectionEndX = mousePos.x;
+                        
+                        // Get current plot limits to draw vertical lines
+                        double y_min = ImPlot::GetPlotLimits().Y.Min;
+                        double y_max = ImPlot::GetPlotLimits().Y.Max;
+                        
+                        // Create arrays for vertical line points
+                        double start_x[2] = {selectionStartX, selectionStartX};
+                        double start_y[2] = {y_min, y_max};
+                        double end_x[2] = {selectionEndX, selectionEndX};
+                        double end_y[2] = {y_min, y_max};
+                        
+                        // Draw vertical line at start position
+                        ImPlot::PlotLine("##SelectionStart", start_x, start_y, 2);
+                        
+                        // Draw vertical line at end position
+                        ImPlot::PlotLine("##SelectionEnd", end_x, end_y, 2);
+                    }
+                    
                     ImPlot::EndPlot();
                     ImPlot::PopStyleColor(); // Pop grid color
                 }
@@ -1275,6 +1310,35 @@ int main() {
                                        &dataToPlot.primaryDetector[ref_start], 
                                        ref_end - ref_start, 1.0, 0.0, plotSpecs[i]);
                     }
+                    
+                    // Handle X-range selection within plot context
+                    if (isSelectingXRange) {
+                        // Get current mouse position in plot coordinates
+                        ImPlotPoint mousePos = ImPlot::GetPlotMousePos();
+                        
+                        // Initialize start position if not set
+                        if (selectionStartX == 0.0 && selectionEndX == 0.0) {
+                            selectionStartX = mousePos.x;
+                        }
+                        selectionEndX = mousePos.x;
+                        
+                        // Get current plot limits to draw vertical lines
+                        double y_min = ImPlot::GetPlotLimits().Y.Min;
+                        double y_max = ImPlot::GetPlotLimits().Y.Max;
+                        
+                        // Create arrays for vertical line points
+                        double start_x[2] = {selectionStartX, selectionStartX};
+                        double start_y[2] = {y_min, y_max};
+                        double end_x[2] = {selectionEndX, selectionEndX};
+                        double end_y[2] = {y_min, y_max};
+                        
+                        // Draw vertical line at start position
+                        ImPlot::PlotLine("##SelectionStart", start_x, start_y, 2);
+                        
+                        // Draw vertical line at end position
+                        ImPlot::PlotLine("##SelectionEnd", end_x, end_y, 2);
+                    }
+                    
                     ImPlot::EndPlot();
                     ImPlot::PopStyleColor(); // Pop grid color
                 }
@@ -1291,8 +1355,22 @@ int main() {
             // This completely bypasses ImPlot's input system
             ImVec2 mousePos = ImGui::GetMousePos();
             bool isOverPlot = ImGui::IsWindowHovered();
+            isMouseOverPlot = isOverPlot;
             
-            if (isOverPlot && ImGui::IsMouseDown(0) && !isZooming) {
+            // Handle X-range selection with Ctrl key - state management only
+            bool ctrlPressed = ImGui::GetIO().KeyCtrl;
+            if (isOverPlot && ctrlPressed && !isSelectingXRange) {
+                // Start selection when Ctrl is pressed over plot
+                isSelectingXRange = true;
+                // Reset selection positions
+                selectionStartX = 0.0;
+                selectionEndX = 0.0;
+            } else if (!ctrlPressed && isSelectingXRange) {
+                // End selection when Ctrl is released
+                isSelectingXRange = false;
+            }
+            
+            if (isOverPlot && ImGui::IsMouseDown(0) && !isZooming && !isSelectingXRange) {
                 isZooming = true;
                 zoomStart = mousePos;
             }
