@@ -229,11 +229,18 @@ FETCHCONTENT_QUIET:BOOL=ON
 // for imgui
 FETCHCONTENT_SOURCE_DIR_IMGUI:PATH=
 
+//When not empty, overrides where to find pre-populated content
+// for implot
+FETCHCONTENT_SOURCE_DIR_IMPLOT:PATH=
+
 //Enables UPDATE_DISCONNECTED behavior for all content population
 FETCHCONTENT_UPDATES_DISCONNECTED:BOOL=OFF
 
 //Enables UPDATE_DISCONNECTED behavior just for population of imgui
 FETCHCONTENT_UPDATES_DISCONNECTED_IMGUI:BOOL=OFF
+
+//Enables UPDATE_DISCONNECTED behavior just for population of implot
+FETCHCONTENT_UPDATES_DISCONNECTED_IMPLOT:BOOL=OFF
 
 //Git command line client
 GIT_EXECUTABLE:FILEPATH=/usr/bin/git

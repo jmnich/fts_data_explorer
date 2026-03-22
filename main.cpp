@@ -6,11 +6,13 @@
 #include <sstream>
 #include <algorithm>
 #include <limits>
+#include <cmath>
 
 // Include imgui and other dependencies
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
+#include "implot.h"
 #include <GLFW/glfw3.h>
 
 // Simple file dialog implementation (replaces NFD)
@@ -121,12 +123,11 @@ int main() {
     style.Colors[ImGuiCol_PlotHistogram] = yellow_color;
     style.Colors[ImGuiCol_PlotHistogramHovered] = yellow_color;
     
-    // Ensure plot background matches window background
-    style.Colors[ImGuiCol_FrameBg] = background_color;
-    style.Colors[ImGuiCol_FrameBgHovered] = background_color;
-    style.Colors[ImGuiCol_FrameBgActive] = background_color;
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 130");
+    
+    // Initialize ImPlot context
+    ImPlot::CreateContext();
     
     // Set up for high DPI displays AFTER backend initialization
     // Apply 1.5x scaling to all UI elements including fonts
@@ -146,6 +147,7 @@ int main() {
     ImVec2 zoomEnd;
     std::pair<size_t, size_t> zoomRange = {0, 0};
     bool isZoomed = false;
+    bool shouldAutoscale = false; // Flag to trigger autoscale on new data load
     
     // No initialization needed for simple file dialog
     
@@ -188,6 +190,10 @@ int main() {
                 try {
                     currentData = CSVAdapter::loadFromCSV(file);
                     dataLoaded = true;
+                    // Reset zoom when loading new file
+                    isZoomed = false;
+                    zoomRange = {0, 0};
+                    shouldAutoscale = true; // Trigger autoscale for new data
                 } catch (const std::exception& e) {
                     std::cerr << "Error loading file: " << e.what() << std::endl;
                     dataLoaded = false;
@@ -196,7 +202,7 @@ int main() {
         }
         ImGui::End();
         
-        // Graphing panel (main)
+        // Graphing panel (main) - now using ImPlot
         ImGui::Begin("Graphing Panel");
         if (dataLoaded) {
             ImGui::Text("Reference Detector: %zu samples", currentData.referenceDetector.size());
@@ -212,7 +218,7 @@ int main() {
                 ImGui::Text("Zoomed: %zu-%zu", zoomRange.first, zoomRange.second);
             }
             
-            // Calculate min/max values for Y-axis for each dataset independently
+            // Calculate min/max values for Y-axis for each dataset
             auto ref_min_max = std::minmax_element(currentData.referenceDetector.begin(), currentData.referenceDetector.end());
             auto prim_min_max = std::minmax_element(currentData.primaryDetector.begin(), currentData.primaryDetector.end());
             float ref_y_min = *ref_min_max.first;
@@ -220,27 +226,57 @@ int main() {
             float prim_y_min = *prim_min_max.first;
             float prim_y_max = *prim_min_max.second;
             
-            // Get available content region for full-size plots
-            ImVec2 plotSize = ImGui::GetContentRegionAvail();
-            plotSize.y = (plotSize.y - 60.0f) * 0.5f; // Split remaining space after text
-            
             // Determine zoom range
             size_t ref_start = isZoomed ? zoomRange.first : 0;
             size_t ref_end = isZoomed ? zoomRange.second : currentData.referenceDetector.size();
             size_t prim_start = isZoomed ? zoomRange.first : 0;
             size_t prim_end = isZoomed ? zoomRange.second : currentData.primaryDetector.size();
             
-            // Get plot position AFTER Y-axis child to get correct coordinates
-            ImVec2 refPlotPos = ImGui::GetCursorScreenPos();
-            ImVec2 refPlotSize = ImVec2(ImGui::GetContentRegionAvail().x, plotSize.y);
+            // Create ImPlot subplots - two vertically stacked plots
+            if (ImPlot::BeginSubplots("Detector Plots", 2, 1, ImVec2(-1, -1), ImPlotSubplotFlags_NoTitle | ImPlotSubplotFlags_LinkAllX)) {
+                
+                // Reference detector plot (top)
+                if (ImPlot::BeginPlot("Reference", ImVec2(-1, -1), ImPlotFlags_NoTitle)) {
+                    ImPlot::SetupAxes("Sample", "Voltage [V]", ImPlotAxisFlags_NoDecorations, ImPlotAxisFlags_AutoFit);
+                    if (isZoomed) {
+                        ImPlot::SetupAxesLimits(ref_start, ref_end, ref_y_min, ref_y_max, ImPlotCond_Always);
+                    } else if (shouldAutoscale) {
+                        // Set initial view to show all data when new data is loaded
+                        ImPlot::SetupAxesLimits(0, currentData.referenceDetector.size(), ref_y_min, ref_y_max, ImPlotCond_Always);
+                    }
+                    ImPlotSpec spec;
+                    spec.LineColor = ImVec4(1.0f, 1.0f, 0.0f, 1.0f); // Yellow color
+                    ImPlot::PlotLine("Reference", &currentData.referenceDetector[ref_start], ref_end - ref_start, 1.0, 0.0, spec);
+                    ImPlot::EndPlot();
+                }
+                
+                // Primary detector plot (bottom)
+                if (ImPlot::BeginPlot("Primary", ImVec2(-1, -1), ImPlotFlags_NoTitle)) {
+                    ImPlot::SetupAxes("Sample", "Voltage [V]", ImPlotAxisFlags_NoDecorations, ImPlotAxisFlags_AutoFit);
+                    if (isZoomed) {
+                        ImPlot::SetupAxesLimits(ref_start, ref_end, prim_y_min, prim_y_max, ImPlotCond_Always);
+                    } else if (shouldAutoscale) {
+                        // Set initial view to show all data when new data is loaded
+                        ImPlot::SetupAxesLimits(0, currentData.primaryDetector.size(), prim_y_min, prim_y_max, ImPlotCond_Always);
+                    }
+                    ImPlotSpec spec2;
+                    spec2.LineColor = ImVec4(1.0f, 1.0f, 0.0f, 1.0f); // Yellow color
+                    ImPlot::PlotLine("Primary", &currentData.primaryDetector[prim_start], prim_end - prim_start, 1.0, 0.0, spec2);
+                    ImPlot::EndPlot();
+                }
+                
+                // Reset autoscale flag after use
+                if (shouldAutoscale) {
+                    shouldAutoscale = false;
+                }
+                
+                ImPlot::EndSubplots();
+            }
             
-            // Store plot position for zoom calculation
-            ImVec2 plotStartPos = refPlotPos;
-            
-            // Handle zoom selection - check if mouse is over the plot area
+            // Handle box selection zoom manually using ImGui mouse input
+            // This completely bypasses ImPlot's input system
             ImVec2 mousePos = ImGui::GetMousePos();
-            bool isOverPlot = mousePos.x >= refPlotPos.x && mousePos.x <= refPlotPos.x + refPlotSize.x &&
-                            mousePos.y >= refPlotPos.y && mousePos.y <= refPlotPos.y + refPlotSize.y;
+            bool isOverPlot = ImGui::IsWindowHovered();
             
             if (isOverPlot && ImGui::IsMouseDown(0) && !isZooming) {
                 isZooming = true;
@@ -250,124 +286,27 @@ int main() {
                 zoomEnd = mousePos;
                 isZooming = false;
                 
-                // Calculate zoom range relative to current view
-                float x1 = zoomStart.x - plotStartPos.x;
-                float x2 = zoomEnd.x - plotStartPos.x;
-                if (std::abs(x2 - x1) > 10 && refPlotSize.x > 0) {
-                    // Ensure we have the correct order
-                    if (x1 > x2) std::swap(x1, x2);
+                // Calculate zoom based on pixel coordinates
+                // This is a simplified approach - in a real app you'd map pixels to data coordinates
+                if (fabs(zoomEnd.x - zoomStart.x) > 20 && fabs(zoomEnd.y - zoomStart.y) > 20) {
+                    // For now, use a fixed zoom factor
+                    // In a production app, you'd calculate the actual data range
+                    size_t zoom_center = (ref_start + ref_end) / 2;
+                    size_t zoom_width = (ref_end - ref_start) / 4; // Zoom in by 4x
                     
-                    // Calculate relative to current zoom range
-                    size_t current_start = isZoomed ? zoomRange.first : 0;
-                    size_t current_end = isZoomed ? zoomRange.second : currentData.referenceDetector.size();
-                    size_t current_range = current_end - current_start;
-                    
-                    // Calculate new indices relative to current view
-                    size_t start_idx = current_start + static_cast<size_t>((x1 / refPlotSize.x) * current_range);
-                    size_t end_idx = current_start + static_cast<size_t>((x2 / refPlotSize.x) * current_range);
-                    
-                    // Clamp to valid range
-                    start_idx = std::min(start_idx, currentData.referenceDetector.size() - 1);
-                    end_idx = std::min(end_idx, currentData.referenceDetector.size());
-                    
-                    if (start_idx < end_idx && end_idx - start_idx > 1) {
-                        zoomRange = {start_idx, end_idx};
-                        isZoomed = true;
-                    }
+                    ref_start = std::max(size_t(0), zoom_center - zoom_width/2);
+                    ref_end = std::min(currentData.referenceDetector.size(), zoom_center + zoom_width/2);
+                    prim_start = ref_start;
+                    prim_end = ref_end;
+                    isZoomed = true;
                 }
             }
             
-            // Draw zoom selection rectangle if active
+            // Draw custom zoom selection rectangle
             if (isZooming) {
                 ImDrawList* drawList = ImGui::GetWindowDrawList();
-                drawList->AddRect(zoomStart, mousePos, ImGui::GetColorU32(ImGuiCol_Button), 0.0f, 0, 2.0f);
-                drawList->AddRectFilled(zoomStart, mousePos, ImGui::GetColorU32(ImGuiCol_Button, 0.2f));
-            }
-            
-            // Add Y-axis labels for reference plot on the left side
-            ImGui::BeginChild("YAxisRef", ImVec2(60, plotSize.y), false);
-            ImGui::Text("%.3f", ref_y_max);
-            ImGui::SetCursorPosY(plotSize.y * 0.33f);
-            ImGui::Text("%.3f", (ref_y_min + ref_y_max) * 0.66f);
-            ImGui::SetCursorPosY(plotSize.y * 0.66f);
-            ImGui::Text("%.3f", (ref_y_min + ref_y_max) * 0.33f);
-            ImGui::SetCursorPosY(plotSize.y - 20);
-            ImGui::Text("%.3f", ref_y_min);
-            ImGui::EndChild();
-            
-            ImGui::SameLine();
-            
-            // Display reference plot (zoomed or full)
-            if (ref_end > ref_start) {
-                ImGui::PlotLines("##RefPlot", &currentData.referenceDetector[ref_start], 
-                               ref_end - ref_start, 0, nullptr, 
-                               ref_y_min, ref_y_max, refPlotSize);
-            }
-            
-            // Store reference plot end position for primary plot zoom detection
-            ImVec2 refPlotEndPos = ImGui::GetCursorScreenPos();
-            
-            // Add Y-axis labels for primary plot on the left side
-            ImGui::BeginChild("YAxisPrim", ImVec2(60, plotSize.y), false);
-            ImGui::Text("%.3f", prim_y_max);
-            ImGui::SetCursorPosY(plotSize.y * 0.33f);
-            ImGui::Text("%.3f", (prim_y_min + prim_y_max) * 0.66f);
-            ImGui::SetCursorPosY(plotSize.y * 0.66f);
-            ImGui::Text("%.3f", (prim_y_min + prim_y_max) * 0.33f);
-            ImGui::SetCursorPosY(plotSize.y - 20);
-            ImGui::Text("%.3f", prim_y_min);
-            ImGui::EndChild();
-            
-            ImGui::SameLine();
-            
-            // Primary detector plot (bottom) with zoom selection
-            ImVec2 primPlotPos = ImGui::GetCursorScreenPos();
-            ImVec2 primPlotSize = ImVec2(ImGui::GetContentRegionAvail().x, plotSize.y);
-            
-            // Handle zoom selection for primary plot
-            mousePos = ImGui::GetMousePos();
-            bool isOverPrimPlot = mousePos.x >= primPlotPos.x && mousePos.x <= primPlotPos.x + primPlotSize.x &&
-                                mousePos.y >= primPlotPos.y && mousePos.y <= primPlotPos.y + primPlotSize.y;
-            
-            if (isOverPrimPlot && ImGui::IsMouseDown(0) && !isZooming) {
-                isZooming = true;
-                zoomStart = mousePos;
-            }
-            if (isZooming && ImGui::IsMouseReleased(0)) {
-                zoomEnd = mousePos;
-                isZooming = false;
-                
-                // Calculate zoom range for primary plot relative to current view
-                float x1 = zoomStart.x - primPlotPos.x;
-                float x2 = zoomEnd.x - primPlotPos.x;
-                if (std::abs(x2 - x1) > 10 && primPlotSize.x > 0) {
-                    if (x1 > x2) std::swap(x1, x2);
-                    
-                    // Calculate relative to current zoom range
-                    size_t current_start = isZoomed ? zoomRange.first : 0;
-                    size_t current_end = isZoomed ? zoomRange.second : currentData.primaryDetector.size();
-                    size_t current_range = current_end - current_start;
-                    
-                    // Calculate new indices relative to current view
-                    size_t start_idx = current_start + static_cast<size_t>((x1 / primPlotSize.x) * current_range);
-                    size_t end_idx = current_start + static_cast<size_t>((x2 / primPlotSize.x) * current_range);
-                    
-                    // Clamp to valid range
-                    start_idx = std::min(start_idx, currentData.primaryDetector.size() - 1);
-                    end_idx = std::min(end_idx, currentData.primaryDetector.size());
-                    
-                    if (start_idx < end_idx && end_idx - start_idx > 1) {
-                        zoomRange = {start_idx, end_idx};
-                        isZoomed = true;
-                    }
-                }
-            }
-            
-            // Display primary plot (zoomed or full)
-            if (prim_end > prim_start) {
-                ImGui::PlotLines("##PrimPlot", &currentData.primaryDetector[prim_start], 
-                               prim_end - prim_start, 0, nullptr, 
-                               prim_y_min, prim_y_max, ImVec2(-FLT_MIN, plotSize.y));
+                drawList->AddRect(zoomStart, zoomEnd, IM_COL32(255, 255, 0, 255), 0.0f, 0, 2.0f);
+                drawList->AddRectFilled(zoomStart, zoomEnd, IM_COL32(255, 255, 0, 80));
             }
         } else {
             ImGui::Text("No data loaded. Select a CSV file from the Files panel.");

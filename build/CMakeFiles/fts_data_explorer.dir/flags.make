@@ -4,7 +4,7 @@
 # compile CXX with /usr/bin/c++
 CXX_DEFINES = -DIMGUI_IMPL_OPENGL_LOADER_GLAD=0
 
-CXX_INCLUDES = -I/home/guowa/Documents/Repos/fts_data_explorer -I/home/guowa/Documents/Repos/fts_data_explorer/build/_deps/imgui-src -I/home/guowa/Documents/Repos/fts_data_explorer/build/_deps/imgui-src/backends
+CXX_INCLUDES = -I/home/guowa/Documents/Repos/fts_data_explorer -I/home/guowa/Documents/Repos/fts_data_explorer/build/_deps/imgui-src -I/home/guowa/Documents/Repos/fts_data_explorer/build/_deps/imgui-src/backends -I/home/guowa/Documents/Repos/fts_data_explorer/build/_deps/implot-src
 
 CXX_FLAGS = -std=gnu++17
 

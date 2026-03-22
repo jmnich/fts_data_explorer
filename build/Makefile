@@ -318,6 +318,54 @@ _deps/imgui-src/imgui_widgets.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/fts_data_explorer.dir/build.make CMakeFiles/fts_data_explorer.dir/_deps/imgui-src/imgui_widgets.cpp.s
 .PHONY : _deps/imgui-src/imgui_widgets.cpp.s
 
+_deps/implot-src/implot.o: _deps/implot-src/implot.cpp.o
+.PHONY : _deps/implot-src/implot.o
+
+# target to build an object file
+_deps/implot-src/implot.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/fts_data_explorer.dir/build.make CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot.cpp.o
+.PHONY : _deps/implot-src/implot.cpp.o
+
+_deps/implot-src/implot.i: _deps/implot-src/implot.cpp.i
+.PHONY : _deps/implot-src/implot.i
+
+# target to preprocess a source file
+_deps/implot-src/implot.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/fts_data_explorer.dir/build.make CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot.cpp.i
+.PHONY : _deps/implot-src/implot.cpp.i
+
+_deps/implot-src/implot.s: _deps/implot-src/implot.cpp.s
+.PHONY : _deps/implot-src/implot.s
+
+# target to generate assembly for a file
+_deps/implot-src/implot.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/fts_data_explorer.dir/build.make CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot.cpp.s
+.PHONY : _deps/implot-src/implot.cpp.s
+
+_deps/implot-src/implot_items.o: _deps/implot-src/implot_items.cpp.o
+.PHONY : _deps/implot-src/implot_items.o
+
+# target to build an object file
+_deps/implot-src/implot_items.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/fts_data_explorer.dir/build.make CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot_items.cpp.o
+.PHONY : _deps/implot-src/implot_items.cpp.o
+
+_deps/implot-src/implot_items.i: _deps/implot-src/implot_items.cpp.i
+.PHONY : _deps/implot-src/implot_items.i
+
+# target to preprocess a source file
+_deps/implot-src/implot_items.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/fts_data_explorer.dir/build.make CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot_items.cpp.i
+.PHONY : _deps/implot-src/implot_items.cpp.i
+
+_deps/implot-src/implot_items.s: _deps/implot-src/implot_items.cpp.s
+.PHONY : _deps/implot-src/implot_items.s
+
+# target to generate assembly for a file
+_deps/implot-src/implot_items.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/fts_data_explorer.dir/build.make CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot_items.cpp.s
+.PHONY : _deps/implot-src/implot_items.cpp.s
+
 adapters/csv_adapter.o: adapters/csv_adapter.cpp.o
 .PHONY : adapters/csv_adapter.o
 
@@ -397,6 +445,12 @@ help:
 	@echo "... _deps/imgui-src/imgui_widgets.o"
 	@echo "... _deps/imgui-src/imgui_widgets.i"
 	@echo "... _deps/imgui-src/imgui_widgets.s"
+	@echo "... _deps/implot-src/implot.o"
+	@echo "... _deps/implot-src/implot.i"
+	@echo "... _deps/implot-src/implot.s"
+	@echo "... _deps/implot-src/implot_items.o"
+	@echo "... _deps/implot-src/implot_items.i"
+	@echo "... _deps/implot-src/implot_items.s"
 	@echo "... adapters/csv_adapter.o"
 	@echo "... adapters/csv_adapter.i"
 	@echo "... adapters/csv_adapter.s"

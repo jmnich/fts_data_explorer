@@ -14,6 +14,14 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(imgui)
 
+# Download and include ImPlot for scientific plotting
+FetchContent_Declare(
+    implot
+    GIT_REPOSITORY https://github.com/epezent/implot.git
+    GIT_TAG master
+)
+FetchContent_MakeAvailable(implot)
+
 # Add ImGui core and backend source files to the executable
 list(APPEND EXTRA_SOURCES
     ${imgui_SOURCE_DIR}/imgui.cpp
@@ -22,6 +30,8 @@ list(APPEND EXTRA_SOURCES
     ${imgui_SOURCE_DIR}/imgui_widgets.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
+    ${implot_SOURCE_DIR}/implot.cpp
+    ${implot_SOURCE_DIR}/implot_items.cpp
 )
 
 # Find required packages
@@ -37,6 +47,7 @@ include_directories(
     ${CMAKE_SOURCE_DIR}
     ${imgui_SOURCE_DIR}
     ${imgui_SOURCE_DIR}/backends
+    ${implot_SOURCE_DIR}
 )
 
 # Add executable
@@ -47,6 +58,8 @@ add_executable(fts_data_explorer
 )
 
 # Link libraries
+# Note: ImPlot is header-only, so we don't link to a library
+# Instead, we include the source files directly in our compilation
 target_link_libraries(fts_data_explorer
     ${OPENGL_LIBRARIES}
     ${GLFW_LIBRARIES}

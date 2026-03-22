@@ -184,6 +184,34 @@ CMakeFiles/fts_data_explorer.dir/_deps/imgui-src/backends/imgui_impl_opengl3.cpp
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/fts_data_explorer.dir/_deps/imgui-src/backends/imgui_impl_opengl3.cpp.s"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/guowa/Documents/Repos/fts_data_explorer/build/_deps/imgui-src/backends/imgui_impl_opengl3.cpp -o CMakeFiles/fts_data_explorer.dir/_deps/imgui-src/backends/imgui_impl_opengl3.cpp.s
 
+CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot.cpp.o: CMakeFiles/fts_data_explorer.dir/flags.make
+CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot.cpp.o: _deps/implot-src/implot.cpp
+CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot.cpp.o: CMakeFiles/fts_data_explorer.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/guowa/Documents/Repos/fts_data_explorer/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_9) "Building CXX object CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot.cpp.o -MF CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot.cpp.o.d -o CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot.cpp.o -c /home/guowa/Documents/Repos/fts_data_explorer/build/_deps/implot-src/implot.cpp
+
+CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot.cpp.i"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/guowa/Documents/Repos/fts_data_explorer/build/_deps/implot-src/implot.cpp > CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot.cpp.i
+
+CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot.cpp.s"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/guowa/Documents/Repos/fts_data_explorer/build/_deps/implot-src/implot.cpp -o CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot.cpp.s
+
+CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot_items.cpp.o: CMakeFiles/fts_data_explorer.dir/flags.make
+CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot_items.cpp.o: _deps/implot-src/implot_items.cpp
+CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot_items.cpp.o: CMakeFiles/fts_data_explorer.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/guowa/Documents/Repos/fts_data_explorer/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_10) "Building CXX object CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot_items.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot_items.cpp.o -MF CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot_items.cpp.o.d -o CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot_items.cpp.o -c /home/guowa/Documents/Repos/fts_data_explorer/build/_deps/implot-src/implot_items.cpp
+
+CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot_items.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot_items.cpp.i"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/guowa/Documents/Repos/fts_data_explorer/build/_deps/implot-src/implot_items.cpp > CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot_items.cpp.i
+
+CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot_items.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot_items.cpp.s"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/guowa/Documents/Repos/fts_data_explorer/build/_deps/implot-src/implot_items.cpp -o CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot_items.cpp.s
+
 # Object files for target fts_data_explorer
 fts_data_explorer_OBJECTS = \
 "CMakeFiles/fts_data_explorer.dir/main.cpp.o" \
@@ -193,7 +221,9 @@ fts_data_explorer_OBJECTS = \
 "CMakeFiles/fts_data_explorer.dir/_deps/imgui-src/imgui_tables.cpp.o" \
 "CMakeFiles/fts_data_explorer.dir/_deps/imgui-src/imgui_widgets.cpp.o" \
 "CMakeFiles/fts_data_explorer.dir/_deps/imgui-src/backends/imgui_impl_glfw.cpp.o" \
-"CMakeFiles/fts_data_explorer.dir/_deps/imgui-src/backends/imgui_impl_opengl3.cpp.o"
+"CMakeFiles/fts_data_explorer.dir/_deps/imgui-src/backends/imgui_impl_opengl3.cpp.o" \
+"CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot.cpp.o" \
+"CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot_items.cpp.o"
 
 # External object files for target fts_data_explorer
 fts_data_explorer_EXTERNAL_OBJECTS =
@@ -206,6 +236,8 @@ fts_data_explorer: CMakeFiles/fts_data_explorer.dir/_deps/imgui-src/imgui_tables
 fts_data_explorer: CMakeFiles/fts_data_explorer.dir/_deps/imgui-src/imgui_widgets.cpp.o
 fts_data_explorer: CMakeFiles/fts_data_explorer.dir/_deps/imgui-src/backends/imgui_impl_glfw.cpp.o
 fts_data_explorer: CMakeFiles/fts_data_explorer.dir/_deps/imgui-src/backends/imgui_impl_opengl3.cpp.o
+fts_data_explorer: CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot.cpp.o
+fts_data_explorer: CMakeFiles/fts_data_explorer.dir/_deps/implot-src/implot_items.cpp.o
 fts_data_explorer: CMakeFiles/fts_data_explorer.dir/build.make
 fts_data_explorer: CMakeFiles/fts_data_explorer.dir/compiler_depend.ts
 fts_data_explorer: /usr/lib/x86_64-linux-gnu/libOpenGL.so
@@ -213,7 +245,7 @@ fts_data_explorer: /usr/lib/x86_64-linux-gnu/libGLX.so
 fts_data_explorer: /usr/lib/x86_64-linux-gnu/libGLU.so
 fts_data_explorer: /usr/lib/x86_64-linux-gnu/libglfw.so.3.3
 fts_data_explorer: CMakeFiles/fts_data_explorer.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/guowa/Documents/Repos/fts_data_explorer/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_9) "Linking CXX executable fts_data_explorer"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/guowa/Documents/Repos/fts_data_explorer/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_11) "Linking CXX executable fts_data_explorer"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/fts_data_explorer.dir/link.txt --verbose=$(VERBOSE)
 
 # Rule to build all files generated by this target.
