@@ -8,6 +8,8 @@
 #include <limits>
 #include <cmath>
 #include <cctype>
+#include <cstdio>
+#include <cstdlib>
 
 // Include imgui and other dependencies
 #include "imgui.h"
@@ -110,6 +112,65 @@ public:
         }
         
         return csvFiles;
+    }
+    
+    // Simple cross-platform directory selection dialog
+    static std::string showDirectorySelectionDialog() {
+        // For Linux/Unix systems, we'll use a simple approach
+        // In a production app, you might use Zenity, KDialog, or a proper GUI library
+        
+        std::string result;
+        
+        // Try using zenity if available (common on Ubuntu/GNOME)
+        FILE* pipe = popen("zenity --file-selection --directory --title='Select Dataset Directory'", "r");
+        if (pipe) {
+            char buffer[1024];
+            if (fgets(buffer, sizeof(buffer), pipe) != NULL) {
+                // Remove trailing newline
+                buffer[strcspn(buffer, "\n")] = 0;
+                result = buffer;
+            }
+            pclose(pipe);
+            
+            // If zenity returned a valid path, use it
+            if (!result.empty() && result != "") {
+                return result;
+            }
+        }
+        
+        // Fallback: use a simple ImGui-based directory selector
+        // This is a basic implementation - a production app would use a proper file dialog library
+        static char tempDirectoryBuffer[1024] = "/home"; // Default starting directory
+        static bool showDialog = true;
+        
+        if (showDialog) {
+            ImGui::OpenPopup("Select Directory");
+            showDialog = false;
+        }
+        
+        // Simple directory selector popup
+        if (ImGui::BeginPopupModal("Select Directory", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::Text("Enter directory path:");
+            ImGui::InputText("##DirectoryPath", tempDirectoryBuffer, sizeof(tempDirectoryBuffer), ImGuiInputTextFlags_EnterReturnsTrue);
+            
+            if (ImGui::Button("OK") || ImGui::IsKeyPressed(ImGuiKey_Enter)) {
+                // Check if directory exists
+                if (std::filesystem::exists(tempDirectoryBuffer) && std::filesystem::is_directory(tempDirectoryBuffer)) {
+                    result = tempDirectoryBuffer;
+                    ImGui::CloseCurrentPopup();
+                } else {
+                    ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Directory does not exist!");
+                }
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel")) {
+                ImGui::CloseCurrentPopup();
+            }
+            
+            ImGui::EndPopup();
+        }
+        
+        return result;
     }
 };
 
@@ -660,12 +721,20 @@ int main() {
         // Buttons panel (bottom)
         ImGui::Begin("Controls");
         if (ImGui::Button("Set Working Directory")) {
-            // Simple directory selection - for now just use a hardcoded path
-            // In a real application, you would integrate a proper file dialog
-            currentDirectory = "/home/guowa/Documents/Repos/fts_data_explorer/example_datasets/2025-06-12_15-49-40_reference_3mm_0.5mms_30avg/raw_data";
-            csvFiles = FileBrowser::getCSVFilesInDirectory(currentDirectory);
-            dataLoaded = false;
-            std::cout << "Working directory set to: " << currentDirectory << std::endl;
+            // Implement proper directory selection dialog
+            std::string selectedDirectory = FileBrowser::showDirectorySelectionDialog();
+            if (!selectedDirectory.empty()) {
+                // Check if the selected directory has a raw_data subdirectory
+                std::string rawDataPath = selectedDirectory + "/raw_data";
+                if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {
+                    currentDirectory = rawDataPath; // Use the raw_data subdirectory
+                } else {
+                    currentDirectory = selectedDirectory; // Fallback to selected directory
+                }
+                csvFiles = FileBrowser::getCSVFilesInDirectory(currentDirectory);
+                dataLoaded = false;
+                std::cout << "Working directory set to: " << currentDirectory << std::endl;
+            }
         }
         ImGui::End();
         
