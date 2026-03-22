@@ -858,8 +858,10 @@ int main() {
                 ImGui::Separator();
             }
             
-            // Create ImPlot subplots - two vertically stacked plots
-            if (ImPlot::BeginSubplots("Detector Plots", 2, 1, ImVec2(-1, -1), ImPlotSubplotFlags_NoTitle | ImPlotSubplotFlags_LinkAllX | ImPlotSubplotFlags_NoLegend)) {
+            // Create ImPlot subplots - two vertically stacked plots with custom height ratio
+            // Reference plot: 1 unit height, Primary plot: 2 units height (2x taller)
+            float row_ratios[2] = {1.0f, 2.0f}; // Reference:Primary height ratio
+            if (ImPlot::BeginSubplots("Detector Plots", 2, 1, ImVec2(-1, -1), ImPlotSubplotFlags_NoTitle | ImPlotSubplotFlags_LinkAllX | ImPlotSubplotFlags_NoLegend, row_ratios)) {
                 
                 // Reference detector plot (top)
                 if (ImPlot::BeginPlot("Reference", ImVec2(-1, -1), ImPlotFlags_NoTitle | ImPlotFlags_NoLegend | ImPlotFlags_Crosshairs)) {
@@ -868,7 +870,7 @@ int main() {
                     if (autoFitYAxis) {
                         y_flags |= ImPlotAxisFlags_AutoFit;
                     }
-                    ImPlot::SetupAxes("Sample", "Voltage [V]", ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks, y_flags);
+                    ImPlot::SetupAxes("Sample", "Voltage [V]", ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks | ImPlotAxisFlags_NoTickLabels, y_flags);
                     // Set lighter gray grid color
                     ImPlot::PushStyleColor(ImPlotCol_AxisGrid, ImVec4(0.3f, 0.3f, 0.3f, 0.5f));
                     if (isZoomed) {
