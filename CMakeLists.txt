@@ -1,0 +1,64 @@
+cmake_minimum_required(VERSION 3.14)  # FetchContent requires 3.14+
+project(fts_data_explorer)
+
+# Set C++ standard
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Download and include Dear ImGui
+include(FetchContent)
+FetchContent_Declare(
+    imgui
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    GIT_TAG docking
+)
+FetchContent_MakeAvailable(imgui)
+
+# Add ImGui core and backend source files to the executable
+list(APPEND EXTRA_SOURCES
+    ${imgui_SOURCE_DIR}/imgui.cpp
+    ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp
+    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
+)
+
+# Find required packages
+find_package(OpenGL REQUIRED)
+find_package(glfw3 REQUIRED)
+
+
+
+# ImGui is now handled by FetchContent
+include_directories(
+    ${OPENGL_INCLUDE_DIR}
+    ${GLFW_INCLUDE_DIR}
+    ${CMAKE_SOURCE_DIR}
+    ${imgui_SOURCE_DIR}
+    ${imgui_SOURCE_DIR}/backends
+)
+
+# Add executable
+add_executable(fts_data_explorer
+    main.cpp
+    adapters/csv_adapter.cpp
+    ${EXTRA_SOURCES}
+)
+
+# Link libraries
+target_link_libraries(fts_data_explorer
+    ${OPENGL_LIBRARIES}
+    ${GLFW_LIBRARIES}
+    glfw
+    GL
+    m
+)
+
+# Add compile definitions for imgui
+target_compile_definitions(fts_data_explorer PRIVATE
+    IMGUI_IMPL_OPENGL_LOADER_GLAD=0
+)
+
+# Install targets (optional)
+install(TARGETS fts_data_explorer DESTINATION bin)

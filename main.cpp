@@ -1,0 +1,420 @@
+#include <iostream>
+#include <vector>
+#include <string>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <algorithm>
+#include <limits>
+
+// Include imgui and other dependencies
+#include "imgui.h"
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_opengl3.h"
+#include <GLFW/glfw3.h>
+
+// Simple file dialog implementation (replaces NFD)
+#include <sys/stat.h>
+#include <dirent.h>
+#include <unistd.h>
+
+// Data structure to hold interferogram data
+struct InterferogramData {
+    std::vector<float> referenceDetector;
+    std::vector<float> primaryDetector;
+    std::string metadata;
+};
+
+// CSV Adapter class
+class CSVAdapter {
+public:
+    static InterferogramData loadFromCSV(const std::string& filePath) {
+        InterferogramData data;
+        std::ifstream file(filePath);
+        
+        if (!file.is_open()) {
+            throw std::runtime_error("Could not open file: " + filePath);
+        }
+        
+        std::string line;
+        bool isFirstLine = true;
+        
+        while (std::getline(file, line)) {
+            if (isFirstLine) {
+                isFirstLine = false;
+                continue; // Skip header
+            }
+            
+            std::istringstream iss(line);
+            std::string refValue, primaryValue;
+            
+            if (std::getline(iss, refValue, ',') && std::getline(iss, primaryValue, ',')) {
+                try {
+                    data.referenceDetector.push_back(std::stof(refValue));
+                    data.primaryDetector.push_back(std::stof(primaryValue));
+                } catch (const std::exception& e) {
+                    std::cerr << "Error parsing line: " << line << " - " << e.what() << std::endl;
+                }
+            }
+        }
+        
+        return data;
+    }
+};
+
+// Simple file browser
+class FileBrowser {
+public:
+    static std::vector<std::string> getCSVFilesInDirectory(const std::string& directoryPath) {
+        std::vector<std::string> csvFiles;
+        
+        for (const auto& entry : std::filesystem::directory_iterator(directoryPath)) {
+            if (entry.is_regular_file() && entry.path().extension() == ".csv") {
+                csvFiles.push_back(entry.path().string());
+            }
+        }
+        
+        return csvFiles;
+    }
+};
+
+int main() {
+    std::cout << "FTS Data Explorer - Starting application..." << std::endl;
+    
+    // Initialize GLFW
+    if (!glfwInit()) {
+        std::cerr << "Failed to initialize GLFW" << std::endl;
+        return -1;
+    }
+    
+    // Create window
+    GLFWwindow* window = glfwCreateWindow(1280, 720, "FTS Data Explorer", nullptr, nullptr);
+    if (!window) {
+        std::cerr << "Failed to create GLFW window" << std::endl;
+        glfwTerminate();
+        return -1;
+    }
+    
+    glfwMakeContextCurrent(window);
+    
+    // Initialize ImGui
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    
+    // Enable docking
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    
+    // Enable docking
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    
+    ImGui::StyleColorsDark();
+    
+    // Customize plot colors
+    ImGuiStyle& style = ImGui::GetStyle();
+    ImVec4 yellow_color = ImVec4(1.0f, 1.0f, 0.0f, 1.0f); // Bright yellow
+    ImVec4 background_color = style.Colors[ImGuiCol_WindowBg]; // Match window background
+    
+    // Set plot colors
+    style.Colors[ImGuiCol_PlotLines] = yellow_color;
+    style.Colors[ImGuiCol_PlotLinesHovered] = yellow_color;
+    style.Colors[ImGuiCol_PlotHistogram] = yellow_color;
+    style.Colors[ImGuiCol_PlotHistogramHovered] = yellow_color;
+    
+    // Ensure plot background matches window background
+    style.Colors[ImGuiCol_FrameBg] = background_color;
+    style.Colors[ImGuiCol_FrameBgHovered] = background_color;
+    style.Colors[ImGuiCol_FrameBgActive] = background_color;
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init("#version 130");
+    
+    // Set up for high DPI displays AFTER backend initialization
+    // Apply 1.5x scaling to all UI elements including fonts
+    float dpi_scale = io.DisplayFramebufferScale.x;
+    io.FontGlobalScale = dpi_scale * 1.5f;
+    ImGui::GetStyle().ScaleAllSizes(dpi_scale * 1.5f);
+    
+    // Main application state
+    std::string currentDirectory = "/home/guowa/Documents/Repos/fts_data_explorer/example_datasets/2025-06-12_15-17-10_reference_3mm_2.0mms_30avg/raw_data";
+    std::vector<std::string> csvFiles = FileBrowser::getCSVFilesInDirectory(currentDirectory);
+    InterferogramData currentData;
+    bool dataLoaded = false;
+    
+    // Zoom state
+    bool isZooming = false;
+    ImVec2 zoomStart;
+    ImVec2 zoomEnd;
+    std::pair<size_t, size_t> zoomRange = {0, 0};
+    bool isZoomed = false;
+    
+    // No initialization needed for simple file dialog
+    
+    // Main loop
+    while (!glfwWindowShouldClose(window)) {
+        glfwPollEvents();
+        
+        // Start ImGui frame
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+        
+        // Set up docking
+        ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDocking;
+        ImGuiViewport* viewport = ImGui::GetMainViewport();
+        ImGui::SetNextWindowPos(viewport->Pos);
+        ImGui::SetNextWindowSize(viewport->Size);
+        ImGui::SetNextWindowViewport(viewport->ID);
+        
+        // Push style variables for full viewport docking
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+        window_flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
+        window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
+        
+        // Create main dockspace window
+        ImGui::Begin("DockSpace", nullptr, window_flags);
+        ImGui::PopStyleVar(2);
+        
+        // Create docking space
+        ImGuiID dockspace_id = ImGui::GetID("MainDockSpace");
+        ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);
+        ImGui::End();
+        
+        // Files panel (left)
+        ImGui::Begin("Files");
+        ImGui::Text("CSV Files:");
+        for (const auto& file : csvFiles) {
+            if (ImGui::Button(file.c_str())) {
+                try {
+                    currentData = CSVAdapter::loadFromCSV(file);
+                    dataLoaded = true;
+                } catch (const std::exception& e) {
+                    std::cerr << "Error loading file: " << e.what() << std::endl;
+                    dataLoaded = false;
+                }
+            }
+        }
+        ImGui::End();
+        
+        // Graphing panel (main)
+        ImGui::Begin("Graphing Panel");
+        if (dataLoaded) {
+            ImGui::Text("Reference Detector: %zu samples", currentData.referenceDetector.size());
+            ImGui::Text("Primary Detector: %zu samples", currentData.primaryDetector.size());
+            
+            // Add zoom controls
+            if (isZoomed) {
+                if (ImGui::Button("Reset Zoom")) {
+                    isZoomed = false;
+                    zoomRange = {0, 0};
+                }
+                ImGui::SameLine();
+                ImGui::Text("Zoomed: %zu-%zu", zoomRange.first, zoomRange.second);
+            }
+            
+            // Calculate min/max values for Y-axis for each dataset independently
+            auto ref_min_max = std::minmax_element(currentData.referenceDetector.begin(), currentData.referenceDetector.end());
+            auto prim_min_max = std::minmax_element(currentData.primaryDetector.begin(), currentData.primaryDetector.end());
+            float ref_y_min = *ref_min_max.first;
+            float ref_y_max = *ref_min_max.second;
+            float prim_y_min = *prim_min_max.first;
+            float prim_y_max = *prim_min_max.second;
+            
+            // Get available content region for full-size plots
+            ImVec2 plotSize = ImGui::GetContentRegionAvail();
+            plotSize.y = (plotSize.y - 60.0f) * 0.5f; // Split remaining space after text
+            
+            // Determine zoom range
+            size_t ref_start = isZoomed ? zoomRange.first : 0;
+            size_t ref_end = isZoomed ? zoomRange.second : currentData.referenceDetector.size();
+            size_t prim_start = isZoomed ? zoomRange.first : 0;
+            size_t prim_end = isZoomed ? zoomRange.second : currentData.primaryDetector.size();
+            
+            // Get plot position AFTER Y-axis child to get correct coordinates
+            ImVec2 refPlotPos = ImGui::GetCursorScreenPos();
+            ImVec2 refPlotSize = ImVec2(ImGui::GetContentRegionAvail().x, plotSize.y);
+            
+            // Store plot position for zoom calculation
+            ImVec2 plotStartPos = refPlotPos;
+            
+            // Handle zoom selection - check if mouse is over the plot area
+            ImVec2 mousePos = ImGui::GetMousePos();
+            bool isOverPlot = mousePos.x >= refPlotPos.x && mousePos.x <= refPlotPos.x + refPlotSize.x &&
+                            mousePos.y >= refPlotPos.y && mousePos.y <= refPlotPos.y + refPlotSize.y;
+            
+            if (isOverPlot && ImGui::IsMouseDown(0) && !isZooming) {
+                isZooming = true;
+                zoomStart = mousePos;
+            }
+            if (isZooming && ImGui::IsMouseReleased(0)) {
+                zoomEnd = mousePos;
+                isZooming = false;
+                
+                // Calculate zoom range relative to current view
+                float x1 = zoomStart.x - plotStartPos.x;
+                float x2 = zoomEnd.x - plotStartPos.x;
+                if (std::abs(x2 - x1) > 10 && refPlotSize.x > 0) {
+                    // Ensure we have the correct order
+                    if (x1 > x2) std::swap(x1, x2);
+                    
+                    // Calculate relative to current zoom range
+                    size_t current_start = isZoomed ? zoomRange.first : 0;
+                    size_t current_end = isZoomed ? zoomRange.second : currentData.referenceDetector.size();
+                    size_t current_range = current_end - current_start;
+                    
+                    // Calculate new indices relative to current view
+                    size_t start_idx = current_start + static_cast<size_t>((x1 / refPlotSize.x) * current_range);
+                    size_t end_idx = current_start + static_cast<size_t>((x2 / refPlotSize.x) * current_range);
+                    
+                    // Clamp to valid range
+                    start_idx = std::min(start_idx, currentData.referenceDetector.size() - 1);
+                    end_idx = std::min(end_idx, currentData.referenceDetector.size());
+                    
+                    if (start_idx < end_idx && end_idx - start_idx > 1) {
+                        zoomRange = {start_idx, end_idx};
+                        isZoomed = true;
+                    }
+                }
+            }
+            
+            // Draw zoom selection rectangle if active
+            if (isZooming) {
+                ImDrawList* drawList = ImGui::GetWindowDrawList();
+                drawList->AddRect(zoomStart, mousePos, ImGui::GetColorU32(ImGuiCol_Button), 0.0f, 0, 2.0f);
+                drawList->AddRectFilled(zoomStart, mousePos, ImGui::GetColorU32(ImGuiCol_Button, 0.2f));
+            }
+            
+            // Add Y-axis labels for reference plot on the left side
+            ImGui::BeginChild("YAxisRef", ImVec2(60, plotSize.y), false);
+            ImGui::Text("%.3f", ref_y_max);
+            ImGui::SetCursorPosY(plotSize.y * 0.33f);
+            ImGui::Text("%.3f", (ref_y_min + ref_y_max) * 0.66f);
+            ImGui::SetCursorPosY(plotSize.y * 0.66f);
+            ImGui::Text("%.3f", (ref_y_min + ref_y_max) * 0.33f);
+            ImGui::SetCursorPosY(plotSize.y - 20);
+            ImGui::Text("%.3f", ref_y_min);
+            ImGui::EndChild();
+            
+            ImGui::SameLine();
+            
+            // Display reference plot (zoomed or full)
+            if (ref_end > ref_start) {
+                ImGui::PlotLines("##RefPlot", &currentData.referenceDetector[ref_start], 
+                               ref_end - ref_start, 0, nullptr, 
+                               ref_y_min, ref_y_max, refPlotSize);
+            }
+            
+            // Store reference plot end position for primary plot zoom detection
+            ImVec2 refPlotEndPos = ImGui::GetCursorScreenPos();
+            
+            // Add Y-axis labels for primary plot on the left side
+            ImGui::BeginChild("YAxisPrim", ImVec2(60, plotSize.y), false);
+            ImGui::Text("%.3f", prim_y_max);
+            ImGui::SetCursorPosY(plotSize.y * 0.33f);
+            ImGui::Text("%.3f", (prim_y_min + prim_y_max) * 0.66f);
+            ImGui::SetCursorPosY(plotSize.y * 0.66f);
+            ImGui::Text("%.3f", (prim_y_min + prim_y_max) * 0.33f);
+            ImGui::SetCursorPosY(plotSize.y - 20);
+            ImGui::Text("%.3f", prim_y_min);
+            ImGui::EndChild();
+            
+            ImGui::SameLine();
+            
+            // Primary detector plot (bottom) with zoom selection
+            ImVec2 primPlotPos = ImGui::GetCursorScreenPos();
+            ImVec2 primPlotSize = ImVec2(ImGui::GetContentRegionAvail().x, plotSize.y);
+            
+            // Handle zoom selection for primary plot
+            mousePos = ImGui::GetMousePos();
+            bool isOverPrimPlot = mousePos.x >= primPlotPos.x && mousePos.x <= primPlotPos.x + primPlotSize.x &&
+                                mousePos.y >= primPlotPos.y && mousePos.y <= primPlotPos.y + primPlotSize.y;
+            
+            if (isOverPrimPlot && ImGui::IsMouseDown(0) && !isZooming) {
+                isZooming = true;
+                zoomStart = mousePos;
+            }
+            if (isZooming && ImGui::IsMouseReleased(0)) {
+                zoomEnd = mousePos;
+                isZooming = false;
+                
+                // Calculate zoom range for primary plot relative to current view
+                float x1 = zoomStart.x - primPlotPos.x;
+                float x2 = zoomEnd.x - primPlotPos.x;
+                if (std::abs(x2 - x1) > 10 && primPlotSize.x > 0) {
+                    if (x1 > x2) std::swap(x1, x2);
+                    
+                    // Calculate relative to current zoom range
+                    size_t current_start = isZoomed ? zoomRange.first : 0;
+                    size_t current_end = isZoomed ? zoomRange.second : currentData.primaryDetector.size();
+                    size_t current_range = current_end - current_start;
+                    
+                    // Calculate new indices relative to current view
+                    size_t start_idx = current_start + static_cast<size_t>((x1 / primPlotSize.x) * current_range);
+                    size_t end_idx = current_start + static_cast<size_t>((x2 / primPlotSize.x) * current_range);
+                    
+                    // Clamp to valid range
+                    start_idx = std::min(start_idx, currentData.primaryDetector.size() - 1);
+                    end_idx = std::min(end_idx, currentData.primaryDetector.size());
+                    
+                    if (start_idx < end_idx && end_idx - start_idx > 1) {
+                        zoomRange = {start_idx, end_idx};
+                        isZoomed = true;
+                    }
+                }
+            }
+            
+            // Display primary plot (zoomed or full)
+            if (prim_end > prim_start) {
+                ImGui::PlotLines("##PrimPlot", &currentData.primaryDetector[prim_start], 
+                               prim_end - prim_start, 0, nullptr, 
+                               prim_y_min, prim_y_max, ImVec2(-FLT_MIN, plotSize.y));
+            }
+        } else {
+            ImGui::Text("No data loaded. Select a CSV file from the Files panel.");
+        }
+        ImGui::End();
+        
+        // Metadata panel (right)
+        ImGui::Begin("Metadata");
+        if (dataLoaded) {
+            ImGui::Text("File: %s", csvFiles.empty() ? "None" : csvFiles[0].c_str());
+            ImGui::Text("Samples: %zu", currentData.referenceDetector.size());
+        } else {
+            ImGui::Text("No metadata available.");
+        }
+        ImGui::End();
+        
+        // Buttons panel (bottom)
+        ImGui::Begin("Controls");
+        if (ImGui::Button("Set Working Directory")) {
+            // Simple directory selection - for now just use a hardcoded path
+            // In a real application, you would integrate a proper file dialog
+            currentDirectory = "/home/guowa/Documents/Repos/fts_data_explorer/example_datasets/2025-06-12_15-49-40_reference_3mm_0.5mms_30avg/raw_data";
+            csvFiles = FileBrowser::getCSVFilesInDirectory(currentDirectory);
+            dataLoaded = false;
+            std::cout << "Working directory set to: " << currentDirectory << std::endl;
+        }
+        ImGui::End();
+        
+        // Rendering
+        ImGui::Render();
+        int display_w, display_h;
+        glfwGetFramebufferSize(window, &display_w, &display_h);
+        glViewport(0, 0, display_w, display_h);
+        glClearColor(0.45f, 0.55f, 0.60f, 1.00f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        
+        glfwSwapBuffers(window);
+    }
+    
+    // Cleanup
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+    
+    glfwDestroyWindow(window);
+    glfwTerminate();
+    
+    return 0;
+}
