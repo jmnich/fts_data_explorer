@@ -251,6 +251,11 @@ int main() {
     bool isZoomed = false;
     bool shouldAutoscale = false; // Flag to trigger autoscale on new data load
     
+    // Y-axis limits for plots
+    float ref_y_min = 0.0f, ref_y_max = 1.0f;
+    float prim_y_min = 0.0f, prim_y_max = 1.0f;
+    bool autoFitYAxis = true; // Enable auto-fit by default
+    
     // No initialization needed for simple file dialog
     
     // Main loop
@@ -506,23 +511,11 @@ int main() {
                 ImGui::Text("Zoomed: %zu-%zu", zoomRange.first, zoomRange.second);
             }
             
-            // Calculate min/max values for Y-axis for each dataset
-            auto ref_min_max = std::minmax_element(loadedData[0].referenceDetector.begin(), loadedData[0].referenceDetector.end());
-            auto prim_min_max = std::minmax_element(loadedData[0].primaryDetector.begin(), loadedData[0].primaryDetector.end());
-            float ref_y_min = *ref_min_max.first;
-            float ref_y_max = *ref_min_max.second;
-            float prim_y_min = *prim_min_max.first;
-            float prim_y_max = *prim_min_max.second;
+
             
-            // Add 2% margin to Y axis limits symmetrically
-            float ref_y_range = ref_y_max - ref_y_min;
-            float prim_y_range = prim_y_max - prim_y_min;
-            float ref_margin = ref_y_range * 0.02f;
-            float prim_margin = prim_y_range * 0.02f;
-            ref_y_min -= ref_margin;
-            ref_y_max += ref_margin;
-            prim_y_min -= prim_margin;
-            prim_y_max += prim_margin;
+            // Y-axis limits are now handled by the auto-fit toggle
+            // When autoFitYAxis is true, ImPlot will auto-calculate Y-axis limits
+            // When autoFitYAxis is false, we use the manually calculated limits
             
             // Determine zoom range
             size_t ref_start = isZoomed ? zoomRange.first : 0;
@@ -632,14 +625,32 @@ int main() {
                 
                 // Reference detector plot (top)
                 if (ImPlot::BeginPlot("Reference", ImVec2(-1, -1), ImPlotFlags_NoTitle | ImPlotFlags_NoLegend | ImPlotFlags_Crosshairs)) {
-                    ImPlot::SetupAxes("Sample", "Voltage [V]", ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks | ImPlotAxisFlags_NoTickLabels, ImPlotAxisFlags_AutoFit);
+                    // Set up axes with auto-fit flag for Y-axis when enabled
+                    ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks | ImPlotAxisFlags_NoTickLabels;
+                    if (autoFitYAxis) {
+                        y_flags |= ImPlotAxisFlags_AutoFit;
+                    }
+                    ImPlot::SetupAxes("Sample", "Voltage [V]", ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks | ImPlotAxisFlags_NoTickLabels, y_flags);
                     // Set lighter gray grid color
                     ImPlot::PushStyleColor(ImPlotCol_AxisGrid, ImVec4(0.3f, 0.3f, 0.3f, 0.5f));
                     if (isZoomed) {
-                        ImPlot::SetupAxesLimits(ref_start, ref_end, ref_y_min, ref_y_max, ImPlotCond_Always);
+                        // Only zoom X-axis (Y-axis is handled by auto-fit flag)
+                        if (!autoFitYAxis) {
+                            // Manual Y-axis: set both X and Y limits
+                            ImPlot::SetupAxesLimits(ref_start, ref_end, ref_y_min, ref_y_max, ImPlotCond_Always);
+                        } else {
+                            // Auto-fit Y-axis: only set X-axis limits for zoom
+                            ImPlot::SetupAxisLimits(ImAxis_X1, ref_start, ref_end, ImPlotCond_Always);
+                        }
                     } else if (shouldAutoscale) {
                         // Set initial view to show all data when new data is loaded
-                        ImPlot::SetupAxesLimits(0, loadedData[0].referenceDetector.size(), ref_y_min, ref_y_max, ImPlotCond_Always);
+                        if (!autoFitYAxis) {
+                            // Manual Y-axis: set both X and Y limits
+                            ImPlot::SetupAxesLimits(0, loadedData[0].referenceDetector.size(), ref_y_min, ref_y_max, ImPlotCond_Always);
+                        } else {
+                            // Auto-fit both axes: set X-axis to full range, let Y-axis auto-fit
+                            ImPlot::SetupAxisLimits(ImAxis_X1, 0, loadedData[0].referenceDetector.size(), ImPlotCond_Always);
+                        }
                     }
                     ImPlotSpec spec;
                     spec.LineColor = ImVec4(1.0f, 1.0f, 0.0f, 1.0f); // Yellow color
@@ -672,14 +683,32 @@ int main() {
                 
                 // Primary detector plot (bottom)
                 if (ImPlot::BeginPlot("Primary", ImVec2(-1, -1), ImPlotFlags_NoTitle | ImPlotFlags_Crosshairs)) {
-                    ImPlot::SetupAxes("Sample", "Voltage [V]", ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks | ImPlotAxisFlags_NoTickLabels, ImPlotAxisFlags_AutoFit);
+                    // Set up axes with auto-fit flag for Y-axis when enabled
+                    ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks | ImPlotAxisFlags_NoTickLabels;
+                    if (autoFitYAxis) {
+                        y_flags |= ImPlotAxisFlags_AutoFit;
+                    }
+                    ImPlot::SetupAxes("Sample", "Voltage [V]", ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks | ImPlotAxisFlags_NoTickLabels, y_flags);
                     // Set lighter gray grid color
                     ImPlot::PushStyleColor(ImPlotCol_AxisGrid, ImVec4(0.3f, 0.3f, 0.3f, 0.5f));
                     if (isZoomed) {
-                        ImPlot::SetupAxesLimits(ref_start, ref_end, prim_y_min, prim_y_max, ImPlotCond_Always);
+                        // Only zoom X-axis (Y-axis is handled by auto-fit flag)
+                        if (!autoFitYAxis) {
+                            // Manual Y-axis: set both X and Y limits
+                            ImPlot::SetupAxesLimits(ref_start, ref_end, prim_y_min, prim_y_max, ImPlotCond_Always);
+                        } else {
+                            // Auto-fit Y-axis: only set X-axis limits for zoom
+                            ImPlot::SetupAxisLimits(ImAxis_X1, ref_start, ref_end, ImPlotCond_Always);
+                        }
                     } else if (shouldAutoscale) {
                         // Set initial view to show all data when new data is loaded
-                        ImPlot::SetupAxesLimits(0, loadedData[0].primaryDetector.size(), prim_y_min, prim_y_max, ImPlotCond_Always);
+                        if (!autoFitYAxis) {
+                            // Manual Y-axis: set both X and Y limits
+                            ImPlot::SetupAxesLimits(0, loadedData[0].primaryDetector.size(), prim_y_min, prim_y_max, ImPlotCond_Always);
+                        } else {
+                            // Auto-fit both axes: set X-axis to full range, let Y-axis auto-fit
+                            ImPlot::SetupAxisLimits(ImAxis_X1, 0, loadedData[0].primaryDetector.size(), ImPlotCond_Always);
+                        }
                     }
                     ImPlotSpec spec2;
                     spec2.LineColor = ImVec4(1.0f, 1.0f, 0.0f, 1.0f); // Yellow color
@@ -812,6 +841,19 @@ int main() {
         }
         
         ImGui::Checkbox("Align peaks", &alignPeaks);
+        
+        // Auto-fit Y-axis toggle
+        if (ImGui::Checkbox("Auto-fit Y-axis", &autoFitYAxis)) {
+            // When toggling auto-fit, recalculate limits if enabling auto-fit
+            if (autoFitYAxis && dataLoaded) {
+                auto ref_min_max = std::minmax_element(loadedData[0].referenceDetector.begin(), loadedData[0].referenceDetector.end());
+                auto prim_min_max = std::minmax_element(loadedData[0].primaryDetector.begin(), loadedData[0].primaryDetector.end());
+                ref_y_min = *ref_min_max.first;
+                ref_y_max = *ref_min_max.second;
+                prim_y_min = *prim_min_max.first;
+                prim_y_max = *prim_min_max.second;
+            }
+        }
         
         ImGui::End();
         
