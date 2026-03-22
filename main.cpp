@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <limits>
 #include <cmath>
+#include <cctype>
 
 // Include imgui and other dependencies
 #include "imgui.h"
@@ -26,6 +27,38 @@ struct InterferogramData {
     std::vector<float> primaryDetector;
     std::string metadata;
 };
+
+// Natural sort comparison function for filenames with numbers
+static bool naturalSortCompare(const std::string& a, const std::string& b) {
+    size_t i = 0, j = 0;
+    while (i < a.size() && j < b.size()) {
+        // Skip non-digit characters
+        if (!isdigit(a[i]) || !isdigit(b[j])) {
+            if (a[i] != b[j]) {
+                return a[i] < b[j];
+            }
+            i++; j++;
+        } else {
+            // Compare numeric sequences
+            size_t numStartA = i;
+            size_t numStartB = j;
+            while (i < a.size() && isdigit(a[i])) i++;
+            while (j < b.size() && isdigit(b[j])) j++;
+            
+            std::string numStrA = a.substr(numStartA, i - numStartA);
+            std::string numStrB = b.substr(numStartB, j - numStartB);
+            
+            // Convert to numbers and compare
+            int numA = std::stoi(numStrA);
+            int numB = std::stoi(numStrB);
+            
+            if (numA != numB) {
+                return numA < numB;
+            }
+        }
+    }
+    return a.size() < b.size();
+}
 
 // CSV Adapter class
 class CSVAdapter {
@@ -140,6 +173,9 @@ int main() {
     std::vector<std::string> csvFiles = FileBrowser::getCSVFilesInDirectory(currentDirectory);
     InterferogramData currentData;
     bool dataLoaded = false;
+    std::string currentDatasetName = "No dataset selected"; // Track current dataset name
+    size_t currentSortedFileIndex = 0; // Track currently selected file index in sorted list
+    bool filesChanged = true; // Flag to indicate files list changed
     
     // Zoom state
     bool isZooming = false;
@@ -154,6 +190,56 @@ int main() {
     // Main loop
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
+        
+        // Handle keyboard navigation for file selection
+        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) && !csvFiles.empty() && dataLoaded) {
+            if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
+                // Navigate up in file list (with wrapping)
+                if (currentSortedFileIndex > 0) {
+                    currentSortedFileIndex--;
+                } else {
+                    currentSortedFileIndex = csvFiles.size() - 1; // Wrap to bottom
+                }
+                filesChanged = true;
+            } else if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
+                // Navigate down in file list (with wrapping)
+                if (currentSortedFileIndex < csvFiles.size() - 1) {
+                    currentSortedFileIndex++;
+                } else {
+                    currentSortedFileIndex = 0; // Wrap to top
+                }
+                filesChanged = true;
+            }
+        }
+        
+        // Load file if navigation changed
+        if (filesChanged && !csvFiles.empty()) {
+            try {
+                // Sort files to get the correct file for the current index
+                std::vector<std::string> sortedFiles = csvFiles;
+                std::sort(sortedFiles.begin(), sortedFiles.end(), [](const std::string& a, const std::string& b) {
+                    std::string nameA = a;
+                    std::string nameB = b;
+                    size_t last_slash_a = nameA.find_last_of("/\\");
+                    size_t last_slash_b = nameB.find_last_of("/\\");
+                    if (last_slash_a != std::string::npos) nameA = nameA.substr(last_slash_a + 1);
+                    if (last_slash_b != std::string::npos) nameB = nameB.substr(last_slash_b + 1);
+                    return naturalSortCompare(nameA, nameB);
+                });
+                
+                currentData = CSVAdapter::loadFromCSV(sortedFiles[currentSortedFileIndex]);
+                dataLoaded = true;
+                // Reset zoom when loading new file
+                isZoomed = false;
+                zoomRange = {0, 0};
+                shouldAutoscale = true; // Trigger autoscale for new data
+                filesChanged = false;
+            } catch (const std::exception& e) {
+                std::cerr << "Error loading file: " << e.what() << std::endl;
+                dataLoaded = false;
+                filesChanged = false;
+            }
+        }
         
         // Start ImGui frame
         ImGui_ImplOpenGL3_NewFrame();
@@ -184,22 +270,68 @@ int main() {
         
         // Files panel (left)
         ImGui::Begin("Files");
-        ImGui::Text("CSV Files:");
-        for (const auto& file : csvFiles) {
-            if (ImGui::Button(file.c_str())) {
-                try {
-                    currentData = CSVAdapter::loadFromCSV(file);
-                    dataLoaded = true;
-                    // Reset zoom when loading new file
-                    isZoomed = false;
-                    zoomRange = {0, 0};
-                    shouldAutoscale = true; // Trigger autoscale for new data
-                } catch (const std::exception& e) {
-                    std::cerr << "Error loading file: " << e.what() << std::endl;
-                    dataLoaded = false;
-                }
+        ImGui::PushTextWrapPos(); // Enable text wrapping
+        ImGui::Text("Current Dataset: %s", currentDatasetName.c_str());
+        
+        // Sort files naturally (handles numbers properly)
+        std::vector<std::string> sortedFiles = csvFiles;
+        std::sort(sortedFiles.begin(), sortedFiles.end(), [](const std::string& a, const std::string& b) {
+            // Extract just the filename without path for comparison
+            std::string nameA = a;
+            std::string nameB = b;
+            size_t last_slash_a = nameA.find_last_of("/\\");
+            size_t last_slash_b = nameB.find_last_of("/\\");
+            if (last_slash_a != std::string::npos) nameA = nameA.substr(last_slash_a + 1);
+            if (last_slash_b != std::string::npos) nameB = nameB.substr(last_slash_b + 1);
+            
+            return naturalSortCompare(nameA, nameB);
+        });
+        
+        // Use the directly tracked sorted index
+        size_t currentSortedIndex = currentSortedFileIndex;
+        
+        // Calculate scroll position to keep selected file visible
+        if (currentSortedIndex > 0 && ImGui::GetScrollY() + ImGui::GetWindowHeight() < (currentSortedIndex + 1) * ImGui::GetTextLineHeightWithSpacing()) {
+            ImGui::SetScrollY((currentSortedIndex + 1) * ImGui::GetTextLineHeightWithSpacing() - ImGui::GetWindowHeight());
+        } else if (currentSortedIndex == 0) {
+            ImGui::SetScrollY(0);
+        }
+        
+        for (size_t i = 0; i < sortedFiles.size(); i++) {
+            const auto& file = sortedFiles[i];
+            // Extract just the filename without path
+            std::string filename = file;
+            size_t last_slash = filename.find_last_of("/\\");
+            if (last_slash != std::string::npos) {
+                filename = filename.substr(last_slash + 1);
+            }
+            
+            // Enhanced highlighting for the currently selected file
+            int stylesPushed = 1; // Default: push 1 style
+            if (i == currentSortedIndex) {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.4f, 0.8f, 0.8f)); // Brighter blue
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.5f, 0.9f, 0.9f)); // Lighter on hover
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f)); // White text
+                stylesPushed = 3; // Selected: push 3 styles
+            } else {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.15f, 0.15f, 0.5f)); // Default button color
+            }
+            
+            if (ImGui::Button(filename.c_str())) {
+                // Update current sorted file index to match the clicked file
+                currentSortedFileIndex = i;
+                filesChanged = true;
+            }
+            
+            // Pop the correct number of styles
+            ImGui::PopStyleColor(stylesPushed);
+            
+            // Auto-scroll to keep selected item visible
+            if (i == currentSortedFileIndex) {
+                ImGui::SetScrollHereY(0.5f); // Scroll to center the selected item
             }
         }
+        ImGui::PopTextWrapPos(); // Disable text wrapping
         ImGui::End();
         
         // Graphing panel (main) - now using ImPlot
@@ -315,12 +447,36 @@ int main() {
         
         // Metadata panel (right)
         ImGui::Begin("Metadata");
+        ImGui::PushTextWrapPos(); // Enable text wrapping
         if (dataLoaded) {
             ImGui::Text("File: %s", csvFiles.empty() ? "None" : csvFiles[0].c_str());
             ImGui::Text("Samples: %zu", currentData.referenceDetector.size());
+            
+            // Display comments if comments.txt exists
+            ImGui::Separator();
+            ImGui::Text("Comments:");
+            
+            std::string commentsPath = currentDirectory;
+            size_t last_slash = commentsPath.find_last_of("/\\");
+            if (last_slash != std::string::npos) {
+                commentsPath = commentsPath.substr(0, last_slash); // Go up to parent directory
+            }
+            commentsPath += "/comments.txt";
+            
+            std::ifstream commentsFile(commentsPath);
+            if (commentsFile.is_open()) {
+                std::string line;
+                while (std::getline(commentsFile, line)) {
+                    ImGui::TextWrapped("%s", line.c_str());
+                }
+                commentsFile.close();
+            } else {
+                ImGui::Text("<Comments Empty>");
+            }
         } else {
             ImGui::Text("No metadata available.");
         }
+        ImGui::PopTextWrapPos(); // Disable text wrapping
         ImGui::End();
         
         // Buttons panel (bottom)
