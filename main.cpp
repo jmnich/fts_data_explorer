@@ -514,6 +514,16 @@ int main() {
             float prim_y_min = *prim_min_max.first;
             float prim_y_max = *prim_min_max.second;
             
+            // Add 2% margin to Y axis limits symmetrically
+            float ref_y_range = ref_y_max - ref_y_min;
+            float prim_y_range = prim_y_max - prim_y_min;
+            float ref_margin = ref_y_range * 0.02f;
+            float prim_margin = prim_y_range * 0.02f;
+            ref_y_min -= ref_margin;
+            ref_y_max += ref_margin;
+            prim_y_min -= prim_margin;
+            prim_y_max += prim_margin;
+            
             // Determine zoom range
             size_t ref_start = isZoomed ? zoomRange.first : 0;
             size_t ref_end = isZoomed ? zoomRange.second : loadedData[0].referenceDetector.size();
@@ -621,8 +631,10 @@ int main() {
             if (ImPlot::BeginSubplots("Detector Plots", 2, 1, ImVec2(-1, -1), ImPlotSubplotFlags_NoTitle | ImPlotSubplotFlags_LinkAllX | ImPlotSubplotFlags_NoLegend)) {
                 
                 // Reference detector plot (top)
-                if (ImPlot::BeginPlot("Reference", ImVec2(-1, -1), ImPlotFlags_NoTitle | ImPlotFlags_NoLegend)) {
-                    ImPlot::SetupAxes("Sample", "Voltage [V]", ImPlotAxisFlags_NoDecorations, ImPlotAxisFlags_AutoFit);
+                if (ImPlot::BeginPlot("Reference", ImVec2(-1, -1), ImPlotFlags_NoTitle | ImPlotFlags_NoLegend | ImPlotFlags_Crosshairs)) {
+                    ImPlot::SetupAxes("Sample", "Voltage [V]", ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks | ImPlotAxisFlags_NoTickLabels, ImPlotAxisFlags_AutoFit);
+                    // Set lighter gray grid color
+                    ImPlot::PushStyleColor(ImPlotCol_AxisGrid, ImVec4(0.3f, 0.3f, 0.3f, 0.5f));
                     if (isZoomed) {
                         ImPlot::SetupAxesLimits(ref_start, ref_end, ref_y_min, ref_y_max, ImPlotCond_Always);
                     } else if (shouldAutoscale) {
@@ -655,11 +667,14 @@ int main() {
                                        ref_end - ref_start, 1.0, 0.0, spec);
                     }
                     ImPlot::EndPlot();
+                    ImPlot::PopStyleColor(); // Pop grid color
                 }
                 
                 // Primary detector plot (bottom)
-                if (ImPlot::BeginPlot("Primary", ImVec2(-1, -1), ImPlotFlags_NoTitle)) {
-                    ImPlot::SetupAxes("Sample", "Voltage [V]", ImPlotAxisFlags_NoDecorations, ImPlotAxisFlags_AutoFit);
+                if (ImPlot::BeginPlot("Primary", ImVec2(-1, -1), ImPlotFlags_NoTitle | ImPlotFlags_Crosshairs)) {
+                    ImPlot::SetupAxes("Sample", "Voltage [V]", ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks | ImPlotAxisFlags_NoTickLabels, ImPlotAxisFlags_AutoFit);
+                    // Set lighter gray grid color
+                    ImPlot::PushStyleColor(ImPlotCol_AxisGrid, ImVec4(0.3f, 0.3f, 0.3f, 0.5f));
                     if (isZoomed) {
                         ImPlot::SetupAxesLimits(ref_start, ref_end, prim_y_min, prim_y_max, ImPlotCond_Always);
                     } else if (shouldAutoscale) {
@@ -692,6 +707,7 @@ int main() {
                                        ref_end - ref_start, 1.0, 0.0, spec);
                     }
                     ImPlot::EndPlot();
+                    ImPlot::PopStyleColor(); // Pop grid color
                 }
                 
                 // Reset autoscale flag after use
