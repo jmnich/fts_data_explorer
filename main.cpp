@@ -241,6 +241,7 @@ int main() {
     bool filesChanged = true; // Flag to indicate files list changed
     bool multiSelectMode = false; // Track if Ctrl is held for multi-select
     const size_t MAX_SELECTABLE_FILES = 5; // Limit to 5 files for simultaneous display
+    bool alignPeaks = false; // Flag to enable peak alignment
     
     // Zoom state
     bool isZooming = false;
@@ -518,8 +519,63 @@ int main() {
             size_t ref_end = isZoomed ? zoomRange.second : loadedData[0].referenceDetector.size();
             size_t prim_start = isZoomed ? zoomRange.first : 0;
             size_t prim_end = isZoomed ? zoomRange.second : loadedData[0].primaryDetector.size();
+            // Apply peak alignment if enabled
+            std::vector<InterferogramData> alignedData = loadedData;
+            if (alignPeaks && loadedData.size() > 1) {
+                // Find the peak position in the first dataset's primary detector (reference)
+                size_t referencePeakPos = 0;
+                float referencePeakValue = loadedData[0].primaryDetector[0];
+                for (size_t i = 1; i < loadedData[0].primaryDetector.size(); i++) {
+                    if (loadedData[0].primaryDetector[i] > referencePeakValue) {
+                        referencePeakValue = loadedData[0].primaryDetector[i];
+                        referencePeakPos = i;
+                    }
+                }
+                
+                // Align all other datasets to this peak position
+                for (size_t datasetIdx = 1; datasetIdx < loadedData.size(); datasetIdx++) {
+                    // Find peak in current dataset's primary detector
+                    size_t currentPeakPos = 0;
+                    float currentPeakValue = loadedData[datasetIdx].primaryDetector[0];
+                    for (size_t i = 1; i < loadedData[datasetIdx].primaryDetector.size(); i++) {
+                        if (loadedData[datasetIdx].primaryDetector[i] > currentPeakValue) {
+                            currentPeakValue = loadedData[datasetIdx].primaryDetector[i];
+                            currentPeakPos = i;
+                        }
+                    }
+                    
+                    // Calculate shift needed to align peaks
+                    int shift = referencePeakPos - currentPeakPos;
+                    
+                    // Apply shift to both reference and primary detectors
+                    std::vector<float> shiftedRef(loadedData[datasetIdx].referenceDetector.size(), 0.0f);
+                    std::vector<float> shiftedPrim(loadedData[datasetIdx].primaryDetector.size(), 0.0f);
+                    
+                    if (shift > 0) {
+                        // Shift right - pad beginning with zeros
+                        for (size_t i = 0; i < loadedData[datasetIdx].referenceDetector.size() - shift; i++) {
+                            shiftedRef[i + shift] = loadedData[datasetIdx].referenceDetector[i];
+                            shiftedPrim[i + shift] = loadedData[datasetIdx].primaryDetector[i];
+                        }
+                    } else if (shift < 0) {
+                        // Shift left - pad end with zeros
+                        shift = -shift; // Make positive
+                        for (size_t i = 0; i < loadedData[datasetIdx].referenceDetector.size() - shift; i++) {
+                            shiftedRef[i] = loadedData[datasetIdx].referenceDetector[i + shift];
+                            shiftedPrim[i] = loadedData[datasetIdx].primaryDetector[i + shift];
+                        }
+                    } else {
+                        // No shift needed
+                        shiftedRef = loadedData[datasetIdx].referenceDetector;
+                        shiftedPrim = loadedData[datasetIdx].primaryDetector;
+                    }
+                    
+                    // Update aligned data
+                    alignedData[datasetIdx].referenceDetector = shiftedRef;
+                    alignedData[datasetIdx].primaryDetector = shiftedPrim;
+                }
+            }
             
-            // Create common legend above both plots
             if (loadedData.size() > 1) {
                 ImGui::Text("Datasets:");
                 ImGui::BeginGroup(); // Start horizontal group
@@ -593,8 +649,9 @@ int main() {
                             spec.LineColor = ImVec4(0.5f, 0.5f, 0.5f, 1.0f); // Grey
                         }
                         
+                        const auto& dataToPlot = alignPeaks ? alignedData[i] : loadedData[i];
                         ImPlot::PlotLine("", 
-                                       &loadedData[i].referenceDetector[ref_start], 
+                                       &dataToPlot.referenceDetector[ref_start], 
                                        ref_end - ref_start, 1.0, 0.0, spec);
                     }
                     ImPlot::EndPlot();
@@ -629,8 +686,9 @@ int main() {
                             spec.LineColor = ImVec4(0.5f, 0.5f, 0.5f, 1.0f); // Grey
                         }
                         
+                        const auto& dataToPlot = alignPeaks ? alignedData[i] : loadedData[i];
                         ImPlot::PlotLine("", 
-                                       &loadedData[i].primaryDetector[ref_start], 
+                                       &dataToPlot.primaryDetector[ref_start], 
                                        ref_end - ref_start, 1.0, 0.0, spec);
                     }
                     ImPlot::EndPlot();
@@ -736,6 +794,9 @@ int main() {
                 std::cout << "Working directory set to: " << currentDirectory << std::endl;
             }
         }
+        
+        ImGui::Checkbox("Align peaks", &alignPeaks);
+        
         ImGui::End();
         
         // Rendering
