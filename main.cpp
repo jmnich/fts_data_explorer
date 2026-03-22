@@ -1073,6 +1073,8 @@ int main() {
                 }
             }
             
+
+            
             // Determine zoom range
             size_t ref_start = isZoomed ? zoomRange.first : 0;
             size_t ref_end = isZoomed ? zoomRange.second : loadedData[0].referenceDetector.size();
@@ -1201,6 +1203,46 @@ int main() {
                     }
                 }
             }
+
+            // Handle box selection zoom manually using ImGui mouse input
+            // This completely bypasses ImPlot's input system
+            ImVec2 mousePos = ImGui::GetMousePos();
+            bool isOverPlot = ImGui::IsWindowHovered();
+            isMouseOverPlot = isOverPlot;
+
+            bool isXRangeZoomSelectionFinalized = false;
+
+            // Handle X-range selection with Ctrl key - state management only
+            bool ctrlPressed = ImGui::GetIO().KeyCtrl;
+            if (isOverPlot && ctrlPressed && !isSelectingXRange) {
+                // Start selection when Ctrl is pressed over plot
+                isSelectingXRange = true;
+                // Reset selection positions
+                selectionStartX = 0.0;
+                selectionEndX = 0.0;
+                std::cout << "DEBUG: Started X-range selection" << std::endl;
+            } else if (!ctrlPressed && isSelectingXRange) {
+                // End selection when Ctrl is released
+                isSelectingXRange = false;
+                
+                // Only finalize if we have valid selection
+                if(selectionStartX != selectionEndX) {
+                    isXRangeZoomSelectionFinalized = true;
+                    
+                    if(selectionStartX > selectionEndX)
+                    {
+                        // make sure start is always smaller
+                        double dum = selectionStartX;
+                        selectionStartX = selectionEndX;
+                        selectionEndX = dum;
+                    }
+                    
+                    std::cout << "DEBUG: Finalizing X-range selection: Start=" << selectionStartX << ", End=" << selectionEndX << std::endl;
+                } else {
+                    std::cout << "DEBUG: X-range selection cancelled (no valid range)" << std::endl;
+                }
+            }
+
             
             if (ImPlot::BeginSubplots("Detector Plots", 2, 1, ImVec2(-1, -1), ImPlotSubplotFlags_NoTitle | ImPlotSubplotFlags_LinkAllX | ImPlotSubplotFlags_NoLegend, row_ratios)) {
                 
@@ -1214,7 +1256,23 @@ int main() {
                     ImPlot::SetupAxes("Sample", "Voltage [V]", ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks | ImPlotAxisFlags_NoTickLabels, y_flags);
                     // Set lighter gray grid color
                     ImPlot::PushStyleColor(ImPlotCol_AxisGrid, ImVec4(0.3f, 0.3f, 0.3f, 0.5f));
-                    if (isZoomed) {
+                    if (isXRangeZoomSelectionFinalized) {
+                        // Apply X-range zoom selection - this takes priority over other zoom states
+                        size_t start_idx = static_cast<size_t>(std::round(selectionStartX));
+                        size_t end_idx = static_cast<size_t>(std::round(selectionEndX));
+                        
+                        // Ensure valid range
+                        size_t data_size = loadedData[0].referenceDetector.size();
+                        start_idx = std::min(start_idx, data_size - 1);
+                        end_idx = std::min(end_idx, data_size);
+                        end_idx = std::max(end_idx, start_idx + 1);
+                        
+                        // Selection complete, but taking no action (zoom feature removed)
+                        isXRangeZoomSelectionFinalized = false;
+                        
+                        std::cout << "X-range selection completed: " << start_idx << "-" << end_idx << " (no action taken)" << std::endl;
+                    }
+                    else if (isZoomed) {
                         // Only zoom X-axis (Y-axis is handled by auto-fit flag)
                         if (!autoFitYAxis) {
                             // Manual Y-axis: set both X and Y limits
@@ -1234,11 +1292,21 @@ int main() {
                         }
                     }
                     // Plot all selected datasets with pre-allocated specs
-                    for (size_t i = 0; i < loadedData.size(); i++) {
-                        const auto& dataToPlot = alignPeaks ? alignedData[i] : loadedData[i];
-                        ImPlot::PlotLine("", 
-                                       &dataToPlot.referenceDetector[ref_start], 
-                                       ref_end - ref_start, 1.0, 0.0, plotSpecs[i]);
+                    if (dataLoaded) {  // Only plot if data is loaded
+                        size_t data_count = ref_end - ref_start;
+                        if (data_count > 0 && ref_start < loadedData[0].referenceDetector.size()) {
+                            for (size_t i = 0; i < loadedData.size(); i++) {
+                                const auto& dataToPlot = alignPeaks ? alignedData[i] : loadedData[i];
+                                if (ref_start < dataToPlot.referenceDetector.size()) {
+                                    size_t actual_count = std::min(data_count, dataToPlot.referenceDetector.size() - ref_start);
+                                    ImPlot::PlotLine("", 
+                                                   &dataToPlot.referenceDetector[ref_start], 
+                                                   actual_count, 1.0, 0.0, plotSpecs[i]);
+                                }
+                            }
+                        } else {
+                            std::cout << "DEBUG: Invalid data range for plotting: start=" << ref_start << ", end=" << ref_end << ", size=" << loadedData[0].referenceDetector.size() << std::endl;
+                        }
                     }
                     
                     // Handle X-range selection within plot context
@@ -1299,7 +1367,21 @@ int main() {
                     ImPlot::SetupAxes("Sample", "Voltage [V]", ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks, y_flags);
                     // Set lighter gray grid color
                     ImPlot::PushStyleColor(ImPlotCol_AxisGrid, ImVec4(0.3f, 0.3f, 0.3f, 0.5f));
-                    if (isZoomed) {
+                    if (isXRangeZoomSelectionFinalized) {
+                        // Apply X-range zoom selection - this takes priority over other zoom states
+                        size_t start_idx = static_cast<size_t>(std::round(selectionStartX));
+                        size_t end_idx = static_cast<size_t>(std::round(selectionEndX));
+                        
+                        // Ensure valid range
+                        size_t data_size = loadedData[0].primaryDetector.size();
+                        start_idx = std::min(start_idx, data_size - 1);
+                        end_idx = std::min(end_idx, data_size);
+                        end_idx = std::max(end_idx, start_idx + 1);
+                        
+                        // Selection complete, but taking no action (zoom feature removed)
+                        isXRangeZoomSelectionFinalized = false;
+                    }
+                    else if (isZoomed) {
                         // Only zoom X-axis (Y-axis is handled by auto-fit flag)
                         if (!autoFitYAxis) {
                             // Manual Y-axis: set both X and Y limits
@@ -1320,11 +1402,19 @@ int main() {
                     }
                     // Reuse the same plot specs as reference plot (already pre-allocated)
                     // Plot all selected datasets with same colors as reference
-                    for (size_t i = 0; i < loadedData.size(); i++) {
-                        const auto& dataToPlot = alignPeaks ? alignedData[i] : loadedData[i];
-                        ImPlot::PlotLine("", 
-                                       &dataToPlot.primaryDetector[ref_start], 
-                                       ref_end - ref_start, 1.0, 0.0, plotSpecs[i]);
+                    if (dataLoaded) {  // Only plot if data is loaded
+                        size_t data_count = ref_end - ref_start;
+                        if (data_count > 0 && ref_start < loadedData[0].primaryDetector.size()) {
+                            for (size_t i = 0; i < loadedData.size(); i++) {
+                                const auto& dataToPlot = alignPeaks ? alignedData[i] : loadedData[i];
+                                if (ref_start < dataToPlot.primaryDetector.size()) {
+                                    size_t actual_count = std::min(data_count, dataToPlot.primaryDetector.size() - ref_start);
+                                    ImPlot::PlotLine("", 
+                                                   &dataToPlot.primaryDetector[ref_start], 
+                                                   actual_count, 1.0, 0.0, plotSpecs[i]);
+                                }
+                            }
+                        }
                     }
                     
                     // Handle X-range selection within plot context
@@ -1383,78 +1473,7 @@ int main() {
                 ImPlot::EndSubplots();
             }
             
-            // Handle box selection zoom manually using ImGui mouse input
-            // This completely bypasses ImPlot's input system
-            ImVec2 mousePos = ImGui::GetMousePos();
-            bool isOverPlot = ImGui::IsWindowHovered();
-            isMouseOverPlot = isOverPlot;
             
-            // Handle X-range selection with Ctrl key - state management only
-            bool ctrlPressed = ImGui::GetIO().KeyCtrl;
-            if (isOverPlot && ctrlPressed && !isSelectingXRange) {
-                // Start selection when Ctrl is pressed over plot
-                isSelectingXRange = true;
-                // Reset selection positions
-                selectionStartX = 0.0;
-                selectionEndX = 0.0;
-            } else if (!ctrlPressed && isSelectingXRange) {
-                // End selection when Ctrl is released
-                isSelectingXRange = false;
-            }
-            
-            if (isOverPlot && ImGui::IsMouseDown(0) && !isZooming && !isSelectingXRange) {
-                isZooming = true;
-                zoomStart = mousePos;
-            }
-            if (isZooming && ImGui::IsMouseReleased(0)) {
-                zoomEnd = mousePos;
-                isZooming = false;
-                
-                // Calculate zoom based on pixel coordinates
-                // Map mouse selection to data coordinates
-                if (fabs(zoomEnd.x - zoomStart.x) > 20 && fabs(zoomEnd.y - zoomStart.y) > 20) {
-                    // Get the plot boundaries and size
-                    ImVec2 plot_min = ImGui::GetItemRectMin();
-                    ImVec2 plot_max = ImGui::GetItemRectMax();
-                    float plot_width = plot_max.x - plot_min.x;
-                    
-                    // Calculate selection percentage
-                    float select_start_pct = (zoomStart.x - plot_min.x) / plot_width;
-                    float select_end_pct = (zoomEnd.x - plot_min.x) / plot_width;
-                    
-                    // Ensure proper ordering (left to right)
-                    if (select_start_pct > select_end_pct) {
-                        std::swap(select_start_pct, select_end_pct);
-                    }
-                    
-                    // Map percentage to data coordinates
-                    size_t data_size = loadedData[0].referenceDetector.size();
-                    ref_start = static_cast<size_t>(select_start_pct * data_size);
-                    ref_end = static_cast<size_t>(select_end_pct * data_size);
-                    
-                    // Ensure valid range
-                    ref_start = std::min(ref_start, data_size - 1);
-                    ref_end = std::min(ref_end, data_size);
-                    ref_end = std::max(ref_end, ref_start + 1);
-                    
-                    prim_start = ref_start;
-                    prim_end = ref_end;
-                    zoomRange.first = ref_start;
-                    zoomRange.second = ref_end;
-                    isZoomed = true;
-                    
-                    std::cout << "Mouse zoom applied: " << zoomRange.first << "-" << zoomRange.second 
-                              << " (data size: " << data_size 
-                              << ", selection: " << select_start_pct*100 << "%-" << select_end_pct*100 << "%)" << std::endl;
-                }
-            }
-            
-            // Draw custom zoom selection rectangle
-            if (isZooming) {
-                ImDrawList* drawList = ImGui::GetWindowDrawList();
-                drawList->AddRect(zoomStart, zoomEnd, IM_COL32(255, 255, 0, 255), 0.0f, 0, 2.0f);
-                drawList->AddRectFilled(zoomStart, zoomEnd, IM_COL32(255, 255, 0, 80));
-            }
         } else {
             ImGui::Text("No data loaded. Select a CSV file from the Files panel.");
         }
