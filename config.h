@@ -16,6 +16,13 @@ struct AppConfig {
     bool alignPeaks = false;
     std::string lastWorkingDirectory;
     
+    // Window state
+    int windowWidth = 1280;
+    int windowHeight = 720;
+    int windowPosX = -1; // -1 means centered
+    int windowPosY = -1; // -1 means centered
+    bool windowMaximized = false;
+    
     // Add a dataset to recent list (maintains max size)
     void addRecentDataset(const std::string& datasetPath) {
         // Remove if already exists
@@ -59,6 +66,14 @@ struct AppConfig {
             configFile << "auto_fit_y_axis=" << (autoFitYAxis ? "true" : "false") << "\n";
             configFile << "align_peaks=" << (alignPeaks ? "true" : "false") << "\n";
             configFile << "last_working_directory=" << lastWorkingDirectory << "\n";
+            
+            // Write window settings
+            configFile << "\n[Window]\n";
+            configFile << "width=" << windowWidth << "\n";
+            configFile << "height=" << windowHeight << "\n";
+            configFile << "pos_x=" << windowPosX << "\n";
+            configFile << "pos_y=" << windowPosY << "\n";
+            configFile << "maximized=" << (windowMaximized ? "true" : "false") << "\n";
             
             configFile.close();
             return true;
@@ -118,6 +133,18 @@ struct AppConfig {
                             alignPeaks = (value == "true");
                         } else if (key == "last_working_directory") {
                             lastWorkingDirectory = value;
+                        }
+                    } else if (currentSection == "Window") {
+                        if (key == "width") {
+                            windowWidth = std::stoi(value);
+                        } else if (key == "height") {
+                            windowHeight = std::stoi(value);
+                        } else if (key == "pos_x") {
+                            windowPosX = std::stoi(value);
+                        } else if (key == "pos_y") {
+                            windowPosY = std::stoi(value);
+                        } else if (key == "maximized") {
+                            windowMaximized = (value == "true");
                         }
                     }
                 }

@@ -198,12 +198,17 @@ int main() {
         return -1;
     }
     
-    // Create window
-    GLFWwindow* window = glfwCreateWindow(1280, 720, "FTS Data Explorer", nullptr, nullptr);
+    // Create window with saved settings
+    GLFWwindow* window = glfwCreateWindow(config.windowWidth, config.windowHeight, "FTS Data Explorer", nullptr, nullptr);
     if (!window) {
         std::cerr << "Failed to create GLFW window" << std::endl;
         glfwTerminate();
         return -1;
+    }
+    
+    // Set window position if saved (not centered)
+    if (config.windowPosX != -1 && config.windowPosY != -1) {
+        glfwSetWindowPos(window, config.windowPosX, config.windowPosY);
     }
     
     glfwMakeContextCurrent(window);
@@ -293,6 +298,24 @@ int main() {
         glfwPollEvents();
         multiSelectMode = ImGui::GetIO().KeyCtrl;
         
+        // Track window state changes
+        int newWidth, newHeight;
+        glfwGetWindowSize(window, &newWidth, &newHeight);
+        if (newWidth != config.windowWidth || newHeight != config.windowHeight) {
+            config.windowWidth = newWidth;
+            config.windowHeight = newHeight;
+        }
+        
+        int newPosX, newPosY;
+        glfwGetWindowPos(window, &newPosX, &newPosY);
+        if (newPosX != config.windowPosX || newPosY != config.windowPosY) {
+            config.windowPosX = newPosX;
+            config.windowPosY = newPosY;
+        }
+        
+        // Check if window is maximized
+        config.windowMaximized = glfwGetWindowAttrib(window, GLFW_MAXIMIZED);
+        
         // Handle keyboard navigation for file selection
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) && !csvFiles.empty() && dataLoaded) {
             if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
@@ -359,6 +382,20 @@ int main() {
                 }
                 selectedFilenames.push_back(filename);
                 
+                // Update current dataset name (extract from current directory path)
+                std::string dirPath = currentDirectory;
+                size_t dir_last_slash = dirPath.find_last_of("/\\");
+                if (dir_last_slash != std::string::npos) {
+                    currentDatasetName = dirPath.substr(dir_last_slash + 1);
+                    // If this is "raw_data", get the parent directory name
+                    if (currentDatasetName == "raw_data" && dir_last_slash > 0) {
+                        size_t parent_slash = dirPath.substr(0, dir_last_slash).find_last_of("/\\");
+                        if (parent_slash != std::string::npos) {
+                            currentDatasetName = dirPath.substr(parent_slash + 1, dir_last_slash - parent_slash - 1);
+                        }
+                    }
+                }
+                
                 dataLoaded = true;
                 // Reset zoom when loading new file
                 isZoomed = false;
@@ -385,18 +422,21 @@ int main() {
         
         // Show welcome screen if no data is loaded and we haven't initialized yet
         if (showWelcomeScreen && !welcomeScreenInitialized) {
-            // Make welcome screen modal and block interaction with main window
-            ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+            // Set up welcome screen styling to match the main window background
+            ImVec4 backgroundColor = ImGui::GetStyle().Colors[ImGuiCol_WindowBg];
+            ImGui::PushStyleColor(ImGuiCol_PopupBg, backgroundColor);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(20, 20));
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 8.0f);
+            
+            // Center the welcome screen
+            ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+            ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
             ImGui::SetNextWindowSize(ImVec2(600, 400));
             
             // Create a modal popup that blocks all interaction
             ImGui::OpenPopup("Welcome to FTS Data Explorer");
             
-            // Darken the background to indicate modal state
-            ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f);
-            
             if (ImGui::BeginPopupModal("Welcome to FTS Data Explorer", NULL, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove)) {
-                ImGui::PopStyleVar(); // Restore alpha
                 
                 // Welcome message
                 ImGui::TextColored(ImVec4(0.6f, 0.5f, 0.1f, 1.0f), "Welcome to FTS Data Explorer");
@@ -440,6 +480,10 @@ int main() {
                                     } else {
                                         currentDirectory = datasetPath; // Fallback to the dataset directory itself
                                     }
+                                    
+                                    // Update current dataset name
+                                    currentDatasetName = datasetPath.substr(datasetPath.find_last_of("/\\") + 1);
+                                    
                                     csvFiles = FileBrowser::getCSVFilesInDirectory(currentDirectory);
                                     dataLoaded = false;
                                     filesChanged = true;
@@ -474,8 +518,12 @@ int main() {
                         std::string rawDataPath = selectedDirectory + "/raw_data";
                         if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {
                             currentDirectory = rawDataPath;
+                            // Update dataset name from parent directory
+                            currentDatasetName = selectedDirectory.substr(selectedDirectory.find_last_of("/\\") + 1);
                         } else {
                             currentDirectory = selectedDirectory;
+                            // Update dataset name from selected directory
+                            currentDatasetName = selectedDirectory.substr(selectedDirectory.find_last_of("/\\") + 1);
                         }
                         csvFiles = FileBrowser::getCSVFilesInDirectory(currentDirectory);
                         dataLoaded = false;
@@ -497,8 +545,15 @@ int main() {
                 if (!showWelcomeScreen) {
                     welcomeScreenInitialized = true;
                 }
+            // Clean up styles
+            ImGui::PopStyleVar(); // WindowRounding
+            ImGui::PopStyleVar(); // WindowPadding
+            ImGui::PopStyleColor(); // PopupBg
             } else {
-                ImGui::PopStyleVar(); // Clean up style if popup wasn't opened
+                // Clean up styles if popup wasn't opened
+                ImGui::PopStyleVar(); // WindowRounding
+                ImGui::PopStyleVar(); // WindowPadding
+                ImGui::PopStyleColor(); // PopupBg
             }
         }
         
@@ -988,8 +1043,12 @@ int main() {
                 std::string rawDataPath = selectedDirectory + "/raw_data";
                 if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {
                     currentDirectory = rawDataPath; // Use the raw_data subdirectory
+                    // Update dataset name from parent directory
+                    currentDatasetName = selectedDirectory.substr(selectedDirectory.find_last_of("/\\") + 1);
                 } else {
                     currentDirectory = selectedDirectory; // Fallback to selected directory
+                    // Update dataset name from selected directory
+                    currentDatasetName = selectedDirectory.substr(selectedDirectory.find_last_of("/\\") + 1);
                 }
                 csvFiles = FileBrowser::getCSVFilesInDirectory(currentDirectory);
                 dataLoaded = false;
@@ -1016,6 +1075,10 @@ int main() {
                             } else {
                                 currentDirectory = datasetPath; // Fallback to the dataset directory itself
                             }
+                            
+                            // Update current dataset name
+                            currentDatasetName = datasetPath.substr(datasetPath.find_last_of("/\\") + 1);
+                            
                             csvFiles = FileBrowser::getCSVFilesInDirectory(currentDirectory);
                             dataLoaded = false;
                             filesChanged = true;
