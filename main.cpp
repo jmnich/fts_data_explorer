@@ -572,7 +572,7 @@ int main() {
                 // Reset X-axis zoom when ESC is pressed
                 isZoomed = false;
                 zoomRange = {0, 0};
-                shouldAutoscale = autoRestoreScale; // Force redraw with full range only if autorestore enabled
+                shouldAutoscale = true; // Always force redraw with full range when ESC is pressed
             }
         }
         
