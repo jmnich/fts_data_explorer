@@ -533,6 +533,7 @@ int main() {
 
     // X-range selection state
     bool isSelectingXRange = false;
+    bool applyXRangeSelection = false;
     double selectionStartX = 0.0;
     double selectionEndX = 0.0;
     bool isMouseOverPlot = false;
@@ -655,9 +656,11 @@ int main() {
                 }
                 
                 dataLoaded = true;
-                // Reset zoom when loading new file
-                isZoomed = false;
-                zoomRange = {0, 0};
+                // Reset zoom when loading new file only if autorestore is enabled
+                if (autoRestoreScale) {
+                    isZoomed = false;
+                    zoomRange = {0, 0};
+                }
                 shouldAutoscale = autoRestoreScale; // Only trigger autoscale if autorestore is enabled
                 filesChanged = false;
                 
@@ -1211,8 +1214,6 @@ int main() {
             bool isOverPlot = ImGui::IsWindowHovered();
             isMouseOverPlot = isOverPlot;
 
-            bool isXRangeZoomSelectionFinalized = false;
-
             // Handle X-range selection with Ctrl key - state management only
             bool ctrlPressed = ImGui::GetIO().KeyCtrl;
             if (isOverPlot && ctrlPressed && !isSelectingXRange) {
@@ -1228,7 +1229,7 @@ int main() {
                 
                 // Only finalize if we have valid selection
                 if(selectionStartX != selectionEndX) {
-                    isXRangeZoomSelectionFinalized = true;
+                    applyXRangeSelection = true;
                     
                     if(selectionStartX > selectionEndX)
                     {
@@ -1278,7 +1279,7 @@ int main() {
                         }
                     }
                     // Apply X-range selection if finalized and flag is set
-                    if (applyXRangeSelection && isXRangeZoomSelectionFinalized && selectionStartX != selectionEndX) {
+                    if (applyXRangeSelection && selectionStartX != selectionEndX) {
                         ImPlot::SetupAxisLimits(ImAxis_X1, selectionStartX, selectionEndX, ImPlotCond_Always);
                         applyXRangeSelection = false; // Reset flag after applying
                     }
@@ -1379,7 +1380,7 @@ int main() {
                         }
                     }
                     // Apply X-range selection if finalized and flag is set
-                    if (applyXRangeSelection && isXRangeZoomSelectionFinalized && selectionStartX != selectionEndX) {
+                    if (applyXRangeSelection && selectionStartX != selectionEndX) {
                         ImPlot::SetupAxisLimits(ImAxis_X1, selectionStartX, selectionEndX, ImPlotCond_Always);
                         applyXRangeSelection = false; // Reset flag after applying
                     }
