@@ -42,4 +42,6 @@
 
 # ImGui configuration files
 imgui.ini
-build/imgui.ini
+
+# Build directory
+build/
