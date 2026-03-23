@@ -1277,6 +1277,11 @@ int main() {
                             ImPlot::SetupAxisLimits(ImAxis_X1, 0, loadedData[0].referenceDetector.size(), ImPlotCond_Always);
                         }
                     }
+                    // Apply X-range selection if finalized and flag is set
+                    if (applyXRangeSelection && isXRangeZoomSelectionFinalized && selectionStartX != selectionEndX) {
+                        ImPlot::SetupAxisLimits(ImAxis_X1, selectionStartX, selectionEndX, ImPlotCond_Always);
+                        applyXRangeSelection = false; // Reset flag after applying
+                    }
                     // Plot all selected datasets with pre-allocated specs
                     if (dataLoaded) {  // Only plot if data is loaded
                         size_t data_count = ref_end - ref_start;
@@ -1372,6 +1377,11 @@ int main() {
                             // Auto-fit both axes: set X-axis to full range, let Y-axis auto-fit
                             ImPlot::SetupAxisLimits(ImAxis_X1, 0, loadedData[0].primaryDetector.size(), ImPlotCond_Always);
                         }
+                    }
+                    // Apply X-range selection if finalized and flag is set
+                    if (applyXRangeSelection && isXRangeZoomSelectionFinalized && selectionStartX != selectionEndX) {
+                        ImPlot::SetupAxisLimits(ImAxis_X1, selectionStartX, selectionEndX, ImPlotCond_Always);
+                        applyXRangeSelection = false; // Reset flag after applying
                     }
                     // Reuse the same plot specs as reference plot (already pre-allocated)
                     // Plot all selected datasets with same colors as reference
