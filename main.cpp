@@ -517,6 +517,7 @@ int main() {
     bool multiSelectMode = false; // Track if Ctrl is held for multi-select
     const size_t MAX_SELECTABLE_FILES = 5; // Limit to 5 files for simultaneous display
     bool alignPeaks = config.alignPeaks; // Use config setting for peak alignment
+    bool autoRestoreScale = config.autoRestoreScale; // Use config setting for scale restoration
     
     // Performance optimization: downsampling for large datasets
     bool enableDownsampling = true;
@@ -570,7 +571,7 @@ int main() {
                 // Reset X-axis zoom when ESC is pressed
                 isZoomed = false;
                 zoomRange = {0, 0};
-                shouldAutoscale = true; // Force redraw with full range
+                shouldAutoscale = autoRestoreScale; // Force redraw with full range only if autorestore enabled
             }
         }
         
@@ -657,7 +658,7 @@ int main() {
                 // Reset zoom when loading new file
                 isZoomed = false;
                 zoomRange = {0, 0};
-                shouldAutoscale = true; // Trigger autoscale for new data
+                shouldAutoscale = autoRestoreScale; // Only trigger autoscale if autorestore is enabled
                 filesChanged = false;
                 
                 // Mark that we should update recent datasets after this successful load
@@ -1547,6 +1548,12 @@ int main() {
         }
         
         ImGui::Checkbox("Align peaks", &alignPeaks);
+        if (ImGui::Checkbox("Autorestore scale", &autoRestoreScale)) {
+            // When enabling autorestore scale, trigger autoscale to fit all data
+            if (autoRestoreScale && dataLoaded) {
+                shouldAutoscale = true;
+            }
+        }
         
         // Auto-fit Y-axis toggle
         if (ImGui::Checkbox("Auto-fit Y-axis", &autoFitYAxis)) {
@@ -1619,7 +1626,7 @@ int main() {
                 
                 if (!reloadedData.empty()) {
                     loadedData = reloadedData;
-                    shouldAutoscale = true; // Trigger plot update
+                    shouldAutoscale = autoRestoreScale; // Trigger plot update only if autorestore enabled
                     std::cout << "Reloaded " << loadedData.size() << " datasets with " 
                               << (enableDownsampling ? "enabled" : "disabled") << " downsampling" << std::endl;
                 }
@@ -1656,6 +1663,7 @@ int main() {
     
     // Save configuration before exiting
     config.alignPeaks = alignPeaks;
+    config.autoRestoreScale = autoRestoreScale;
     config.lastWorkingDirectory = currentDirectory;
     config.uiSize = currentUiSize;
     

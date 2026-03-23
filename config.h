@@ -14,6 +14,7 @@ struct AppConfig {
     size_t maxRecentDatasets = 10;
     bool autoFitYAxis = true;
     bool alignPeaks = false;
+    bool autoRestoreScale = true;
     std::string lastWorkingDirectory;
     std::string uiSize = "normal"; // tiny, small, normal, large, huge
     
@@ -66,6 +67,7 @@ struct AppConfig {
             configFile << "max_recent_datasets=" << maxRecentDatasets << "\n";
 
             configFile << "align_peaks=" << (alignPeaks ? "true" : "false") << "\n";
+            configFile << "auto_restore_scale=" << (autoRestoreScale ? "true" : "false") << "\n";
             configFile << "last_working_directory=" << lastWorkingDirectory << "\n";
             configFile << "ui_size=" << uiSize << "\n";
             
@@ -132,6 +134,8 @@ struct AppConfig {
 
                         } else if (key == "align_peaks") {
                             alignPeaks = (value == "true");
+                        } else if (key == "auto_restore_scale") {
+                            autoRestoreScale = (value == "true");
                         } else if (key == "last_working_directory") {
                             lastWorkingDirectory = value;
                         } else if (key == "ui_size") {
