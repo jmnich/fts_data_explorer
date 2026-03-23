@@ -539,7 +539,7 @@ int main() {
     // Y-axis limits for plots
     float ref_y_min = 0.0f, ref_y_max = 1.0f;
     float prim_y_min = 0.0f, prim_y_max = 1.0f;
-    bool autoFitYAxis = config.autoFitYAxis; // Use config setting for auto-fit
+    bool autoFitYAxis = true; // Always default to enabled, don't use config
     
     // Track if we should update recent datasets (only after successful load)
     bool shouldUpdateRecentDatasets = false;
@@ -1256,23 +1256,8 @@ int main() {
                     ImPlot::SetupAxes("Sample", "Voltage [V]", ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks | ImPlotAxisFlags_NoTickLabels, y_flags);
                     // Set lighter gray grid color
                     ImPlot::PushStyleColor(ImPlotCol_AxisGrid, ImVec4(0.3f, 0.3f, 0.3f, 0.5f));
-                    if (isXRangeZoomSelectionFinalized) {
-                        // Apply X-range zoom selection - this takes priority over other zoom states
-                        size_t start_idx = static_cast<size_t>(std::round(selectionStartX));
-                        size_t end_idx = static_cast<size_t>(std::round(selectionEndX));
-                        
-                        // Ensure valid range
-                        size_t data_size = loadedData[0].referenceDetector.size();
-                        start_idx = std::min(start_idx, data_size - 1);
-                        end_idx = std::min(end_idx, data_size);
-                        end_idx = std::max(end_idx, start_idx + 1);
-                        
-                        // Selection complete, but taking no action (zoom feature removed)
-                        isXRangeZoomSelectionFinalized = false;
-                        
-                        std::cout << "X-range selection completed: " << start_idx << "-" << end_idx << " (no action taken)" << std::endl;
-                    }
-                    else if (isZoomed) {
+
+                    if (isZoomed) {
                         // Only zoom X-axis (Y-axis is handled by auto-fit flag)
                         if (!autoFitYAxis) {
                             // Manual Y-axis: set both X and Y limits
@@ -1367,21 +1352,8 @@ int main() {
                     ImPlot::SetupAxes("Sample", "Voltage [V]", ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks, y_flags);
                     // Set lighter gray grid color
                     ImPlot::PushStyleColor(ImPlotCol_AxisGrid, ImVec4(0.3f, 0.3f, 0.3f, 0.5f));
-                    if (isXRangeZoomSelectionFinalized) {
-                        // Apply X-range zoom selection - this takes priority over other zoom states
-                        size_t start_idx = static_cast<size_t>(std::round(selectionStartX));
-                        size_t end_idx = static_cast<size_t>(std::round(selectionEndX));
-                        
-                        // Ensure valid range
-                        size_t data_size = loadedData[0].primaryDetector.size();
-                        start_idx = std::min(start_idx, data_size - 1);
-                        end_idx = std::min(end_idx, data_size);
-                        end_idx = std::max(end_idx, start_idx + 1);
-                        
-                        // Selection complete, but taking no action (zoom feature removed)
-                        isXRangeZoomSelectionFinalized = false;
-                    }
-                    else if (isZoomed) {
+
+                    if (isZoomed) {
                         // Only zoom X-axis (Y-axis is handled by auto-fit flag)
                         if (!autoFitYAxis) {
                             // Manual Y-axis: set both X and Y limits
@@ -1683,7 +1655,6 @@ int main() {
     cleanupApplication(window);
     
     // Save configuration before exiting
-    config.autoFitYAxis = autoFitYAxis;
     config.alignPeaks = alignPeaks;
     config.lastWorkingDirectory = currentDirectory;
     config.uiSize = currentUiSize;

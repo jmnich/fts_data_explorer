@@ -64,7 +64,7 @@ struct AppConfig {
             // Write other settings
             configFile << "[Settings]\n";
             configFile << "max_recent_datasets=" << maxRecentDatasets << "\n";
-            configFile << "auto_fit_y_axis=" << (autoFitYAxis ? "true" : "false") << "\n";
+
             configFile << "align_peaks=" << (alignPeaks ? "true" : "false") << "\n";
             configFile << "last_working_directory=" << lastWorkingDirectory << "\n";
             configFile << "ui_size=" << uiSize << "\n";
@@ -129,8 +129,7 @@ struct AppConfig {
                     } else if (currentSection == "Settings") {
                         if (key == "max_recent_datasets") {
                             maxRecentDatasets = std::stoul(value);
-                        } else if (key == "auto_fit_y_axis") {
-                            autoFitYAxis = (value == "true");
+
                         } else if (key == "align_peaks") {
                             alignPeaks = (value == "true");
                         } else if (key == "last_working_directory") {
