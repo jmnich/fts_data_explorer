@@ -9,11 +9,22 @@ It presents a tree view of information available in the dataset and then allows 
 - CMake 3.10+ build system
 
 # Functionality and GUI description
-- Main window consists of 4 docked panels:
+- Main window consists of 3 docked panels:
     - primary, large graphing panel, which shows selected primary and reference interferograms on 2 vertically stacked plots with shared x axis. These graphs support zoom with mouse.
     - metadata panel, docked to the right of the graphing panel, showing all available metadata
     - files panel, docked to the left, showing tree view with files in the selected directory
-    - buttons panel, docked in the bottom left, showing a single button "set working directory", which invokes directory browsing window and switches working directory
+- Main window contains a ribbon menu, which is hidden in the welcome screen. The structure of the menu is as follows:
+    - File
+        - a single button "set working directory", which invokes directory browsing window and switches working directory
+        - recent datasets selector, allowing to quickly switch between recently opened datasets stored in the config
+    - Settings
+        - checkbox "Align peaks", which shifts the data in x axis to align the max value of primary interferogram
+        - checkbox "Autorestore scale"
+        - checkbox "Auto-fit Y-axis"
+        - checkbox "Enable downsampling"
+        - UI size selection droplist
+    - Help
+        - non-interactive list of all implemented keyboard shortcuts
 - Detailed description of axis ranging in data plots:
     - when application is launched, 'auto fit y axis' option must be enabled. This enables/disables the native "Auto-Fit" option from implot.
     - when application is launched, 'autorestore scale' option loads the last used value from config. The effect of this option is described below.
