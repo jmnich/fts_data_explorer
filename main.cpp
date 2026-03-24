@@ -297,9 +297,9 @@ void setupUIStyle(ImGuiIO& io, const AppConfig& config, float& uiScale, const st
     } else if (currentUiSize == "normal") {
         uiScale = 1.0f;
     } else if (currentUiSize == "large") {
-        uiScale = 1.25f;
+        uiScale = 1.4f;
     } else if (currentUiSize == "huge") {
-        uiScale = 1.5f;
+        uiScale = 1.8f;
     }
 
     // Apply the scaling (font only initially to avoid UI issues)
@@ -448,9 +448,9 @@ void handleUIScaling(ImGuiIO& io, float& uiScale, const std::string& currentUiSi
         } else if (currentUiSize == "normal") {
             uiScale = 1.0f;
         } else if (currentUiSize == "large") {
-            uiScale = 1.35f;
+            uiScale = 1.4f;
         } else if (currentUiSize == "huge") {
-            uiScale = 1.65f;
+            uiScale = 1.8f;
         }
         
         // Reapply scaling (font only to avoid UI issues)
@@ -561,9 +561,9 @@ int main() {
     } else if (currentUiSize == "normal") {
         uiScale = 1.0f;
     } else if (currentUiSize == "large") {
-        uiScale = 1.35f;
+        uiScale = 1.4f;
     } else if (currentUiSize == "huge") {
-        uiScale = 1.65f;
+        uiScale = 1.8f;
     }
     
     // Apply the scaling (font only initially to avoid UI issues)
@@ -871,7 +871,7 @@ int main() {
             // Center the welcome screen
             ImVec2 center = ImGui::GetMainViewport()->GetCenter();
             ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-            ImGui::SetNextWindowSize(ImVec2(1200, 600));
+            ImGui::SetNextWindowSize(ImVec2(1200, 800));
             
             // Create a modal popup that blocks all interaction
             ImGui::OpenPopup("Welcome to FTS Data Explorer");
@@ -897,7 +897,7 @@ int main() {
                     ImGui::Text("Use the button below to select a dataset directory.");
                 } else {
                     // Create a child window for scrollable recent datasets list
-                    if (ImGui::BeginChild("RecentDatasetsChild", ImVec2(0, 400), true)) {
+                    if (ImGui::BeginChild("RecentDatasetsChild", ImVec2(0, 500), true)) {
                         for (const auto& datasetPath : config.recentDatasets) {
                             // Extract the parent directory name for display (skip "raw_data" if present)
                             std::string displayName = datasetPath;
