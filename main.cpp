@@ -546,6 +546,9 @@ int main() {
     // Track if we should update recent datasets (only after successful load)
     bool shouldUpdateRecentDatasets = false;
     
+    // Track if this is the first data load after launch or directory switch
+    bool isFirstDataLoad = true;
+    
     // Welcome screen state
     bool showWelcomeScreen = true;
     bool welcomeScreenInitialized = false;
@@ -656,12 +659,25 @@ int main() {
                 }
                 
                 dataLoaded = true;
-                // Reset zoom when loading new file only if autorestore is enabled
-                if (autoRestoreScale) {
+                
+                // Handle autoscale behavior based on AGENTS.md requirements:
+                // "when the application loads a file for display for the first time after launch or work directory switch, axes zoom to fit all data."
+                if (isFirstDataLoad || autoRestoreScale) {
                     isZoomed = false;
                     zoomRange = {0, 0};
+                    shouldAutoscale = true; // Trigger autoscale
+                    
+                    // Recalculate Y-axis limits from the actual data for autoscale
+                    auto ref_min_max = std::minmax_element(data.referenceDetector.begin(), data.referenceDetector.end());
+                    auto prim_min_max = std::minmax_element(data.primaryDetector.begin(), data.primaryDetector.end());
+                    ref_y_min = *ref_min_max.first;
+                    ref_y_max = *ref_min_max.second;
+                    prim_y_min = *prim_min_max.first;
+                    prim_y_max = *prim_min_max.second;
+                    
+                    // Reset first load flag after handling
+                    isFirstDataLoad = false;
                 }
-                shouldAutoscale = autoRestoreScale; // Only trigger autoscale if autorestore is enabled
                 filesChanged = false;
                 
                 // Mark that we should update recent datasets after this successful load
@@ -755,6 +771,7 @@ int main() {
                                     currentSortedFileIndex = 0;
                                     showWelcomeScreen = false;
                                     welcomeScreenInitialized = true;
+                                    isFirstDataLoad = true; // Reset first load flag for new directory
                                     std::cout << "Opened recent dataset: " << datasetPath << std::endl;
                                     ImGui::CloseCurrentPopup(); // Close the modal
                                 } else {
@@ -1517,6 +1534,7 @@ int main() {
                 csvFiles = FileBrowser::getCSVFilesInDirectory(currentDirectory);
                 dataLoaded = false;
                 shouldUpdateRecentDatasets = true; // Mark to update recent datasets
+                isFirstDataLoad = true; // Reset first load flag for new directory
                 std::cout << "Working directory set to: " << currentDirectory << std::endl;
             }
         }
@@ -1548,6 +1566,7 @@ int main() {
                             dataLoaded = false;
                             filesChanged = true;
                             currentSortedFileIndex = 0;
+                            isFirstDataLoad = true; // Reset first load flag for new directory
                             std::cout << "Opened recent dataset: " << datasetPath << std::endl;
                         } else {
                             std::cerr << "Recent dataset path no longer exists: " << datasetPath << std::endl;

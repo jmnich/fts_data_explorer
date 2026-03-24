@@ -14,6 +14,15 @@ It presents a tree view of information available in the dataset and then allows 
     - metadata panel, docked to the right of the graphing panel, showing all available metadata
     - files panel, docked to the left, showing tree view with files in the selected directory
     - buttons panel, docked in the bottom left, showing a single button "set working directory", which invokes directory browsing window and switches working directory
+- Detailed description of axis ranging in data plots:
+    - when application is launched, 'auto fit y axis' option must be enabled. This enables/disables the native "Auto-Fit" option from implot.
+    - when application is launched, 'autorestore scale' option loads the last used value from config. The effect of this option is described below.
+    - feature: select range to zoom - with mouse hovering over plot area, when user presses ctrl button, a selection of x-axis range begins, and when ctrl is released the selection is finalized. During selection, the range is indicated by two vertical cursors with area between them painted in translucent purple. When ctrl is released, the range of displayed x-axis values is set to the selected range.
+    - feature: pressing 'esc' button resets zoom to fit all data. This feature is always active when any data is displayed.
+    - feature: when user selects additional data files to display, the current range of axes is preseved. 
+    - feature: when user switches between data files using mouse click or up/down arrows, axis ranging depends on option "autorestore scale". If enabled then autoscale to fit all data, if disabled then preserve the range of XY axes used for previous file.
+    - feature: mouse scroll allows to zoom into the region over witch mouse is currently hovering.
+    - feature: when the application loads a file for display for the first time after launch or work directory switch, axes zoom to fit all data.
 
 # Application structure
 - the application uses 'adapter classes' which convert different data storage formats into a unified object carrying primary and reference interferograms as well as metadata. These unified data objects are then used to display the information in gui.
