@@ -530,6 +530,7 @@ int main() {
 
     // Customize plot colors
     ImVec4 yellow_color = ImVec4(1.0f, 1.0f, 0.0f, 1.0f); // Bright yellow
+    ImVec4 purple_color = ImVec4(0.5f, 0.0f, 0.5f, 1.0f); // Purple for selection
     ImVec4 background_color = ImVec4(0.0f, 0.0f, 0.0f, 1.0f); // Black background
     
     // Set plot colors
@@ -537,6 +538,10 @@ int main() {
     style.Colors[ImGuiCol_PlotLinesHovered] = yellow_color;
     style.Colors[ImGuiCol_PlotHistogram] = yellow_color;
     style.Colors[ImGuiCol_PlotHistogramHovered] = yellow_color;
+    
+    // Set ImPlot selection color to match our custom purple
+    ImPlotStyle& plotStyle = ImPlot::GetStyle();
+    plotStyle.Colors[ImPlotCol_Selection] = purple_color;
     
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 460");
@@ -1202,7 +1207,7 @@ int main() {
                     ImGui::Text("Keyboard Shortcuts:");
                     ImGui::Separator();
                     ImGui::Text("Up/Down Arrows: Navigate files");
-                    ImGui::Text("Shift+Click: X-axis range selection");
+                    ImGui::Text("Shift + mouse / Right click: X-axis range selection");
                     ImGui::Text("ESC: Reset zoom");
                     ImGui::Text("Mouse Scroll: Zoom in/out");
                     ImGui::Text("Ctrl+Y: Toggle auto-fit Y-axis");
