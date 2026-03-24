@@ -33,6 +33,13 @@ struct InterferogramData {
     std::string metadata;
 };
 
+// Dummy variables for function defaults
+static std::vector<std::string> dummySelectedFiles;
+static std::vector<std::string> dummySelectedFilenames;
+static std::vector<InterferogramData> dummyLoadedData;
+static bool dummyDataLoaded = false;
+static std::vector<std::string> dummySortedFiles;
+
 // Natural sort comparison function for filenames with numbers
 static bool naturalSortCompare(const std::string& a, const std::string& b) {
     size_t i = 0, j = 0;
@@ -334,7 +341,16 @@ void handleWindowEvents(GLFWwindow* window, AppConfig& config) {
 void handleKeyboardNavigation(const std::vector<std::string>& csvFiles, 
                              size_t& currentSortedFileIndex, 
                              bool& filesChanged, 
-                             bool& keyboardNavigation) {
+                             bool& keyboardNavigation, 
+                             bool shiftSelectMode = false, 
+                             std::vector<std::string>& selectedFiles = dummySelectedFiles, 
+                             std::vector<std::string>& selectedFilenames = dummySelectedFilenames, 
+                             std::vector<InterferogramData>& loadedData = dummyLoadedData, 
+                             bool& dataLoaded = dummyDataLoaded, 
+                             const std::vector<std::string>& sortedFiles = dummySortedFiles, 
+                             bool enableDownsampling = true, 
+                             size_t maxPointsBeforeDownsampling = 50000, 
+                             size_t maxSelectableFiles = 5) {
     if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) && !csvFiles.empty()) {
         if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
             // Navigate up in file list (with wrapping)
@@ -354,6 +370,61 @@ void handleKeyboardNavigation(const std::vector<std::string>& csvFiles,
             }
             filesChanged = true;
             keyboardNavigation = true;
+        }
+        
+        // Handle Shift+Arrow for adding next file to selection
+        if (shiftSelectMode) {
+            if (ImGui::IsKeyPressed(ImGuiKey_UpArrow) || ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
+                // Add the current file to selection with FIFO behavior if limit reached
+                std::string fullPath = sortedFiles[currentSortedFileIndex];
+                
+                // Check if file is already selected
+                auto it = std::find(selectedFiles.begin(), selectedFiles.end(), fullPath);
+                if (it == selectedFiles.end()) {
+                    // File not already selected, add it
+                    try {
+                        InterferogramData data = CSVAdapter::loadFromCSV(fullPath);
+                        
+                        // Apply downsampling
+                        if (enableDownsampling && data.referenceDetector.size() > maxPointsBeforeDownsampling) {
+                            size_t localDownsampleFactor = data.referenceDetector.size() / maxPointsBeforeDownsampling + 1;
+                            std::vector<float> downsampledRef, downsampledPrim;
+                            for (size_t j = 0; j < data.referenceDetector.size(); j += localDownsampleFactor) {
+                                downsampledRef.push_back(data.referenceDetector[j]);
+                                downsampledPrim.push_back(data.primaryDetector[j]);
+                            }
+                            data.referenceDetector = downsampledRef;
+                            data.primaryDetector = downsampledPrim;
+                        }
+                        
+                        // Enforce 5-file limit with FIFO behavior
+                        if (selectedFiles.size() >= maxSelectableFiles) {
+                            // Remove oldest file (FIFO)
+                            selectedFiles.erase(selectedFiles.begin());
+                            selectedFilenames.erase(selectedFilenames.begin());
+                            loadedData.erase(loadedData.begin());
+                        }
+                        
+                        loadedData.push_back(data);
+                        selectedFiles.push_back(fullPath);
+                        
+                        // Extract filename for legend
+                        std::string filename = fullPath;
+                        size_t last_slash = filename.find_last_of("/\\");
+                        if (last_slash != std::string::npos) {
+                            filename = filename.substr(last_slash + 1);
+                        }
+                        selectedFilenames.push_back(filename);
+                        
+                        dataLoaded = true;
+                    } catch (const std::exception& e) {
+                        std::cerr << "Error loading file: " << e.what() << std::endl;
+                    }
+                }
+                
+                // Don't change filesChanged since we're adding to selection, not replacing
+                filesChanged = false;
+            }
         }
     }
 }
@@ -515,7 +586,9 @@ int main() {
     bool filesChanged = true; // Flag to indicate files list changed
     bool keyboardNavigation = false; // Track if selection changed via keyboard
     bool multiSelectMode = false; // Track if Ctrl is held for multi-select
+    bool shiftSelectMode = false; // Track if Shift is held for range selection
     const size_t MAX_SELECTABLE_FILES = 5; // Limit to 5 files for simultaneous display
+    size_t lastSelectedIndex = 0; // Track last selected index for Shift+Click range selection
     bool alignPeaks = config.alignPeaks; // Use config setting for peak alignment
     bool autoRestoreScale = config.autoRestoreScale; // Use config setting for scale restoration
     
@@ -549,6 +622,9 @@ int main() {
     // Track if this is the first data load after launch or directory switch
     bool isFirstDataLoad = true;
     
+    // Sorted files list for display
+    std::vector<std::string> sortedFiles;
+    
     // Welcome screen state
     bool showWelcomeScreen = true;
     bool welcomeScreenInitialized = false;
@@ -559,6 +635,7 @@ int main() {
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
         multiSelectMode = ImGui::GetIO().KeyCtrl;
+        shiftSelectMode = ImGui::GetIO().KeyShift;
         
         // Reapply UI scaling if size changed
         handleUIScaling(io, uiScale, currentUiSize, uiSizeChanged);
@@ -566,8 +643,22 @@ int main() {
         // Track window state changes
         handleWindowEvents(window, config);
         
+        // Update sorted files list for keyboard navigation
+        sortedFiles = csvFiles;
+        std::sort(sortedFiles.begin(), sortedFiles.end(), [](const std::string& a, const std::string& b) {
+            std::string nameA = a;
+            std::string nameB = b;
+            size_t last_slash_a = nameA.find_last_of("/\\");
+            size_t last_slash_b = nameB.find_last_of("/\\");
+            if (last_slash_a != std::string::npos) nameA = nameA.substr(last_slash_a + 1);
+            if (last_slash_b != std::string::npos) nameB = nameB.substr(last_slash_b + 1);
+            return naturalSortCompare(nameA, nameB);
+        });
+        
         // Handle keyboard navigation for file selection
-        handleKeyboardNavigation(csvFiles, currentSortedFileIndex, filesChanged, keyboardNavigation);
+        handleKeyboardNavigation(csvFiles, currentSortedFileIndex, filesChanged, keyboardNavigation, 
+                                shiftSelectMode, selectedFiles, selectedFilenames, loadedData, dataLoaded, 
+                                sortedFiles, enableDownsampling, maxPointsBeforeDownsampling, MAX_SELECTABLE_FILES);
         
         // Handle ESC key to reset zoom (works independently of file navigation)
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) && dataLoaded) {
@@ -593,18 +684,6 @@ int main() {
         // Load file if navigation changed
         if (filesChanged && !csvFiles.empty()) {
             try {
-                // Sort files to get the correct file for the current index
-                std::vector<std::string> sortedFiles = csvFiles;
-                std::sort(sortedFiles.begin(), sortedFiles.end(), [](const std::string& a, const std::string& b) {
-                    std::string nameA = a;
-                    std::string nameB = b;
-                    size_t last_slash_a = nameA.find_last_of("/\\");
-                    size_t last_slash_b = nameB.find_last_of("/\\");
-                    if (last_slash_a != std::string::npos) nameA = nameA.substr(last_slash_a + 1);
-                    if (last_slash_b != std::string::npos) nameB = nameB.substr(last_slash_b + 1);
-                    return naturalSortCompare(nameA, nameB);
-                });
-                
                 // Load the currently selected file
                 InterferogramData data = CSVAdapter::loadFromCSV(sortedFiles[currentSortedFileIndex]);
                 
@@ -909,21 +988,7 @@ int main() {
         ImGui::PushTextWrapPos(); // Enable text wrapping
         ImGui::Text("Current Dataset: %s", currentDatasetName.c_str());
         
-        // Sort files naturally (handles numbers properly)
-        std::vector<std::string> sortedFiles = csvFiles;
-        std::sort(sortedFiles.begin(), sortedFiles.end(), [](const std::string& a, const std::string& b) {
-            // Extract just the filename without path for comparison
-            std::string nameA = a;
-            std::string nameB = b;
-            size_t last_slash_a = nameA.find_last_of("/\\");
-            size_t last_slash_b = nameB.find_last_of("/\\");
-            if (last_slash_a != std::string::npos) nameA = nameA.substr(last_slash_a + 1);
-            if (last_slash_b != std::string::npos) nameB = nameB.substr(last_slash_b + 1);
-            
-            return naturalSortCompare(nameA, nameB);
-        });
-        
-        // Use the directly tracked sorted index
+        // Use the pre-sorted files list
         size_t currentSortedIndex = currentSortedFileIndex;
         
         // Only calculate scroll position when using keyboard navigation
@@ -1025,10 +1090,62 @@ int main() {
                             ImGui::OpenPopup("Selection Limit");
                         }
                     }
+                } else if (shiftSelectMode) {
+                    // Handle Shift+Click for range selection
+                    size_t startIndex = std::min(lastSelectedIndex, i);
+                    size_t endIndex = std::max(lastSelectedIndex, i);
+                    
+                    // Clear current selection
+                    selectedFiles.clear();
+                    selectedFilenames.clear();
+                    loadedData.clear();
+                    
+                    // Add all files in the range, respecting the 5-file limit
+                    size_t filesToAdd = 0;
+                    for (size_t j = startIndex; j <= endIndex; j++) {
+                        if (filesToAdd >= MAX_SELECTABLE_FILES) break;
+                        
+                        try {
+                            std::string fullPath = sortedFiles[j];
+                            InterferogramData data = CSVAdapter::loadFromCSV(fullPath);
+                            
+                            // Apply downsampling
+                            if (enableDownsampling && data.referenceDetector.size() > maxPointsBeforeDownsampling) {
+                                size_t localDownsampleFactor = data.referenceDetector.size() / maxPointsBeforeDownsampling + 1;
+                                std::vector<float> downsampledRef, downsampledPrim;
+                                for (size_t k = 0; k < data.referenceDetector.size(); k += localDownsampleFactor) {
+                                    downsampledRef.push_back(data.referenceDetector[k]);
+                                    downsampledPrim.push_back(data.primaryDetector[k]);
+                                }
+                                data.referenceDetector = downsampledRef;
+                                data.primaryDetector = downsampledPrim;
+                            }
+                            
+                            loadedData.push_back(data);
+                            selectedFiles.push_back(fullPath);
+                            
+                            // Extract filename for legend
+                            std::string filename = sortedFiles[j];
+                            size_t last_slash = filename.find_last_of("/\\");
+                            if (last_slash != std::string::npos) {
+                                filename = filename.substr(last_slash + 1);
+                            }
+                            selectedFilenames.push_back(filename);
+                            filesToAdd++;
+                        } catch (const std::exception& e) {
+                            std::cerr << "Error loading file: " << e.what() << std::endl;
+                        }
+                    }
+                    
+                    // Update last selected index
+                    lastSelectedIndex = i;
+                    dataLoaded = !selectedFiles.empty();
                 } else {
                     // Single selection - replace current selection
                     currentSortedFileIndex = i;
                     filesChanged = true;
+                    // Update last selected index for future Shift+Click
+                    lastSelectedIndex = i;
                 }
             }
             
@@ -1040,6 +1157,18 @@ int main() {
                 ImGui::SetScrollHereY(0.5f); // Scroll to center the selected item
             }
         }
+        // Show selection limit popup if needed
+        if (ImGui::BeginPopupModal("Selection Limit", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::Text("Maximum of %zu files can be selected at once.", MAX_SELECTABLE_FILES);
+            ImGui::Text("Please deselect some files first.");
+            
+            if (ImGui::Button("OK")) {
+                ImGui::CloseCurrentPopup();
+            }
+            
+            ImGui::EndPopup();
+        }
+        
         ImGui::PopTextWrapPos(); // Disable text wrapping
         ImGui::End();
         
