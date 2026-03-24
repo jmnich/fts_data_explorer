@@ -957,6 +957,182 @@ int main() {
             ImGui::SetNextWindowSize(viewport->Size);
             ImGui::SetNextWindowViewport(viewport->ID);
             
+            // Create ribbon menu first, before docking
+            if (ImGui::BeginMainMenuBar())
+            {
+                // File menu
+                if (ImGui::BeginMenu("File"))
+                {
+                    if (ImGui::MenuItem("Set Working Directory")) {
+                        // Implement proper directory selection dialog
+                        std::string selectedDirectory = FileBrowser::showDirectorySelectionDialog();
+                        if (!selectedDirectory.empty()) {
+                            // Check if the selected directory has a raw_data subdirectory
+                            std::string rawDataPath = selectedDirectory + "/raw_data";
+                            if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {
+                                currentDirectory = rawDataPath; // Use the raw_data subdirectory
+                                // Update dataset name from parent directory
+                                currentDatasetName = selectedDirectory.substr(selectedDirectory.find_last_of("/\\") + 1);
+                            } else {
+                                currentDirectory = selectedDirectory; // Fallback to selected directory
+                                // Update dataset name from selected directory
+                                currentDatasetName = selectedDirectory.substr(selectedDirectory.find_last_of("/\\") + 1);
+                            }
+                            csvFiles = FileBrowser::getCSVFilesInDirectory(currentDirectory);
+                            dataLoaded = false;
+                            shouldUpdateRecentDatasets = true; // Mark to update recent datasets
+                            isFirstDataLoad = true; // Reset first load flag for new directory
+                            std::cout << "Working directory set to: " << currentDirectory << std::endl;
+                        }
+                    }
+                    
+                    // Recent datasets menu
+                    if (!config.recentDatasets.empty()) {
+                        if (ImGui::BeginMenu("Recent Datasets")) {
+                            for (const auto& datasetPath : config.recentDatasets) {
+                                if (ImGui::MenuItem(datasetPath.c_str())) {
+                                    // Extract just the directory name for display
+                                    size_t last_slash = datasetPath.find_last_of("/\\");
+                                    std::string displayName = (last_slash != std::string::npos) 
+                                        ? datasetPath.substr(last_slash + 1) 
+                                        : datasetPath;
+                                    
+                                    if (std::filesystem::exists(datasetPath) && std::filesystem::is_directory(datasetPath)) {
+                                        // Check if there's a raw_data subdirectory
+                                        std::string rawDataPath = datasetPath + "/raw_data";
+                                        if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {
+                                            currentDirectory = rawDataPath; // Use the raw_data subdirectory
+                                        } else {
+                                            currentDirectory = datasetPath; // Fallback to the dataset directory itself
+                                        }
+                                        
+                                        // Update current dataset name
+                                        currentDatasetName = datasetPath.substr(datasetPath.find_last_of("/\\") + 1);
+                                        
+                                        csvFiles = FileBrowser::getCSVFilesInDirectory(currentDirectory);
+                                        dataLoaded = false;
+                                        filesChanged = true;
+                                        currentSortedFileIndex = 0;
+                                        isFirstDataLoad = true; // Reset first load flag for new directory
+                                        std::cout << "Opened recent dataset: " << datasetPath << std::endl;
+                                    } else {
+                                        std::cerr << "Recent dataset path no longer exists: " << datasetPath << std::endl;
+                                    }
+                                }
+                            }
+                            ImGui::EndMenu();
+                        }
+                    }
+                    
+                    ImGui::EndMenu();
+                }
+                
+                // Settings menu
+                if (ImGui::BeginMenu("Settings"))
+                {
+                    ImGui::MenuItem("Align peaks", NULL, &alignPeaks);
+                    if (ImGui::MenuItem("Autorestore scale", NULL, &autoRestoreScale)) {
+                        // When enabling autorestore scale, trigger autoscale to fit all data
+                        if (autoRestoreScale && dataLoaded) {
+                            shouldAutoscale = true;
+                        }
+                    }
+                    
+                    // Auto-fit Y-axis toggle
+                    if (ImGui::MenuItem("Auto-fit Y-axis", NULL, &autoFitYAxis)) {
+                        // When toggling auto-fit, recalculate limits if enabling auto-fit
+                        if (autoFitYAxis && dataLoaded) {
+                            auto ref_min_max = std::minmax_element(loadedData[0].referenceDetector.begin(), loadedData[0].referenceDetector.end());
+                            auto prim_min_max = std::minmax_element(loadedData[0].primaryDetector.begin(), loadedData[0].primaryDetector.end());
+                            ref_y_min = *ref_min_max.first;
+                            ref_y_max = *ref_min_max.second;
+                            prim_y_min = *prim_min_max.first;
+                            prim_y_max = *prim_min_max.second;
+                        }
+                    }
+                    
+                    // Downsampling toggle
+                    if (ImGui::MenuItem("Enable downsampling", NULL, &enableDownsampling)) {
+                        if (dataLoaded) {
+                            // Reload all selected files with new downsampling setting while preserving selection
+                            std::vector<InterferogramData> reloadedData;
+                            for (const auto& filePath : selectedFiles) {
+                                try {
+                                    InterferogramData data = CSVAdapter::loadFromCSV(filePath);
+                                    
+                                    // Apply downsampling if enabled and dataset is large
+                                    if (enableDownsampling && data.referenceDetector.size() > maxPointsBeforeDownsampling) {
+                                        size_t localDownsampleFactor = data.referenceDetector.size() / maxPointsBeforeDownsampling + 1;
+                                        
+                                        // Downsample both reference and primary detectors
+                                        std::vector<float> downsampledRef, downsampledPrim;
+                                        for (size_t j = 0; j < data.referenceDetector.size(); j += localDownsampleFactor) {
+                                            downsampledRef.push_back(data.referenceDetector[j]);
+                                            downsampledPrim.push_back(data.primaryDetector[j]);
+                                        }
+                                        data.referenceDetector = downsampledRef;
+                                        data.primaryDetector = downsampledPrim;
+                                    }
+                                    
+                                    reloadedData.push_back(data);
+                                } catch (const std::exception& e) {
+                                    std::cerr << "Error reloading file: " << e.what() << std::endl;
+                                }
+                            }
+                            
+                            if (!reloadedData.empty()) {
+                                loadedData = reloadedData;
+                                shouldAutoscale = autoRestoreScale; // Trigger plot update only if autorestore enabled
+                                std::cout << "Reloaded " << loadedData.size() << " datasets with " 
+                                          << (enableDownsampling ? "enabled" : "disabled") << " downsampling" << std::endl;
+                            }
+                        }
+                    }
+                    
+                    // UI Size selection dropdown
+                    if (ImGui::BeginMenu("UI Size"))
+                    {
+                        if (ImGui::MenuItem("tiny", NULL, currentUiSize == "tiny")) {
+                            currentUiSize = "tiny";
+                            uiSizeChanged = true;
+                        }
+                        if (ImGui::MenuItem("small", NULL, currentUiSize == "small")) {
+                            currentUiSize = "small";
+                            uiSizeChanged = true;
+                        }
+                        if (ImGui::MenuItem("normal", NULL, currentUiSize == "normal")) {
+                            currentUiSize = "normal";
+                            uiSizeChanged = true;
+                        }
+                        if (ImGui::MenuItem("large", NULL, currentUiSize == "large")) {
+                            currentUiSize = "large";
+                            uiSizeChanged = true;
+                        }
+                        if (ImGui::MenuItem("huge", NULL, currentUiSize == "huge")) {
+                            currentUiSize = "huge";
+                            uiSizeChanged = true;
+                        }
+                        ImGui::EndMenu();
+                    }
+                    
+                    ImGui::EndMenu();
+                }
+                
+                // Help menu
+                if (ImGui::BeginMenu("Help"))
+                {
+                    ImGui::Text("Keyboard Shortcuts:");
+                    ImGui::Separator();
+                    ImGui::Text("Up/Down Arrows: Navigate files");
+                    ImGui::Text("Ctrl+Click: X-axis range selection");
+                    ImGui::Text("ESC: Reset zoom");
+                    ImGui::Text("Mouse Scroll: Zoom in/out");
+                    ImGui::EndMenu();
+                }
+                
+                ImGui::EndMainMenuBar();
+            }
+            
             // Push style variables for full viewport docking
             ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
             ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
@@ -968,6 +1144,10 @@ int main() {
             
             window_flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
             window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
+            
+            // Adjust window position to account for menu bar
+            ImGui::SetNextWindowPos(ImVec2(viewport->Pos.x, viewport->Pos.y + ImGui::GetFrameHeight()));
+            ImGui::SetNextWindowSize(ImVec2(viewport->Size.x, viewport->Size.y - ImGui::GetFrameHeight()));
             
             // Create main dockspace window
             ImGui::Begin("DockSpace", nullptr, window_flags);
@@ -1642,182 +1822,6 @@ int main() {
         }
         ImGui::PopTextWrapPos(); // Disable text wrapping
         ImGui::End();
-        
-        // Ribbon menu
-        if (ImGui::BeginMainMenuBar())
-        {
-            // File menu
-            if (ImGui::BeginMenu("File"))
-            {
-                if (ImGui::MenuItem("Set Working Directory")) {
-                    // Implement proper directory selection dialog
-                    std::string selectedDirectory = FileBrowser::showDirectorySelectionDialog();
-                    if (!selectedDirectory.empty()) {
-                        // Check if the selected directory has a raw_data subdirectory
-                        std::string rawDataPath = selectedDirectory + "/raw_data";
-                        if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {
-                            currentDirectory = rawDataPath; // Use the raw_data subdirectory
-                            // Update dataset name from parent directory
-                            currentDatasetName = selectedDirectory.substr(selectedDirectory.find_last_of("/\\") + 1);
-                        } else {
-                            currentDirectory = selectedDirectory; // Fallback to selected directory
-                            // Update dataset name from selected directory
-                            currentDatasetName = selectedDirectory.substr(selectedDirectory.find_last_of("/\\") + 1);
-                        }
-                        csvFiles = FileBrowser::getCSVFilesInDirectory(currentDirectory);
-                        dataLoaded = false;
-                        shouldUpdateRecentDatasets = true; // Mark to update recent datasets
-                        isFirstDataLoad = true; // Reset first load flag for new directory
-                        std::cout << "Working directory set to: " << currentDirectory << std::endl;
-                    }
-                }
-                
-                // Recent datasets menu
-                if (!config.recentDatasets.empty()) {
-                    if (ImGui::BeginMenu("Recent Datasets")) {
-                        for (const auto& datasetPath : config.recentDatasets) {
-                            if (ImGui::MenuItem(datasetPath.c_str())) {
-                                // Extract just the directory name for display
-                                size_t last_slash = datasetPath.find_last_of("/\\");
-                                std::string displayName = (last_slash != std::string::npos) 
-                                    ? datasetPath.substr(last_slash + 1) 
-                                    : datasetPath;
-                                
-                                if (std::filesystem::exists(datasetPath) && std::filesystem::is_directory(datasetPath)) {
-                                    // Check if there's a raw_data subdirectory
-                                    std::string rawDataPath = datasetPath + "/raw_data";
-                                    if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {
-                                        currentDirectory = rawDataPath; // Use the raw_data subdirectory
-                                    } else {
-                                        currentDirectory = datasetPath; // Fallback to the dataset directory itself
-                                    }
-                                    
-                                    // Update current dataset name
-                                    currentDatasetName = datasetPath.substr(datasetPath.find_last_of("/\\") + 1);
-                                    
-                                    csvFiles = FileBrowser::getCSVFilesInDirectory(currentDirectory);
-                                    dataLoaded = false;
-                                    filesChanged = true;
-                                    currentSortedFileIndex = 0;
-                                    isFirstDataLoad = true; // Reset first load flag for new directory
-                                    std::cout << "Opened recent dataset: " << datasetPath << std::endl;
-                                } else {
-                                    std::cerr << "Recent dataset path no longer exists: " << datasetPath << std::endl;
-                                }
-                            }
-                        }
-                        ImGui::EndMenu();
-                    }
-                }
-                
-                ImGui::EndMenu();
-            }
-            
-            // Settings menu
-            if (ImGui::BeginMenu("Settings"))
-            {
-                ImGui::MenuItem("Align peaks", NULL, &alignPeaks);
-                if (ImGui::MenuItem("Autorestore scale", NULL, &autoRestoreScale)) {
-                    // When enabling autorestore scale, trigger autoscale to fit all data
-                    if (autoRestoreScale && dataLoaded) {
-                        shouldAutoscale = true;
-                    }
-                }
-                
-                // Auto-fit Y-axis toggle
-                if (ImGui::MenuItem("Auto-fit Y-axis", NULL, &autoFitYAxis)) {
-                    // When toggling auto-fit, recalculate limits if enabling auto-fit
-                    if (autoFitYAxis && dataLoaded) {
-                        auto ref_min_max = std::minmax_element(loadedData[0].referenceDetector.begin(), loadedData[0].referenceDetector.end());
-                        auto prim_min_max = std::minmax_element(loadedData[0].primaryDetector.begin(), loadedData[0].primaryDetector.end());
-                        ref_y_min = *ref_min_max.first;
-                        ref_y_max = *ref_min_max.second;
-                        prim_y_min = *prim_min_max.first;
-                        prim_y_max = *prim_min_max.second;
-                    }
-                }
-                
-                // Downsampling toggle
-                if (ImGui::MenuItem("Enable downsampling", NULL, &enableDownsampling)) {
-                    if (dataLoaded) {
-                        // Reload all selected files with new downsampling setting while preserving selection
-                        std::vector<InterferogramData> reloadedData;
-                        for (const auto& filePath : selectedFiles) {
-                            try {
-                                InterferogramData data = CSVAdapter::loadFromCSV(filePath);
-                                
-                                // Apply downsampling if enabled and dataset is large
-                                if (enableDownsampling && data.referenceDetector.size() > maxPointsBeforeDownsampling) {
-                                    size_t localDownsampleFactor = data.referenceDetector.size() / maxPointsBeforeDownsampling + 1;
-                                    
-                                    // Downsample both reference and primary detectors
-                                    std::vector<float> downsampledRef, downsampledPrim;
-                                    for (size_t j = 0; j < data.referenceDetector.size(); j += localDownsampleFactor) {
-                                        downsampledRef.push_back(data.referenceDetector[j]);
-                                        downsampledPrim.push_back(data.primaryDetector[j]);
-                                    }
-                                    data.referenceDetector = downsampledRef;
-                                    data.primaryDetector = downsampledPrim;
-                                }
-                                
-                                reloadedData.push_back(data);
-                            } catch (const std::exception& e) {
-                                std::cerr << "Error reloading file: " << e.what() << std::endl;
-                            }
-                        }
-                        
-                        if (!reloadedData.empty()) {
-                            loadedData = reloadedData;
-                            shouldAutoscale = autoRestoreScale; // Trigger plot update only if autorestore enabled
-                            std::cout << "Reloaded " << loadedData.size() << " datasets with " 
-                                      << (enableDownsampling ? "enabled" : "disabled") << " downsampling" << std::endl;
-                        }
-                    }
-                }
-                
-                // UI Size selection dropdown
-                if (ImGui::BeginMenu("UI Size"))
-                {
-                    if (ImGui::MenuItem("tiny", NULL, currentUiSize == "tiny")) {
-                        currentUiSize = "tiny";
-                        uiSizeChanged = true;
-                    }
-                    if (ImGui::MenuItem("small", NULL, currentUiSize == "small")) {
-                        currentUiSize = "small";
-                        uiSizeChanged = true;
-                    }
-                    if (ImGui::MenuItem("normal", NULL, currentUiSize == "normal")) {
-                        currentUiSize = "normal";
-                        uiSizeChanged = true;
-                    }
-                    if (ImGui::MenuItem("large", NULL, currentUiSize == "large")) {
-                        currentUiSize = "large";
-                        uiSizeChanged = true;
-                    }
-                    if (ImGui::MenuItem("huge", NULL, currentUiSize == "huge")) {
-                        currentUiSize = "huge";
-                        uiSizeChanged = true;
-                    }
-                    ImGui::EndMenu();
-                }
-                
-                ImGui::EndMenu();
-            }
-            
-            // Help menu
-            if (ImGui::BeginMenu("Help"))
-            {
-                ImGui::Text("Keyboard Shortcuts:");
-                ImGui::Separator();
-                ImGui::Text("Up/Down Arrows: Navigate files");
-                ImGui::Text("Ctrl+Click: X-axis range selection");
-                ImGui::Text("ESC: Reset zoom");
-                ImGui::Text("Mouse Scroll: Zoom in/out");
-                ImGui::EndMenu();
-            }
-            
-            ImGui::EndMainMenuBar();
-        }
         
 
 
