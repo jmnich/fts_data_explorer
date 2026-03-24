@@ -592,6 +592,10 @@ int main() {
     bool alignPeaks = config.alignPeaks; // Use config setting for peak alignment
     bool autoRestoreScale = config.autoRestoreScale; // Use config setting for scale restoration
     
+    // Keyboard shortcut state tracking
+    bool yKeyPressedLastFrame = false;
+    bool aKeyPressedLastFrame = false;
+    
     // Performance optimization: downsampling for large datasets
     bool enableDownsampling = true;
     const size_t maxPointsBeforeDownsampling = 50000; // Downsample if dataset exceeds this
@@ -636,6 +640,38 @@ int main() {
         glfwPollEvents();
         multiSelectMode = ImGui::GetIO().KeyCtrl;
         shiftSelectMode = ImGui::GetIO().KeyShift;
+        
+        // Handle keyboard shortcuts - only trigger once per key press
+        if (!ImGui::GetIO().WantCaptureKeyboard) {
+            bool yKeyPressed = glfwGetKey(window, GLFW_KEY_Y) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
+            bool aKeyPressed = glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
+            
+            // 'Ctrl+Y' - Toggle auto-fit Y-axis (only on initial press)
+            if (yKeyPressed && !yKeyPressedLastFrame) {
+                autoFitYAxis = !autoFitYAxis;
+                if (autoFitYAxis && dataLoaded) {
+                    auto ref_min_max = std::minmax_element(loadedData[0].referenceDetector.begin(), loadedData[0].referenceDetector.end());
+                    auto prim_min_max = std::minmax_element(loadedData[0].primaryDetector.begin(), loadedData[0].primaryDetector.end());
+                    ref_y_min = *ref_min_max.first;
+                    ref_y_max = *ref_min_max.second;
+                    prim_y_min = *prim_min_max.first;
+                    prim_y_max = *prim_min_max.second;
+                }
+            }
+            
+            // 'Ctrl+A' - Toggle align peaks (only on initial press)
+            if (aKeyPressed && !aKeyPressedLastFrame) {
+                alignPeaks = !alignPeaks;
+            }
+            
+            // Update key state tracking for next frame
+            yKeyPressedLastFrame = yKeyPressed;
+            aKeyPressedLastFrame = aKeyPressed;
+        } else {
+            // Reset key states when keyboard is captured (e.g., typing in text field)
+            yKeyPressedLastFrame = false;
+            aKeyPressedLastFrame = false;
+        }
         
         // Reapply UI scaling if size changed
         handleUIScaling(io, uiScale, currentUiSize, uiSizeChanged);
@@ -1127,6 +1163,9 @@ int main() {
                     ImGui::Text("Ctrl+Click: X-axis range selection");
                     ImGui::Text("ESC: Reset zoom");
                     ImGui::Text("Mouse Scroll: Zoom in/out");
+                    ImGui::Text("Ctrl+Y: Toggle auto-fit Y-axis");
+                    ImGui::Text("Ctrl+A: Toggle align peaks");
+                    ImGui::Text("Ctrl+H: Show/hide this help menu");
                     ImGui::EndMenu();
                 }
                 
