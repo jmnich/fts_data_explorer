@@ -448,9 +448,9 @@ void handleUIScaling(ImGuiIO& io, float& uiScale, const std::string& currentUiSi
         } else if (currentUiSize == "normal") {
             uiScale = 1.0f;
         } else if (currentUiSize == "large") {
-            uiScale = 1.25f;
+            uiScale = 1.35f;
         } else if (currentUiSize == "huge") {
-            uiScale = 1.5f;
+            uiScale = 1.65f;
         }
         
         // Reapply scaling (font only to avoid UI issues)
@@ -556,9 +556,9 @@ int main() {
     } else if (currentUiSize == "normal") {
         uiScale = 1.0f;
     } else if (currentUiSize == "large") {
-        uiScale = 1.25f;
+        uiScale = 1.35f;
     } else if (currentUiSize == "huge") {
-        uiScale = 1.5f;
+        uiScale = 1.65f;
     }
     
     // Apply the scaling (font only initially to avoid UI issues)
@@ -595,6 +595,7 @@ int main() {
     // Keyboard shortcut state tracking
     bool yKeyPressedLastFrame = false;
     bool aKeyPressedLastFrame = false;
+    bool dKeyPressedLastFrame = false;
     
     // Performance optimization: downsampling for large datasets
     bool enableDownsampling = true;
@@ -645,6 +646,7 @@ int main() {
         if (!ImGui::GetIO().WantCaptureKeyboard) {
             bool yKeyPressed = glfwGetKey(window, GLFW_KEY_Y) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
             bool aKeyPressed = glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
+            bool dKeyPressed = glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
             
             // 'Ctrl+Y' - Toggle auto-fit Y-axis (only on initial press)
             if (yKeyPressed && !yKeyPressedLastFrame) {
@@ -664,9 +666,49 @@ int main() {
                 alignPeaks = !alignPeaks;
             }
             
+            // 'Ctrl+D' - Toggle downsampling (only on initial press)
+            if (dKeyPressed && !dKeyPressedLastFrame) {
+                enableDownsampling = !enableDownsampling;
+                if (dataLoaded) {
+                    // Reload all selected files with new downsampling setting while preserving selection
+                    std::vector<InterferogramData> reloadedData;
+                    for (const auto& filePath : selectedFiles) {
+                        try {
+                            InterferogramData data = CSVAdapter::loadFromCSV(filePath);
+                            
+                            // Apply downsampling if enabled and dataset is large
+                            if (enableDownsampling && data.referenceDetector.size() > maxPointsBeforeDownsampling) {
+                                size_t localDownsampleFactor = data.referenceDetector.size() / maxPointsBeforeDownsampling + 1;
+                                
+                                // Downsample both reference and primary detectors
+                                std::vector<float> downsampledRef, downsampledPrim;
+                                for (size_t j = 0; j < data.referenceDetector.size(); j += localDownsampleFactor) {
+                                    downsampledRef.push_back(data.referenceDetector[j]);
+                                    downsampledPrim.push_back(data.primaryDetector[j]);
+                                }
+                                data.referenceDetector = downsampledRef;
+                                data.primaryDetector = downsampledPrim;
+                            }
+                            
+                            reloadedData.push_back(data);
+                        } catch (const std::exception& e) {
+                            std::cerr << "Error reloading file: " << e.what() << std::endl;
+                        }
+                    }
+                    
+                    if (!reloadedData.empty()) {
+                        loadedData = reloadedData;
+                        shouldAutoscale = autoRestoreScale; // Trigger plot update only if autorestore enabled
+                        std::cout << "Reloaded " << loadedData.size() << " datasets with " 
+                                  << (enableDownsampling ? "enabled" : "disabled") << " downsampling" << std::endl;
+                    }
+                }
+            }
+            
             // Update key state tracking for next frame
             yKeyPressedLastFrame = yKeyPressed;
             aKeyPressedLastFrame = aKeyPressed;
+            dKeyPressedLastFrame = dKeyPressed;
         } else {
             // Reset key states when keyboard is captured (e.g., typing in text field)
             yKeyPressedLastFrame = false;
@@ -1165,6 +1207,7 @@ int main() {
                     ImGui::Text("Mouse Scroll: Zoom in/out");
                     ImGui::Text("Ctrl+Y: Toggle auto-fit Y-axis");
                     ImGui::Text("Ctrl+A: Toggle align peaks");
+                    ImGui::Text("Ctrl+D: Toggle downsampling");
                     ImGui::Text("Ctrl+H: Go back to home");
                     ImGui::EndMenu();
                 }
