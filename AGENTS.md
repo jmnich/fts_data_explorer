@@ -28,7 +28,7 @@ It presents a tree view of information available in the dataset and then allows 
 - Detailed description of axis ranging in data plots:
     - when application is launched, 'auto fit y axis' option must be enabled. This enables/disables the native "Auto-Fit" option from implot.
     - when application is launched, 'autorestore scale' option loads the last used value from config. The effect of this option is described below.
-    - feature: select range to zoom - with mouse hovering over plot area, when user presses ctrl button, a selection of x-axis range begins, and when ctrl is released the selection is finalized. During selection, the range is indicated by two vertical cursors with area between them painted in translucent purple. When ctrl is released, the range of displayed x-axis values is set to the selected range.
+    - feature: select range to zoom - with mouse hovering over plot area, when user presses shift button, a selection of x-axis range begins, and when shift is released the selection is finalized. During selection, the range is indicated by two vertical cursors with area between them painted in translucent purple. When shift is released, the range of displayed x-axis values is set to the selected range.
     - feature: pressing 'esc' button resets zoom to fit all data. This feature is always active when any data is displayed.
     - feature: when user selects additional data files to display, the current range of axes is preseved. 
     - feature: when user switches between data files using mouse click or up/down arrows, axis ranging depends on option "autorestore scale". If enabled then autoscale to fit all data, if disabled then preserve the range of XY axes used for previous file.

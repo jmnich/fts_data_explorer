@@ -1160,12 +1160,12 @@ int main() {
                     ImGui::Text("Keyboard Shortcuts:");
                     ImGui::Separator();
                     ImGui::Text("Up/Down Arrows: Navigate files");
-                    ImGui::Text("Ctrl+Click: X-axis range selection");
+                    ImGui::Text("Shift+Click: X-axis range selection");
                     ImGui::Text("ESC: Reset zoom");
                     ImGui::Text("Mouse Scroll: Zoom in/out");
                     ImGui::Text("Ctrl+Y: Toggle auto-fit Y-axis");
                     ImGui::Text("Ctrl+A: Toggle align peaks");
-                    ImGui::Text("Ctrl+H: Show/hide this help menu");
+                    ImGui::Text("Ctrl+H: Go back to home");
                     ImGui::EndMenu();
                 }
                 
@@ -1579,17 +1579,17 @@ int main() {
             bool isOverPlot = ImGui::IsWindowHovered();
             isMouseOverPlot = isOverPlot;
 
-            // Handle X-range selection with Ctrl key - state management only
-            bool ctrlPressed = ImGui::GetIO().KeyCtrl;
-            if (isOverPlot && ctrlPressed && !isSelectingXRange) {
-                // Start selection when Ctrl is pressed over plot
+            // Handle X-range selection with Shift key - state management only
+            bool shiftPressed = ImGui::GetIO().KeyShift;
+            if (isOverPlot && shiftPressed && !isSelectingXRange) {
+                // Start selection when Shift is pressed over plot
                 isSelectingXRange = true;
                 // Reset selection positions
                 selectionStartX = 0.0;
                 selectionEndX = 0.0;
                 std::cout << "DEBUG: Started X-range selection" << std::endl;
-            } else if (!ctrlPressed && isSelectingXRange) {
-                // End selection when Ctrl is released
+            } else if (!shiftPressed && isSelectingXRange) {
+                // End selection when Shift is released
                 isSelectingXRange = false;
                 
                 // Only finalize if we have valid selection
