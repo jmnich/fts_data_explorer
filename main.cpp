@@ -1,4 +1,5 @@
 #include <iostream>
+#include <ostream>
 #include <vector>
 #include <string>
 #include <filesystem>
@@ -625,7 +626,6 @@ int main() {
     ImVec2 zoomStart;
     ImVec2 zoomEnd;
     std::pair<size_t, size_t> zoomRange = {0, 0};
-    bool isZoomed = false;
     bool shouldAutoscale = false; // Flag to trigger autoscale on new data load
     bool forceXAutofit = false; // Flag to force X-axis autofit (used for downsampling toggle)
     
@@ -725,7 +725,6 @@ int main() {
                     if (!reloadedData.empty()) {
                         loadedData = reloadedData;
                         // Force X-axis to show all data when downsampling is toggled (same behavior as menu)
-                        isZoomed = false;
                         zoomRange = {0, 0};
                         shouldAutoscale = true;
                         forceXAutofit = true; // Set global flag to force X-axis autofit
@@ -744,7 +743,7 @@ int main() {
             yKeyPressedLastFrame = false;
             aKeyPressedLastFrame = false;
         }
-        
+
         // Reapply UI scaling if size changed
         handleUIScaling(io, uiScale, currentUiSize, uiSizeChanged);
         
@@ -781,7 +780,6 @@ int main() {
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) && dataLoaded) {
             if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
                 // Reset X-axis zoom when ESC is pressed
-                isZoomed = false;
                 zoomRange = {0, 0};
                 shouldAutoscale = true; // Always force redraw with full range when ESC is pressed
             }
@@ -859,7 +857,6 @@ int main() {
                 // Handle autoscale behavior based on AGENTS.md requirements:
                 // "when the application loads a file for display for the first time after launch or work directory switch, axes zoom to fit all data."
                 if (isFirstDataLoad || autoRestoreScale) {
-                    isZoomed = false;
                     zoomRange = {0, 0};
                     shouldAutoscale = true; // Trigger autoscale
                     
@@ -1205,7 +1202,6 @@ int main() {
                             if (!reloadedData.empty()) {
                                 loadedData = reloadedData;
                                 // Force X-axis to show all data when downsampling is toggled
-                                isZoomed = false;
                                 zoomRange = {0, 0};
                                 // Set flag to force autofit on next render
                                 shouldAutoscale = true;
@@ -1494,57 +1490,36 @@ int main() {
             // When autoFitYAxis is true, ImPlot will auto-calculate Y-axis limits
             // When autoFitYAxis is false, we use the manually calculated limits
             
-            // Handle mouse scroll zoom
-            float scroll = ImGui::GetIO().MouseWheel;
-            if (scroll != 0.0f && ImGui::IsWindowHovered()) {
-                // Get mouse position relative to plot area
-                ImVec2 mousePos = ImGui::GetMousePos();
-                ImVec2 plotMin = ImGui::GetItemRectMin();
-                ImVec2 plotMax = ImGui::GetItemRectMax();
-                
-                if (mousePos.x >= plotMin.x && mousePos.x <= plotMax.x && 
-                    mousePos.y >= plotMin.y && mousePos.y <= plotMax.y) {
-                    
-                    // Calculate zoom factor based on scroll direction
-                    float zoomFactor = scroll > 0 ? 0.8f : 1.25f; // Scroll up = zoom in, scroll down = zoom out
-                    
-                    // Get current visible range
-                    size_t current_start = isZoomed ? zoomRange.first : 0;
-                    size_t current_end = isZoomed ? zoomRange.second : loadedData[0].referenceDetector.size();
-                    size_t current_width = current_end - current_start;
-                    
-                    // Calculate new zoom range centered on mouse position
-                    size_t new_width = static_cast<size_t>(current_width * zoomFactor);
-                    size_t mouse_data_pos = static_cast<size_t>(((mousePos.x - plotMin.x) / (plotMax.x - plotMin.x)) * loadedData[0].referenceDetector.size());
-                    
-                    // Apply zoom with constraints
-                    size_t new_start = mouse_data_pos - new_width / 2;
-                    size_t new_end = mouse_data_pos + new_width / 2;
-                    
-                    // Clamp to valid range
-                    size_t data_size = loadedData[0].referenceDetector.size();
-                    new_start = std::max(size_t(0), new_start);
-                    new_end = std::min(data_size, new_end);
-                    new_end = std::max(new_start + 1, new_end);
-                    
-                    // Apply the zoom
-                    zoomRange.first = new_start;
-                    zoomRange.second = new_end;
-                    isZoomed = true;
-                    shouldAutoscale = false;
-                    
-                    std::cout << "Scroll zoom: " << zoomRange.first << "-" << zoomRange.second 
-                              << " (center: " << mouse_data_pos << ", width: " << new_width << ")" << std::endl;
-                }
-            }
+            // WIP arrows 
+            static bool leftArrowPressedLastFrame = false;
+            static bool rightArrowPressedLastFrame = false;
+
+            // 'Left Arrow' - Pan left by 10% of current visible range
+            if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS && !leftArrowPressedLastFrame) {
+
+                leftArrowPressedLastFrame = true;
+
+                // Calculate current visible range (use full range if not zoomed)
+                // double visible_range = isZoomed ? (zoomRange.second - zoomRange.first) : loadedData[0].referenceDetector.size();
+                // double pan_amount = visible_range * 0.1;
+
+                // std::cout << "Range: " << visible_range << "\tPanning left by " << pan_amount << " samples" << std::endl;
+
+                // std::cout << "Zoomed: " << isZoomed << "\tZoom range: " << zoomRange.first << " to " << zoomRange.second << std::endl;
             
 
+            }
+            else if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_RELEASE) {
+                leftArrowPressedLastFrame = false;
+            }
+
+            // WIP arrows
             
             // Determine zoom range
-            size_t ref_start = isZoomed ? zoomRange.first : 0;
-            size_t ref_end = isZoomed ? zoomRange.second : loadedData[0].referenceDetector.size();
-            size_t prim_start = isZoomed ? zoomRange.first : 0;
-            size_t prim_end = isZoomed ? zoomRange.second : loadedData[0].primaryDetector.size();
+            size_t ref_start =  0;
+            size_t ref_end =  loadedData[0].referenceDetector.size();
+            size_t prim_start =  0;
+            size_t prim_end =  loadedData[0].primaryDetector.size();
             // Apply peak alignment if enabled
             std::vector<InterferogramData> alignedData = loadedData;
             if (alignPeaks && loadedData.size() > 1) {
@@ -1728,16 +1703,7 @@ int main() {
                         // Optimize by reducing grid line rendering overhead for large datasets
                     }
 
-                    if (isZoomed) {
-                        // Only zoom X-axis (Y-axis is handled by auto-fit flag)
-                        if (!autoFitYAxis) {
-                            // Manual Y-axis: set both X and Y limits
-                            ImPlot::SetupAxesLimits(ref_start, ref_end, ref_y_min, ref_y_max, ImPlotCond_Always);
-                        } else {
-                            // Auto-fit Y-axis: only set X-axis limits for zoom
-                            ImPlot::SetupAxisLimits(ImAxis_X1, ref_start, ref_end, ImPlotCond_Always);
-                        }
-                    } else if (shouldAutoscale || forceXAutofit) {
+                    if (shouldAutoscale || forceXAutofit) {
                         // Set initial view to show all data when new data is loaded or when downsampling is toggled
                         if (!autoFitYAxis) {
                             // Manual Y-axis: set both X and Y limits
@@ -1843,16 +1809,7 @@ int main() {
                         // Optimize by reducing grid line rendering overhead for large datasets
                     }
 
-                    if (isZoomed) {
-                        // Only zoom X-axis (Y-axis is handled by auto-fit flag)
-                        if (!autoFitYAxis) {
-                            // Manual Y-axis: set both X and Y limits
-                            ImPlot::SetupAxesLimits(ref_start, ref_end, prim_y_min, prim_y_max, ImPlotCond_Always);
-                        } else {
-                            // Auto-fit Y-axis: only set X-axis limits for zoom
-                            ImPlot::SetupAxisLimits(ImAxis_X1, ref_start, ref_end, ImPlotCond_Always);
-                        }
-                    } else if (shouldAutoscale || forceXAutofit) {
+                    if (shouldAutoscale || forceXAutofit) {
                         // Set initial view to show all data when new data is loaded or when downsampling is toggled
                         if (!autoFitYAxis) {
                             // Manual Y-axis: set both X and Y limits
