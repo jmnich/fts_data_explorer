@@ -1928,6 +1928,14 @@ int main() {
                         ImPlot::PlotLine("##SelectionEnd", end_x, end_y, 2);
                     }
                     
+                    // Add "LARGE DATA" indicator for large datasets (>50k points)
+                    if (dataLoaded && loadedData[0].primaryDetector.size() > 50000) {
+                        // Use ImPlot's annotation system for reliable positioning
+                        // Position at top-right of plot with small offset
+                        ImPlot::Annotation(ImPlot::GetPlotLimits().X.Max, ImPlot::GetPlotLimits().Y.Max, 
+                                         ImVec4(1.0f, 1.0f, 1.0f, 1.0f), ImVec2(-10, 10), true, "LARGE DATA");
+                    }
+                    
                     ImPlot::EndPlot();
                     if (dataLoaded && loadedData[0].primaryDetector.size() > 50000) {
                         ImPlot::PopStyleColor(); // Pop grid color only if we pushed it
