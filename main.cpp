@@ -647,6 +647,15 @@ int main() {
     float prim_y_min = 0.0f, prim_y_max = 1.0f;
     bool autoFitYAxis = true; // Always default to enabled, don't use config
     
+    // last x axis limits
+    double last_x_min = 0, last_x_max = 0;
+
+    // handling arrow presses
+    bool leftArrowPressedLastFrame = false;
+    bool rightArrowPressedLastFrame = false;
+    bool leftArrowHandleFlag = false;
+    bool rightArrowHandleFlag = false;
+
     // Track if we should update recent datasets (only after successful load)
     bool shouldUpdateRecentDatasets = false;
     
@@ -795,7 +804,28 @@ int main() {
             dataLoaded = false;
             filesChanged = false;
         }
-        
+
+        // 'Left/Right Arrow' - Pan left by 10% of current visible range
+        if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS && !leftArrowPressedLastFrame) {
+
+            leftArrowPressedLastFrame = true;
+            leftArrowHandleFlag = true;
+        }
+        else if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_RELEASE) {
+            leftArrowPressedLastFrame = false;
+            leftArrowHandleFlag = false;
+        }
+
+        if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS && !rightArrowPressedLastFrame) {
+
+            rightArrowPressedLastFrame = true;
+            rightArrowHandleFlag = true;
+        }
+        else if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_RELEASE) {
+            rightArrowPressedLastFrame = false;
+            rightArrowHandleFlag = false;
+        }
+
         // Load file if navigation changed
         if (filesChanged && !csvFiles.empty()) {
             try {
@@ -1490,31 +1520,6 @@ int main() {
             // When autoFitYAxis is true, ImPlot will auto-calculate Y-axis limits
             // When autoFitYAxis is false, we use the manually calculated limits
             
-            // WIP arrows 
-            static bool leftArrowPressedLastFrame = false;
-            static bool rightArrowPressedLastFrame = false;
-
-            // 'Left Arrow' - Pan left by 10% of current visible range
-            if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS && !leftArrowPressedLastFrame) {
-
-                leftArrowPressedLastFrame = true;
-
-                // Calculate current visible range (use full range if not zoomed)
-                // double visible_range = isZoomed ? (zoomRange.second - zoomRange.first) : loadedData[0].referenceDetector.size();
-                // double pan_amount = visible_range * 0.1;
-
-                // std::cout << "Range: " << visible_range << "\tPanning left by " << pan_amount << " samples" << std::endl;
-
-                // std::cout << "Zoomed: " << isZoomed << "\tZoom range: " << zoomRange.first << " to " << zoomRange.second << std::endl;
-            
-
-            }
-            else if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_RELEASE) {
-                leftArrowPressedLastFrame = false;
-            }
-
-            // WIP arrows
-            
             // Determine zoom range
             size_t ref_start =  0;
             size_t ref_end =  loadedData[0].referenceDetector.size();
@@ -1683,7 +1688,7 @@ int main() {
 
             
             if (ImPlot::BeginSubplots("Detector Plots", 2, 1, ImVec2(-1, -1), ImPlotSubplotFlags_NoTitle | ImPlotSubplotFlags_LinkAllX | ImPlotSubplotFlags_NoLegend, row_ratios)) {
-                
+
                 // Reference detector plot (top)
                 ImPlotFlags ref_flags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend;
                 if (dataLoaded && loadedData[0].referenceDetector.size() > 50000) {
@@ -1789,12 +1794,15 @@ int main() {
                         ImPlot::PopStyleColor(); // Pop grid color only if we pushed it
                     }
                 }
+
+                
                 
                 // Primary detector plot (bottom)
                 ImPlotFlags prim_flags = ImPlotFlags_NoTitle;
                 if (dataLoaded && loadedData[0].primaryDetector.size() > 50000) {
                     prim_flags |= ImPlotFlags_NoInputs; // Only disable inputs for large datasets
                 }
+
                 // Never show crosshairs
                 if (ImPlot::BeginPlot("Primary", ImVec2(-1, -1), prim_flags)) {
                     // Set up axes with auto-fit flag for Y-axis when enabled
@@ -1802,11 +1810,24 @@ int main() {
                     if (autoFitYAxis) {
                         y_flags |= ImPlotAxisFlags_AutoFit;
                     }
+
+
                     ImPlot::SetupAxes("Sample", "Voltage [V]", ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks, y_flags);
+
                     // Conditionally optimize grid rendering for large datasets
                     if (dataLoaded && loadedData[0].primaryDetector.size() > 50000) {
                         ImPlot::PushStyleColor(ImPlotCol_AxisGrid, ImVec4(0.3f, 0.3f, 0.3f, 0.5f));
                         // Optimize by reducing grid line rendering overhead for large datasets
+                    }
+
+                    if(leftArrowHandleFlag) {
+                        float translationAmount = (last_x_max - last_x_min) / 10;
+                        ImPlot::SetupAxisLimits(ImAxis_X1, last_x_min + translationAmount, last_x_max + translationAmount, ImPlotCond_Always);
+                        leftArrowHandleFlag = false;
+                    } else if(rightArrowHandleFlag) {
+                        float translationAmount = (last_x_max - last_x_min) / 10;
+                        ImPlot::SetupAxisLimits(ImAxis_X1, last_x_min - translationAmount, last_x_max - translationAmount, ImPlotCond_Always);
+                        rightArrowHandleFlag = false;
                     }
 
                     if (shouldAutoscale || forceXAutofit) {
@@ -1893,6 +1914,9 @@ int main() {
                                          ImVec4(1.0f, 1.0f, 1.0f, 1.0f), ImVec2(-10, 10), true, "LARGE DATA");
                     }
                     
+                    last_x_max = ImPlot::GetPlotLimits().X.Max;
+                    last_x_min = ImPlot::GetPlotLimits().X.Min;
+
                     ImPlot::EndPlot();
                     if (dataLoaded && loadedData[0].primaryDetector.size() > 50000) {
                         ImPlot::PopStyleColor(); // Pop grid color only if we pushed it
