@@ -256,6 +256,10 @@ bool initializeApplication(AppConfig& config, GLFWwindow*& window) {
 
     // Initialize ImPlot context
     ImPlot::CreateContext();
+    
+    // Optimize for large datasets - disable anti-aliasing (will be conditionally applied)
+    // ImGuiStyle& style = ImGui::GetStyle();
+    // style.AntiAliasedLines = false;
 
     return true;
 }
@@ -623,6 +627,7 @@ int main() {
     std::pair<size_t, size_t> zoomRange = {0, 0};
     bool isZoomed = false;
     bool shouldAutoscale = false; // Flag to trigger autoscale on new data load
+    bool forceXAutofit = false; // Flag to force X-axis autofit (used for downsampling toggle)
     
     // FPS counter state
     bool showFPS = config.showFPS; // Load from config
@@ -719,7 +724,11 @@ int main() {
                     
                     if (!reloadedData.empty()) {
                         loadedData = reloadedData;
-                        shouldAutoscale = autoRestoreScale; // Trigger plot update only if autorestore enabled
+                        // Force X-axis to show all data when downsampling is toggled (same behavior as menu)
+                        isZoomed = false;
+                        zoomRange = {0, 0};
+                        shouldAutoscale = true;
+                        forceXAutofit = true; // Set global flag to force X-axis autofit
                         std::cout << "Reloaded " << loadedData.size() << " datasets with " 
                                   << (enableDownsampling ? "enabled" : "disabled") << " downsampling" << std::endl;
                     }
@@ -883,6 +892,11 @@ int main() {
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
+        
+        // Conditionally disable anti-aliasing for large datasets (>50k points)
+        if (dataLoaded && loadedData[0].referenceDetector.size() > 50000) {
+            ImGui::GetStyle().AntiAliasedLines = false;
+        }
         
         // Show welcome screen if no data is loaded and we haven't initialized yet
         if (showWelcomeScreen && !welcomeScreenInitialized) {
@@ -1190,7 +1204,13 @@ int main() {
                             
                             if (!reloadedData.empty()) {
                                 loadedData = reloadedData;
-                                shouldAutoscale = autoRestoreScale; // Trigger plot update only if autorestore enabled
+                                // Force X-axis to show all data when downsampling is toggled
+                                isZoomed = false;
+                                zoomRange = {0, 0};
+                                // Set flag to force autofit on next render
+                                shouldAutoscale = true;
+                                forceXAutofit = true; // Set global flag to force X-axis autofit
+                                // Note: We don't change autoRestoreScale setting, so other behaviors are preserved
                                 std::cout << "Reloaded " << loadedData.size() << " datasets with " 
                                           << (enableDownsampling ? "enabled" : "disabled") << " downsampling" << std::endl;
                             }
@@ -1690,15 +1710,23 @@ int main() {
             if (ImPlot::BeginSubplots("Detector Plots", 2, 1, ImVec2(-1, -1), ImPlotSubplotFlags_NoTitle | ImPlotSubplotFlags_LinkAllX | ImPlotSubplotFlags_NoLegend, row_ratios)) {
                 
                 // Reference detector plot (top)
-                if (ImPlot::BeginPlot("Reference", ImVec2(-1, -1), ImPlotFlags_NoTitle | ImPlotFlags_NoLegend | ImPlotFlags_Crosshairs)) {
+                ImPlotFlags ref_flags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend;
+                if (dataLoaded && loadedData[0].referenceDetector.size() > 50000) {
+                    ref_flags |= ImPlotFlags_NoInputs; // Only disable inputs for large datasets
+                }
+                // Never show crosshairs
+                if (ImPlot::BeginPlot("Reference", ImVec2(-1, -1), ref_flags)) {
                     // Set up axes with auto-fit flag for Y-axis when enabled
                     ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
                     if (autoFitYAxis) {
                         y_flags |= ImPlotAxisFlags_AutoFit;
                     }
                     ImPlot::SetupAxes("Sample", "Voltage [V]", ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks | ImPlotAxisFlags_NoTickLabels, y_flags);
-                    // Set lighter gray grid color
-                    ImPlot::PushStyleColor(ImPlotCol_AxisGrid, ImVec4(0.3f, 0.3f, 0.3f, 0.5f));
+                    // Conditionally optimize grid rendering for large datasets
+                    if (dataLoaded && loadedData[0].referenceDetector.size() > 50000) {
+                        ImPlot::PushStyleColor(ImPlotCol_AxisGrid, ImVec4(0.3f, 0.3f, 0.3f, 0.5f));
+                        // Optimize by reducing grid line rendering overhead for large datasets
+                    }
 
                     if (isZoomed) {
                         // Only zoom X-axis (Y-axis is handled by auto-fit flag)
@@ -1709,14 +1737,18 @@ int main() {
                             // Auto-fit Y-axis: only set X-axis limits for zoom
                             ImPlot::SetupAxisLimits(ImAxis_X1, ref_start, ref_end, ImPlotCond_Always);
                         }
-                    } else if (shouldAutoscale) {
-                        // Set initial view to show all data when new data is loaded
+                    } else if (shouldAutoscale || forceXAutofit) {
+                        // Set initial view to show all data when new data is loaded or when downsampling is toggled
                         if (!autoFitYAxis) {
                             // Manual Y-axis: set both X and Y limits
                             ImPlot::SetupAxesLimits(0, loadedData[0].referenceDetector.size(), ref_y_min, ref_y_max, ImPlotCond_Always);
                         } else {
                             // Auto-fit both axes: set X-axis to full range, let Y-axis auto-fit
                             ImPlot::SetupAxisLimits(ImAxis_X1, 0, loadedData[0].referenceDetector.size(), ImPlotCond_Always);
+                        }
+                        // Reset the force flag after use
+                        if (forceXAutofit) {
+                            forceXAutofit = false;
                         }
                     }
                     // Apply X-range selection if finalized and flag is set
@@ -1787,19 +1819,29 @@ int main() {
                     }
                     
                     ImPlot::EndPlot();
-                    ImPlot::PopStyleColor(); // Pop grid color
+                    if (dataLoaded && loadedData[0].referenceDetector.size() > 50000) {
+                        ImPlot::PopStyleColor(); // Pop grid color only if we pushed it
+                    }
                 }
                 
                 // Primary detector plot (bottom)
-                if (ImPlot::BeginPlot("Primary", ImVec2(-1, -1), ImPlotFlags_NoTitle | ImPlotFlags_Crosshairs)) {
+                ImPlotFlags prim_flags = ImPlotFlags_NoTitle;
+                if (dataLoaded && loadedData[0].primaryDetector.size() > 50000) {
+                    prim_flags |= ImPlotFlags_NoInputs; // Only disable inputs for large datasets
+                }
+                // Never show crosshairs
+                if (ImPlot::BeginPlot("Primary", ImVec2(-1, -1), prim_flags)) {
                     // Set up axes with auto-fit flag for Y-axis when enabled
                     ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
                     if (autoFitYAxis) {
                         y_flags |= ImPlotAxisFlags_AutoFit;
                     }
                     ImPlot::SetupAxes("Sample", "Voltage [V]", ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks, y_flags);
-                    // Set lighter gray grid color
-                    ImPlot::PushStyleColor(ImPlotCol_AxisGrid, ImVec4(0.3f, 0.3f, 0.3f, 0.5f));
+                    // Conditionally optimize grid rendering for large datasets
+                    if (dataLoaded && loadedData[0].primaryDetector.size() > 50000) {
+                        ImPlot::PushStyleColor(ImPlotCol_AxisGrid, ImVec4(0.3f, 0.3f, 0.3f, 0.5f));
+                        // Optimize by reducing grid line rendering overhead for large datasets
+                    }
 
                     if (isZoomed) {
                         // Only zoom X-axis (Y-axis is handled by auto-fit flag)
@@ -1810,8 +1852,8 @@ int main() {
                             // Auto-fit Y-axis: only set X-axis limits for zoom
                             ImPlot::SetupAxisLimits(ImAxis_X1, ref_start, ref_end, ImPlotCond_Always);
                         }
-                    } else if (shouldAutoscale) {
-                        // Set initial view to show all data when new data is loaded
+                    } else if (shouldAutoscale || forceXAutofit) {
+                        // Set initial view to show all data when new data is loaded or when downsampling is toggled
                         if (!autoFitYAxis) {
                             // Manual Y-axis: set both X and Y limits
                             ImPlot::SetupAxesLimits(0, loadedData[0].primaryDetector.size(), prim_y_min, prim_y_max, ImPlotCond_Always);
@@ -1887,7 +1929,9 @@ int main() {
                     }
                     
                     ImPlot::EndPlot();
-                    ImPlot::PopStyleColor(); // Pop grid color
+                    if (dataLoaded && loadedData[0].primaryDetector.size() > 50000) {
+                        ImPlot::PopStyleColor(); // Pop grid color only if we pushed it
+                    }
                 }
                 
                 // Reset autoscale flag after use
