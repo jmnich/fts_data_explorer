@@ -45,3 +45,6 @@ imgui.ini
 
 # Build directory
 build/
+
+# continue config
+.continue/
