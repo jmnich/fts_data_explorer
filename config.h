@@ -15,6 +15,7 @@ struct AppConfig {
     bool autoFitYAxis = true;
     bool alignPeaks = false;
     bool autoRestoreScale = true;
+    bool showFPS = false; // FPS counter display setting
     std::string lastWorkingDirectory;
     std::string uiSize = "normal"; // tiny, small, normal, large, huge
     
@@ -68,6 +69,7 @@ struct AppConfig {
 
             configFile << "align_peaks=" << (alignPeaks ? "true" : "false") << "\n";
             configFile << "auto_restore_scale=" << (autoRestoreScale ? "true" : "false") << "\n";
+            configFile << "show_fps=" << (showFPS ? "true" : "false") << "\n";
             configFile << "last_working_directory=" << lastWorkingDirectory << "\n";
             configFile << "ui_size=" << uiSize << "\n";
             
@@ -136,6 +138,8 @@ struct AppConfig {
                             alignPeaks = (value == "true");
                         } else if (key == "auto_restore_scale") {
                             autoRestoreScale = (value == "true");
+                        } else if (key == "show_fps") {
+                            showFPS = (value == "true");
                         } else if (key == "last_working_directory") {
                             lastWorkingDirectory = value;
                         } else if (key == "ui_size") {

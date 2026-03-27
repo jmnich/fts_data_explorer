@@ -623,6 +623,12 @@ int main() {
     std::pair<size_t, size_t> zoomRange = {0, 0};
     bool isZoomed = false;
     bool shouldAutoscale = false; // Flag to trigger autoscale on new data load
+    
+    // FPS counter state
+    bool showFPS = config.showFPS; // Load from config
+    float fps = 0.0f;
+    int frameCount = 0;
+    float lastTime = 0.0f;
 
     // X-range selection state
     bool isSelectingXRange = false;
@@ -732,6 +738,15 @@ int main() {
         
         // Reapply UI scaling if size changed
         handleUIScaling(io, uiScale, currentUiSize, uiSizeChanged);
+        
+        // Calculate FPS
+        float currentTime = ImGui::GetTime();
+        frameCount++;
+        if (currentTime - lastTime >= 1.0f) {
+            fps = static_cast<float>(frameCount) / (currentTime - lastTime);
+            frameCount = 0;
+            lastTime = currentTime;
+        }
         
         // Track window state changes
         handleWindowEvents(window, config);
@@ -1181,6 +1196,9 @@ int main() {
                             }
                         }
                     }
+                    
+                    // Display FPS toggle
+                    ImGui::MenuItem("Display fps", NULL, &showFPS);
                     
                     // UI Size selection dropdown
                     if (ImGui::BeginMenu("UI Size"))
@@ -1926,6 +1944,21 @@ int main() {
         // Close the docking condition
         }
         
+        // Add FPS counter overlay before rendering
+        if (showFPS) {
+            // Create a high-contrast FPS counter in top-right corner
+            ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - 120, 30), ImGuiCond_Always, ImVec2(1.0f, 0.0f));
+            ImGui::SetNextWindowBgAlpha(0.7f); // Semi-transparent background
+            
+            ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | 
+                                   ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar | 
+                                   ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize;
+            
+            ImGui::Begin("FPS Counter", nullptr, flags);
+            ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), "FPS: %.1f", fps); // White text for high contrast
+            ImGui::End();
+        }
+        
         // Rendering
         ImGui::Render();
         int display_w, display_h;
@@ -1971,6 +2004,9 @@ int main() {
             config.addRecentDataset(parentDir);
         }
     }
+    
+    // Update config with current FPS setting before saving
+    config.showFPS = showFPS;
     
     // Save config to file
     if (!config.saveToFile(configFilePath)) {
