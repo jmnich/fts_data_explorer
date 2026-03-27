@@ -115,6 +115,16 @@ public:
     static std::vector<std::string> getCSVFilesInDirectory(const std::string& directoryPath) {
         std::vector<std::string> csvFiles;
         
+        // Return empty vector if directory path is empty
+        if (directoryPath.empty()) {
+            return csvFiles;
+        }
+        
+        // Check if directory exists
+        if (!std::filesystem::exists(directoryPath) || !std::filesystem::is_directory(directoryPath)) {
+            return csvFiles;
+        }
+        
         for (const auto& entry : std::filesystem::directory_iterator(directoryPath)) {
             if (entry.is_regular_file() && entry.path().extension() == ".csv") {
                 csvFiles.push_back(entry.path().string());
@@ -574,11 +584,11 @@ int main() {
     // Main application state
     std::string currentDirectory;
     
-    // Use config settings if available, otherwise use default
+    // Use config settings if available, otherwise use empty path
     if (!config.lastWorkingDirectory.empty() && std::filesystem::exists(config.lastWorkingDirectory)) {
         currentDirectory = config.lastWorkingDirectory;
     } else {
-        currentDirectory = "/home/guowa/Documents/Repos/fts_data_explorer/example_datasets/2025-06-12_15-17-10_reference_3mm_2.0mms_30avg/raw_data";
+        currentDirectory = "";
     }
     
     std::vector<std::string> csvFiles = FileBrowser::getCSVFilesInDirectory(currentDirectory);
@@ -1219,7 +1229,7 @@ int main() {
                 
                 ImGui::EndMainMenuBar();
             }
-            
+
             // Push style variables for full viewport docking
             ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
             ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
