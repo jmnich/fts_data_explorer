@@ -53,6 +53,7 @@ include_directories(
 # Add executable
 add_executable(fts_data_explorer
     main.cpp
+    app_state.cpp
     adapters/csv_adapter.cpp
     ${EXTRA_SOURCES}
 )

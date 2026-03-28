@@ -14,6 +14,7 @@
 
 // Include config header
 #include "config.h"
+#include "app_state.h"
 
 // Include imgui and other dependencies
 #include "imgui.h"
@@ -27,12 +28,7 @@
 #include <dirent.h>
 #include <unistd.h>
 
-// Data structure to hold interferogram data
-struct InterferogramData {
-    std::vector<float> referenceDetector;
-    std::vector<float> primaryDetector;
-    std::string metadata;
-};
+
 
 
 
@@ -343,7 +339,7 @@ void handleKeyboardNavigation(const std::vector<std::string>& csvFiles,
                         
                         // Apply downsampling
                         if (enableDownsampling && data.referenceDetector.size() > maxPointsBeforeDownsampling) {
-                            size_t localDownsampleFactor = data.referenceDetector.size() / maxPointsBeforeDownsampling + 1;
+                            size_t localDownsampleFactor = data.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
                             std::vector<float> downsampledRef, downsampledPrim;
                             for (size_t j = 0; j < data.referenceDetector.size(); j += localDownsampleFactor) {
                                 downsampledRef.push_back(data.referenceDetector[j]);
@@ -455,9 +451,7 @@ int main() {
     }
 
     // UI size settings
-    std::string currentUiSize = config.uiSize;
-    float uiScale = 1.0f; // Default scale
-    bool uiSizeChanged = false; // Flag to track UI size changes
+    appState.currentUiSize = config.uiSize;
     
     // Initialize application
     GLFWwindow* window = nullptr;
@@ -504,110 +498,43 @@ int main() {
     float dpi_scale = io.DisplayFramebufferScale.x;
     
     // Apply UI scaling based on selected size
-    if (currentUiSize == "tiny") {
-        uiScale = 0.75f;
-    } else if (currentUiSize == "small") {
-        uiScale = 0.9f;
-    } else if (currentUiSize == "normal") {
-        uiScale = 1.0f;
-    } else if (currentUiSize == "large") {
-        uiScale = 1.4f;
-    } else if (currentUiSize == "huge") {
-        uiScale = 1.8f;
+    if (appState.currentUiSize == "tiny") {
+        appState.uiScale = 0.75f;
+    } else if (appState.currentUiSize == "small") {
+        appState.uiScale = 0.9f;
+    } else if (appState.currentUiSize == "normal") {
+        appState.uiScale = 1.0f;
+    } else if (appState.currentUiSize == "large") {
+        appState.uiScale = 1.4f;
+    } else if (appState.currentUiSize == "huge") {
+        appState.uiScale = 1.8f;
     }
     
     // Apply the scaling (font only initially to avoid UI issues)
-    io.FontGlobalScale = dpi_scale * uiScale;
+    io.FontGlobalScale = dpi_scale * appState.uiScale;
     // Note: We don't call ScaleAllSizes here to avoid UI element issues
     // The font scaling will handle most of the UI size adjustment
     
     // Main application state
-    std::string currentDirectory;
-    
     // Use config settings if available, otherwise use empty path
     if (!config.lastWorkingDirectory.empty() && std::filesystem::exists(config.lastWorkingDirectory)) {
-        currentDirectory = config.lastWorkingDirectory;
+        appState.currentDirectory = config.lastWorkingDirectory;
     } else {
-        currentDirectory = "";
+        appState.currentDirectory = "";
     }
     
-    std::vector<std::string> csvFiles = FileBrowser::getCSVFilesInDirectory(currentDirectory);
-    std::vector<InterferogramData> loadedData; // Store multiple loaded datasets
-    std::vector<std::string> selectedFiles; // Store selected file paths
-    std::vector<std::string> selectedFilenames; // Store selected filenames for legend
-    bool dataLoaded = false;
-    std::string currentDatasetName = "No dataset selected"; // Track current dataset name
-    size_t currentSortedFileIndex = 0; // Track currently selected file index in sorted list
-    bool filesChanged = true; // Flag to indicate files list changed
-    bool keyboardNavigation = false; // Track if selection changed via keyboard
-    bool multiSelectMode = false; // Track if Ctrl is held for multi-select
-    bool shiftSelectMode = false; // Track if Shift is held for range selection
-    const size_t MAX_SELECTABLE_FILES = 5; // Limit to 5 files for simultaneous display
-    size_t lastSelectedIndex = 0; // Track last selected index for Shift+Click range selection
-    bool alignPeaks = config.alignPeaks; // Use config setting for peak alignment
-    bool autoRestoreScale = config.autoRestoreScale; // Use config setting for scale restoration
-    
-    // Keyboard shortcut state tracking
-    bool yKeyPressedLastFrame = false;
-    bool aKeyPressedLastFrame = false;
-    bool dKeyPressedLastFrame = false;
-    
-    // Performance optimization: downsampling for large datasets
-    bool enableDownsampling = true;
-    const size_t maxPointsBeforeDownsampling = 50000; // Downsample if dataset exceeds this
-    
-    // Zoom state
-    std::pair<size_t, size_t> zoomRange = {0, 0};
-    bool shouldAutoscale = false; // Flag to trigger autoscale on new data load
-    bool forceXAutofit = false; // Flag to force X-axis autofit (used for downsampling toggle)
-    
-    // FPS counter state
-    bool showFPS = config.showFPS; // Load from config
-    float fps = 0.0f;
-    int frameCount = 0;
-    float lastTime = 0.0f;
-
-    // X-range selection state
-    bool isSelectingXRange = false;
-    bool applyXRangeSelection = false;
-    double selectionStartX = 0.0;
-    double selectionEndX = 0.0;
-    bool isMouseOverPlot = false;
-    
-    // Y-axis limits for plots
-    float ref_y_min = 0.0f, ref_y_max = 1.0f;
-    float prim_y_min = 0.0f, prim_y_max = 1.0f;
-    bool autoFitYAxis = true; // Always default to enabled, don't use config
-    
-    // last x axis limits
-    double last_x_min = 0, last_x_max = 0;
-
-    // handling arrow presses
-    bool leftArrowPressedLastFrame = false;
-    bool rightArrowPressedLastFrame = false;
-    bool leftArrowHandleFlag = false;
-    bool rightArrowHandleFlag = false;
-
-    // Track if we should update recent datasets (only after successful load)
-    bool shouldUpdateRecentDatasets = false;
-    
-    // Track if this is the first data load after launch or directory switch
-    bool isFirstDataLoad = true;
-    
-    // Sorted files list for display
-    std::vector<std::string> sortedFiles;
-    
-    // Welcome screen state
-    bool showWelcomeScreen = true;
-    bool welcomeScreenInitialized = false;
+    appState.csvFiles = FileBrowser::getCSVFilesInDirectory(appState.currentDirectory);
+    appState.alignPeaks = config.alignPeaks; // Use config setting for peak alignment
+    appState.autoRestoreScale = config.autoRestoreScale; // Use config setting for scale restoration
+    appState.showFPS = config.showFPS; // Load from config
     
     // No initialization needed for simple file dialog
     
     // Main loop
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
-        multiSelectMode = ImGui::GetIO().KeyCtrl;
-        shiftSelectMode = ImGui::GetIO().KeyShift;
+        appState.multiSelectMode = ImGui::GetIO().KeyCtrl;
+        appState.shiftSelectMode = ImGui::GetIO().KeyShift;
         
         // Handle keyboard shortcuts - only trigger once per key press
         if (!ImGui::GetIO().WantCaptureKeyboard) {
@@ -616,36 +543,36 @@ int main() {
             bool dKeyPressed = glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
             
             // 'Ctrl+Y' - Toggle auto-fit Y-axis (only on initial press)
-            if (yKeyPressed && !yKeyPressedLastFrame) {
-                autoFitYAxis = !autoFitYAxis;
-                if (autoFitYAxis && dataLoaded) {
-                    auto ref_min_max = std::minmax_element(loadedData[0].referenceDetector.begin(), loadedData[0].referenceDetector.end());
-                    auto prim_min_max = std::minmax_element(loadedData[0].primaryDetector.begin(), loadedData[0].primaryDetector.end());
-                    ref_y_min = *ref_min_max.first;
-                    ref_y_max = *ref_min_max.second;
-                    prim_y_min = *prim_min_max.first;
-                    prim_y_max = *prim_min_max.second;
+            if (yKeyPressed && !appState.yKeyPressedLastFrame) {
+                appState.autoFitYAxis = !appState.autoFitYAxis;
+                if (appState.autoFitYAxis && appState.dataLoaded) {
+                    auto ref_min_max = std::minmax_element(appState.loadedData[0].referenceDetector.begin(), appState.loadedData[0].referenceDetector.end());
+                    auto prim_min_max = std::minmax_element(appState.loadedData[0].primaryDetector.begin(), appState.loadedData[0].primaryDetector.end());
+                    appState.ref_y_min = *ref_min_max.first;
+                    appState.ref_y_max = *ref_min_max.second;
+                    appState.prim_y_min = *prim_min_max.first;
+                    appState.prim_y_max = *prim_min_max.second;
                 }
             }
             
             // 'Ctrl+A' - Toggle align peaks (only on initial press)
-            if (aKeyPressed && !aKeyPressedLastFrame) {
-                alignPeaks = !alignPeaks;
+            if (aKeyPressed && !appState.aKeyPressedLastFrame) {
+                appState.alignPeaks = !appState.alignPeaks;
             }
             
             // 'Ctrl+D' - Toggle downsampling (only on initial press)
-            if (dKeyPressed && !dKeyPressedLastFrame) {
-                enableDownsampling = !enableDownsampling;
-                if (dataLoaded) {
+            if (dKeyPressed && !appState.dKeyPressedLastFrame) {
+                appState.enableDownsampling = !appState.enableDownsampling;
+                if (appState.dataLoaded) {
                     // Reload all selected files with new downsampling setting while preserving selection
                     std::vector<InterferogramData> reloadedData;
-                    for (const auto& filePath : selectedFiles) {
+                    for (const auto& filePath : appState.selectedFiles) {
                         try {
                             InterferogramData data = CSVAdapter::loadFromCSV(filePath);
                             
                             // Apply downsampling if enabled and dataset is large
-                            if (enableDownsampling && data.referenceDetector.size() > maxPointsBeforeDownsampling) {
-                                size_t localDownsampleFactor = data.referenceDetector.size() / maxPointsBeforeDownsampling + 1;
+                            if (appState.enableDownsampling && data.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
+                                size_t localDownsampleFactor = data.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
                                 
                                 // Downsample both reference and primary detectors
                                 std::vector<float> downsampledRef, downsampledPrim;
@@ -664,45 +591,45 @@ int main() {
                     }
                     
                     if (!reloadedData.empty()) {
-                        loadedData = reloadedData;
+                        appState.loadedData = reloadedData;
                         // Force X-axis to show all data when downsampling is toggled (same behavior as menu)
-                        zoomRange = {0, 0};
-                        shouldAutoscale = true;
-                        forceXAutofit = true; // Set global flag to force X-axis autofit
-                        std::cout << "Reloaded " << loadedData.size() << " datasets with " 
-                                  << (enableDownsampling ? "enabled" : "disabled") << " downsampling" << std::endl;
+                        appState.zoomRange = {0, 0};
+                        appState.shouldAutoscale = true;
+                        appState.forceXAutofit = true; // Set global flag to force X-axis autofit
+                        std::cout << "Reloaded " << appState.loadedData.size() << " datasets with " 
+                                  << (appState.enableDownsampling ? "enabled" : "disabled") << " downsampling" << std::endl;
                     }
                 }
             }
             
             // Update key state tracking for next frame
-            yKeyPressedLastFrame = yKeyPressed;
-            aKeyPressedLastFrame = aKeyPressed;
-            dKeyPressedLastFrame = dKeyPressed;
+            appState.yKeyPressedLastFrame = yKeyPressed;
+            appState.aKeyPressedLastFrame = aKeyPressed;
+            appState.dKeyPressedLastFrame = dKeyPressed;
         } else {
             // Reset key states when keyboard is captured (e.g., typing in text field)
-            yKeyPressedLastFrame = false;
-            aKeyPressedLastFrame = false;
+            appState.yKeyPressedLastFrame = false;
+            appState.aKeyPressedLastFrame = false;
         }
 
         // Reapply UI scaling if size changed
-        handleUIScaling(io, uiScale, currentUiSize, uiSizeChanged);
+        handleUIScaling(io, appState.uiScale, appState.currentUiSize, appState.uiSizeChanged);
         
         // Calculate FPS
         float currentTime = ImGui::GetTime();
-        frameCount++;
-        if (currentTime - lastTime >= 1.0f) {
-            fps = static_cast<float>(frameCount) / (currentTime - lastTime);
-            frameCount = 0;
-            lastTime = currentTime;
+        appState.frameCount++;
+        if (currentTime - appState.lastTime >= 1.0f) {
+            appState.fps = static_cast<float>(appState.frameCount) / (currentTime - appState.lastTime);
+            appState.frameCount = 0;
+            appState.lastTime = currentTime;
         }
         
         // Track window state changes
         handleWindowEvents(window, config);
         
         // Update sorted files list for keyboard navigation
-        sortedFiles = csvFiles;
-        std::sort(sortedFiles.begin(), sortedFiles.end(), [](const std::string& a, const std::string& b) {
+        appState.sortedFiles = appState.csvFiles;
+        std::sort(appState.sortedFiles.begin(), appState.sortedFiles.end(), [](const std::string& a, const std::string& b) {
             std::string nameA = a;
             std::string nameB = b;
             size_t last_slash_a = nameA.find_last_of("/\\");
@@ -713,16 +640,16 @@ int main() {
         });
         
         // Handle keyboard navigation for file selection
-        handleKeyboardNavigation(csvFiles, currentSortedFileIndex, filesChanged, keyboardNavigation, 
-                                shiftSelectMode, selectedFiles, selectedFilenames, loadedData, dataLoaded, 
-                                sortedFiles, enableDownsampling, maxPointsBeforeDownsampling, MAX_SELECTABLE_FILES);
+        handleKeyboardNavigation(appState.csvFiles, appState.currentSortedFileIndex, appState.filesChanged, appState.keyboardNavigation, 
+                                appState.shiftSelectMode, appState.selectedFiles, appState.selectedFilenames, appState.loadedData, appState.dataLoaded, 
+                                appState.sortedFiles, appState.enableDownsampling, appState.maxPointsBeforeDownsampling, appState.MAX_SELECTABLE_FILES);
         
         // Handle ESC key to reset zoom (works independently of file navigation)
-        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) && dataLoaded) {
+        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) && appState.dataLoaded) {
             if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
                 // Reset X-axis zoom when ESC is pressed
-                zoomRange = {0, 0};
-                shouldAutoscale = true; // Always force redraw with full range when ESC is pressed
+                appState.zoomRange = {0, 0};
+                appState.shouldAutoscale = true; // Always force redraw with full range when ESC is pressed
             }
         }
         
@@ -731,44 +658,44 @@ int main() {
         // Handle Ctrl+H to return to welcome screen
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) && ImGui::IsKeyPressed(ImGuiKey_H) && ImGui::GetIO().KeyCtrl) {
             // Reset to welcome screen state
-            showWelcomeScreen = true;
-            welcomeScreenInitialized = false;
-            dataLoaded = false;
-            filesChanged = false;
+            appState.showWelcomeScreen = true;
+            appState.welcomeScreenInitialized = false;
+            appState.dataLoaded = false;
+            appState.filesChanged = false;
         }
 
         // 'Left/Right Arrow' - Pan left by 10% of current visible range
-        if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS && !leftArrowPressedLastFrame) {
+        if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS && !appState.leftArrowPressedLastFrame) {
 
-            leftArrowPressedLastFrame = true;
-            leftArrowHandleFlag = true;
+            appState.leftArrowPressedLastFrame = true;
+            appState.leftArrowHandleFlag = true;
         }
         else if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_RELEASE) {
-            leftArrowPressedLastFrame = false;
-            leftArrowHandleFlag = false;
+            appState.leftArrowPressedLastFrame = false;
+            appState.leftArrowHandleFlag = false;
         }
 
-        if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS && !rightArrowPressedLastFrame) {
+        if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS && !appState.rightArrowPressedLastFrame) {
 
-            rightArrowPressedLastFrame = true;
-            rightArrowHandleFlag = true;
+            appState.rightArrowPressedLastFrame = true;
+            appState.rightArrowHandleFlag = true;
         }
         else if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_RELEASE) {
-            rightArrowPressedLastFrame = false;
-            rightArrowHandleFlag = false;
+            appState.rightArrowPressedLastFrame = false;
+            appState.rightArrowHandleFlag = false;
         }
 
         // Load file if navigation changed
-        if (filesChanged && !csvFiles.empty()) {
+        if (appState.filesChanged && !appState.csvFiles.empty()) {
             try {
                 // Load the currently selected file
-                InterferogramData data = CSVAdapter::loadFromCSV(sortedFiles[currentSortedFileIndex]);
+                InterferogramData data = CSVAdapter::loadFromCSV(appState.sortedFiles[appState.currentSortedFileIndex]);
                 
 
                 
                 // Apply downsampling if enabled and dataset is large
-                if (enableDownsampling && data.referenceDetector.size() > maxPointsBeforeDownsampling) {
-                    size_t localDownsampleFactor = data.referenceDetector.size() / maxPointsBeforeDownsampling + 1;
+                if (appState.enableDownsampling && data.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
+                    size_t localDownsampleFactor = data.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
                     
                     // Downsample both reference and primary detectors
                     std::vector<float> downsampledRef, downsampledPrim;
@@ -783,67 +710,67 @@ int main() {
                 }
                 
                 // For single selection (no Ctrl), replace current selection
-                loadedData.clear();
-                selectedFiles.clear();
-                selectedFilenames.clear();
+                appState.loadedData.clear();
+                appState.selectedFiles.clear();
+                appState.selectedFilenames.clear();
                 
                 // Always load the current file
-                loadedData.push_back(data);
+                appState.loadedData.push_back(data);
 
-                selectedFiles.push_back(sortedFiles[currentSortedFileIndex]);
+                appState.selectedFiles.push_back(appState.sortedFiles[appState.currentSortedFileIndex]);
                 
                 // Extract filename for legend
-                std::string filename = sortedFiles[currentSortedFileIndex];
+                std::string filename = appState.sortedFiles[appState.currentSortedFileIndex];
                 size_t last_slash = filename.find_last_of("/\\");
                 if (last_slash != std::string::npos) {
                     filename = filename.substr(last_slash + 1);
                 }
-                selectedFilenames.push_back(filename);
+                appState.selectedFilenames.push_back(filename);
                 
                 // Update current dataset name (extract from current directory path)
-                std::string dirPath = currentDirectory;
+                std::string dirPath = appState.currentDirectory;
                 size_t dir_last_slash = dirPath.find_last_of("/\\");
                 if (dir_last_slash != std::string::npos) {
-                    currentDatasetName = dirPath.substr(dir_last_slash + 1);
+                    appState.currentDatasetName = dirPath.substr(dir_last_slash + 1);
                     // If this is "raw_data", get the parent directory name
-                    if (currentDatasetName == "raw_data" && dir_last_slash > 0) {
+                    if (appState.currentDatasetName == "raw_data" && dir_last_slash > 0) {
                         size_t parent_slash = dirPath.substr(0, dir_last_slash).find_last_of("/\\");
                         if (parent_slash != std::string::npos) {
-                            currentDatasetName = dirPath.substr(parent_slash + 1, dir_last_slash - parent_slash - 1);
+                            appState.currentDatasetName = dirPath.substr(parent_slash + 1, dir_last_slash - parent_slash - 1);
                         }
                     }
                 }
                 
-                dataLoaded = true;
+                appState.dataLoaded = true;
                 
                 // Handle autoscale behavior based on AGENTS.md requirements:
                 // "when the application loads a file for display for the first time after launch or work directory switch, axes zoom to fit all data."
-                if (isFirstDataLoad || autoRestoreScale) {
-                    zoomRange = {0, 0};
-                    shouldAutoscale = true; // Trigger autoscale
+                if (appState.isFirstDataLoad || appState.autoRestoreScale) {
+                    appState.zoomRange = {0, 0};
+                    appState.shouldAutoscale = true; // Trigger autoscale
                     
                     // Recalculate Y-axis limits from the actual data for autoscale
                     auto ref_min_max = std::minmax_element(data.referenceDetector.begin(), data.referenceDetector.end());
                     auto prim_min_max = std::minmax_element(data.primaryDetector.begin(), data.primaryDetector.end());
-                    ref_y_min = *ref_min_max.first;
-                    ref_y_max = *ref_min_max.second;
-                    prim_y_min = *prim_min_max.first;
-                    prim_y_max = *prim_min_max.second;
+                    appState.ref_y_min = *ref_min_max.first;
+                    appState.ref_y_max = *ref_min_max.second;
+                    appState.prim_y_min = *prim_min_max.first;
+                    appState.prim_y_max = *prim_min_max.second;
                     
                     // Reset first load flag after handling
-                    isFirstDataLoad = false;
+                    appState.isFirstDataLoad = false;
                 }
-                filesChanged = false;
+                appState.filesChanged = false;
                 
                 // Mark that we should update recent datasets after this successful load
-                shouldUpdateRecentDatasets = true;
+                appState.shouldUpdateRecentDatasets = true;
                 
             } catch (const std::exception& e) {
                 std::cerr << "Error loading file: " << e.what() << std::endl;
-                dataLoaded = false;
-                filesChanged = false;
+                appState.dataLoaded = false;
+                appState.filesChanged = false;
                 // Don't update recent datasets on failure
-                shouldUpdateRecentDatasets = false;
+                appState.shouldUpdateRecentDatasets = false;
             }
         }
         
@@ -853,17 +780,17 @@ int main() {
         ImGui::NewFrame();
         
         // Conditionally disable anti-aliasing for large datasets (>50k points)
-        if (dataLoaded && loadedData[0].referenceDetector.size() > 50000) {
+        if (appState.dataLoaded && appState.loadedData[0].referenceDetector.size() > 50000) {
             ImGui::GetStyle().AntiAliasedLines = false;
         }
         
         // Show welcome screen if no data is loaded and we haven't initialized yet
-        if (showWelcomeScreen && !welcomeScreenInitialized) {
+        if (appState.showWelcomeScreen && !appState.welcomeScreenInitialized) {
             // Safety check to prevent multiple welcome screen instances
             static bool welcomeScreenActive = false;
             if (welcomeScreenActive) {
                 std::cerr << "Warning: Attempted to show welcome screen while already active!" << std::endl;
-                showWelcomeScreen = false; // Prevent re-entry by disabling welcome screen
+                appState.showWelcomeScreen = false; // Prevent re-entry by disabling welcome screen
             }
             welcomeScreenActive = true;
             // Center the welcome screen
@@ -917,21 +844,21 @@ int main() {
                                     // Check if there's a raw_data subdirectory
                                     std::string rawDataPath = datasetPath + "/raw_data";
                                     if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {
-                                        currentDirectory = rawDataPath; // Use the raw_data subdirectory
+                                        appState.currentDirectory = rawDataPath; // Use the raw_data subdirectory
                                     } else {
-                                        currentDirectory = datasetPath; // Fallback to the dataset directory itself
+                                        appState.currentDirectory = datasetPath; // Fallback to the dataset directory itself
                                     }
                                     
                                     // Update current dataset name
-                                    currentDatasetName = datasetPath.substr(datasetPath.find_last_of("/\\") + 1);
+                                    appState.currentDatasetName = datasetPath.substr(datasetPath.find_last_of("/\\") + 1);
                                     
-                                    csvFiles = FileBrowser::getCSVFilesInDirectory(currentDirectory);
-                                    dataLoaded = false;
-                                    filesChanged = true;
-                                    currentSortedFileIndex = 0;
-                                    showWelcomeScreen = false;
-                                    welcomeScreenInitialized = true;
-                                    isFirstDataLoad = true; // Reset first load flag for new directory
+                                    appState.csvFiles = FileBrowser::getCSVFilesInDirectory(appState.currentDirectory);
+                                    appState.dataLoaded = false;
+                                    appState.filesChanged = true;
+                                    appState.currentSortedFileIndex = 0;
+                                    appState.showWelcomeScreen = false;
+                                    appState.welcomeScreenInitialized = true;
+                                    appState.isFirstDataLoad = true; // Reset first load flag for new directory
                                     std::cout << "Opened recent dataset: " << datasetPath << std::endl;
                                     ImGui::CloseCurrentPopup(); // Close the modal
                                 } else {
@@ -954,26 +881,26 @@ int main() {
                 
                 // UI Size selection dropdown
                 ImGui::Text("UI Size:");
-                if (ImGui::BeginCombo("##UISizeCombo", currentUiSize.c_str())) {
-                    if (ImGui::Selectable("tiny", currentUiSize == "tiny")) {
-                        currentUiSize = "tiny";
-                        uiSizeChanged = true;
+                if (ImGui::BeginCombo("##UISizeCombo", appState.currentUiSize.c_str())) {
+                    if (ImGui::Selectable("tiny", appState.currentUiSize == "tiny")) {
+                        appState.currentUiSize = "tiny";
+                        appState.uiSizeChanged = true;
                     }
-                    if (ImGui::Selectable("small", currentUiSize == "small")) {
-                        currentUiSize = "small";
-                        uiSizeChanged = true;
+                    if (ImGui::Selectable("small", appState.currentUiSize == "small")) {
+                        appState.currentUiSize = "small";
+                        appState.uiSizeChanged = true;
                     }
-                    if (ImGui::Selectable("normal", currentUiSize == "normal")) {
-                        currentUiSize = "normal";
-                        uiSizeChanged = true;
+                    if (ImGui::Selectable("normal", appState.currentUiSize == "normal")) {
+                        appState.currentUiSize = "normal";
+                        appState.uiSizeChanged = true;
                     }
-                    if (ImGui::Selectable("large", currentUiSize == "large")) {
-                        currentUiSize = "large";
-                        uiSizeChanged = true;
+                    if (ImGui::Selectable("large", appState.currentUiSize == "large")) {
+                        appState.currentUiSize = "large";
+                        appState.uiSizeChanged = true;
                     }
-                    if (ImGui::Selectable("huge", currentUiSize == "huge")) {
-                        currentUiSize = "huge";
-                        uiSizeChanged = true;
+                    if (ImGui::Selectable("huge", appState.currentUiSize == "huge")) {
+                        appState.currentUiSize = "huge";
+                        appState.uiSizeChanged = true;
                     }
                     ImGui::EndCombo();
                 }
@@ -995,21 +922,21 @@ int main() {
                         // Check if the selected directory has a raw_data subdirectory
                         std::string rawDataPath = selectedDirectory + "/raw_data";
                         if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {
-                            currentDirectory = rawDataPath;
+                            appState.currentDirectory = rawDataPath;
                             // Update dataset name from parent directory
-                            currentDatasetName = selectedDirectory.substr(selectedDirectory.find_last_of("/\\") + 1);
+                            appState.currentDatasetName = selectedDirectory.substr(selectedDirectory.find_last_of("/\\") + 1);
                         } else {
-                            currentDirectory = selectedDirectory;
+                            appState.currentDirectory = selectedDirectory;
                             // Update dataset name from selected directory
-                            currentDatasetName = selectedDirectory.substr(selectedDirectory.find_last_of("/\\") + 1);
+                            appState.currentDatasetName = selectedDirectory.substr(selectedDirectory.find_last_of("/\\") + 1);
                         }
-                        csvFiles = FileBrowser::getCSVFilesInDirectory(currentDirectory);
-                        dataLoaded = false;
-                        filesChanged = true;
-                        currentSortedFileIndex = 0;
-                        showWelcomeScreen = false;
-                        welcomeScreenInitialized = true;
-                        std::cout << "Working directory set to: " << currentDirectory << std::endl;
+                        appState.csvFiles = FileBrowser::getCSVFilesInDirectory(appState.currentDirectory);
+                        appState.dataLoaded = false;
+                        appState.filesChanged = true;
+                        appState.currentSortedFileIndex = 0;
+                        appState.showWelcomeScreen = false;
+                        appState.welcomeScreenInitialized = true;
+                        std::cout << "Working directory set to: " << appState.currentDirectory << std::endl;
                         ImGui::CloseCurrentPopup(); // Close the modal
                     }
                 }
@@ -1019,8 +946,8 @@ int main() {
                 ImGui::EndPopup();
                 
                 // If welcome screen is closed manually, initialize the app
-                if (!showWelcomeScreen) {
-                    welcomeScreenInitialized = true;
+                if (!appState.showWelcomeScreen) {
+                    appState.welcomeScreenInitialized = true;
                 }
                 welcomeScreenActive = false; // Reset the safety flag when welcome screen closes
             } else {
@@ -1030,7 +957,7 @@ int main() {
         }
         
         // Only render main docking interface if welcome screen is not active
-        if (welcomeScreenInitialized) {
+        if (appState.welcomeScreenInitialized) {
             // Set up docking
             ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDocking;
             ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -1051,19 +978,19 @@ int main() {
                             // Check if the selected directory has a raw_data subdirectory
                             std::string rawDataPath = selectedDirectory + "/raw_data";
                             if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {
-                                currentDirectory = rawDataPath; // Use the raw_data subdirectory
+                                appState.currentDirectory = rawDataPath; // Use the raw_data subdirectory
                                 // Update dataset name from parent directory
-                                currentDatasetName = selectedDirectory.substr(selectedDirectory.find_last_of("/\\") + 1);
+                                appState.currentDatasetName = selectedDirectory.substr(selectedDirectory.find_last_of("/\\") + 1);
                             } else {
-                                currentDirectory = selectedDirectory; // Fallback to selected directory
+                                appState.currentDirectory = selectedDirectory; // Fallback to selected directory
                                 // Update dataset name from selected directory
-                                currentDatasetName = selectedDirectory.substr(selectedDirectory.find_last_of("/\\") + 1);
+                                appState.currentDatasetName = selectedDirectory.substr(selectedDirectory.find_last_of("/\\") + 1);
                             }
-                            csvFiles = FileBrowser::getCSVFilesInDirectory(currentDirectory);
-                            dataLoaded = false;
-                            shouldUpdateRecentDatasets = true; // Mark to update recent datasets
-                            isFirstDataLoad = true; // Reset first load flag for new directory
-                            std::cout << "Working directory set to: " << currentDirectory << std::endl;
+                            appState.csvFiles = FileBrowser::getCSVFilesInDirectory(appState.currentDirectory);
+                            appState.dataLoaded = false;
+                            appState.shouldUpdateRecentDatasets = true; // Mark to update recent datasets
+                            appState.isFirstDataLoad = true; // Reset first load flag for new directory
+                            std::cout << "Working directory set to: " << appState.currentDirectory << std::endl;
                         }
                     }
                     
@@ -1082,19 +1009,19 @@ int main() {
                                         // Check if there's a raw_data subdirectory
                                         std::string rawDataPath = datasetPath + "/raw_data";
                                         if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {
-                                            currentDirectory = rawDataPath; // Use the raw_data subdirectory
+                                            appState.currentDirectory = rawDataPath; // Use the raw_data subdirectory
                                         } else {
-                                            currentDirectory = datasetPath; // Fallback to the dataset directory itself
+                                            appState.currentDirectory = datasetPath; // Fallback to the dataset directory itself
                                         }
                                         
                                         // Update current dataset name
-                                        currentDatasetName = datasetPath.substr(datasetPath.find_last_of("/\\") + 1);
+                                        appState.currentDatasetName = datasetPath.substr(datasetPath.find_last_of("/\\") + 1);
                                         
-                                        csvFiles = FileBrowser::getCSVFilesInDirectory(currentDirectory);
-                                        dataLoaded = false;
-                                        filesChanged = true;
-                                        currentSortedFileIndex = 0;
-                                        isFirstDataLoad = true; // Reset first load flag for new directory
+                                        appState.csvFiles = FileBrowser::getCSVFilesInDirectory(appState.currentDirectory);
+                                        appState.dataLoaded = false;
+                                        appState.filesChanged = true;
+                                        appState.currentSortedFileIndex = 0;
+                                        appState.isFirstDataLoad = true; // Reset first load flag for new directory
                                         std::cout << "Opened recent dataset: " << datasetPath << std::endl;
                                     } else {
                                         std::cerr << "Recent dataset path no longer exists: " << datasetPath << std::endl;
@@ -1111,39 +1038,39 @@ int main() {
                 // Settings menu
                 if (ImGui::BeginMenu("Settings"))
                 {
-                    ImGui::MenuItem("Align peaks", NULL, &alignPeaks);
-                    if (ImGui::MenuItem("Autorestore scale", NULL, &autoRestoreScale)) {
+                    ImGui::MenuItem("Align peaks", NULL, &appState.alignPeaks);
+                    if (ImGui::MenuItem("Autorestore scale", NULL, &appState.autoRestoreScale)) {
                         // When enabling autorestore scale, trigger autoscale to fit all data
-                        if (autoRestoreScale && dataLoaded) {
-                            shouldAutoscale = true;
+                        if (appState.autoRestoreScale && appState.dataLoaded) {
+                            appState.shouldAutoscale = true;
                         }
                     }
                     
                     // Auto-fit Y-axis toggle
-                    if (ImGui::MenuItem("Auto-fit Y-axis", NULL, &autoFitYAxis)) {
+                    if (ImGui::MenuItem("Auto-fit Y-axis", NULL, &appState.autoFitYAxis)) {
                         // When toggling auto-fit, recalculate limits if enabling auto-fit
-                        if (autoFitYAxis && dataLoaded) {
-                            auto ref_min_max = std::minmax_element(loadedData[0].referenceDetector.begin(), loadedData[0].referenceDetector.end());
-                            auto prim_min_max = std::minmax_element(loadedData[0].primaryDetector.begin(), loadedData[0].primaryDetector.end());
-                            ref_y_min = *ref_min_max.first;
-                            ref_y_max = *ref_min_max.second;
-                            prim_y_min = *prim_min_max.first;
-                            prim_y_max = *prim_min_max.second;
+                        if (appState.autoFitYAxis && appState.dataLoaded) {
+                            auto ref_min_max = std::minmax_element(appState.loadedData[0].referenceDetector.begin(), appState.loadedData[0].referenceDetector.end());
+                            auto prim_min_max = std::minmax_element(appState.loadedData[0].primaryDetector.begin(), appState.loadedData[0].primaryDetector.end());
+                            appState.ref_y_min = *ref_min_max.first;
+                            appState.ref_y_max = *ref_min_max.second;
+                            appState.prim_y_min = *prim_min_max.first;
+                            appState.prim_y_max = *prim_min_max.second;
                         }
                     }
                     
                     // Downsampling toggle
-                    if (ImGui::MenuItem("Enable downsampling", NULL, &enableDownsampling)) {
-                        if (dataLoaded) {
+                    if (ImGui::MenuItem("Enable downsampling", NULL, &appState.enableDownsampling)) {
+                        if (appState.dataLoaded) {
                             // Reload all selected files with new downsampling setting while preserving selection
                             std::vector<InterferogramData> reloadedData;
-                            for (const auto& filePath : selectedFiles) {
+                            for (const auto& filePath : appState.selectedFiles) {
                                 try {
                                     InterferogramData data = CSVAdapter::loadFromCSV(filePath);
                                     
                                     // Apply downsampling if enabled and dataset is large
-                                    if (enableDownsampling && data.referenceDetector.size() > maxPointsBeforeDownsampling) {
-                                        size_t localDownsampleFactor = data.referenceDetector.size() / maxPointsBeforeDownsampling + 1;
+                                    if (appState.enableDownsampling && data.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
+                                        size_t localDownsampleFactor = data.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
                                         
                                         // Downsample both reference and primary detectors
                                         std::vector<float> downsampledRef, downsampledPrim;
@@ -1162,44 +1089,44 @@ int main() {
                             }
                             
                             if (!reloadedData.empty()) {
-                                loadedData = reloadedData;
+                                appState.loadedData = reloadedData;
                                 // Force X-axis to show all data when downsampling is toggled
-                                zoomRange = {0, 0};
+                                appState.zoomRange = {0, 0};
                                 // Set flag to force autofit on next render
-                                shouldAutoscale = true;
-                                forceXAutofit = true; // Set global flag to force X-axis autofit
+                                appState.shouldAutoscale = true;
+                                appState.forceXAutofit = true; // Set global flag to force X-axis autofit
                                 // Note: We don't change autoRestoreScale setting, so other behaviors are preserved
-                                std::cout << "Reloaded " << loadedData.size() << " datasets with " 
-                                          << (enableDownsampling ? "enabled" : "disabled") << " downsampling" << std::endl;
+                                std::cout << "Reloaded " << appState.loadedData.size() << " datasets with " 
+                                          << (appState.enableDownsampling ? "enabled" : "disabled") << " downsampling" << std::endl;
                             }
                         }
                     }
                     
                     // Display FPS toggle
-                    ImGui::MenuItem("Display fps", NULL, &showFPS);
+                    ImGui::MenuItem("Display fps", NULL, &appState.showFPS);
                     
                     // UI Size selection dropdown
                     if (ImGui::BeginMenu("UI Size"))
                     {
-                        if (ImGui::MenuItem("tiny", NULL, currentUiSize == "tiny")) {
-                            currentUiSize = "tiny";
-                            uiSizeChanged = true;
+                        if (ImGui::MenuItem("tiny", NULL, appState.currentUiSize == "tiny")) {
+                            appState.currentUiSize = "tiny";
+                            appState.uiSizeChanged = true;
                         }
-                        if (ImGui::MenuItem("small", NULL, currentUiSize == "small")) {
-                            currentUiSize = "small";
-                            uiSizeChanged = true;
+                        if (ImGui::MenuItem("small", NULL, appState.currentUiSize == "small")) {
+                            appState.currentUiSize = "small";
+                            appState.uiSizeChanged = true;
                         }
-                        if (ImGui::MenuItem("normal", NULL, currentUiSize == "normal")) {
-                            currentUiSize = "normal";
-                            uiSizeChanged = true;
+                        if (ImGui::MenuItem("normal", NULL, appState.currentUiSize == "normal")) {
+                            appState.currentUiSize = "normal";
+                            appState.uiSizeChanged = true;
                         }
-                        if (ImGui::MenuItem("large", NULL, currentUiSize == "large")) {
-                            currentUiSize = "large";
-                            uiSizeChanged = true;
+                        if (ImGui::MenuItem("large", NULL, appState.currentUiSize == "large")) {
+                            appState.currentUiSize = "large";
+                            appState.uiSizeChanged = true;
                         }
-                        if (ImGui::MenuItem("huge", NULL, currentUiSize == "huge")) {
-                            currentUiSize = "huge";
-                            uiSizeChanged = true;
+                        if (ImGui::MenuItem("huge", NULL, appState.currentUiSize == "huge")) {
+                            appState.currentUiSize = "huge";
+                            appState.uiSizeChanged = true;
                         }
                         ImGui::EndMenu();
                     }
@@ -1231,7 +1158,7 @@ int main() {
             ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
             
             // Make the dockspace background match the welcome screen when welcome screen is active
-            if (showWelcomeScreen && !welcomeScreenInitialized) {
+            if (appState.showWelcomeScreen && !appState.welcomeScreenInitialized) {
                 ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.0f, 0.0f, 1.0f));
             }
             
@@ -1250,7 +1177,7 @@ int main() {
             ImGuiID dockspace_id = ImGui::GetID("MainDockSpace");
             ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);
             
-            if (showWelcomeScreen && !welcomeScreenInitialized) {
+            if (appState.showWelcomeScreen && !appState.welcomeScreenInitialized) {
                 ImGui::PopStyleColor(); // Restore window background color
             }
             
@@ -1259,13 +1186,13 @@ int main() {
         // Files panel (left)
         ImGui::Begin("Files");
         ImGui::PushTextWrapPos(); // Enable text wrapping
-        ImGui::Text("Current Dataset: %s", currentDatasetName.c_str());
+        ImGui::Text("Current Dataset: %s", appState.currentDatasetName.c_str());
         
         // Use the pre-sorted files list
-        size_t currentSortedIndex = currentSortedFileIndex;
+        size_t currentSortedIndex = appState.currentSortedFileIndex;
         
         // Only calculate scroll position when using keyboard navigation
-        if (keyboardNavigation) {
+        if (appState.keyboardNavigation) {
             if (currentSortedIndex > 0 && ImGui::GetScrollY() + ImGui::GetWindowHeight() < (currentSortedIndex + 1) * ImGui::GetTextLineHeightWithSpacing()) {
                 ImGui::SetScrollY((currentSortedIndex + 1) * ImGui::GetTextLineHeightWithSpacing() - ImGui::GetWindowHeight());
             } else if (currentSortedIndex == 0) {
@@ -1273,8 +1200,8 @@ int main() {
             }
         }
         
-        for (size_t i = 0; i < sortedFiles.size(); i++) {
-            const auto& file = sortedFiles[i];
+        for (size_t i = 0; i < appState.sortedFiles.size(); i++) {
+            const auto& file = appState.sortedFiles[i];
             // Extract just the filename without path
             std::string filename = file;
             size_t last_slash = filename.find_last_of("/\\");
@@ -1284,12 +1211,12 @@ int main() {
             
             // Enhanced highlighting for the currently selected file
             int stylesPushed = 1; // Default: push 1 style
-            bool isFileSelected = (std::find(selectedFiles.begin(), selectedFiles.end(), file) != selectedFiles.end());
+            bool isFileSelected = (std::find(appState.selectedFiles.begin(), appState.selectedFiles.end(), file) != appState.selectedFiles.end());
             
             if (isFileSelected) {
                 // Find the index of this file in the selectedFiles vector to determine its color
-                auto it = std::find(selectedFiles.begin(), selectedFiles.end(), file);
-                size_t fileIndex = std::distance(selectedFiles.begin(), it);
+                auto it = std::find(appState.selectedFiles.begin(), appState.selectedFiles.end(), file);
+                size_t fileIndex = std::distance(appState.selectedFiles.begin(), it);
                 
                 // Get the color matching the plot curve color
                 ImVec4 buttonColor;
@@ -1322,26 +1249,26 @@ int main() {
             
             if (ImGui::Button(filename.c_str())) {
                 // Handle multi-select with Ctrl key
-                if (multiSelectMode) {
+                if (appState.multiSelectMode) {
                     // Toggle selection for this file
-                    std::string fullPath = sortedFiles[i];
-                    auto it = std::find(selectedFiles.begin(), selectedFiles.end(), fullPath);
-                    if (it != selectedFiles.end()) {
+                    std::string fullPath = appState.sortedFiles[i];
+                    auto it = std::find(appState.selectedFiles.begin(), appState.selectedFiles.end(), fullPath);
+                    if (it != appState.selectedFiles.end()) {
                         // File already selected, remove it
-                        size_t index = std::distance(selectedFiles.begin(), it);
-                        selectedFiles.erase(selectedFiles.begin() + index);
-                        selectedFilenames.erase(selectedFilenames.begin() + index);
-                        loadedData.erase(loadedData.begin() + index);
+                        size_t index = std::distance(appState.selectedFiles.begin(), it);
+                        appState.selectedFiles.erase(appState.selectedFiles.begin() + index);
+                        appState.selectedFilenames.erase(appState.selectedFilenames.begin() + index);
+                        appState.loadedData.erase(appState.loadedData.begin() + index);
                     } else {
                         // Check if we would exceed the limit
-                        if (selectedFiles.size() < MAX_SELECTABLE_FILES) {
+                        if (appState.selectedFiles.size() < appState.MAX_SELECTABLE_FILES) {
                             try {
                                 InterferogramData data = CSVAdapter::loadFromCSV(fullPath);
         
                                 
                                 // Apply downsampling to multi-selected files too
-                                if (enableDownsampling && data.referenceDetector.size() > maxPointsBeforeDownsampling) {
-                                    size_t localDownsampleFactor = data.referenceDetector.size() / maxPointsBeforeDownsampling + 1;
+                                if (appState.enableDownsampling && data.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
+                                    size_t localDownsampleFactor = data.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
                                     
                                     // Downsample both reference and primary detectors
                                     std::vector<float> downsampledRef, downsampledPrim;
@@ -1353,9 +1280,9 @@ int main() {
                                     data.primaryDetector = downsampledPrim;
                                 }
                                 
-                                loadedData.push_back(data);
-                                selectedFiles.push_back(fullPath);
-                                selectedFilenames.push_back(filename);
+                                appState.loadedData.push_back(data);
+                                appState.selectedFiles.push_back(fullPath);
+                                appState.selectedFilenames.push_back(filename);
                             } catch (const std::exception& e) {
                                 std::cerr << "Error loading file: " << e.what() << std::endl;
                             }
@@ -1363,28 +1290,28 @@ int main() {
                             ImGui::OpenPopup("Selection Limit");
                         }
                     }
-                } else if (shiftSelectMode) {
+                } else if (appState.shiftSelectMode) {
                     // Handle Shift+Click for range selection
-                    size_t startIndex = std::min(lastSelectedIndex, i);
-                    size_t endIndex = std::max(lastSelectedIndex, i);
+                    size_t startIndex = std::min(appState.lastSelectedIndex, i);
+                    size_t endIndex = std::max(appState.lastSelectedIndex, i);
                     
                     // Clear current selection
-                    selectedFiles.clear();
-                    selectedFilenames.clear();
-                    loadedData.clear();
+                    appState.selectedFiles.clear();
+                    appState.selectedFilenames.clear();
+                    appState.loadedData.clear();
                     
                     // Add all files in the range, respecting the 5-file limit
                     size_t filesToAdd = 0;
                     for (size_t j = startIndex; j <= endIndex; j++) {
-                        if (filesToAdd >= MAX_SELECTABLE_FILES) break;
+                        if (filesToAdd >= appState.MAX_SELECTABLE_FILES) break;
                         
                         try {
-                            std::string fullPath = sortedFiles[j];
+                            std::string fullPath = appState.sortedFiles[j];
                             InterferogramData data = CSVAdapter::loadFromCSV(fullPath);
                             
                             // Apply downsampling
-                            if (enableDownsampling && data.referenceDetector.size() > maxPointsBeforeDownsampling) {
-                                size_t localDownsampleFactor = data.referenceDetector.size() / maxPointsBeforeDownsampling + 1;
+                            if (appState.enableDownsampling && data.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
+                                size_t localDownsampleFactor = data.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
                                 std::vector<float> downsampledRef, downsampledPrim;
                                 for (size_t k = 0; k < data.referenceDetector.size(); k += localDownsampleFactor) {
                                     downsampledRef.push_back(data.referenceDetector[k]);
@@ -1394,16 +1321,16 @@ int main() {
                                 data.primaryDetector = downsampledPrim;
                             }
                             
-                            loadedData.push_back(data);
-                            selectedFiles.push_back(fullPath);
+                            appState.loadedData.push_back(data);
+                            appState.selectedFiles.push_back(fullPath);
                             
                             // Extract filename for legend
-                            std::string filename = sortedFiles[j];
+                            std::string filename = appState.sortedFiles[j];
                             size_t last_slash = filename.find_last_of("/\\");
                             if (last_slash != std::string::npos) {
                                 filename = filename.substr(last_slash + 1);
                             }
-                            selectedFilenames.push_back(filename);
+                            appState.selectedFilenames.push_back(filename);
                             filesToAdd++;
                         } catch (const std::exception& e) {
                             std::cerr << "Error loading file: " << e.what() << std::endl;
@@ -1411,14 +1338,14 @@ int main() {
                     }
                     
                     // Update last selected index
-                    lastSelectedIndex = i;
-                    dataLoaded = !selectedFiles.empty();
+                    appState.lastSelectedIndex = i;
+                    appState.dataLoaded = !appState.selectedFiles.empty();
                 } else {
                     // Single selection - replace current selection
-                    currentSortedFileIndex = i;
-                    filesChanged = true;
+                    appState.currentSortedFileIndex = i;
+                    appState.filesChanged = true;
                     // Update last selected index for future Shift+Click
-                    lastSelectedIndex = i;
+                    appState.lastSelectedIndex = i;
                 }
             }
             
@@ -1426,13 +1353,13 @@ int main() {
             ImGui::PopStyleColor(stylesPushed);
             
             // Auto-scroll to keep selected item visible only when selection changes via keyboard
-            if (i == currentSortedFileIndex && keyboardNavigation) {
+            if (i == appState.currentSortedFileIndex && appState.keyboardNavigation) {
                 ImGui::SetScrollHereY(0.5f); // Scroll to center the selected item
             }
         }
         // Show selection limit popup if needed
         if (ImGui::BeginPopupModal("Selection Limit", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
-            ImGui::Text("Maximum of %zu files can be selected at once.", MAX_SELECTABLE_FILES);
+            ImGui::Text("Maximum of %zu files can be selected at once.", appState.MAX_SELECTABLE_FILES);
             ImGui::Text("Please deselect some files first.");
             
             if (ImGui::Button("OK")) {
@@ -1447,37 +1374,37 @@ int main() {
         
         // Graphing panel (main) - now using ImPlot
         ImGui::Begin("Graphing Panel");
-        if (dataLoaded) {
+        if (appState.dataLoaded) {
             // Y-axis limits are now handled by the auto-fit toggle
             // When autoFitYAxis is true, ImPlot will auto-calculate Y-axis limits
             // When autoFitYAxis is false, we use the manually calculated limits
             
             // Determine zoom range
             size_t ref_start =  0;
-            size_t ref_end =  loadedData[0].referenceDetector.size();
+            size_t ref_end =  appState.loadedData[0].referenceDetector.size();
             size_t prim_start =  0;
-            size_t prim_end =  loadedData[0].primaryDetector.size();
+            size_t prim_end =  appState.loadedData[0].primaryDetector.size();
             // Apply peak alignment if enabled
-            std::vector<InterferogramData> alignedData = loadedData;
-            if (alignPeaks && loadedData.size() > 1) {
+            std::vector<InterferogramData> alignedData = appState.loadedData;
+            if (appState.alignPeaks && appState.loadedData.size() > 1) {
                 // Find the peak position in the first dataset's primary detector (reference)
                 size_t referencePeakPos = 0;
-                float referencePeakValue = loadedData[0].primaryDetector[0];
-                for (size_t i = 1; i < loadedData[0].primaryDetector.size(); i++) {
-                    if (loadedData[0].primaryDetector[i] > referencePeakValue) {
-                        referencePeakValue = loadedData[0].primaryDetector[i];
+                float referencePeakValue = appState.loadedData[0].primaryDetector[0];
+                for (size_t i = 1; i < appState.loadedData[0].primaryDetector.size(); i++) {
+                    if (appState.loadedData[0].primaryDetector[i] > referencePeakValue) {
+                        referencePeakValue = appState.loadedData[0].primaryDetector[i];
                         referencePeakPos = i;
                     }
                 }
                 
                 // Align all other datasets to this peak position
-                for (size_t datasetIdx = 1; datasetIdx < loadedData.size(); datasetIdx++) {
+                for (size_t datasetIdx = 1; datasetIdx < appState.loadedData.size(); datasetIdx++) {
                     // Find peak in current dataset's primary detector
                     size_t currentPeakPos = 0;
-                    float currentPeakValue = loadedData[datasetIdx].primaryDetector[0];
-                    for (size_t i = 1; i < loadedData[datasetIdx].primaryDetector.size(); i++) {
-                        if (loadedData[datasetIdx].primaryDetector[i] > currentPeakValue) {
-                            currentPeakValue = loadedData[datasetIdx].primaryDetector[i];
+                    float currentPeakValue = appState.loadedData[datasetIdx].primaryDetector[0];
+                    for (size_t i = 1; i < appState.loadedData[datasetIdx].primaryDetector.size(); i++) {
+                        if (appState.loadedData[datasetIdx].primaryDetector[i] > currentPeakValue) {
+                            currentPeakValue = appState.loadedData[datasetIdx].primaryDetector[i];
                             currentPeakPos = i;
                         }
                     }
@@ -1486,26 +1413,26 @@ int main() {
                     int shift = referencePeakPos - currentPeakPos;
                     
                     // Apply shift to both reference and primary detectors
-                    std::vector<float> shiftedRef(loadedData[datasetIdx].referenceDetector.size(), 0.0f);
-                    std::vector<float> shiftedPrim(loadedData[datasetIdx].primaryDetector.size(), 0.0f);
+                    std::vector<float> shiftedRef(appState.loadedData[datasetIdx].referenceDetector.size(), 0.0f);
+                    std::vector<float> shiftedPrim(appState.loadedData[datasetIdx].primaryDetector.size(), 0.0f);
                     
                     if (shift > 0) {
                         // Shift right - pad beginning with zeros
-                        for (size_t i = 0; i < loadedData[datasetIdx].referenceDetector.size() - shift; i++) {
-                            shiftedRef[i + shift] = loadedData[datasetIdx].referenceDetector[i];
-                            shiftedPrim[i + shift] = loadedData[datasetIdx].primaryDetector[i];
+                        for (size_t i = 0; i < appState.loadedData[datasetIdx].referenceDetector.size() - shift; i++) {
+                            shiftedRef[i + shift] = appState.loadedData[datasetIdx].referenceDetector[i];
+                            shiftedPrim[i + shift] = appState.loadedData[datasetIdx].primaryDetector[i];
                         }
                     } else if (shift < 0) {
                         // Shift left - pad end with zeros
                         shift = -shift; // Make positive
-                        for (size_t i = 0; i < loadedData[datasetIdx].referenceDetector.size() - shift; i++) {
-                            shiftedRef[i] = loadedData[datasetIdx].referenceDetector[i + shift];
-                            shiftedPrim[i] = loadedData[datasetIdx].primaryDetector[i + shift];
+                        for (size_t i = 0; i < appState.loadedData[datasetIdx].referenceDetector.size() - shift; i++) {
+                            shiftedRef[i] = appState.loadedData[datasetIdx].referenceDetector[i + shift];
+                            shiftedPrim[i] = appState.loadedData[datasetIdx].primaryDetector[i + shift];
                         }
                     } else {
                         // No shift needed
-                        shiftedRef = loadedData[datasetIdx].referenceDetector;
-                        shiftedPrim = loadedData[datasetIdx].primaryDetector;
+                        shiftedRef = appState.loadedData[datasetIdx].referenceDetector;
+                        shiftedPrim = appState.loadedData[datasetIdx].primaryDetector;
                     }
                     
                     // Update aligned data
@@ -1514,10 +1441,10 @@ int main() {
                 }
             }
             
-            if (loadedData.size() > 1) {
+            if (appState.loadedData.size() > 1) {
                 ImGui::Text("Datasets:");
                 ImGui::BeginGroup(); // Start horizontal group
-                for (size_t i = 0; i < loadedData.size(); i++) {
+                for (size_t i = 0; i < appState.loadedData.size(); i++) {
                     ImVec4 color;
                     // Assign same colors as used in plots
                     if (i == 0) {
@@ -1544,8 +1471,8 @@ int main() {
                     // Move cursor forward and add text
                     ImGui::Dummy(square_size);
                     ImGui::SameLine();
-                    ImGui::Text("%s", selectedFilenames[i].c_str());
-                    if (i < loadedData.size() - 1) {
+                    ImGui::Text("%s", appState.selectedFilenames[i].c_str());
+                    if (i < appState.loadedData.size() - 1) {
                         ImGui::SameLine();
                         ImGui::Text("  "); // Add some spacing between items
                         ImGui::SameLine();
@@ -1561,9 +1488,9 @@ int main() {
             
             // Pre-allocate plot specs to avoid repeated construction in rendering loop
             std::vector<ImPlotSpec> plotSpecs;
-            if (dataLoaded) {
-                plotSpecs.resize(loadedData.size());
-                for (size_t i = 0; i < loadedData.size(); i++) {
+            if (appState.dataLoaded) {
+                plotSpecs.resize(appState.loadedData.size());
+                for (size_t i = 0; i < appState.loadedData.size(); i++) {
                     plotSpecs[i].LineWeight = 2.0f;
                     
                     // Assign specific colors based on the requested scheme (yellow first)
@@ -1585,34 +1512,34 @@ int main() {
             // This completely bypasses ImPlot's input system
             ImVec2 mousePos = ImGui::GetMousePos();
             bool isOverPlot = ImGui::IsWindowHovered();
-            isMouseOverPlot = isOverPlot;
+            appState.isMouseOverPlot = isOverPlot;
 
             // Handle X-range selection with Shift key - state management only
             bool shiftPressed = ImGui::GetIO().KeyShift;
-            if (isOverPlot && shiftPressed && !isSelectingXRange) {
+            if (isOverPlot && shiftPressed && !appState.isSelectingXRange) {
                 // Start selection when Shift is pressed over plot
-                isSelectingXRange = true;
+                appState.isSelectingXRange = true;
                 // Reset selection positions
-                selectionStartX = 0.0;
-                selectionEndX = 0.0;
+                appState.selectionStartX = 0.0;
+                appState.selectionEndX = 0.0;
                 std::cout << "DEBUG: Started X-range selection" << std::endl;
-            } else if (!shiftPressed && isSelectingXRange) {
+            } else if (!shiftPressed && appState.isSelectingXRange) {
                 // End selection when Shift is released
-                isSelectingXRange = false;
+                appState.isSelectingXRange = false;
                 
                 // Only finalize if we have valid selection
-                if(selectionStartX != selectionEndX) {
-                    applyXRangeSelection = true;
+                if(appState.selectionStartX != appState.selectionEndX) {
+                    appState.applyXRangeSelection = true;
                     
-                    if(selectionStartX > selectionEndX)
+                    if(appState.selectionStartX > appState.selectionEndX)
                     {
                         // make sure start is always smaller
-                        double dum = selectionStartX;
-                        selectionStartX = selectionEndX;
-                        selectionEndX = dum;
+                        double dum = appState.selectionStartX;
+                        appState.selectionStartX = appState.selectionEndX;
+                        appState.selectionEndX = dum;
                     }
                     
-                    std::cout << "DEBUG: Finalizing X-range selection: Start=" << selectionStartX << ", End=" << selectionEndX << std::endl;
+                    std::cout << "DEBUG: Finalizing X-range selection: Start=" << appState.selectionStartX << ", End=" << appState.selectionEndX << std::endl;
                 } else {
                     std::cout << "DEBUG: X-range selection cancelled (no valid range)" << std::endl;
                 }
@@ -1623,48 +1550,48 @@ int main() {
 
                 // Reference detector plot (top)
                 ImPlotFlags ref_flags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend;
-                if (dataLoaded && loadedData[0].referenceDetector.size() > 50000) {
+                if (appState.dataLoaded && appState.loadedData[0].referenceDetector.size() > 50000) {
                     ref_flags |= ImPlotFlags_NoInputs; // Only disable inputs for large datasets
                 }
                 // Never show crosshairs
                 if (ImPlot::BeginPlot("Reference", ImVec2(-1, -1), ref_flags)) {
                     // Set up axes with auto-fit flag for Y-axis when enabled
                     ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
-                    if (autoFitYAxis) {
+                    if (appState.autoFitYAxis) {
                         y_flags |= ImPlotAxisFlags_AutoFit;
                     }
                     ImPlot::SetupAxes("Sample", "Voltage [V]", ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks | ImPlotAxisFlags_NoTickLabels, y_flags);
                     // Conditionally optimize grid rendering for large datasets
-                    if (dataLoaded && loadedData[0].referenceDetector.size() > 50000) {
+                    if (appState.dataLoaded && appState.loadedData[0].referenceDetector.size() > 50000) {
                         ImPlot::PushStyleColor(ImPlotCol_AxisGrid, ImVec4(0.3f, 0.3f, 0.3f, 0.5f));
                         // Optimize by reducing grid line rendering overhead for large datasets
                     }
 
-                    if (shouldAutoscale || forceXAutofit) {
+                    if (appState.shouldAutoscale || appState.forceXAutofit) {
                         // Set initial view to show all data when new data is loaded or when downsampling is toggled
-                        if (!autoFitYAxis) {
+                        if (!appState.autoFitYAxis) {
                             // Manual Y-axis: set both X and Y limits
-                            ImPlot::SetupAxesLimits(0, loadedData[0].referenceDetector.size(), ref_y_min, ref_y_max, ImPlotCond_Always);
+                            ImPlot::SetupAxesLimits(0, appState.loadedData[0].referenceDetector.size(), appState.ref_y_min, appState.ref_y_max, ImPlotCond_Always);
                         } else {
                             // Auto-fit both axes: set X-axis to full range, let Y-axis auto-fit
-                            ImPlot::SetupAxisLimits(ImAxis_X1, 0, loadedData[0].referenceDetector.size(), ImPlotCond_Always);
+                            ImPlot::SetupAxisLimits(ImAxis_X1, 0, appState.loadedData[0].referenceDetector.size(), ImPlotCond_Always);
                         }
                         // Reset the force flag after use
-                        if (forceXAutofit) {
-                            forceXAutofit = false;
+                        if (appState.forceXAutofit) {
+                            appState.forceXAutofit = false;
                         }
                     }
                     // Apply X-range selection if finalized and flag is set
-                    if (applyXRangeSelection && selectionStartX != selectionEndX) {
-                        ImPlot::SetupAxisLimits(ImAxis_X1, selectionStartX, selectionEndX, ImPlotCond_Always);
-                        applyXRangeSelection = false; // Reset flag after applying
+                    if (appState.applyXRangeSelection && appState.selectionStartX != appState.selectionEndX) {
+                        ImPlot::SetupAxisLimits(ImAxis_X1, appState.selectionStartX, appState.selectionEndX, ImPlotCond_Always);
+                        appState.applyXRangeSelection = false; // Reset flag after applying
                     }
                     // Plot all selected datasets with pre-allocated specs
-                    if (dataLoaded) {  // Only plot if data is loaded
+                    if (appState.dataLoaded) {  // Only plot if data is loaded
                         size_t data_count = ref_end - ref_start;
-                        if (data_count > 0 && ref_start < loadedData[0].referenceDetector.size()) {
-                            for (size_t i = 0; i < loadedData.size(); i++) {
-                                const auto& dataToPlot = alignPeaks ? alignedData[i] : loadedData[i];
+                        if (data_count > 0 && ref_start < appState.loadedData[0].referenceDetector.size()) {
+                            for (size_t i = 0; i < appState.loadedData.size(); i++) {
+                                const auto& dataToPlot = appState.alignPeaks ? alignedData[i] : appState.loadedData[i];
                                 if (ref_start < dataToPlot.referenceDetector.size()) {
                                     size_t actual_count = std::min(data_count, dataToPlot.referenceDetector.size() - ref_start);
                                     ImPlot::PlotLine("", 
@@ -1673,28 +1600,28 @@ int main() {
                                 }
                             }
                         } else {
-                            std::cout << "DEBUG: Invalid data range for plotting: start=" << ref_start << ", end=" << ref_end << ", size=" << loadedData[0].referenceDetector.size() << std::endl;
+                            std::cout << "DEBUG: Invalid data range for plotting: start=" << ref_start << ", end=" << ref_end << ", size=" << appState.loadedData[0].referenceDetector.size() << std::endl;
                         }
                     }
                     
                     // Handle X-range selection within plot context
-                    if (isSelectingXRange) {
+                    if (appState.isSelectingXRange) {
                         // Get current mouse position in plot coordinates
                         ImPlotPoint mousePos = ImPlot::GetPlotMousePos();
                         
                         // Initialize start position if not set
-                        if (selectionStartX == 0.0 && selectionEndX == 0.0) {
-                            selectionStartX = mousePos.x;
+                        if (appState.selectionStartX == 0.0 && appState.selectionEndX == 0.0) {
+                            appState.selectionStartX = mousePos.x;
                         }
-                        selectionEndX = mousePos.x;
+                        appState.selectionEndX = mousePos.x;
                         
                         // Get current plot limits to draw vertical lines
                         double y_min = ImPlot::GetPlotLimits().Y.Min;
                         double y_max = ImPlot::GetPlotLimits().Y.Max;
                         
                         // Ensure proper ordering (left to right)
-                        double selection_left = std::min(selectionStartX, selectionEndX);
-                        double selection_right = std::max(selectionStartX, selectionEndX);
+                        double selection_left = std::min(appState.selectionStartX, appState.selectionEndX);
+                        double selection_right = std::max(appState.selectionStartX, appState.selectionEndX);
                         
                         // Create arrays for shaded region - need X array and two Y arrays (bottom and top)
                         double shade_x[2] = {selection_left, selection_right};
@@ -1709,9 +1636,9 @@ int main() {
                         ImPlot::PlotShaded("##SelectionFill", shade_x, shade_y1, shade_y2, 2, fillSpec);
                         
                         // Create arrays for vertical line points
-                        double start_x[2] = {selectionStartX, selectionStartX};
+                        double start_x[2] = {appState.selectionStartX, appState.selectionStartX};
                         double start_y[2] = {y_min, y_max};
-                        double end_x[2] = {selectionEndX, selectionEndX};
+                        double end_x[2] = {appState.selectionEndX, appState.selectionEndX};
                         double end_y[2] = {y_min, y_max};
                         
                         // Draw vertical line at start position
@@ -1722,7 +1649,7 @@ int main() {
                     }
                     
                     ImPlot::EndPlot();
-                    if (dataLoaded && loadedData[0].referenceDetector.size() > 50000) {
+                    if (appState.dataLoaded && appState.loadedData[0].referenceDetector.size() > 50000) {
                         ImPlot::PopStyleColor(); // Pop grid color only if we pushed it
                     }
                 }
@@ -1731,7 +1658,7 @@ int main() {
                 
                 // Primary detector plot (bottom)
                 ImPlotFlags prim_flags = ImPlotFlags_NoTitle;
-                if (dataLoaded && loadedData[0].primaryDetector.size() > 50000) {
+                if (appState.dataLoaded && appState.loadedData[0].primaryDetector.size() > 50000) {
                     prim_flags |= ImPlotFlags_NoInputs; // Only disable inputs for large datasets
                 }
 
@@ -1739,7 +1666,7 @@ int main() {
                 if (ImPlot::BeginPlot("Primary", ImVec2(-1, -1), prim_flags)) {
                     // Set up axes with auto-fit flag for Y-axis when enabled
                     ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
-                    if (autoFitYAxis) {
+                    if (appState.autoFitYAxis) {
                         y_flags |= ImPlotAxisFlags_AutoFit;
                     }
 
@@ -1747,43 +1674,43 @@ int main() {
                     ImPlot::SetupAxes("Sample", "Voltage [V]", ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks, y_flags);
 
                     // Conditionally optimize grid rendering for large datasets
-                    if (dataLoaded && loadedData[0].primaryDetector.size() > 50000) {
+                    if (appState.dataLoaded && appState.loadedData[0].primaryDetector.size() > 50000) {
                         ImPlot::PushStyleColor(ImPlotCol_AxisGrid, ImVec4(0.3f, 0.3f, 0.3f, 0.5f));
                         // Optimize by reducing grid line rendering overhead for large datasets
                     }
 
-                    if(leftArrowHandleFlag) {
-                        float translationAmount = (last_x_max - last_x_min) / 10;
-                        ImPlot::SetupAxisLimits(ImAxis_X1, last_x_min - translationAmount, last_x_max - translationAmount, ImPlotCond_Always);
-                        leftArrowHandleFlag = false;
-                    } else if(rightArrowHandleFlag) {
-                        float translationAmount = (last_x_max - last_x_min) / 10;
-                        ImPlot::SetupAxisLimits(ImAxis_X1, last_x_min + translationAmount, last_x_max + translationAmount, ImPlotCond_Always);
-                        rightArrowHandleFlag = false;
+                    if(appState.leftArrowHandleFlag) {
+                        float translationAmount = (appState.last_x_max - appState.last_x_min) / 10;
+                        ImPlot::SetupAxisLimits(ImAxis_X1, appState.last_x_min - translationAmount, appState.last_x_max - translationAmount, ImPlotCond_Always);
+                        appState.leftArrowHandleFlag = false;
+                    } else if(appState.rightArrowHandleFlag) {
+                        float translationAmount = (appState.last_x_max - appState.last_x_min) / 10;
+                        ImPlot::SetupAxisLimits(ImAxis_X1, appState.last_x_min + translationAmount, appState.last_x_max + translationAmount, ImPlotCond_Always);
+                        appState.rightArrowHandleFlag = false;
                     }
 
-                    if (shouldAutoscale || forceXAutofit) {
+                    if (appState.shouldAutoscale || appState.forceXAutofit) {
                         // Set initial view to show all data when new data is loaded or when downsampling is toggled
-                        if (!autoFitYAxis) {
+                        if (!appState.autoFitYAxis) {
                             // Manual Y-axis: set both X and Y limits
-                            ImPlot::SetupAxesLimits(0, loadedData[0].primaryDetector.size(), prim_y_min, prim_y_max, ImPlotCond_Always);
+                            ImPlot::SetupAxesLimits(0, appState.loadedData[0].primaryDetector.size(), appState.prim_y_min, appState.prim_y_max, ImPlotCond_Always);
                         } else {
                             // Auto-fit both axes: set X-axis to full range, let Y-axis auto-fit
-                            ImPlot::SetupAxisLimits(ImAxis_X1, 0, loadedData[0].primaryDetector.size(), ImPlotCond_Always);
+                            ImPlot::SetupAxisLimits(ImAxis_X1, 0, appState.loadedData[0].primaryDetector.size(), ImPlotCond_Always);
                         }
                     }
                     // Apply X-range selection if finalized and flag is set
-                    if (applyXRangeSelection && selectionStartX != selectionEndX) {
-                        ImPlot::SetupAxisLimits(ImAxis_X1, selectionStartX, selectionEndX, ImPlotCond_Always);
-                        applyXRangeSelection = false; // Reset flag after applying
+                    if (appState.applyXRangeSelection && appState.selectionStartX != appState.selectionEndX) {
+                        ImPlot::SetupAxisLimits(ImAxis_X1, appState.selectionStartX, appState.selectionEndX, ImPlotCond_Always);
+                        appState.applyXRangeSelection = false; // Reset flag after applying
                     }
                     // Reuse the same plot specs as reference plot (already pre-allocated)
                     // Plot all selected datasets with same colors as reference
-                    if (dataLoaded) {  // Only plot if data is loaded
+                    if (appState.dataLoaded) {  // Only plot if data is loaded
                         size_t data_count = ref_end - ref_start;
-                        if (data_count > 0 && ref_start < loadedData[0].primaryDetector.size()) {
-                            for (size_t i = 0; i < loadedData.size(); i++) {
-                                const auto& dataToPlot = alignPeaks ? alignedData[i] : loadedData[i];
+                        if (data_count > 0 && ref_start < appState.loadedData[0].primaryDetector.size()) {
+                            for (size_t i = 0; i < appState.loadedData.size(); i++) {
+                                const auto& dataToPlot = appState.alignPeaks ? alignedData[i] : appState.loadedData[i];
                                 if (ref_start < dataToPlot.primaryDetector.size()) {
                                     size_t actual_count = std::min(data_count, dataToPlot.primaryDetector.size() - ref_start);
                                     ImPlot::PlotLine("", 
@@ -1795,23 +1722,23 @@ int main() {
                     }
                     
                     // Handle X-range selection within plot context
-                    if (isSelectingXRange) {
+                    if (appState.isSelectingXRange) {
                         // Get current mouse position in plot coordinates
                         ImPlotPoint mousePos = ImPlot::GetPlotMousePos();
                         
                         // Initialize start position if not set
-                        if (selectionStartX == 0.0 && selectionEndX == 0.0) {
-                            selectionStartX = mousePos.x;
+                        if (appState.selectionStartX == 0.0 && appState.selectionEndX == 0.0) {
+                            appState.selectionStartX = mousePos.x;
                         }
-                        selectionEndX = mousePos.x;
+                        appState.selectionEndX = mousePos.x;
                         
                         // Get current plot limits to draw vertical lines
                         double y_min = ImPlot::GetPlotLimits().Y.Min;
                         double y_max = ImPlot::GetPlotLimits().Y.Max;
                         
                         // Ensure proper ordering (left to right)
-                        double selection_left = std::min(selectionStartX, selectionEndX);
-                        double selection_right = std::max(selectionStartX, selectionEndX);
+                        double selection_left = std::min(appState.selectionStartX, appState.selectionEndX);
+                        double selection_right = std::max(appState.selectionStartX, appState.selectionEndX);
                         
                         // Create arrays for shaded region - need X array and two Y arrays (bottom and top)
                         double shade_x[2] = {selection_left, selection_right};
@@ -1826,9 +1753,9 @@ int main() {
                         ImPlot::PlotShaded("##SelectionFill", shade_x, shade_y1, shade_y2, 2, fillSpec);
                         
                         // Create arrays for vertical line points
-                        double start_x[2] = {selectionStartX, selectionStartX};
+                        double start_x[2] = {appState.selectionStartX, appState.selectionStartX};
                         double start_y[2] = {y_min, y_max};
-                        double end_x[2] = {selectionEndX, selectionEndX};
+                        double end_x[2] = {appState.selectionEndX, appState.selectionEndX};
                         double end_y[2] = {y_min, y_max};
                         
                         // Draw vertical line at start position
@@ -1839,25 +1766,25 @@ int main() {
                     }
                     
                     // Add "LARGE DATA" indicator for large datasets (>50k points)
-                    if (dataLoaded && loadedData[0].primaryDetector.size() > 50000) {
+                    if (appState.dataLoaded && appState.loadedData[0].primaryDetector.size() > 50000) {
                         // Use ImPlot's annotation system for reliable positioning
                         // Position at top-right of plot with small offset
                         ImPlot::Annotation(ImPlot::GetPlotLimits().X.Max, ImPlot::GetPlotLimits().Y.Max, 
                                          ImVec4(1.0f, 1.0f, 1.0f, 1.0f), ImVec2(-10, 10), true, "LARGE DATA");
                     }
                     
-                    last_x_max = ImPlot::GetPlotLimits().X.Max;
-                    last_x_min = ImPlot::GetPlotLimits().X.Min;
+                    appState.last_x_max = ImPlot::GetPlotLimits().X.Max;
+                    appState.last_x_min = ImPlot::GetPlotLimits().X.Min;
 
                     ImPlot::EndPlot();
-                    if (dataLoaded && loadedData[0].primaryDetector.size() > 50000) {
+                    if (appState.dataLoaded && appState.loadedData[0].primaryDetector.size() > 50000) {
                         ImPlot::PopStyleColor(); // Pop grid color only if we pushed it
                     }
                 }
                 
                 // Reset autoscale flag after use
-                if (shouldAutoscale) {
-                    shouldAutoscale = false;
+                if (appState.shouldAutoscale) {
+                    appState.shouldAutoscale = false;
                 }
                 
                 ImPlot::EndSubplots();
@@ -1872,15 +1799,15 @@ int main() {
         // Metadata panel (right)
         ImGui::Begin("Metadata");
         ImGui::PushTextWrapPos(); // Enable text wrapping
-        if (dataLoaded) {
-            ImGui::Text("File: %s", csvFiles.empty() ? "None" : csvFiles[0].c_str());
-            ImGui::Text("Samples: %zu", loadedData[0].referenceDetector.size());
+        if (appState.dataLoaded) {
+            ImGui::Text("File: %s", appState.csvFiles.empty() ? "None" : appState.csvFiles[0].c_str());
+            ImGui::Text("Samples: %zu", appState.loadedData[0].referenceDetector.size());
             
             // Display comments if comments.txt exists
             ImGui::Separator();
             ImGui::Text("Comments:");
             
-            std::string commentsPath = currentDirectory;
+            std::string commentsPath = appState.currentDirectory;
             size_t last_slash = commentsPath.find_last_of("/\\");
             if (last_slash != std::string::npos) {
                 commentsPath = commentsPath.substr(0, last_slash); // Go up to parent directory
@@ -1910,7 +1837,7 @@ int main() {
         }
         
         // Add FPS counter overlay before rendering
-        if (showFPS) {
+        if (appState.showFPS) {
             // Create a high-contrast FPS counter in top-right corner
             ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - 120, 30), ImGuiCond_Always, ImVec2(1.0f, 0.0f));
             ImGui::SetNextWindowBgAlpha(0.7f); // Semi-transparent background
@@ -1920,7 +1847,7 @@ int main() {
                                    ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize;
             
             ImGui::Begin("FPS Counter", nullptr, flags);
-            ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), "FPS: %.1f", fps); // White text for high contrast
+            ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), "FPS: %.1f", appState.fps); // White text for high contrast
             ImGui::End();
         }
         
@@ -1939,22 +1866,22 @@ int main() {
         glfwSwapBuffers(window);
         
         // Reset keyboard navigation flag after rendering
-        keyboardNavigation = false;
+        appState.keyboardNavigation = false;
     }
     
     // Cleanup
     cleanupApplication(window);
     
     // Save configuration before exiting
-    config.alignPeaks = alignPeaks;
-    config.autoRestoreScale = autoRestoreScale;
-    config.lastWorkingDirectory = currentDirectory;
-    config.uiSize = currentUiSize;
+    config.alignPeaks = appState.alignPeaks;
+    config.autoRestoreScale = appState.autoRestoreScale;
+    config.lastWorkingDirectory = appState.currentDirectory;
+    config.uiSize = appState.currentUiSize;
     
     // Update recent datasets if we had a successful load
-    if (shouldUpdateRecentDatasets && dataLoaded && !selectedFiles.empty()) {
+    if (appState.shouldUpdateRecentDatasets && appState.dataLoaded && !appState.selectedFiles.empty()) {
         // Add the parent directory of the current dataset to recent datasets
-        std::string datasetPath = selectedFiles[0];
+        std::string datasetPath = appState.selectedFiles[0];
         size_t last_slash = datasetPath.find_last_of("/\\");
         if (last_slash != std::string::npos) {
             std::string parentDir = datasetPath.substr(0, last_slash);
@@ -1971,7 +1898,7 @@ int main() {
     }
     
     // Update config with current FPS setting before saving
-    config.showFPS = showFPS;
+    config.showFPS = appState.showFPS;
     
     // Save config to file
     if (!config.saveToFile(configFilePath)) {
