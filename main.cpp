@@ -34,12 +34,7 @@ struct InterferogramData {
     std::string metadata;
 };
 
-// Dummy variables for function defaults
-static std::vector<std::string> dummySelectedFiles;
-static std::vector<std::string> dummySelectedFilenames;
-static std::vector<InterferogramData> dummyLoadedData;
-static bool dummyDataLoaded = false;
-static std::vector<std::string> dummySortedFiles;
+
 
 // Natural sort comparison function for filenames with numbers
 static bool naturalSortCompare(const std::string& a, const std::string& b) {
@@ -265,61 +260,7 @@ bool initializeApplication(AppConfig& config, GLFWwindow*& window) {
     return true;
 }
 
-/**
- * Configure ImGui style and colors
- * @param io ImGuiIO reference for DPI scaling
- * @param config Application configuration for UI settings
- * @param uiScale UI scale factor
- */
-void setupUIStyle(ImGuiIO& io, const AppConfig& config, float& uiScale, const std::string& currentUiSize) {
-    // Initialize ImGui context
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    
-    // Enable docking
-    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-    
-    ImGui::StyleColorsDark();
-    
-    // Customize colors to use black background
-    ImGuiStyle& style = ImGui::GetStyle();
-    style.Colors[ImGuiCol_WindowBg] = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
-    style.Colors[ImGuiCol_ChildBg] = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
-    style.Colors[ImGuiCol_PopupBg] = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
 
-    // Customize plot colors
-    ImVec4 yellow_color = ImVec4(1.0f, 1.0f, 0.0f, 1.0f); // Bright yellow
-    ImVec4 background_color = ImVec4(0.0f, 0.0f, 0.0f, 1.0f); // Black background
-
-    // Set plot colors
-    style.Colors[ImGuiCol_PlotLines] = yellow_color;
-    style.Colors[ImGuiCol_PlotLinesHovered] = yellow_color;
-    style.Colors[ImGuiCol_PlotHistogram] = yellow_color;
-    style.Colors[ImGuiCol_PlotHistogramHovered] = yellow_color;
-
-    // Initialize ImPlot context
-    ImPlot::CreateContext();
-
-    // Set up for high DPI displays AFTER backend initialization
-    // Apply scaling based on UI size setting
-    float dpi_scale = io.DisplayFramebufferScale.x;
-
-    // Update scale based on UI size
-    if (currentUiSize == "tiny") {
-        uiScale = 0.75f;
-    } else if (currentUiSize == "small") {
-        uiScale = 0.9f;
-    } else if (currentUiSize == "normal") {
-        uiScale = 1.0f;
-    } else if (currentUiSize == "large") {
-        uiScale = 1.4f;
-    } else if (currentUiSize == "huge") {
-        uiScale = 1.8f;
-    }
-
-    // Apply the scaling (font only initially to avoid UI issues)
-    io.FontGlobalScale = dpi_scale * uiScale;
-}
 
 /**
  * Process window events and update configuration
@@ -357,15 +298,15 @@ void handleKeyboardNavigation(const std::vector<std::string>& csvFiles,
                              size_t& currentSortedFileIndex, 
                              bool& filesChanged, 
                              bool& keyboardNavigation, 
-                             bool shiftSelectMode = false, 
-                             std::vector<std::string>& selectedFiles = dummySelectedFiles, 
-                             std::vector<std::string>& selectedFilenames = dummySelectedFilenames, 
-                             std::vector<InterferogramData>& loadedData = dummyLoadedData, 
-                             bool& dataLoaded = dummyDataLoaded, 
-                             const std::vector<std::string>& sortedFiles = dummySortedFiles, 
-                             bool enableDownsampling = true, 
-                             size_t maxPointsBeforeDownsampling = 50000, 
-                             size_t maxSelectableFiles = 5) {
+                             bool shiftSelectMode, 
+                             std::vector<std::string>& selectedFiles, 
+                             std::vector<std::string>& selectedFilenames, 
+                             std::vector<InterferogramData>& loadedData, 
+                             bool& dataLoaded, 
+                             const std::vector<std::string>& sortedFiles, 
+                             bool enableDownsampling, 
+                             size_t maxPointsBeforeDownsampling, 
+                             size_t maxSelectableFiles) {
     if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) && !csvFiles.empty()) {
         if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
             // Navigate up in file list (with wrapping)
@@ -524,13 +465,8 @@ int main() {
         return -1;
     }
     
-    // Initialize ImGui
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
+    // Get ImGui IO (context already created in initializeApplication)
     ImGuiIO& io = ImGui::GetIO(); (void)io;
-    
-    // Enable docking
-    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     
     // Enable docking
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
@@ -561,8 +497,7 @@ int main() {
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 460");
     
-    // Initialize ImPlot context
-    ImPlot::CreateContext();
+    // ImPlot context already created in initializeApplication
     
     // Set up for high DPI displays AFTER backend initialization
     // Apply scaling based on UI size setting
@@ -622,9 +557,6 @@ int main() {
     const size_t maxPointsBeforeDownsampling = 50000; // Downsample if dataset exceeds this
     
     // Zoom state
-    bool isZooming = false;
-    ImVec2 zoomStart;
-    ImVec2 zoomEnd;
     std::pair<size_t, size_t> zoomRange = {0, 0};
     bool shouldAutoscale = false; // Flag to trigger autoscale on new data load
     bool forceXAutofit = false; // Flag to force X-axis autofit (used for downsampling toggle)
