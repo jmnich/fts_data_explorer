@@ -1754,11 +1754,11 @@ int main() {
 
                     if(leftArrowHandleFlag) {
                         float translationAmount = (last_x_max - last_x_min) / 10;
-                        ImPlot::SetupAxisLimits(ImAxis_X1, last_x_min + translationAmount, last_x_max + translationAmount, ImPlotCond_Always);
+                        ImPlot::SetupAxisLimits(ImAxis_X1, last_x_min - translationAmount, last_x_max - translationAmount, ImPlotCond_Always);
                         leftArrowHandleFlag = false;
                     } else if(rightArrowHandleFlag) {
                         float translationAmount = (last_x_max - last_x_min) / 10;
-                        ImPlot::SetupAxisLimits(ImAxis_X1, last_x_min - translationAmount, last_x_max - translationAmount, ImPlotCond_Always);
+                        ImPlot::SetupAxisLimits(ImAxis_X1, last_x_min + translationAmount, last_x_max + translationAmount, ImPlotCond_Always);
                         rightArrowHandleFlag = false;
                     }
 
