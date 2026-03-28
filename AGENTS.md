@@ -60,6 +60,16 @@ It presents a tree view of information available in the dataset and then allows 
     - 'gui' - contains all code for handling the gui interface
     - 'adapters' - contains adapter classes 
 
+# App State Description
+- The application maintains state for the current working directory, selected files, and visualization settings.
+- Key state variables include:
+  - `currentWorkingDirectory`: Path to the dataset directory being explored
+  - `selectedFiles`: List of currently selected files for comparison (up to 5 files)
+  - `visualizationSettings`: Contains toggle states for features like peak alignment, auto-fit Y-axis, downsampling, and autorestore scale
+  - `axisRanges`: Stores the current X and Y axis ranges for the plots
+  - `peakAlignmentOffsets`: Calculated X-axis offsets for aligning peaks across multiple files
+- State persistence: Configuration settings are saved to and loaded from a config file for session restoration.
+
 # Key files and their purposes
 - `main.cpp` - Main application entry point with ImGui docking interface
 - `config.h` - Configuration header with build options
