@@ -25,15 +25,34 @@ It presents a tree view of information available in the dataset and then allows 
         - UI size selection droplist
     - Help
         - non-interactive list of all implemented keyboard shortcuts
+        - keyboard shortcuts include:
+          - Up/Down Arrows: Navigate through files
+          - Left/Right Arrows: Pan view horizontally
+          - Shift + mouse / Right click: X-axis range selection
+          - Ctrl+Y: Toggle auto-fit Y-axis
+          - Ctrl+A: Toggle align peaks
+          - Ctrl+D: Toggle downsampling
+          - Ctrl+H: Return to welcome screen
+          - ESC: Reset zoom to fit all data
 - Detailed description of axis ranging in data plots:
     - when application is launched, 'auto fit y axis' option must be enabled. This enables/disables the native "Auto-Fit" option from implot.
     - when application is launched, 'autorestore scale' option loads the last used value from config. The effect of this option is described below.
     - feature: select range to zoom - with mouse hovering over plot area, when user presses shift button, a selection of x-axis range begins, and when shift is released the selection is finalized. During selection, the range is indicated by two vertical cursors with area between them painted in translucent purple. When shift is released, the range of displayed x-axis values is set to the selected range.
+    - feature: multi-file selection with Ctrl+Click for individual files and Shift+Click for range selection, supporting up to 5 simultaneously selected files for comparison.
     - feature: pressing 'esc' button resets zoom to fit all data. This feature is always active when any data is displayed.
     - feature: when user selects additional data files to display, the current range of axes is preseved. 
     - feature: when user switches between data files using mouse click or up/down arrows, axis ranging depends on option "autorestore scale". If enabled then autoscale to fit all data, if disabled then preserve the range of XY axes used for previous file.
+    - feature: peak alignment functionality that shifts datasets on the x-axis to align the maximum values of primary interferograms across multiple selected files, enabling direct comparison of signal shapes.
     - feature: mouse scroll allows to zoom into the region over witch mouse is currently hovering.
+    - feature: left/right arrow keys allow panning the view by 10% of the current visible range in the respective direction.
     - feature: when the application loads a file for display for the first time after launch or work directory switch, axes zoom to fit all data.
+    - feature: FPS counter can be enabled/disabled via the Settings menu, displaying current frames per second in the top-right corner.
+    - feature: large datasets (>50,000 points) trigger optimizations including:
+      - Automatic downsampling to reduce data points
+      - Disabled anti-aliasing for improved rendering performance
+      - Disabled plot inputs (ImPlotFlags_NoInputs) to prevent interaction lag
+      - Optimized grid rendering with reduced overhead
+      - "LARGE DATA" indicator shown in the top-right of plots
 
 # Application structure
 - the application uses 'adapter classes' which convert different data storage formats into a unified object carrying primary and reference interferograms as well as metadata. These unified data objects are then used to display the information in gui.
