@@ -33,6 +33,12 @@ public:
     bool shouldAutoscale;
     double manualXMin;
     double manualXMax;
+
+    // Arrow key handling for spectrum window
+    bool leftArrowPressedLastFrame;
+    bool rightArrowPressedLastFrame;
+    bool leftArrowHandleFlag;
+    bool rightArrowHandleFlag;
     
     Spectrum();
     

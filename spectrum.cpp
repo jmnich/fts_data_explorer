@@ -18,7 +18,11 @@ Spectrum::Spectrum()
       selectionEndX(0.0),
       shouldAutoscale(true),
       manualXMin(0.0),
-      manualXMax(0.0) {}
+      manualXMax(0.0),
+      leftArrowPressedLastFrame(false),
+      rightArrowPressedLastFrame(false),
+      leftArrowHandleFlag(false),
+      rightArrowHandleFlag(false) {}
 
 void Spectrum::initSpectrumWindow() {
     if (!spectrumWindowInitialized) {
@@ -44,6 +48,12 @@ void Spectrum::resetSpectrumWindow() {
     shouldAutoscale = true;
     manualXMin = 0.0;
     manualXMax = 0.0;
+    
+    // Reset arrow key state
+    leftArrowPressedLastFrame = false;
+    rightArrowPressedLastFrame = false;
+    leftArrowHandleFlag = false;
+    rightArrowHandleFlag = false;
 }
 
 size_t Spectrum::nextPowerOf2(size_t n) {
@@ -179,6 +189,14 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
         // Plot all spectra for selected files
         bool isSpectrumWindowFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
         
+        // Reset arrow key state when window loses focus
+        if (!isSpectrumWindowFocused) {
+            leftArrowPressedLastFrame = false;
+            rightArrowPressedLastFrame = false;
+            leftArrowHandleFlag = false;
+            rightArrowHandleFlag = false;
+        }
+        
         if (ImPlot::BeginPlot("Spectrum", ImVec2(-1, -1))) {
             // Setup axes with conditional auto-fit behavior
             if (shouldAutoscale) {
@@ -204,6 +222,66 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                 shouldAutoscale = true;
                 manualXMin = 0.0;
                 manualXMax = 0.0;
+            }
+
+            // Handle arrow key presses for panning (only when spectrum window is focused)
+            if (isSpectrumWindowFocused) {
+                // Left arrow handling
+                if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) && !leftArrowPressedLastFrame) {
+                    leftArrowPressedLastFrame = true;
+                    leftArrowHandleFlag = true;
+                }
+                else if (ImGui::IsKeyReleased(ImGuiKey_LeftArrow)) {
+                    leftArrowPressedLastFrame = false;
+                    leftArrowHandleFlag = false;
+                }
+
+                // Right arrow handling
+                if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) && !rightArrowPressedLastFrame) {
+                    rightArrowPressedLastFrame = true;
+                    rightArrowHandleFlag = true;
+                }
+                else if (ImGui::IsKeyReleased(ImGuiKey_RightArrow)) {
+                    rightArrowPressedLastFrame = false;
+                    rightArrowHandleFlag = false;
+                }
+            }
+
+            // Apply arrow key panning if requested (must be done before any plot operations)
+            if (isSpectrumWindowFocused) {
+                if(leftArrowHandleFlag) {
+                    // Get current plot limits
+                    double currentXMin = ImPlot::GetPlotLimits().X.Min;
+                    double currentXMax = ImPlot::GetPlotLimits().X.Max;
+                    double currentRange = currentXMax - currentXMin;
+                    double translationAmount = currentRange / 10.0; // Pan by 10% of current visible range
+                    
+                    // Apply panning
+                    ImPlot::SetupAxisLimits(ImAxis_X1, currentXMin - translationAmount, currentXMax - translationAmount, ImPlotCond_Always);
+                    
+                    // Update manual zoom limits
+                    manualXMin = currentXMin - translationAmount;
+                    manualXMax = currentXMax - translationAmount;
+                    shouldAutoscale = false;
+                    
+                    leftArrowHandleFlag = false;
+                } else if(rightArrowHandleFlag) {
+                    // Get current plot limits
+                    double currentXMin = ImPlot::GetPlotLimits().X.Min;
+                    double currentXMax = ImPlot::GetPlotLimits().X.Max;
+                    double currentRange = currentXMax - currentXMin;
+                    double translationAmount = currentRange / 10.0; // Pan by 10% of current visible range
+                    
+                    // Apply panning
+                    ImPlot::SetupAxisLimits(ImAxis_X1, currentXMin + translationAmount, currentXMax + translationAmount, ImPlotCond_Always);
+                    
+                    // Update manual zoom limits
+                    manualXMin = currentXMin + translationAmount;
+                    manualXMax = currentXMax + translationAmount;
+                    shouldAutoscale = false;
+                    
+                    rightArrowHandleFlag = false;
+                }
             }
             
             // Handle X-range selection with Shift key - state management (only when spectrum window is focused)
