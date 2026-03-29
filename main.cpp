@@ -15,6 +15,7 @@
 // Include config header
 #include "config.h"
 #include "app_state.h"
+#include "spectrum.h"
 
 // Include imgui and other dependencies
 #include "imgui.h"
@@ -528,6 +529,12 @@ int main() {
     appState.autoRestoreScale = config.autoRestoreScale; // Use config setting for scale restoration
     appState.showFPS = config.showFPS; // Load from config
     
+    // Load spectrum window settings from config
+    appState.spectrum.spectrumWindowPosX = config.spectrumWindowPosX;
+    appState.spectrum.spectrumWindowPosY = config.spectrumWindowPosY;
+    appState.spectrum.spectrumWindowSizeX = config.spectrumWindowSizeX;
+    appState.spectrum.spectrumWindowSizeY = config.spectrumWindowSizeY;
+    
     // No initialization needed for simple file dialog
     
     // Main loop
@@ -662,6 +669,8 @@ int main() {
             appState.welcomeScreenInitialized = false;
             appState.dataLoaded = false;
             appState.filesChanged = false;
+            appState.spectrum.showSpectrumWindow = false; // Close spectrum window when returning to welcome screen
+            appState.spectrum.spectrumWindowInitialized = false;
         }
 
         // 'Left/Right Arrow' - Pan left by 10% of current visible range
@@ -1796,6 +1805,17 @@ int main() {
         }
         ImGui::End();
         
+        // Spectrum panel (bottom)
+        ImGui::Begin("Spectrum");
+        if (appState.dataLoaded) {
+            if (ImGui::Button("Spectrum")) {
+                appState.spectrum.showSpectrumWindow = true;
+            }
+        } else {
+            ImGui::Text("No data loaded.");
+        }
+        ImGui::End();
+        
         // Metadata panel (right)
         ImGui::Begin("Metadata");
         ImGui::PushTextWrapPos(); // Enable text wrapping
@@ -1850,6 +1870,14 @@ int main() {
             ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), "FPS: %.1f", appState.fps); // White text for high contrast
             ImGui::End();
         }
+
+        // Spectrum view window
+        if (appState.spectrum.showSpectrumWindow && appState.dataLoaded) {
+            if (!appState.selectedFiles.empty() && appState.selectedFiles.size() <= appState.loadedData.size()) {
+                const auto& data = appState.loadedData[0]; // Use first selected file
+                appState.spectrum.renderSpectrumWindow(data.primaryDetector);
+            }
+        }
         
         // Rendering
         ImGui::Render();
@@ -1899,6 +1927,12 @@ int main() {
     
     // Update config with current FPS setting before saving
     config.showFPS = appState.showFPS;
+    
+    // Save spectrum window settings
+    config.spectrumWindowPosX = appState.spectrum.spectrumWindowPosX;
+    config.spectrumWindowPosY = appState.spectrum.spectrumWindowPosY;
+    config.spectrumWindowSizeX = appState.spectrum.spectrumWindowSizeX;
+    config.spectrumWindowSizeY = appState.spectrum.spectrumWindowSizeY;
     
     // Save config to file
     if (!config.saveToFile(configFilePath)) {

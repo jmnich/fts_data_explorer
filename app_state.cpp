@@ -48,7 +48,8 @@ AppState::AppState()
       shouldUpdateRecentDatasets(false),
       isFirstDataLoad(true),
       showWelcomeScreen(true),
-      welcomeScreenInitialized(false)
+      welcomeScreenInitialized(false),
+      spectrum()
 {
     // Constructor body
 }
@@ -102,6 +103,7 @@ void AppState::reset() {
     sortedFiles.clear();
     showWelcomeScreen = true;
     welcomeScreenInitialized = false;
+    spectrum.resetSpectrumWindow();
 }
 
 // Global application state instance

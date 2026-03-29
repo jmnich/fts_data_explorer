@@ -9,10 +9,11 @@ It presents a tree view of information available in the dataset and then allows 
 - CMake 3.10+ build system
 
 # Functionality and GUI description
-- Main window consists of 3 docked panels:
+- Main window consists of 4 docked panels:
     - primary, large graphing panel, which shows selected primary and reference interferograms on 2 vertically stacked plots with shared x axis. These graphs support zoom with mouse.
     - metadata panel, docked to the right of the graphing panel, showing all available metadata
     - files panel, docked to the left, showing tree view with files in the selected directory
+    - spectrum panel showing button "spectrum"
 - Main window contains a ribbon menu, which is hidden in the welcome screen. The structure of the menu is as follows:
     - File
         - a single button "set working directory", which invokes directory browsing window and switches working directory
@@ -53,6 +54,13 @@ It presents a tree view of information available in the dataset and then allows 
       - Disabled plot inputs (ImPlotFlags_NoInputs) to prevent interaction lag
       - Optimized grid rendering with reduced overhead
       - "LARGE DATA" indicator shown in the top-right of plots
+
+- Spectrum functionality
+    - pressing button "Spectrum" invokes a new "Spectrum view" window that stays always on top of the application
+    - Spectrum view window contains a plot of the spectrum of the currently selected file, which is FFT of the primary detector signal
+    - Spectrum view window closes with the rest of the application and whenever user returns to the welcome screen
+    - Spectrum view window size and position are stored in config file and restored on next launch
+    
 
 # Application structure
 - the application uses 'adapter classes' which convert different data storage formats into a unified object carrying primary and reference interferograms as well as metadata. These unified data objects are then used to display the information in gui.

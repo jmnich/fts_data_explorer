@@ -54,6 +54,7 @@ include_directories(
 add_executable(fts_data_explorer
     main.cpp
     app_state.cpp
+    spectrum.cpp
     adapters/csv_adapter.cpp
     ${EXTRA_SOURCES}
 )

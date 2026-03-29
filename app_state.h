@@ -4,6 +4,7 @@
 #include <string>
 #include <filesystem>
 #include "config.h"
+#include "spectrum.h"
 
 // Data structure to hold interferogram data
 struct InterferogramData {
@@ -93,6 +94,9 @@ struct AppState {
     // Welcome screen state
     bool showWelcomeScreen;
     bool welcomeScreenInitialized;
+    
+    // Spectrum window state
+    Spectrum spectrum;
     
     // Constructor to initialize constants
     AppState();

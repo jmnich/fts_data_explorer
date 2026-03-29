@@ -26,6 +26,12 @@ struct AppConfig {
     int windowPosY = -1; // -1 means centered
     bool windowMaximized = false;
     
+    // Spectrum window state
+    float spectrumWindowPosX = 100.0f;
+    float spectrumWindowPosY = 100.0f;
+    float spectrumWindowSizeX = 600.0f;
+    float spectrumWindowSizeY = 400.0f;
+    
     // Add a dataset to recent list (maintains max size)
     void addRecentDataset(const std::string& datasetPath) {
         // Remove if already exists
@@ -80,6 +86,13 @@ struct AppConfig {
             configFile << "pos_x=" << windowPosX << "\n";
             configFile << "pos_y=" << windowPosY << "\n";
             configFile << "maximized=" << (windowMaximized ? "true" : "false") << "\n";
+            
+            // Write spectrum window settings
+            configFile << "\n[SpectrumWindow]\n";
+            configFile << "pos_x=" << spectrumWindowPosX << "\n";
+            configFile << "pos_y=" << spectrumWindowPosY << "\n";
+            configFile << "size_x=" << spectrumWindowSizeX << "\n";
+            configFile << "size_y=" << spectrumWindowSizeY << "\n";
             
             configFile.close();
             return true;
@@ -156,6 +169,16 @@ struct AppConfig {
                             windowPosY = std::stoi(value);
                         } else if (key == "maximized") {
                             windowMaximized = (value == "true");
+                        }
+                    } else if (currentSection == "SpectrumWindow") {
+                        if (key == "pos_x") {
+                            spectrumWindowPosX = std::stof(value);
+                        } else if (key == "pos_y") {
+                            spectrumWindowPosY = std::stof(value);
+                        } else if (key == "size_x") {
+                            spectrumWindowSizeX = std::stof(value);
+                        } else if (key == "size_y") {
+                            spectrumWindowSizeY = std::stof(value);
                         }
                     }
                 }
