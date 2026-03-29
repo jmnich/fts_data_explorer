@@ -34,6 +34,9 @@ list(APPEND EXTRA_SOURCES
     ${implot_SOURCE_DIR}/implot_items.cpp
 )
 
+# Add FFTW subdirectory - build it as part of our project
+add_subdirectory(fftw-3.3.10)
+
 # Find required packages
 find_package(OpenGL REQUIRED)
 find_package(glfw3 REQUIRED)
@@ -48,6 +51,7 @@ include_directories(
     ${imgui_SOURCE_DIR}
     ${imgui_SOURCE_DIR}/backends
     ${implot_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/fftw-3.3.10/api  # FFTW headers
 )
 
 # Add executable
@@ -55,6 +59,7 @@ add_executable(fts_data_explorer
     main.cpp
     app_state.cpp
     spectrum.cpp
+    spectral_toolbox.cpp
     adapters/csv_adapter.cpp
     ${EXTRA_SOURCES}
 )
@@ -73,6 +78,16 @@ target_link_libraries(fts_data_explorer
 # Add compile definitions for imgui
 target_compile_definitions(fts_data_explorer PRIVATE
     IMGUI_IMPL_OPENGL_LOADER_GLAD=0
+)
+
+# Link FFTW to our executable - use the targets created by the FFTW build
+target_link_libraries(fts_data_explorer
+    ${OPENGL_LIBRARIES}
+    ${GLFW_LIBRARIES}
+    glfw
+    GL
+    m
+    fftw3  # Use the FFTW target that was built
 )
 
 # Install targets (optional)

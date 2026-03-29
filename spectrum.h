@@ -63,10 +63,4 @@ public:
     
     // Check if spectrum needs recalculation for a specific file
     bool isSpectrumDirty(const std::string& fileId, const std::vector<float>& primaryDetector);
-    
-    // Efficient FFT implementation using Cooley-Tukey algorithm
-    void fft(const std::vector<std::complex<float>>& input, std::vector<std::complex<float>>& output);
-    
-    // Find next power of 2
-    size_t nextPowerOf2(size_t n);
 };

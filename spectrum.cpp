@@ -1,7 +1,8 @@
 #include "spectrum.h"
+#include "spectral_toolbox.h"
 #include <cmath>
 #include <algorithm>
-#include <complex>
+// #include <complex>
 #include <vector>
 
 Spectrum::Spectrum()
@@ -62,48 +63,6 @@ void Spectrum::resetSpectrumWindow() {
     strcpy(refLaserTextbox, "1.550"); // Reset to default value
 }
 
-size_t Spectrum::nextPowerOf2(size_t n) {
-    size_t power = 1;
-    while (power < n) {
-        power <<= 1;
-    }
-    return power;
-}
-
-void Spectrum::fft(const std::vector<std::complex<float>>& input, std::vector<std::complex<float>>& output) {
-    size_t n = input.size();
-    
-    // Base case
-    if (n == 1) {
-        output[0] = input[0];
-        return;
-    }
-    
-    // Divide
-    std::vector<std::complex<float>> even(n / 2);
-    std::vector<std::complex<float>> odd(n / 2);
-    
-    for (size_t i = 0; i < n / 2; i++) {
-        even[i] = input[2 * i];
-        odd[i] = input[2 * i + 1];
-    }
-    
-    // Conquer
-    std::vector<std::complex<float>> evenFFT(n / 2);
-    std::vector<std::complex<float>> oddFFT(n / 2);
-    
-    fft(even, evenFFT);
-    fft(odd, oddFFT);
-    
-    // Combine
-    for (size_t k = 0; k < n / 2; k++) {
-        float angle = -2 * M_PI * k / n;
-        std::complex<float> t = std::polar(1.0f, angle) * oddFFT[k];
-        output[k] = evenFFT[k] + t;
-        output[k + n / 2] = evenFFT[k] - t;
-    }
-}
-
 bool Spectrum::isSpectrumDirty(const std::string& fileId, const std::vector<float>& primaryDetector) {
     // Check if we have cached data for this file
     auto cachedSpectrumIt = cachedSpectra.find(fileId);
@@ -130,45 +89,6 @@ bool Spectrum::isSpectrumDirty(const std::string& fileId, const std::vector<floa
     }
     
     return false; // Data appears unchanged, use cached spectrum
-}
-
-void Spectrum::computeSpectrum(const std::vector<float>& primaryDetector, std::vector<float>& spectrum, std::vector<float>& frequencies) {
-    size_t n = primaryDetector.size();
-    if (n == 0) {
-        return;
-    }
-
-    // Use all data points without any artificial limits
-    // Find next power of 2 for efficient FFT (this handles the size automatically)
-    size_t fft_size = nextPowerOf2(n);
-    
-    // Prepare input data - convert to complex numbers, use all available data points
-    std::vector<std::complex<float>> input(fft_size, std::complex<float>(0.0f, 0.0f));
-    
-    // Copy all available data points (no downsampling)
-    for (size_t i = 0; i < n && i < fft_size; i++) {
-        input[i] = std::complex<float>(primaryDetector[i], 0.0f);
-    }
-    
-    // Zero-pad if FFT size is larger than input data
-    for (size_t i = n; i < fft_size; i++) {
-        input[i] = std::complex<float>(0.0f, 0.0f);
-    }
-    
-    // Perform FFT using Cooley-Tukey algorithm
-    std::vector<std::complex<float>> output(fft_size);
-    fft(input, output);
-    
-    // Extract magnitude spectrum (first half for real FFT)
-    size_t spectrum_size = fft_size / 2;
-    spectrum.resize(spectrum_size);
-    frequencies.resize(spectrum_size);
-    
-    for (size_t k = 0; k < spectrum_size; k++) {
-        float magnitude = std::abs(output[k]);
-        spectrum[k] = magnitude / fft_size; // Normalize
-        frequencies[k] = static_cast<float>(k);
-    }
 }
 
 void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std::vector<float>>>& primaryDetectors) {
@@ -358,7 +278,7 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                 
                 if (needsComputation) {
                     // Compute new spectrum
-                    computeSpectrum(primaryDetector, spectrum, frequencies);
+                    SpectralToolbox::computeSpectrum(primaryDetector, spectrum, frequencies);
                     
                     // Cache the results
                     cachedSpectra[fileId] = spectrum;
