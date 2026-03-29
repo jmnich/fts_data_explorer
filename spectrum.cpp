@@ -274,22 +274,13 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                 const std::vector<float>& primaryDetector = fileData.second;
                 
                 // For spectrum computation, always use raw data to avoid downsampling and peak alignment artifacts
-                // Since loadedData and rawDataCache should be parallel arrays, we can use the same index
+                // Since primaryDetectors and rawDataCache should be parallel arrays, we can use the same index
                 InterferogramData rawData;
                 
-                // Find the index of this file in primaryDetectors (which corresponds to loadedData index)
-                size_t loadedDataIndex = 0;
-                for (size_t j = 0; j < primaryDetectors.size(); j++) {
-                    if (primaryDetectors[j].first == fileId) {
-                        loadedDataIndex = j;
-                        break;
-                    }
-                }
-                
                 // Use raw data from cache if available and index is valid
-                // rawDataCache should have the same number of entries as loadedData
-                if (loadedDataIndex < rawDataCache.size()) {
-                    rawData = rawDataCache[loadedDataIndex];
+                // rawDataCache should have the same number of entries as primaryDetectors
+                if (i < rawDataCache.size()) {
+                    rawData = rawDataCache[i];
                 } else {
                     // If not found in cache, use the processed data as fallback
                     // This can happen if raw data cache wasn't properly populated

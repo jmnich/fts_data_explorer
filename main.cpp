@@ -603,12 +603,19 @@ int main() {
                     if (!reloadedData.empty()) {
                         appState.loadedData = reloadedData;
                         // Also update raw data cache - need to reload raw data
+                        // IMPORTANT: We need to reload the ORIGINAL raw data, not the processed data
                         appState.rawDataCache.clear();
-                        for (const auto& data : reloadedData) {
-                            // For downsampling toggle, we need to reload the raw data
-                            // This is a simplified approach - in a full implementation,
-                            // we would store the raw data separately
-                            appState.rawDataCache.push_back(data); // Temporary: use processed data as raw
+                        for (const auto& file : appState.selectedFiles) {
+                            try {
+                                // Load the original raw data from file
+                                InterferogramData rawData = CSVAdapter::loadFromCSV(file);
+                                appState.rawDataCache.push_back(rawData);
+                            } catch (const std::exception& e) {
+                                std::cerr << "Error reloading raw data for spectrum: " << e.what() << std::endl;
+                                // If we can't reload raw data, use processed data as fallback
+                                // This ensures spectrum can still be computed
+                                appState.rawDataCache.push_back(reloadedData[&file - &appState.selectedFiles[0]]);
+                            }
                         }
                         // Force X-axis to show all data when downsampling is toggled (same behavior as menu)
                         appState.zoomRange = {0, 0};
@@ -1112,10 +1119,20 @@ int main() {
                             
                             if (!reloadedData.empty()) {
                                 appState.loadedData = reloadedData;
-                                // Also update raw data cache
+                                // Also update raw data cache - need to reload raw data
+                                // IMPORTANT: We need to reload the ORIGINAL raw data, not the processed data
                                 appState.rawDataCache.clear();
-                                for (const auto& data : reloadedData) {
-                                    appState.rawDataCache.push_back(data); // Temporary: use processed data as raw
+                                for (const auto& file : appState.selectedFiles) {
+                                    try {
+                                        // Load the original raw data from file
+                                        InterferogramData rawData = CSVAdapter::loadFromCSV(file);
+                                        appState.rawDataCache.push_back(rawData);
+                                    } catch (const std::exception& e) {
+                                        std::cerr << "Error reloading raw data for spectrum: " << e.what() << std::endl;
+                                        // If we can't reload raw data, use processed data as fallback
+                                        // This ensures spectrum can still be computed
+                                        appState.rawDataCache.push_back(reloadedData[&file - &appState.selectedFiles[0]]);
+                                    }
                                 }
                                 // Force X-axis to show all data when downsampling is toggled
                                 appState.zoomRange = {0, 0};
@@ -1286,6 +1303,7 @@ int main() {
                         appState.selectedFiles.erase(appState.selectedFiles.begin() + index);
                         appState.selectedFilenames.erase(appState.selectedFilenames.begin() + index);
                         appState.loadedData.erase(appState.loadedData.begin() + index);
+                        appState.rawDataCache.erase(appState.rawDataCache.begin() + index); // Also remove from raw data cache
                     } else {
                         // Check if we would exceed the limit
                         if (appState.selectedFiles.size() < appState.MAX_SELECTABLE_FILES) {
