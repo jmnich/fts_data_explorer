@@ -651,14 +651,7 @@ int main() {
                                 appState.shiftSelectMode, appState.selectedFiles, appState.selectedFilenames, appState.loadedData, appState.dataLoaded, 
                                 appState.sortedFiles, appState.enableDownsampling, appState.maxPointsBeforeDownsampling, appState.MAX_SELECTABLE_FILES);
         
-        // Handle ESC key to reset zoom (works independently of file navigation)
-        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) && appState.dataLoaded) {
-            if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-                // Reset X-axis zoom when ESC is pressed
-                appState.zoomRange = {0, 0};
-                appState.shouldAutoscale = true; // Always force redraw with full range when ESC is pressed
-            }
-        }
+
         
 
         
@@ -1382,7 +1375,17 @@ int main() {
         ImGui::End();
         
         // Graphing panel (main) - now using ImPlot
+        bool isMainWindowFocused = false;
         ImGui::Begin("Graphing Panel");
+        isMainWindowFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
+        
+        // Handle ESC key to reset zoom (only when main window is focused)
+        if (isMainWindowFocused && appState.dataLoaded && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            // Reset X-axis zoom when ESC is pressed (only for main window)
+            appState.zoomRange = {0, 0};
+            appState.shouldAutoscale = true; // Always force redraw with full range when ESC is pressed
+        }
+        
         if (appState.dataLoaded) {
             // Y-axis limits are now handled by the auto-fit toggle
             // When autoFitYAxis is true, ImPlot will auto-calculate Y-axis limits
@@ -1523,9 +1526,9 @@ int main() {
             bool isOverPlot = ImGui::IsWindowHovered();
             appState.isMouseOverPlot = isOverPlot;
 
-            // Handle X-range selection with Shift key - state management only
+            // Handle X-range selection with Shift key - state management only (only when main window is focused)
             bool shiftPressed = ImGui::GetIO().KeyShift;
-            if (isOverPlot && shiftPressed && !appState.isSelectingXRange) {
+            if (isMainWindowFocused && isOverPlot && shiftPressed && !appState.isSelectingXRange) {
                 // Start selection when Shift is pressed over plot
                 appState.isSelectingXRange = true;
                 // Reset selection positions
@@ -1688,14 +1691,17 @@ int main() {
                         // Optimize by reducing grid line rendering overhead for large datasets
                     }
 
-                    if(appState.leftArrowHandleFlag) {
-                        float translationAmount = (appState.last_x_max - appState.last_x_min) / 10;
-                        ImPlot::SetupAxisLimits(ImAxis_X1, appState.last_x_min - translationAmount, appState.last_x_max - translationAmount, ImPlotCond_Always);
-                        appState.leftArrowHandleFlag = false;
-                    } else if(appState.rightArrowHandleFlag) {
-                        float translationAmount = (appState.last_x_max - appState.last_x_min) / 10;
-                        ImPlot::SetupAxisLimits(ImAxis_X1, appState.last_x_min + translationAmount, appState.last_x_max + translationAmount, ImPlotCond_Always);
-                        appState.rightArrowHandleFlag = false;
+                    // Only apply arrow key navigation when main window is focused
+                    if (isMainWindowFocused) {
+                        if(appState.leftArrowHandleFlag) {
+                            float translationAmount = (appState.last_x_max - appState.last_x_min) / 10;
+                            ImPlot::SetupAxisLimits(ImAxis_X1, appState.last_x_min - translationAmount, appState.last_x_max - translationAmount, ImPlotCond_Always);
+                            appState.leftArrowHandleFlag = false;
+                        } else if(appState.rightArrowHandleFlag) {
+                            float translationAmount = (appState.last_x_max - appState.last_x_min) / 10;
+                            ImPlot::SetupAxisLimits(ImAxis_X1, appState.last_x_min + translationAmount, appState.last_x_max + translationAmount, ImPlotCond_Always);
+                            appState.rightArrowHandleFlag = false;
+                        }
                     }
 
                     if (appState.shouldAutoscale || appState.forceXAutofit) {

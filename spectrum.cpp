@@ -177,6 +177,8 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
         spectrumWindowInitialized = true;
 
         // Plot all spectra for selected files
+        bool isSpectrumWindowFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
+        
         if (ImPlot::BeginPlot("Spectrum", ImVec2(-1, -1))) {
             // Setup axes with conditional auto-fit behavior
             if (shouldAutoscale) {
@@ -196,11 +198,19 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                 ImPlot::SetupAxisLimits(ImAxis_X1, manualXMin, manualXMax, ImPlotCond_Always);
             }
             
-            // Handle X-range selection with Shift key - state management
+            // Handle ESC key for spectrum window zoom reset (only when spectrum window is focused)
+            if (isSpectrumWindowFocused && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+                // Reset spectrum window zoom when ESC is pressed
+                shouldAutoscale = true;
+                manualXMin = 0.0;
+                manualXMax = 0.0;
+            }
+            
+            // Handle X-range selection with Shift key - state management (only when spectrum window is focused)
             bool shiftPressed = ImGui::GetIO().KeyShift;
             bool isOverPlot = ImPlot::IsPlotHovered();
             
-            if (isOverPlot && shiftPressed && !isSelectingXRange) {
+            if (isSpectrumWindowFocused && isOverPlot && shiftPressed && !isSelectingXRange) {
                 // Start selection when Shift is pressed over plot
                 isSelectingXRange = true;
                 // Reset selection positions
@@ -300,19 +310,30 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                 // Get current mouse position in plot coordinates
                 ImPlotPoint mousePos = ImPlot::GetPlotMousePos();
                 
+                // Get current plot limits to constrain selection within valid range
+                double x_min = ImPlot::GetPlotLimits().X.Min;
+                double x_max = ImPlot::GetPlotLimits().X.Max;
+                
                 // Initialize start position if not set
                 if (selectionStartX == 0.0 && selectionEndX == 0.0) {
                     selectionStartX = mousePos.x;
                 }
-                selectionEndX = mousePos.x;
                 
-                // Get current plot limits to draw vertical lines
+                // Constrain mouse position to valid X-axis range to prevent axis stretching
+                double constrainedMouseX = std::clamp(mousePos.x, x_min, x_max);
+                selectionEndX = constrainedMouseX;
+                
+                // Get Y limits for drawing vertical lines
                 double y_min = ImPlot::GetPlotLimits().Y.Min;
                 double y_max = ImPlot::GetPlotLimits().Y.Max;
                 
                 // Ensure proper ordering (left to right)
                 double selection_left = std::min(selectionStartX, selectionEndX);
                 double selection_right = std::max(selectionStartX, selectionEndX);
+                
+                // Constrain selection to current plot limits to prevent invalid ranges
+                selection_left = std::clamp(selection_left, x_min, x_max);
+                selection_right = std::clamp(selection_right, x_min, x_max);
                 
                 // Create arrays for shaded region - need X array and two Y arrays (bottom and top)
                 double shade_x[2] = {selection_left, selection_right};
