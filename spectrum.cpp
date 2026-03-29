@@ -10,7 +10,8 @@ Spectrum::Spectrum()
       spectrumWindowPosX(100.0f),
       spectrumWindowPosY(100.0f),
       spectrumWindowSizeX(600.0f),
-      spectrumWindowSizeY(400.0f) {}
+      spectrumWindowSizeY(400.0f),
+      spectrumDirty(true) {}
 
 void Spectrum::initSpectrumWindow() {
     if (!spectrumWindowInitialized) {
@@ -69,7 +70,38 @@ void Spectrum::fft(const std::vector<std::complex<float>>& input, std::vector<st
     }
 }
 
+bool Spectrum::isSpectrumDirty(const std::vector<float>& primaryDetector) {
+    // Check if we have cached data
+    if (cachedSpectrum.empty() || cachedFrequencies.empty()) {
+        return true; // No cached data, need to calculate
+    }
+    
+    // Check if the input data has changed
+    if (primaryDetector.size() != lastPrimaryDetector.size()) {
+        return true; // Size changed, need to recalculate
+    }
+    
+    // Compare a few key points to detect changes (full comparison would be expensive)
+    // This is a heuristic - for exact comparison, we'd need to compare all points
+    size_t checkPoints = std::min(primaryDetector.size(), lastPrimaryDetector.size());
+    for (size_t i = 0; i < checkPoints; i += std::max(1UL, checkPoints / 10)) {
+        if (primaryDetector[i] != lastPrimaryDetector[i]) {
+            return true; // Data changed, need to recalculate
+        }
+    }
+    
+    return false; // Data appears unchanged, use cached spectrum
+}
+
 void Spectrum::computeSpectrum(const std::vector<float>& primaryDetector, std::vector<float>& spectrum, std::vector<float>& frequencies) {
+    // Check if we need to recalculate or can use cached data
+    if (!spectrumDirty && !isSpectrumDirty(primaryDetector)) {
+        // Use cached data
+        spectrum = cachedSpectrum;
+        frequencies = cachedFrequencies;
+        return;
+    }
+    
     size_t n = primaryDetector.size();
     if (n == 0) {
         return;
@@ -106,6 +138,12 @@ void Spectrum::computeSpectrum(const std::vector<float>& primaryDetector, std::v
         spectrum[k] = magnitude / fft_size; // Normalize
         frequencies[k] = static_cast<float>(k);
     }
+    
+    // Cache the calculated spectrum for future use
+    cachedSpectrum = spectrum;
+    cachedFrequencies = frequencies;
+    lastPrimaryDetector = primaryDetector;
+    spectrumDirty = false;
 }
 
 void Spectrum::renderSpectrumWindow(const std::vector<float>& primaryDetector) {
@@ -128,10 +166,10 @@ void Spectrum::renderSpectrumWindow(const std::vector<float>& primaryDetector) {
         }
         
         spectrumWindowInitialized = true;
+        
         // Create spectrum by computing FFT of primary detector signal
         std::vector<float> spectrum;
         std::vector<float> frequencies;
-
         computeSpectrum(primaryDetector, spectrum, frequencies);
 
         // Plot the spectrum
