@@ -70,22 +70,27 @@ void Spectrum::fft(const std::vector<std::complex<float>>& input, std::vector<st
     }
 }
 
-bool Spectrum::isSpectrumDirty(const std::vector<float>& primaryDetector) {
-    // Check if we have cached data
-    if (cachedSpectrum.empty() || cachedFrequencies.empty()) {
-        return true; // No cached data, need to calculate
+bool Spectrum::isSpectrumDirty(const std::string& fileId, const std::vector<float>& primaryDetector) {
+    // Check if we have cached data for this file
+    auto cachedSpectrumIt = cachedSpectra.find(fileId);
+    auto cachedFrequenciesIt = cachedFrequencies.find(fileId);
+    auto lastDetectorIt = lastPrimaryDetectors.find(fileId);
+    
+    if (cachedSpectrumIt == cachedSpectra.end() || cachedFrequenciesIt == cachedFrequencies.end() || 
+        lastDetectorIt == lastPrimaryDetectors.end()) {
+        return true; // No cached data for this file, need to calculate
     }
     
     // Check if the input data has changed
-    if (primaryDetector.size() != lastPrimaryDetector.size()) {
+    if (primaryDetector.size() != lastDetectorIt->second.size()) {
         return true; // Size changed, need to recalculate
     }
     
     // Compare a few key points to detect changes (full comparison would be expensive)
     // This is a heuristic - for exact comparison, we'd need to compare all points
-    size_t checkPoints = std::min(primaryDetector.size(), lastPrimaryDetector.size());
+    size_t checkPoints = std::min(primaryDetector.size(), lastDetectorIt->second.size());
     for (size_t i = 0; i < checkPoints; i += std::max(1UL, checkPoints / 10)) {
-        if (primaryDetector[i] != lastPrimaryDetector[i]) {
+        if (primaryDetector[i] != lastDetectorIt->second[i]) {
             return true; // Data changed, need to recalculate
         }
     }
@@ -94,14 +99,6 @@ bool Spectrum::isSpectrumDirty(const std::vector<float>& primaryDetector) {
 }
 
 void Spectrum::computeSpectrum(const std::vector<float>& primaryDetector, std::vector<float>& spectrum, std::vector<float>& frequencies) {
-    // Check if we need to recalculate or can use cached data
-    if (!spectrumDirty && !isSpectrumDirty(primaryDetector)) {
-        // Use cached data
-        spectrum = cachedSpectrum;
-        frequencies = cachedFrequencies;
-        return;
-    }
-    
     size_t n = primaryDetector.size();
     if (n == 0) {
         return;
@@ -138,15 +135,9 @@ void Spectrum::computeSpectrum(const std::vector<float>& primaryDetector, std::v
         spectrum[k] = magnitude / fft_size; // Normalize
         frequencies[k] = static_cast<float>(k);
     }
-    
-    // Cache the calculated spectrum for future use
-    cachedSpectrum = spectrum;
-    cachedFrequencies = frequencies;
-    lastPrimaryDetector = primaryDetector;
-    spectrumDirty = false;
 }
 
-void Spectrum::renderSpectrumWindow(const std::vector<float>& primaryDetector) {
+void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std::vector<float>>>& primaryDetectors) {
     // Only set position/size on first use, then let user move/resize freely
     ImGui::SetNextWindowPos(ImVec2(spectrumWindowPosX, spectrumWindowPosY), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(spectrumWindowSizeX, spectrumWindowSizeY), ImGuiCond_FirstUseEver);
@@ -166,16 +157,59 @@ void Spectrum::renderSpectrumWindow(const std::vector<float>& primaryDetector) {
         }
         
         spectrumWindowInitialized = true;
-        
-        // Create spectrum by computing FFT of primary detector signal
-        std::vector<float> spectrum;
-        std::vector<float> frequencies;
-        computeSpectrum(primaryDetector, spectrum, frequencies);
 
-        // Plot the spectrum
+        // Plot all spectra for selected files
         if (ImPlot::BeginPlot("Spectrum", ImVec2(-1, -1))) {
             ImPlot::SetupAxes("Frequency", "Magnitude", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
-            ImPlot::PlotLine("Spectrum", frequencies.data(), spectrum.data(), spectrum.size());
+            
+            // Create plot specifications with matching colors
+            std::vector<ImPlotSpec> plotSpecs(primaryDetectors.size());
+            
+            // Plot each spectrum with a unique color and label
+            for (size_t i = 0; i < primaryDetectors.size(); i++) {
+                const auto& fileData = primaryDetectors[i];
+                const std::string& fileId = fileData.first;
+                const std::vector<float>& primaryDetector = fileData.second;
+                
+                // Check if we need to compute or can use cached data
+                bool needsComputation = isSpectrumDirty(fileId, primaryDetector);
+                
+                std::vector<float> spectrum;
+                std::vector<float> frequencies;
+                
+                if (needsComputation) {
+                    // Compute new spectrum
+                    computeSpectrum(primaryDetector, spectrum, frequencies);
+                    
+                    // Cache the results
+                    cachedSpectra[fileId] = spectrum;
+                    cachedFrequencies[fileId] = frequencies;
+                    lastPrimaryDetectors[fileId] = primaryDetector;
+                } else {
+                    // Use cached data
+                    spectrum = cachedSpectra[fileId];
+                    frequencies = cachedFrequencies[fileId];
+                }
+                
+                // Set up plot specifications with matching colors
+                plotSpecs[i].LineWeight = 2.0f;
+                if (i == 0) {
+                    plotSpecs[i].LineColor = ImVec4(0.6f, 0.5f, 0.1f, 1.0f); // Dark yellow - FIRST
+                } else if (i == 1) {
+                    plotSpecs[i].LineColor = ImVec4(0.75f, 0.05f, 0.05f, 1.0f); // #C00E0E - Red
+                } else if (i == 2) {
+                    plotSpecs[i].LineColor = ImVec4(0.15f, 0.45f, 0.28f, 1.0f); // #257448 - Green
+                } else if (i == 3) {
+                    plotSpecs[i].LineColor = ImVec4(0.07f, 0.29f, 0.59f, 1.0f); // #114A97 - Blue
+                } else if (i == 4) {
+                    plotSpecs[i].LineColor = ImVec4(0.5f, 0.5f, 0.5f, 1.0f); // Grey
+                }
+                
+                // Plot this spectrum with a unique label
+                std::string plotLabel = "Spectrum " + std::to_string(i + 1);
+                ImPlot::PlotLine(plotLabel.c_str(), frequencies.data(), spectrum.data(), spectrum.size(), plotSpecs[i]);
+            }
+            
             ImPlot::EndPlot();
         }
     }

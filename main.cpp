@@ -1873,8 +1873,12 @@ int main() {
 
         // Spectrum view window
         if (appState.spectrum.showSpectrumWindow && appState.dataLoaded && !appState.loadedData.empty()) {
-            const auto& data = appState.loadedData[0]; // Use first loaded data
-            appState.spectrum.renderSpectrumWindow(data.primaryDetector);
+            // Prepare data for all selected files
+            std::vector<std::pair<std::string, std::vector<float>>> primaryDetectors;
+            for (size_t i = 0; i < appState.loadedData.size(); i++) {
+                primaryDetectors.emplace_back(appState.selectedFilenames[i], appState.loadedData[i].primaryDetector);
+            }
+            appState.spectrum.renderSpectrumWindow(primaryDetectors);
         }
         
         // Rendering
