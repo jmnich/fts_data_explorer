@@ -23,6 +23,17 @@ public:
     std::map<std::string, std::vector<float>> lastPrimaryDetectors;
     bool spectrumDirty;
     
+    // X-range selection state for spectrum window
+    bool isSelectingXRange;
+    bool applyXRangeSelection;
+    double selectionStartX;
+    double selectionEndX;
+    
+    // Zoom state for spectrum window
+    bool shouldAutoscale;
+    double manualXMin;
+    double manualXMax;
+    
     Spectrum();
     
     // Initialize spectrum window

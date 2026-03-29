@@ -11,7 +11,14 @@ Spectrum::Spectrum()
       spectrumWindowPosY(100.0f),
       spectrumWindowSizeX(600.0f),
       spectrumWindowSizeY(400.0f),
-      spectrumDirty(true) {}
+      spectrumDirty(true),
+      isSelectingXRange(false),
+      applyXRangeSelection(false),
+      selectionStartX(0.0),
+      selectionEndX(0.0),
+      shouldAutoscale(true),
+      manualXMin(0.0),
+      manualXMax(0.0) {}
 
 void Spectrum::initSpectrumWindow() {
     if (!spectrumWindowInitialized) {
@@ -26,6 +33,17 @@ void Spectrum::resetSpectrumWindow() {
     spectrumWindowPosY = 100.0f;
     spectrumWindowSizeX = 600.0f;
     spectrumWindowSizeY = 400.0f;
+    
+    // Reset X-range selection state
+    isSelectingXRange = false;
+    applyXRangeSelection = false;
+    selectionStartX = 0.0;
+    selectionEndX = 0.0;
+    
+    // Reset zoom state
+    shouldAutoscale = true;
+    manualXMin = 0.0;
+    manualXMax = 0.0;
 }
 
 size_t Spectrum::nextPowerOf2(size_t n) {
@@ -160,7 +178,74 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
 
         // Plot all spectra for selected files
         if (ImPlot::BeginPlot("Spectrum", ImVec2(-1, -1))) {
-            ImPlot::SetupAxes("Frequency", "Magnitude", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+            // Setup axes with conditional auto-fit behavior
+            if (shouldAutoscale) {
+                ImPlot::SetupAxes("Frequency", "Magnitude", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+            } else {
+                ImPlot::SetupAxes("Frequency", "Magnitude", ImPlotAxisFlags_None, ImPlotAxisFlags_AutoFit);
+            }
+            
+            // Apply X-range selection if requested (must be done before state management)
+            if (applyXRangeSelection && selectionStartX != selectionEndX) {
+                ImPlot::SetupAxisLimits(ImAxis_X1, selectionStartX, selectionEndX, ImPlotCond_Always);
+                applyXRangeSelection = false; // Reset flag after applying
+            }
+            
+            // Apply manual zoom limits if not in auto-scale mode (must be done before state management)
+            if (!shouldAutoscale && manualXMin != manualXMax) {
+                ImPlot::SetupAxisLimits(ImAxis_X1, manualXMin, manualXMax, ImPlotCond_Always);
+            }
+            
+            // Handle X-range selection with Shift key - state management
+            bool shiftPressed = ImGui::GetIO().KeyShift;
+            bool isOverPlot = ImPlot::IsPlotHovered();
+            
+            if (isOverPlot && shiftPressed && !isSelectingXRange) {
+                // Start selection when Shift is pressed over plot
+                isSelectingXRange = true;
+                // Reset selection positions
+                selectionStartX = 0.0;
+                selectionEndX = 0.0;
+            } else if (!shiftPressed && isSelectingXRange) {
+                // End selection when Shift is released
+                isSelectingXRange = false;
+                
+                // Only finalize if we have valid selection
+                if(selectionStartX != selectionEndX) {
+                    applyXRangeSelection = true;
+                    
+                    if(selectionStartX > selectionEndX)
+                    {
+                        // make sure start is always smaller
+                        double dum = selectionStartX;
+                        selectionStartX = selectionEndX;
+                        selectionEndX = dum;
+                    }
+                    
+                    // Store manual zoom limits
+                    manualXMin = selectionStartX;
+                    manualXMax = selectionEndX;
+                    shouldAutoscale = false;
+                }
+            }
+            
+            // Check if we need to reset zoom (e.g., when data changes significantly)
+            bool shouldResetZoom = false;
+            if (!primaryDetectors.empty()) {
+                const auto& firstDetector = primaryDetectors[0].second;
+                if (!firstDetector.empty()) {
+                    // Simple heuristic: if we have data but no valid zoom range, reset to auto-scale
+                    if (manualXMin == 0.0 && manualXMax == 0.0) {
+                        shouldResetZoom = true;
+                    }
+                }
+            }
+            
+            if (shouldResetZoom) {
+                shouldAutoscale = true;
+                manualXMin = 0.0;
+                manualXMax = 0.0;
+            }
             
             // Create plot specifications with matching colors
             std::vector<ImPlotSpec> plotSpecs(primaryDetectors.size());
@@ -208,6 +293,50 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                 // Plot this spectrum with a unique label
                 std::string plotLabel = "Spectrum " + std::to_string(i + 1);
                 ImPlot::PlotLine(plotLabel.c_str(), frequencies.data(), spectrum.data(), spectrum.size(), plotSpecs[i]);
+            }
+            
+            // Handle X-range selection visualization
+            if (isSelectingXRange) {
+                // Get current mouse position in plot coordinates
+                ImPlotPoint mousePos = ImPlot::GetPlotMousePos();
+                
+                // Initialize start position if not set
+                if (selectionStartX == 0.0 && selectionEndX == 0.0) {
+                    selectionStartX = mousePos.x;
+                }
+                selectionEndX = mousePos.x;
+                
+                // Get current plot limits to draw vertical lines
+                double y_min = ImPlot::GetPlotLimits().Y.Min;
+                double y_max = ImPlot::GetPlotLimits().Y.Max;
+                
+                // Ensure proper ordering (left to right)
+                double selection_left = std::min(selectionStartX, selectionEndX);
+                double selection_right = std::max(selectionStartX, selectionEndX);
+                
+                // Create arrays for shaded region - need X array and two Y arrays (bottom and top)
+                double shade_x[2] = {selection_left, selection_right};
+                double shade_y1[2] = {y_min, y_min};  // Bottom edge
+                double shade_y2[2] = {y_max, y_max};  // Top edge
+                
+                // Create spec for dark purple translucent fill
+                ImPlotSpec fillSpec;
+                fillSpec.FillColor = ImVec4(0.5f, 0.0f, 0.5f, 0.3f); // Dark purple with 30% opacity
+                
+                // Draw translucent dark purple fill between selection lines
+                ImPlot::PlotShaded("##SelectionFill", shade_x, shade_y1, shade_y2, 2, fillSpec);
+                
+                // Create arrays for vertical line points
+                double start_x[2] = {selectionStartX, selectionStartX};
+                double start_y[2] = {y_min, y_max};
+                double end_x[2] = {selectionEndX, selectionEndX};
+                double end_y[2] = {y_min, y_max};
+                
+                // Draw vertical line at start position
+                ImPlot::PlotLine("##SelectionStart", start_x, start_y, 2);
+                
+                // Draw vertical line at end position
+                ImPlot::PlotLine("##SelectionEnd", end_x, end_y, 2);
             }
             
             ImPlot::EndPlot();
