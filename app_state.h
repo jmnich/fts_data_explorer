@@ -24,6 +24,7 @@ struct AppState {
     std::string currentDirectory;
     std::vector<std::string> csvFiles;
     std::vector<InterferogramData> loadedData;
+    std::vector<InterferogramData> rawDataCache; // Cache for raw, unprocessed data for spectrum computation
     std::vector<std::string> selectedFiles;
     std::vector<std::string> selectedFilenames;
     bool dataLoaded;

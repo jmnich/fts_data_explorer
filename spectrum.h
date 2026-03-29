@@ -7,6 +7,10 @@
 #include "imgui.h"
 #include "implot.h"
 
+// Forward declaration to avoid circular dependency
+class AppState;
+struct InterferogramData;
+
 class Spectrum {
 public:
     // Spectrum window state
@@ -16,6 +20,9 @@ public:
     float spectrumWindowPosY;
     float spectrumWindowSizeX;
     float spectrumWindowSizeY;
+    
+    // Reference to app state for accessing raw data cache
+    class AppState* appState;
     
     // Spectrum data caching for multiple files
     std::map<std::string, std::vector<float>> cachedSpectra;
@@ -50,7 +57,8 @@ public:
     void initSpectrumWindow();
     
     // Render spectrum window for multiple files
-    void renderSpectrumWindow(const std::vector<std::pair<std::string, std::vector<float>>>& primaryDetectors);
+    void renderSpectrumWindow(const std::vector<std::pair<std::string, std::vector<float>>>& primaryDetectors,
+                             const std::vector<InterferogramData>& rawDataCache = {});
     
     // Reset spectrum window state
     void resetSpectrumWindow();

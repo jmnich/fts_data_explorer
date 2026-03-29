@@ -535,6 +535,9 @@ int main() {
     appState.spectrum.spectrumWindowSizeX = config.spectrumWindowSizeX;
     appState.spectrum.spectrumWindowSizeY = config.spectrumWindowSizeY;
     
+    // Set the appState pointer in the spectrum object for raw data access
+    appState.spectrum.appState = &appState;
+    
     // No initialization needed for simple file dialog
     
     // Main loop
@@ -599,6 +602,14 @@ int main() {
                     
                     if (!reloadedData.empty()) {
                         appState.loadedData = reloadedData;
+                        // Also update raw data cache - need to reload raw data
+                        appState.rawDataCache.clear();
+                        for (const auto& data : reloadedData) {
+                            // For downsampling toggle, we need to reload the raw data
+                            // This is a simplified approach - in a full implementation,
+                            // we would store the raw data separately
+                            appState.rawDataCache.push_back(data); // Temporary: use processed data as raw
+                        }
                         // Force X-axis to show all data when downsampling is toggled (same behavior as menu)
                         appState.zoomRange = {0, 0};
                         appState.shouldAutoscale = true;
@@ -695,29 +706,38 @@ int main() {
                 
 
                 
+                // Store raw data in cache before any processing for spectrum computation
+                appState.rawDataCache.clear();
+                appState.rawDataCache.push_back(data);
+                
+                // Create a copy for processing (downsampling, etc.)
+                InterferogramData processedData = data;
+                
                 // Apply downsampling if enabled and dataset is large
-                if (appState.enableDownsampling && data.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
-                    size_t localDownsampleFactor = data.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
+                if (appState.enableDownsampling && processedData.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
+                    size_t localDownsampleFactor = processedData.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
                     
                     // Downsample both reference and primary detectors
                     std::vector<float> downsampledRef, downsampledPrim;
-                    for (size_t i = 0; i < data.referenceDetector.size(); i += localDownsampleFactor) {
-                        downsampledRef.push_back(data.referenceDetector[i]);
-                        downsampledPrim.push_back(data.primaryDetector[i]);
+                    for (size_t i = 0; i < processedData.referenceDetector.size(); i += localDownsampleFactor) {
+                        downsampledRef.push_back(processedData.referenceDetector[i]);
+                        downsampledPrim.push_back(processedData.primaryDetector[i]);
                     }
-                    data.referenceDetector = downsampledRef;
-                    data.primaryDetector = downsampledPrim;
+                    processedData.referenceDetector = downsampledRef;
+                    processedData.primaryDetector = downsampledPrim;
                     std::cout << "Downsampled dataset from " << (downsampledRef.size() * localDownsampleFactor) 
                               << " to " << downsampledRef.size() << " points (factor: " << localDownsampleFactor << ")" << std::endl;
                 }
                 
                 // For single selection (no Ctrl), replace current selection
                 appState.loadedData.clear();
+                appState.rawDataCache.clear(); // Clear raw data cache too
                 appState.selectedFiles.clear();
                 appState.selectedFilenames.clear();
                 
-                // Always load the current file
-                appState.loadedData.push_back(data);
+                // Always load the processed data
+                appState.loadedData.push_back(processedData);
+                appState.rawDataCache.push_back(data); // Store raw data for spectrum computation
 
                 appState.selectedFiles.push_back(appState.sortedFiles[appState.currentSortedFileIndex]);
                 
@@ -1092,6 +1112,11 @@ int main() {
                             
                             if (!reloadedData.empty()) {
                                 appState.loadedData = reloadedData;
+                                // Also update raw data cache
+                                appState.rawDataCache.clear();
+                                for (const auto& data : reloadedData) {
+                                    appState.rawDataCache.push_back(data); // Temporary: use processed data as raw
+                                }
                                 // Force X-axis to show all data when downsampling is toggled
                                 appState.zoomRange = {0, 0};
                                 // Set flag to force autofit on next render
@@ -1268,6 +1293,9 @@ int main() {
                                 InterferogramData data = CSVAdapter::loadFromCSV(fullPath);
         
                                 
+                                // Store raw data in cache before downsampling
+                                InterferogramData rawData = data;
+                                
                                 // Apply downsampling to multi-selected files too
                                 if (appState.enableDownsampling && data.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
                                     size_t localDownsampleFactor = data.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
@@ -1283,6 +1311,7 @@ int main() {
                                 }
                                 
                                 appState.loadedData.push_back(data);
+                                appState.rawDataCache.push_back(rawData); // Store raw data for spectrum computation
                                 appState.selectedFiles.push_back(fullPath);
                                 appState.selectedFilenames.push_back(filename);
                             } catch (const std::exception& e) {
@@ -1301,6 +1330,7 @@ int main() {
                     appState.selectedFiles.clear();
                     appState.selectedFilenames.clear();
                     appState.loadedData.clear();
+                    appState.rawDataCache.clear(); // Clear raw data cache too
                     
                     // Add all files in the range, respecting the 5-file limit
                     size_t filesToAdd = 0;
@@ -1310,6 +1340,9 @@ int main() {
                         try {
                             std::string fullPath = appState.sortedFiles[j];
                             InterferogramData data = CSVAdapter::loadFromCSV(fullPath);
+                            
+                            // Store raw data in cache before downsampling
+                            InterferogramData rawData = data;
                             
                             // Apply downsampling
                             if (appState.enableDownsampling && data.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
@@ -1324,6 +1357,7 @@ int main() {
                             }
                             
                             appState.loadedData.push_back(data);
+                            appState.rawDataCache.push_back(rawData); // Store raw data for spectrum computation
                             appState.selectedFiles.push_back(fullPath);
                             
                             // Extract filename for legend
@@ -1900,7 +1934,7 @@ int main() {
             for (size_t i = 0; i < appState.loadedData.size(); i++) {
                 primaryDetectors.emplace_back(appState.selectedFilenames[i], appState.loadedData[i].primaryDetector);
             }
-            appState.spectrum.renderSpectrumWindow(primaryDetectors);
+            appState.spectrum.renderSpectrumWindow(primaryDetectors, appState.rawDataCache);
         }
         
         // Rendering

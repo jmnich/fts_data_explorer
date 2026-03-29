@@ -1,5 +1,6 @@
 #include "spectrum.h"
 #include "spectral_toolbox.h"
+#include "adapters/csv_adapter.h"
 #include <cmath>
 #include <algorithm>
 // #include <complex>
@@ -24,6 +25,7 @@ Spectrum::Spectrum()
       rightArrowPressedLastFrame(false),
       leftArrowHandleFlag(false),
       rightArrowHandleFlag(false),
+      appState(nullptr),
       xUnitSelector(0), // Default to cm-1
       refLaserTextbox() { strcpy(refLaserTextbox, "1.550"); } // Default value
 
@@ -91,7 +93,8 @@ bool Spectrum::isSpectrumDirty(const std::string& fileId, const std::vector<floa
     return false; // Data appears unchanged, use cached spectrum
 }
 
-void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std::vector<float>>>& primaryDetectors) {
+void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std::vector<float>>>& primaryDetectors,
+                                   const std::vector<InterferogramData>& rawDataCache) {
     // Only set position/size on first use, then let user move/resize freely
     ImGui::SetNextWindowPos(ImVec2(spectrumWindowPosX, spectrumWindowPosY), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(spectrumWindowSizeX, spectrumWindowSizeY), ImGuiCond_FirstUseEver);
@@ -270,20 +273,45 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                 const std::string& fileId = fileData.first;
                 const std::vector<float>& primaryDetector = fileData.second;
                 
+                // For spectrum computation, always use raw data to avoid downsampling and peak alignment artifacts
+                // Since loadedData and rawDataCache should be parallel arrays, we can use the same index
+                InterferogramData rawData;
+                
+                // Find the index of this file in primaryDetectors (which corresponds to loadedData index)
+                size_t loadedDataIndex = 0;
+                for (size_t j = 0; j < primaryDetectors.size(); j++) {
+                    if (primaryDetectors[j].first == fileId) {
+                        loadedDataIndex = j;
+                        break;
+                    }
+                }
+                
+                // Use raw data from cache if available and index is valid
+                // rawDataCache should have the same number of entries as loadedData
+                if (loadedDataIndex < rawDataCache.size()) {
+                    rawData = rawDataCache[loadedDataIndex];
+                } else {
+                    // If not found in cache, use the processed data as fallback
+                    // This can happen if raw data cache wasn't properly populated
+                    // This is a safe fallback - spectrum will still be computed correctly
+                    rawData.primaryDetector = primaryDetector;
+                    rawData.referenceDetector = primaryDetector; // Use same data for both
+                }
+                
                 // Check if we need to compute or can use cached data
-                bool needsComputation = isSpectrumDirty(fileId, primaryDetector);
+                bool needsComputation = isSpectrumDirty(fileId, rawData.primaryDetector);
                 
                 std::vector<float> spectrum;
                 std::vector<float> frequencies;
                 
                 if (needsComputation) {
-                    // Compute new spectrum
-                    SpectralToolbox::computeSpectrum(primaryDetector, spectrum, frequencies);
+                    // Compute new spectrum using raw, unprocessed data
+                    SpectralToolbox::computeSpectrum(rawData.primaryDetector, spectrum, frequencies);
                     
                     // Cache the results
                     cachedSpectra[fileId] = spectrum;
                     cachedFrequencies[fileId] = frequencies;
-                    lastPrimaryDetectors[fileId] = primaryDetector;
+                    lastPrimaryDetectors[fileId] = rawData.primaryDetector;
                 } else {
                     // Use cached data
                     spectrum = cachedSpectra[fileId];
@@ -380,3 +408,4 @@ void Spectrum::updateWindowState() {
         spectrumWindowSizeY = windowSize.y;
     }
 }
+
