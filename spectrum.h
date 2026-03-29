@@ -39,6 +39,10 @@ public:
     bool rightArrowPressedLastFrame;
     bool leftArrowHandleFlag;
     bool rightArrowHandleFlag;
+
+    // UI controls for spectrum panel
+    int xUnitSelector; // 0: cm-1, 1: um, 2: THz
+    char refLaserTextbox[32]; // Reference laser wavelength in um
     
     Spectrum();
     

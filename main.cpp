@@ -1817,6 +1817,22 @@ int main() {
             if (ImGui::Button("Spectrum")) {
                 appState.spectrum.showSpectrumWindow = true;
             }
+            
+            // Add new controls to Spectrum panel
+            ImGui::Separator();
+            ImGui::Text("Controls:");
+            
+            // X unit selector
+            const char* xUnitItems[] = { "cm-1", "um", "THz" };
+            ImGui::Text("X unit:");
+            ImGui::SameLine();
+            ImGui::Combo("##XUnitSelector", &appState.spectrum.xUnitSelector, xUnitItems, IM_ARRAYSIZE(xUnitItems));
+            
+            // Reference laser textbox
+            ImGui::Text("Ref laser [um]:");
+            ImGui::SameLine();
+            ImGui::InputText("##RefLaserTextbox", appState.spectrum.refLaserTextbox, sizeof(appState.spectrum.refLaserTextbox));
+            
         } else {
             ImGui::Text("No data loaded.");
         }

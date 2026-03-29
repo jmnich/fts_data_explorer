@@ -22,7 +22,9 @@ Spectrum::Spectrum()
       leftArrowPressedLastFrame(false),
       rightArrowPressedLastFrame(false),
       leftArrowHandleFlag(false),
-      rightArrowHandleFlag(false) {}
+      rightArrowHandleFlag(false),
+      xUnitSelector(0), // Default to cm-1
+      refLaserTextbox() { strcpy(refLaserTextbox, "1.550"); } // Default value
 
 void Spectrum::initSpectrumWindow() {
     if (!spectrumWindowInitialized) {
@@ -54,6 +56,10 @@ void Spectrum::resetSpectrumWindow() {
     rightArrowPressedLastFrame = false;
     leftArrowHandleFlag = false;
     rightArrowHandleFlag = false;
+    
+    // Reset UI controls
+    xUnitSelector = 0; // Reset to cm-1
+    strcpy(refLaserTextbox, "1.550"); // Reset to default value
 }
 
 size_t Spectrum::nextPowerOf2(size_t n) {
