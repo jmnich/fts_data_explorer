@@ -1872,11 +1872,9 @@ int main() {
         }
 
         // Spectrum view window
-        if (appState.spectrum.showSpectrumWindow && appState.dataLoaded) {
-            if (!appState.selectedFiles.empty() && appState.selectedFiles.size() <= appState.loadedData.size()) {
-                const auto& data = appState.loadedData[0]; // Use first selected file
-                appState.spectrum.renderSpectrumWindow(data.primaryDetector);
-            }
+        if (appState.spectrum.showSpectrumWindow && appState.dataLoaded && !appState.loadedData.empty()) {
+            const auto& data = appState.loadedData[0]; // Use first loaded data
+            appState.spectrum.renderSpectrumWindow(data.primaryDetector);
         }
         
         // Rendering

@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <string>
+#include <complex>
 #include "imgui.h"
 #include "implot.h"
 
@@ -31,4 +32,10 @@ public:
     
     // Compute FFT spectrum
     void computeSpectrum(const std::vector<float>& primaryDetector, std::vector<float>& spectrum, std::vector<float>& frequencies);
+    
+    // Efficient FFT implementation using Cooley-Tukey algorithm
+    void fft(const std::vector<std::complex<float>>& input, std::vector<std::complex<float>>& output);
+    
+    // Find next power of 2
+    size_t nextPowerOf2(size_t n);
 };
