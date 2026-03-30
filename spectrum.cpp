@@ -365,20 +365,14 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                 }
             }
             
-            // Check if we need to reset zoom (e.g., when data changes significantly)
-            bool shouldResetZoom = false;
+            // Simple heuristic: if we have data but no valid zoom range, reset to auto-scale
             if (!primaryDetectors.empty()) {
                 const auto& firstDetector = primaryDetectors[0].second;
                 if (!firstDetector.empty()) {
-                    // Simple heuristic: if we have data but no valid zoom range, reset to auto-scale
                     if (manualXMin == 0.0 && manualXMax == 0.0) {
-                        shouldResetZoom = true;
+                        shouldAutoscale = true;
                     }
                 }
-            }
-            
-            if (shouldResetZoom) {
-                shouldAutoscale = true;
             }
             
             // Plot each spectrum with a unique color and label
