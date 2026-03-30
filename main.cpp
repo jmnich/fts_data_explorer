@@ -16,6 +16,7 @@
 #include "config.h"
 #include "app_state.h"
 #include "spectrum.h"
+#include "adapters/csv_adapter.h"
 
 // Include imgui and other dependencies
 #include "imgui.h"
@@ -65,42 +66,7 @@ static bool naturalSortCompare(const std::string& a, const std::string& b) {
     return a.size() < b.size();
 }
 
-// CSV Adapter class
-class CSVAdapter {
-public:
-    static InterferogramData loadFromCSV(const std::string& filePath) {
-        InterferogramData data;
-        std::ifstream file(filePath);
-        
-        if (!file.is_open()) {
-            throw std::runtime_error("Could not open file: " + filePath);
-        }
-        
-        std::string line;
-        bool isFirstLine = true;
-        
-        while (std::getline(file, line)) {
-            if (isFirstLine) {
-                isFirstLine = false;
-                continue; // Skip header
-            }
-            
-            std::istringstream iss(line);
-            std::string refValue, primaryValue;
-            
-            if (std::getline(iss, refValue, ',') && std::getline(iss, primaryValue, ',')) {
-                try {
-                    data.referenceDetector.push_back(std::stof(refValue));
-                    data.primaryDetector.push_back(std::stof(primaryValue));
-                } catch (const std::exception& e) {
-                    std::cerr << "Error parsing line: " << line << " - " << e.what() << std::endl;
-                }
-            }
-        }
-        
-        return data;
-    }
-};
+
 
 // Simple file browser
 class FileBrowser {

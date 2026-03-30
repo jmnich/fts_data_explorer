@@ -6,6 +6,7 @@
 // #include <complex>
 #include <ostream>
 #include <vector>
+#include "app_state.h"
 
 Spectrum::Spectrum()
     : showSpectrumWindow(false),

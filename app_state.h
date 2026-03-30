@@ -5,13 +5,9 @@
 #include <filesystem>
 #include "config.h"
 #include "spectrum.h"
+#include "adapters/csv_adapter.h"
 
-// Data structure to hold interferogram data
-struct InterferogramData {
-    std::vector<float> referenceDetector;
-    std::vector<float> primaryDetector;
-    std::string metadata;
-};
+// Use InterferogramData from csv_adapter.h
 
 // Application state structure
 struct AppState {
