@@ -1512,7 +1512,6 @@ int main() {
             }
             
             if (appState.loadedData.size() > 1) {
-                ImGui::Text("Datasets:");
                 ImGui::BeginGroup(); // Start horizontal group
                 for (size_t i = 0; i < appState.loadedData.size(); i++) {
                     ImVec4 color;

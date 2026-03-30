@@ -115,6 +115,64 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
         
         spectrumWindowInitialized = true;
 
+
+        
+        // Create plot specifications with matching colors (needed for legend)
+        std::vector<ImPlotSpec> plotSpecs(primaryDetectors.size());
+        
+        // Add legend at the top (matching graphing panel style with dataset patches)
+        if (!primaryDetectors.empty()) {
+            ImGui::BeginGroup(); // Start horizontal group for legend
+            for (size_t i = 0; i < primaryDetectors.size(); i++) {
+                const auto& fileData = primaryDetectors[i];
+                const std::string& filename = fileData.first;
+                
+                // Extract just the filename without path
+                std::string displayName = filename;
+                size_t last_slash = displayName.find_last_of("/\\");
+                if (last_slash != std::string::npos) {
+                    displayName = displayName.substr(last_slash + 1);
+                }
+                
+                // Set color for this spectrum (same as will be used in plot)
+                ImVec4 color;
+                if (i == 0) {
+                    color = ImVec4(0.6f, 0.5f, 0.1f, 1.0f); // Dark yellow - FIRST
+                } else if (i == 1) {
+                    color = ImVec4(0.75f, 0.05f, 0.05f, 1.0f); // #C00E0E - Red
+                } else if (i == 2) {
+                    color = ImVec4(0.15f, 0.45f, 0.28f, 1.0f); // #257448 - Green
+                } else if (i == 3) {
+                    color = ImVec4(0.07f, 0.29f, 0.59f, 1.0f); // #114A97 - Blue
+                } else if (i == 4) {
+                    color = ImVec4(0.5f, 0.5f, 0.5f, 1.0f); // Grey
+                }
+                plotSpecs[i].LineColor = color;
+                
+                // Draw colored square patch (same style as graphing panel)
+                ImDrawList* draw_list = ImGui::GetWindowDrawList();
+                ImVec2 cursor_pos = ImGui::GetCursorScreenPos();
+                ImVec2 square_size(12, 12); // Size of the color square
+                
+                // Draw square patch with border
+                draw_list->AddRectFilled(cursor_pos, ImVec2(cursor_pos.x + square_size.x, cursor_pos.y + square_size.y), ImGui::ColorConvertFloat4ToU32(color));
+                draw_list->AddRect(cursor_pos, ImVec2(cursor_pos.x + square_size.x, cursor_pos.y + square_size.y), ImGui::ColorConvertFloat4ToU32(ImVec4(0.2f, 0.2f, 0.2f, 1.0f))); // Border
+                
+                // Move cursor forward and add text
+                ImGui::Dummy(square_size);
+                ImGui::SameLine();
+                ImGui::Text("%s", displayName.c_str());
+                
+                if (i < primaryDetectors.size() - 1) {
+                    ImGui::SameLine();
+                    ImGui::Text("  "); // Add some spacing between items
+                    ImGui::SameLine();
+                }
+            }
+            ImGui::EndGroup(); // End horizontal group
+            ImGui::Separator();
+        }
+        
         // Plot all spectra for selected files
         bool isSpectrumWindowFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
         
@@ -126,13 +184,14 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
             rightArrowHandleFlag = false;
         }
         
-        if (ImPlot::BeginPlot("Spectrum", ImVec2(-1, -1))) {
-            // Setup axes with conditional auto-fit behavior
+        if (ImPlot::BeginPlot("Spectrum", ImVec2(-1, -1), ImPlotFlags_NoTitle | ImPlotFlags_NoLegend)) {
+            // Setup axes with conditional auto-fit behavior (no labels to match graphing panel style)
+            ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
+            ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
             if (shouldAutoscale) {
-                ImPlot::SetupAxes("Frequency", "Magnitude", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
-            } else {
-                ImPlot::SetupAxes("Frequency", "Magnitude", ImPlotAxisFlags_None, ImPlotAxisFlags_AutoFit);
+                y_flags |= ImPlotAxisFlags_AutoFit;
             }
+            ImPlot::SetupAxes("", "", x_flags, y_flags);
             
             // Apply X-range selection if requested (must be done before state management)
             if (applyXRangeSelection && selectionStartX != selectionEndX) {
@@ -264,9 +323,6 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                 manualXMax = 0.0;
             }
             
-            // Create plot specifications with matching colors
-            std::vector<ImPlotSpec> plotSpecs(primaryDetectors.size());
-            
             // Plot each spectrum with a unique color and label
             for (size_t i = 0; i < primaryDetectors.size(); i++) {
                 const auto& fileData = primaryDetectors[i];
@@ -311,17 +367,7 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                 
                 // Set up plot specifications with matching colors
                 plotSpecs[i].LineWeight = 2.0f;
-                if (i == 0) {
-                    plotSpecs[i].LineColor = ImVec4(0.6f, 0.5f, 0.1f, 1.0f); // Dark yellow - FIRST
-                } else if (i == 1) {
-                    plotSpecs[i].LineColor = ImVec4(0.75f, 0.05f, 0.05f, 1.0f); // #C00E0E - Red
-                } else if (i == 2) {
-                    plotSpecs[i].LineColor = ImVec4(0.15f, 0.45f, 0.28f, 1.0f); // #257448 - Green
-                } else if (i == 3) {
-                    plotSpecs[i].LineColor = ImVec4(0.07f, 0.29f, 0.59f, 1.0f); // #114A97 - Blue
-                } else if (i == 4) {
-                    plotSpecs[i].LineColor = ImVec4(0.5f, 0.5f, 0.5f, 1.0f); // Grey
-                }
+                // Colors already set in legend creation above
                 
                 // Plot this spectrum with filename as label (same as graphing panel)
                 std::string plotLabel = fileId; // Use the actual filename instead of "Spectrum 1", "Spectrum 2", etc.
