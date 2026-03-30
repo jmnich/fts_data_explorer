@@ -38,6 +38,7 @@ public:
     
     // Zoom state for spectrum window
     bool shouldAutoscale;
+    bool firstLoadCompleted;
     double manualXMin;
     double manualXMax;
     double manualYMin;

@@ -20,6 +20,7 @@ Spectrum::Spectrum()
       selectionStartX(0.0),
       selectionEndX(0.0),
       shouldAutoscale(true),
+      firstLoadCompleted(false),
       manualXMin(0.0),
       manualXMax(0.0),
       leftArrowPressedLastFrame(false),
@@ -52,6 +53,7 @@ void Spectrum::resetSpectrumWindow() {
     
     // Reset zoom state
     shouldAutoscale = true;
+    firstLoadCompleted = false;
     
     // Reset arrow key state
     leftArrowPressedLastFrame = false;
@@ -366,11 +368,13 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
             }
             
             // Simple heuristic: if we have data but no valid zoom range, reset to auto-scale
-            if (!primaryDetectors.empty()) {
+            // Only apply this on first load to allow manual interactions after initial display
+            if (!primaryDetectors.empty() && !firstLoadCompleted) {
                 const auto& firstDetector = primaryDetectors[0].second;
                 if (!firstDetector.empty()) {
                     if (manualXMin == 0.0 && manualXMax == 0.0) {
                         shouldAutoscale = true;
+                        firstLoadCompleted = true; // Mark that first load is complete
                     }
                 }
             }
