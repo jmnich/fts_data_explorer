@@ -4,6 +4,7 @@
 #include <cmath>
 #include <algorithm>
 // #include <complex>
+#include <ostream>
 #include <vector>
 
 Spectrum::Spectrum()
@@ -179,6 +180,16 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
         // Plot all spectra for selected files
         bool isSpectrumWindowFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
         
+        // Handle ESC key to reset zoom (must be outside BeginPlot to work when plot is not rendered)
+        if (isSpectrumWindowFocused && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            // Reset spectrum window zoom when ESC is pressed
+            shouldAutoscale = true; // Always force redraw with full range when ESC is pressed
+            manualXMin = 0.0;
+            manualXMax = 0.0;
+            manualYMin = 0.0;
+            manualYMax = 0.0;
+        }
+        
         // Reset arrow key state when window loses focus
         if (!isSpectrumWindowFocused) {
             leftArrowPressedLastFrame = false;
@@ -188,6 +199,7 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
         }
         
         if (ImPlot::BeginPlot("Spectrum", ImVec2(-1, -1), ImPlotFlags_NoTitle | ImPlotFlags_NoLegend | ImPlotFlags_NoMenus)) {
+
             // Setup axes with conditional auto-fit behavior (no labels to match graphing panel style)
             // Implement Auto-fit Y-axis (AFY) feature like in graphing panel
             ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
@@ -200,6 +212,71 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
             // Instead, we handle the Y-axis locking separately after checking for manual limits
             
             ImPlot::SetupAxes("", "", x_flags, y_flags);
+            
+            // Apply auto-scale when requested (ESC key or initial load)
+            if (shouldAutoscale) {
+                // Find the overall frequency range from all spectra
+                double globalXMin = 0.0;
+                double globalXMax = 0.0;
+                double globalYMin = 0.0;
+                double globalYMax = 0.0;
+                
+                bool firstSpectrum = true;
+                for (size_t i = 0; i < primaryDetectors.size(); i++) {
+                    const auto& fileData = primaryDetectors[i];
+                    const std::string& fileId = fileData.first;
+                    
+                    // Get cached spectrum data
+                    auto cachedFrequenciesIt = cachedFrequencies.find(fileId);
+                    auto cachedSpectrumIt = cachedSpectra.find(fileId);
+                    
+                    if (cachedFrequenciesIt != cachedFrequencies.end() && cachedSpectrumIt != cachedSpectra.end() && 
+                        !cachedFrequenciesIt->second.empty() && !cachedSpectrumIt->second.empty()) {
+                        
+                        const auto& frequencies = cachedFrequenciesIt->second;
+                        const auto& spectrum = cachedSpectrumIt->second;
+                        
+                        // Find min/max for this spectrum
+                        double localXMin = frequencies.front();
+                        double localXMax = frequencies.back();
+                        auto minmaxY = std::minmax_element(spectrum.begin(), spectrum.end());
+                        double localYMin = *minmaxY.first;
+                        double localYMax = *minmaxY.second;
+                        
+                        // Update global bounds
+                        if (firstSpectrum) {
+                            globalXMin = localXMin;
+                            globalXMax = localXMax;
+                            globalYMin = localYMin;
+                            globalYMax = localYMax;
+                            firstSpectrum = false;
+                        } else {
+                            globalXMin = std::min(globalXMin, localXMin);
+                            globalXMax = std::max(globalXMax, localXMax);
+                            globalYMin = std::min(globalYMin, localYMin);
+                            globalYMax = std::max(globalYMax, localYMax);
+                        }
+                    }
+                }
+                
+                // Apply auto-scale limits if we found valid data
+                if (!firstSpectrum) {
+                    if (autoFitYAxis) {
+                        // Auto-fit both axes
+                        ImPlot::SetupAxisLimits(ImAxis_X1, globalXMin, globalXMax, ImPlotCond_Always);
+                        ImPlot::SetupAxisLimits(ImAxis_Y1, globalYMin, globalYMax, ImPlotCond_Always);
+                    } else {
+                        // Auto-fit X-axis only, preserve Y-axis limits
+                        ImPlot::SetupAxisLimits(ImAxis_X1, globalXMin, globalXMax, ImPlotCond_Always);
+                        if (manualYMin != manualYMax) {
+                            ImPlot::SetupAxisLimits(ImAxis_Y1, manualYMin, manualYMax, ImPlotCond_Always);
+                        }
+                    }
+                }
+                
+                // Reset the autoscale flag after applying
+                shouldAutoscale = false;
+            }
             
             // Apply X-range selection if requested (must be done before state management)
             if (applyXRangeSelection && selectionStartX != selectionEndX) {
@@ -221,16 +298,6 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                 if (manualYMin != manualYMax) {
                     ImPlot::SetupAxisLimits(ImAxis_Y1, manualYMin, manualYMax, ImPlotCond_Always);
                 }
-            }
-            
-            // Handle ESC key to reset zoom (copy of working implementation from graphing panel)
-            if (ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-                // Reset spectrum window zoom when ESC is pressed
-                shouldAutoscale = true; // Always force redraw with full range when ESC is pressed
-                manualXMin = 0.0;
-                manualXMax = 0.0;
-                manualYMin = 0.0;
-                manualYMax = 0.0;
             }
             
             // Note: Ctrl+Y shortcut for toggling AFY is handled in main.cpp
