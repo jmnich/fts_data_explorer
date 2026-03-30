@@ -410,8 +410,8 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                 
                 if (needsComputation) {
                     // Compute new spectrum using raw, unprocessed data
-                    SpectralToolbox::computeSpectrum(rawData.primaryDetector, spectrum, frequencies);
-                    
+                    SpectralToolbox::computeSpectrum(rawData.primaryDetector, spectrum, frequencies);                    
+
                     // Cache the results
                     cachedSpectra[fileId] = spectrum;
                     cachedFrequencies[fileId] = frequencies;

@@ -47,38 +47,32 @@ void SpectralToolbox::xAxisFromHilbert(const std::vector<float> &referenceSignal
     fftw_plan plan_inverse = fftw_plan_dft_1d(n, hilbert, out, FFTW_BACKWARD, FFTW_ESTIMATE);
     fftw_execute(plan_inverse);
 
-    // Compute phase from analytic signal
-    outputHilbertPhase.resize(n);
+    // Compute phase from analytic signal (with proper normalization)
+    std::vector<float> phase(n);
     for (size_t i = 0; i < n; i++) {
-        outputHilbertPhase[i] = static_cast<float>(atan2(out[i][1], out[i][0]));
+        phase[i] = static_cast<float>(atan2(out[i][1] / n, out[i][0] / n)); // Normalize by n
     }
 
-    float * diff = new float[(n - 1)];
-    
-    // perform diff
-    for(int i = 0; i < n - 1; i++) {
-        diff[i] = outputHilbertPhase[i + 1] - outputHilbertPhase[i] + (M_PI * 2.0);
+    // Compute phase differences and unwrap
+    std::vector<float> diff(n - 1);
+    for (size_t i = 0; i < n - 1; i++) {
+        float phase_diff = phase[i + 1] - phase[i];
+        // Unwrap: if difference is negative, add 2π
+        if (phase_diff < 0) {
+            phase_diff += 2.0f * static_cast<float>(M_PI);
+        }
+        diff[i] = phase_diff;
     }
 
-    // perform cumsum
-    outputHilbertPhase.resize(n - 1);
-    for(int i = 1; i < n - 1; i++) {
-        // subtract initial value so that travel starts at 0
-        outputHilbertPhase[i] =  diff[i] + diff[i-1] - diff[0]; 
+    // Compute cumulative sum (integration)
+    outputHilbertPhase.resize(n);
+    outputHilbertPhase[0] = 0.0f; // Start at 0
+    for (size_t i = 1; i < n; i++) {
+        // Convert phase to distance: phase/(2π) * (wavelength/2)
+        // The division by 2π converts radians to cycles, and wavelength/2 accounts for round-trip
+        outputHilbertPhase[i] = outputHilbertPhase[i - 1] + 
+                               (diff[i - 1] / (2.0f * static_cast<float>(M_PI))) * (refLaserWavelength / 2.0f);
     }
-    outputHilbertPhase[0] = 0;
-
-
-    // analytic_signal = hilbert(raw_ref)
-    // angle = np.angle(analytic_signal)
-    // diff = np.diff(angle)
-
-    // for i in range(0, len(diff)):
-    //     if diff[i] < 0:
-    //         diff[i] = diff[i] + np.pi * 2.0
-
-    // integra = np.cumsum(diff)
-    // distanceInUM = integra / (2.0 * np.pi) * (ref_laser_wavelength / 2.0)
 
     // Clean up FFTW resources
     fftw_destroy_plan(plan_forward);
