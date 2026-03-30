@@ -184,12 +184,12 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
             rightArrowHandleFlag = false;
         }
         
-        if (ImPlot::BeginPlot("Spectrum", ImVec2(-1, -1), ImPlotFlags_NoTitle | ImPlotFlags_NoLegend)) {
+        if (ImPlot::BeginPlot("Spectrum", ImVec2(-1, -1), ImPlotFlags_NoTitle | ImPlotFlags_NoLegend | ImPlotFlags_NoMenus)) {
             // Setup axes with conditional auto-fit behavior (no labels to match graphing panel style)
             ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
-            ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
+            ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks | ImPlotAxisFlags_Lock;
             if (shouldAutoscale) {
-                y_flags |= ImPlotAxisFlags_AutoFit;
+                y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks | ImPlotAxisFlags_AutoFit;
             }
             ImPlot::SetupAxes("", "", x_flags, y_flags);
             
