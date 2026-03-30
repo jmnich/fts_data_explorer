@@ -52,10 +52,6 @@ void Spectrum::resetSpectrumWindow() {
     
     // Reset zoom state
     shouldAutoscale = true;
-    manualXMin = 0.0;
-    manualXMax = 0.0;
-    manualYMin = 0.0;
-    manualYMax = 0.0;
     
     // Reset arrow key state
     leftArrowPressedLastFrame = false;
@@ -184,10 +180,6 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
         if (isSpectrumWindowFocused && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
             // Reset spectrum window zoom when ESC is pressed
             shouldAutoscale = true; // Always force redraw with full range when ESC is pressed
-            manualXMin = 0.0;
-            manualXMax = 0.0;
-            manualYMin = 0.0;
-            manualYMax = 0.0;
         }
         
         // Reset arrow key state when window loses focus
@@ -224,7 +216,6 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                 double globalYMin = 0.0;
                 double globalYMax = 0.0;
                 
-                bool firstSpectrum = true;
                 for (size_t i = 0; i < primaryDetectors.size(); i++) {
                     const auto& fileData = primaryDetectors[i];
                     const std::string& fileId = fileData.first;
@@ -246,37 +237,17 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                         double localYMin = *minmaxY.first;
                         double localYMax = *minmaxY.second;
                         
-                        // Update global bounds
-                        if (firstSpectrum) {
-                            globalXMin = localXMin;
-                            globalXMax = localXMax;
-                            globalYMin = localYMin;
-                            globalYMax = localYMax;
-                            firstSpectrum = false;
-                        } else {
-                            globalXMin = std::min(globalXMin, localXMin);
-                            globalXMax = std::max(globalXMax, localXMax);
-                            globalYMin = std::min(globalYMin, localYMin);
-                            globalYMax = std::max(globalYMax, localYMax);
-                        }
+                        globalXMin = std::min(globalXMin, localXMin);
+                        globalXMax = std::max(globalXMax, localXMax);
+                        globalYMin = std::min(globalYMin, localYMin);
+                        globalYMax = std::max(globalYMax, localYMax);
                     }
                 }
-                
-                // Apply auto-scale limits if we found valid data
-                if (!firstSpectrum) {
-                    if (autoFitYAxis) {
-                        // Auto-fit both axes
-                        ImPlot::SetupAxisLimits(ImAxis_X1, globalXMin, globalXMax, ImPlotCond_Always);
-                        ImPlot::SetupAxisLimits(ImAxis_Y1, globalYMin, globalYMax, ImPlotCond_Always);
-                    } else {
-                        // Auto-fit X-axis only, preserve Y-axis limits
-                        ImPlot::SetupAxisLimits(ImAxis_X1, globalXMin, globalXMax, ImPlotCond_Always);
-                        if (manualYMin != manualYMax) {
-                            ImPlot::SetupAxisLimits(ImAxis_Y1, manualYMin, manualYMax, ImPlotCond_Always);
-                        }
-                    }
-                }
-                
+
+                ImPlot::SetupAxisLimits(ImAxis_X1, globalXMin, globalXMax, ImPlotCond_Always);
+
+                ImPlot::SetupAxisLimits(ImAxis_Y1, globalYMin, globalYMax, ImPlotCond_Always);
+
                 // Reset the autoscale flag after applying
                 shouldAutoscale = false;
             }
@@ -287,19 +258,14 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                 applyXRangeSelection = false; // Reset flag after applying
             }
             
-            // Apply manual zoom limits based on AFY setting
-            if (!shouldAutoscale && manualXMin != manualXMax) {
-                ImPlot::SetupAxisLimits(ImAxis_X1, manualXMin, manualXMax, ImPlotCond_Always);
-            }
-            
             // When AFY is disabled, we want X-axis only interactions
             // But we can't lock Y-axis completely as it breaks all interactions
             // Instead, we'll rely on the user to manually control Y-axis when needed
             // and provide visual feedback through the legend
             if (!autoFitYAxis && !shouldAutoscale) {
-                // Apply manual Y-axis limits if set
+                // Apply manual Y-axis limits if set, but only once to allow user interactions
                 if (manualYMin != manualYMax) {
-                    ImPlot::SetupAxisLimits(ImAxis_Y1, manualYMin, manualYMax, ImPlotCond_Always);
+                    ImPlot::SetupAxisLimits(ImAxis_Y1, manualYMin, manualYMax, ImPlotCond_Once);
                 }
             }
             
@@ -413,8 +379,6 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
             
             if (shouldResetZoom) {
                 shouldAutoscale = true;
-                manualXMin = 0.0;
-                manualXMax = 0.0;
             }
             
             // Plot each spectrum with a unique color and label
