@@ -363,8 +363,6 @@ void handleKeyboardNavigation(const std::vector<std::string>& csvFiles,
                         
                         loadedData.push_back(data);
                         rawDataCache.push_back(rawData); // Store raw data for spectrum computation
-                        std::cout << "DEBUG: Shift+Arrow selection - stored raw data in cache, size: " << rawData.primaryDetector.size() 
-                                  << ", processed size: " << data.primaryDetector.size() << std::endl;
                         selectedFiles.push_back(fullPath);
                         
                         // Extract filename for legend
