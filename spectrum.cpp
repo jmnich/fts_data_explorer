@@ -198,7 +198,10 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
             rightArrowHandleFlag = false;
         }
         
-        if (ImPlot::BeginPlot("Spectrum", ImVec2(-1, -1), ImPlotFlags_NoTitle | ImPlotFlags_NoLegend | ImPlotFlags_NoMenus)) {
+        // Match graphing panel behavior: NoTitle only, no NoLegend to ensure full interactions
+        ImPlotFlags plot_flags = ImPlotFlags_NoTitle;
+
+        if (ImPlot::BeginPlot("Spectrum", ImVec2(-1, -1), plot_flags)) {
 
             // Setup axes with conditional auto-fit behavior (no labels to match graphing panel style)
             // Implement Auto-fit Y-axis (AFY) feature like in graphing panel
