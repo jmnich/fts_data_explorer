@@ -323,8 +323,8 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                     plotSpecs[i].LineColor = ImVec4(0.5f, 0.5f, 0.5f, 1.0f); // Grey
                 }
                 
-                // Plot this spectrum with a unique label
-                std::string plotLabel = "Spectrum " + std::to_string(i + 1);
+                // Plot this spectrum with filename as label (same as graphing panel)
+                std::string plotLabel = fileId; // Use the actual filename instead of "Spectrum 1", "Spectrum 2", etc.
                 ImPlot::PlotLine(plotLabel.c_str(), frequencies.data(), spectrum.data(), spectrum.size(), plotSpecs[i]);
             }
             
