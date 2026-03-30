@@ -952,7 +952,22 @@ int main() {
                 ImGui::PopStyleColor(3); // Always pop styles after button
                 
                 if (buttonClicked) {
-                    std::string selectedDirectory = FileBrowser::showDirectorySelectionDialog();
+                    // For welcome screen, use zenity directly since we're in a modal context
+                    std::string selectedDirectory;
+                    FILE* pipe = popen("zenity --file-selection --directory --title='Select Dataset Directory' 2>/dev/null", "r");
+                    if (pipe) {
+                        char buffer[1024] = {0};
+                        if (fgets(buffer, sizeof(buffer), pipe) != NULL) {
+                            // Remove trailing newline
+                            buffer[strcspn(buffer, "\n")] = 0;
+                            // Only use the result if it's not empty and not just whitespace
+                            if (strlen(buffer) > 0 && buffer[0] != '\0') {
+                                selectedDirectory = buffer;
+                            }
+                        }
+                        pclose(pipe);
+                    }
+                    
                     if (!selectedDirectory.empty()) {
                         // Check if the selected directory has a raw_data subdirectory
                         std::string rawDataPath = selectedDirectory + "/raw_data";
