@@ -29,7 +29,7 @@ Spectrum::Spectrum()
       rightArrowHandleFlag(false),
       appState(nullptr),
       xUnitSelector(0), // Default to cm-1
-      refLaserTextbox() { strcpy(refLaserTextbox, "1.550"); } // Default value
+      refLaserTextbox() {refLaserTextbox=1.550; } // Default value
 
 void Spectrum::initSpectrumWindow() {
     if (!spectrumWindowInitialized) {
@@ -63,7 +63,7 @@ void Spectrum::resetSpectrumWindow() {
     
     // Reset UI controls
     xUnitSelector = 0; // Reset to cm-1
-    strcpy(refLaserTextbox, "1.550"); // Reset to default value
+    refLaserTextbox = 1.550; // Reset to default value
 }
 
 bool Spectrum::isSpectrumDirty(const std::string& fileId, const std::vector<float>& primaryDetector) {

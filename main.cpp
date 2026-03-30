@@ -1898,12 +1898,18 @@ int main() {
             const char* xUnitItems[] = { "cm-1", "um", "THz" };
             ImGui::Text("X unit:");
             ImGui::SameLine();
+            
+            float remainingWidth = ImGui::GetContentRegionAvail().x;
+            ImGui::SetNextItemWidth(remainingWidth);
             ImGui::Combo("##XUnitSelector", &appState.spectrum.xUnitSelector, xUnitItems, IM_ARRAYSIZE(xUnitItems));
             
             // Reference laser textbox
             ImGui::Text("Ref laser [um]:");
             ImGui::SameLine();
-            ImGui::InputText("##RefLaserTextbox", appState.spectrum.refLaserTextbox, sizeof(appState.spectrum.refLaserTextbox));
+
+            remainingWidth = ImGui::GetContentRegionAvail().x;
+            ImGui::SetNextItemWidth(remainingWidth);
+            ImGui::InputFloat("##RefLaserTextbox", &(appState.spectrum.refLaserTextbox), 0.001, 0.01);
             
         } else {
             ImGui::Text("No data loaded.");
