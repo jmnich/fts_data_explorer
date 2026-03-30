@@ -299,6 +299,7 @@ void handleKeyboardNavigation(const std::vector<std::string>& csvFiles,
                              std::vector<std::string>& selectedFiles, 
                              std::vector<std::string>& selectedFilenames, 
                              std::vector<InterferogramData>& loadedData, 
+                             std::vector<InterferogramData>& rawDataCache, 
                              bool& dataLoaded, 
                              const std::vector<std::string>& sortedFiles, 
                              bool enableDownsampling, 
@@ -337,6 +338,7 @@ void handleKeyboardNavigation(const std::vector<std::string>& csvFiles,
                     // File not already selected, add it
                     try {
                         InterferogramData data = CSVAdapter::loadFromCSV(fullPath);
+                        InterferogramData rawData = data; // Store raw data before any processing
                         
                         // Apply downsampling
                         if (enableDownsampling && data.referenceDetector.size() > maxPointsBeforeDownsampling) {
@@ -356,9 +358,13 @@ void handleKeyboardNavigation(const std::vector<std::string>& csvFiles,
                             selectedFiles.erase(selectedFiles.begin());
                             selectedFilenames.erase(selectedFilenames.begin());
                             loadedData.erase(loadedData.begin());
+                            rawDataCache.erase(rawDataCache.begin()); // Also remove from raw data cache
                         }
                         
                         loadedData.push_back(data);
+                        rawDataCache.push_back(rawData); // Store raw data for spectrum computation
+                        std::cout << "DEBUG: Shift+Arrow selection - stored raw data in cache, size: " << rawData.primaryDetector.size() 
+                                  << ", processed size: " << data.primaryDetector.size() << std::endl;
                         selectedFiles.push_back(fullPath);
                         
                         // Extract filename for legend
@@ -666,7 +672,7 @@ int main() {
         
         // Handle keyboard navigation for file selection
         handleKeyboardNavigation(appState.csvFiles, appState.currentSortedFileIndex, appState.filesChanged, appState.keyboardNavigation, 
-                                appState.shiftSelectMode, appState.selectedFiles, appState.selectedFilenames, appState.loadedData, appState.dataLoaded, 
+                                appState.shiftSelectMode, appState.selectedFiles, appState.selectedFilenames, appState.loadedData, appState.rawDataCache, appState.dataLoaded, 
                                 appState.sortedFiles, appState.enableDownsampling, appState.maxPointsBeforeDownsampling, appState.MAX_SELECTABLE_FILES);
         
 
@@ -738,13 +744,15 @@ int main() {
                 
                 // For single selection (no Ctrl), replace current selection
                 appState.loadedData.clear();
-                appState.rawDataCache.clear(); // Clear raw data cache too
+                // DON'T clear raw data cache - we need it for spectrum calculation!
+                // appState.rawDataCache.clear(); // Clear raw data cache too
                 appState.selectedFiles.clear();
                 appState.selectedFilenames.clear();
                 
                 // Always load the processed data
                 appState.loadedData.push_back(processedData);
-                appState.rawDataCache.push_back(data); // Store raw data for spectrum computation
+                // Raw data is already in cache from line 718, no need to add again
+                // appState.rawDataCache.push_back(data); // Store raw data for spectrum computation
 
                 appState.selectedFiles.push_back(appState.sortedFiles[appState.currentSortedFileIndex]);
                 
