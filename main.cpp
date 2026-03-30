@@ -1957,7 +1957,7 @@ int main() {
             for (size_t i = 0; i < appState.loadedData.size(); i++) {
                 primaryDetectors.emplace_back(appState.selectedFilenames[i], appState.loadedData[i].primaryDetector);
             }
-            appState.spectrum.renderSpectrumWindow(primaryDetectors, appState.rawDataCache);
+            appState.spectrum.renderSpectrumWindow(primaryDetectors, appState.rawDataCache, appState.autoFitYAxis);
         }
         
         // Rendering

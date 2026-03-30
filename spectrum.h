@@ -40,6 +40,8 @@ public:
     bool shouldAutoscale;
     double manualXMin;
     double manualXMax;
+    double manualYMin;
+    double manualYMax;
 
     // Arrow key handling for spectrum window
     bool leftArrowPressedLastFrame;
@@ -58,7 +60,8 @@ public:
     
     // Render spectrum window for multiple files
     void renderSpectrumWindow(const std::vector<std::pair<std::string, std::vector<float>>>& primaryDetectors,
-                             const std::vector<InterferogramData>& rawDataCache = {});
+                             const std::vector<InterferogramData>& rawDataCache = {},
+                             bool autoFitYAxis = true);
     
     // Reset spectrum window state
     void resetSpectrumWindow();

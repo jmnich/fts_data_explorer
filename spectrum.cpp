@@ -53,6 +53,8 @@ void Spectrum::resetSpectrumWindow() {
     shouldAutoscale = true;
     manualXMin = 0.0;
     manualXMax = 0.0;
+    manualYMin = 0.0;
+    manualYMax = 0.0;
     
     // Reset arrow key state
     leftArrowPressedLastFrame = false;
@@ -94,7 +96,8 @@ bool Spectrum::isSpectrumDirty(const std::string& fileId, const std::vector<floa
 }
 
 void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std::vector<float>>>& primaryDetectors,
-                                   const std::vector<InterferogramData>& rawDataCache) {
+                                   const std::vector<InterferogramData>& rawDataCache,
+                                   bool autoFitYAxis) {
     // Only set position/size on first use, then let user move/resize freely
     ImGui::SetNextWindowPos(ImVec2(spectrumWindowPosX, spectrumWindowPosY), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(spectrumWindowSizeX, spectrumWindowSizeY), ImGuiCond_FirstUseEver);
@@ -186,11 +189,16 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
         
         if (ImPlot::BeginPlot("Spectrum", ImVec2(-1, -1), ImPlotFlags_NoTitle | ImPlotFlags_NoLegend | ImPlotFlags_NoMenus)) {
             // Setup axes with conditional auto-fit behavior (no labels to match graphing panel style)
+            // Implement Auto-fit Y-axis (AFY) feature like in graphing panel
             ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
-            ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks | ImPlotAxisFlags_Lock;
-            if (shouldAutoscale) {
-                y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks | ImPlotAxisFlags_AutoFit;
+            ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
+            
+            if (autoFitYAxis) {
+                y_flags |= ImPlotAxisFlags_AutoFit; // Auto-fit Y-axis when AFY is enabled
             }
+            // Note: When AFY is disabled, we don't lock the Y-axis here because it prevents all interactions
+            // Instead, we handle the Y-axis locking separately after checking for manual limits
+            
             ImPlot::SetupAxes("", "", x_flags, y_flags);
             
             // Apply X-range selection if requested (must be done before state management)
@@ -199,18 +207,34 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                 applyXRangeSelection = false; // Reset flag after applying
             }
             
-            // Apply manual zoom limits if not in auto-scale mode (must be done before state management)
+            // Apply manual zoom limits based on AFY setting
             if (!shouldAutoscale && manualXMin != manualXMax) {
                 ImPlot::SetupAxisLimits(ImAxis_X1, manualXMin, manualXMax, ImPlotCond_Always);
             }
             
-            // Handle ESC key for spectrum window zoom reset (only when spectrum window is focused)
-            if (isSpectrumWindowFocused && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            // When AFY is disabled, we want X-axis only interactions
+            // But we can't lock Y-axis completely as it breaks all interactions
+            // Instead, we'll rely on the user to manually control Y-axis when needed
+            // and provide visual feedback through the legend
+            if (!autoFitYAxis && !shouldAutoscale) {
+                // Apply manual Y-axis limits if set
+                if (manualYMin != manualYMax) {
+                    ImPlot::SetupAxisLimits(ImAxis_Y1, manualYMin, manualYMax, ImPlotCond_Always);
+                }
+            }
+            
+            // Handle ESC key to reset zoom (copy of working implementation from graphing panel)
+            if (ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
                 // Reset spectrum window zoom when ESC is pressed
-                shouldAutoscale = true;
+                shouldAutoscale = true; // Always force redraw with full range when ESC is pressed
                 manualXMin = 0.0;
                 manualXMax = 0.0;
+                manualYMin = 0.0;
+                manualYMax = 0.0;
             }
+            
+            // Note: Ctrl+Y shortcut for toggling AFY is handled in main.cpp
+            // The autoFitYAxis parameter is passed from the main application state
 
             // Handle arrow key presses for panning (only when spectrum window is focused)
             if (isSpectrumWindowFocused) {
