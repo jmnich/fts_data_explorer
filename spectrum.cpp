@@ -30,11 +30,132 @@ Spectrum::Spectrum()
       rightArrowHandleFlag(false),
       appState(nullptr),
       xUnitSelector(0), // Default to cm-1
-      refLaserTextbox() {refLaserTextbox=1.550; } // Default value
+      refLaserTextbox(1.550f), // Default value
+      showHilbertDebugWindow(false),
+      hilbertDebugWindowInitialized(false),
+      hilbertDebugWindowPosX(700.0f),
+      hilbertDebugWindowPosY(100.0f),
+      hilbertDebugWindowSizeX(600.0f),
+      hilbertDebugWindowSizeY(400.0f) {
+      
+      }
 
 void Spectrum::initSpectrumWindow() {
     if (!spectrumWindowInitialized) {
         spectrumWindowInitialized = true;
+    }
+}
+
+void Spectrum::renderHilbertDebugWindow(const std::vector<InterferogramData>& rawDataCache) {
+    // Only set position/size on first use, then let user move/resize freely
+    ImGui::SetNextWindowPos(ImVec2(hilbertDebugWindowPosX, hilbertDebugWindowPosY), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(hilbertDebugWindowSizeX, hilbertDebugWindowSizeY), ImGuiCond_FirstUseEver);
+
+    ImGuiWindowFlags debugFlags = ImGuiWindowFlags_None;
+    
+    if (ImGui::Begin("Hilbert Transform Debug", &showHilbertDebugWindow, debugFlags)) {
+        // Update our saved position and size when window is being moved/resized
+        if (ImGui::IsWindowFocused() && (ImGui::IsMouseDragging(ImGuiMouseButton_Left) || ImGui::IsMouseReleased(ImGuiMouseButton_Left)))
+        {
+            ImVec2 windowPos = ImGui::GetWindowPos();
+            ImVec2 windowSize = ImGui::GetWindowSize();
+            hilbertDebugWindowPosX = windowPos.x;
+            hilbertDebugWindowPosY = windowPos.y;
+            hilbertDebugWindowSizeX = windowSize.x;
+            hilbertDebugWindowSizeY = windowSize.y;
+        }
+        
+        hilbertDebugWindowInitialized = true;
+        
+        if (rawDataCache.empty()) {
+            ImGui::Text("No data available");
+        } else {
+            // Get the first dataset for display
+            const auto& rawData = rawDataCache[0];
+            
+            // Debug info
+            ImGui::Text("File metadata: %s", rawData.metadata.c_str());
+            ImGui::Text("Reference detector size: %zu", rawData.referenceDetector.size());
+            ImGui::Text("Cached Hilbert phases count: %zu", cachedHilbertPhases.size());
+            
+            // Check if we have cached Hilbert phase for this file
+            // We need to find the corresponding filename that was used as fileId in spectrum computation
+            // Since rawDataCache and primaryDetectors are parallel arrays, the fileId should be the same index
+            // Let's try to find a matching cache entry
+            std::string fileId = "";
+            bool foundMatch = false;
+            
+            // Try to find a cache entry that matches this raw data
+            for (const auto& cachePair : cachedHilbertPhases) {
+                // If the metadata matches, use this fileId
+                if (cachePair.first == rawData.metadata) {
+                    fileId = cachePair.first;
+                    foundMatch = true;
+                    break;
+                }
+                // Also try to see if any cache entry has data that matches our raw data size
+                // This is a fallback in case metadata doesn't match
+                if (cachePair.second.size() == rawData.referenceDetector.size()) {
+                    fileId = cachePair.first;
+                    foundMatch = true;
+                    break;
+                }
+            }
+            
+            if (foundMatch && !fileId.empty()) {
+                const auto& hilbertPhase = cachedHilbertPhases[fileId];
+                ImGui::Text("Hilbert phase size: %zu", hilbertPhase.size());
+                
+                if (!hilbertPhase.empty()) {
+                    // Create plot for Hilbert phase
+                    if (ImPlot::BeginPlot("Hilbert Phase Unwrapping", ImVec2(-1, -1))) {
+                        ImPlot::SetupAxes("Sample Index", "Distance (um)");
+                        ImPlot::SetupAxisLimits(ImAxis_X1, 0, hilbertPhase.size() - 1, ImGuiCond_Once);
+                        
+                        // Plot the Hilbert phase result
+                        ImPlot::PlotLine("Hilbert Phase", hilbertPhase.data(), hilbertPhase.size());
+                        
+                        // Add some statistics
+                        float max_val = *std::max_element(hilbertPhase.begin(), hilbertPhase.end());
+                        float min_val = *std::min_element(hilbertPhase.begin(), hilbertPhase.end());
+                        
+                        char stats_text[100];
+                        snprintf(stats_text, 100, "Range: %.3f - %.3f um", min_val, max_val);
+                        ImPlot::Annotation(max_val, 0.5, ImVec4(1,1,1,1), ImVec2(0, 20), true, stats_text);
+                        
+                        ImPlot::EndPlot();
+                    }
+                    
+                    // Show reference signal for comparison
+                    if (ImPlot::BeginPlot("Reference Signal", ImVec2(-1, -1))) {
+                        ImPlot::SetupAxes("Sample Index", "Amplitude");
+                        ImPlot::SetupAxisLimits(ImAxis_X1, 0, rawData.referenceDetector.size() - 1, ImGuiCond_Once);
+                        
+                        ImPlot::PlotLine("Reference", rawData.referenceDetector.data(), rawData.referenceDetector.size());
+                        
+                        ImPlot::EndPlot();
+                    }
+                } else {
+                    ImGui::Text("Hilbert phase data is empty");
+                }
+            } else {
+                ImGui::Text("Hilbert phase not found for this file. Try refreshing the spectrum.");
+                ImGui::Text("Searched for metadata: %s", rawData.metadata.c_str());
+                ImGui::Text("Available cache keys:");
+                for (const auto& pair : cachedHilbertPhases) {
+                    ImGui::Text("  - %s (size: %zu)", pair.first.c_str(), pair.second.size());
+                }
+                ImGui::Text("Expected reference detector size: %zu", rawData.referenceDetector.size());
+            }
+        }
+        
+        ImGui::End();
+    }
+}
+
+void Spectrum::initHilbertDebugWindow() {
+    if (!hilbertDebugWindowInitialized) {
+        hilbertDebugWindowInitialized = true;
     }
 }
 
@@ -407,6 +528,17 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                 
                 std::vector<float> spectrum;
                 std::vector<float> frequencies;
+                
+                // Always compute Hilbert phase for debugging (if we have reference data)
+                if (!rawData.referenceDetector.empty()) {
+                    std::vector<float> hilbertPhase;
+                    SpectralToolbox::xAxisFromHilbert(rawData.referenceDetector, refLaserTextbox, hilbertPhase);
+                    cachedHilbertPhases[fileId] = hilbertPhase;
+                    std::cout << "Computed Hilbert phase for file: " << fileId 
+                              << " (size: " << hilbertPhase.size() << ")" << std::endl;
+                } else {
+                    std::cout << "Warning: Empty reference detector for file: " << fileId << std::endl;
+                }
                 
                 if (needsComputation) {
                     // Compute new spectrum using raw, unprocessed data

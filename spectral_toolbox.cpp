@@ -1,8 +1,41 @@
 #include "spectral_toolbox.h"
-#include <fftw3.h>
 #include <cmath>
 #include <complex>
 #include <iostream>
+#include <numeric>
+
+void SpectralToolbox::complex_divide(fftw_complex * result, fftw_complex a, fftw_complex b) {
+    double denominator = b[0] * b[0] + b[1] * b[1];
+    if (denominator == 0) {
+        // Handle division by zero (set result to zero or handle as needed)
+        (*result)[0] = 0.0;
+        (*result)[1] = 0.0;
+        return;
+    }
+
+    (*result)[0] = (a[0] * b[0] + a[1] * b[1]) / denominator;
+    (*result)[1] = (a[1] * b[0] - a[0] * b[1]) / denominator;
+}
+
+void SpectralToolbox::makeCorrectedInterferogram(const std::vector<float> &rawReferenceSignal, 
+    const std::vector<float> &rawPrimarySignal, float refLaserWavelength,
+    std::vector<float> &outputxAxis, std::vector<float> &outputYAxis) {
+
+        std::vector<float> correctedXAxis(rawReferenceSignal.size(),0);
+
+        // 1. calculate corrected X-axis
+        xAxisFromHilbert(rawReferenceSignal, refLaserWavelength, correctedXAxis);
+
+        // 2. remove one point from Y-axis to match X-axis
+        std::cout << "DEBUG, size raw primary: " << rawPrimarySignal.size();
+        std::cout << "DEBUG, size raw reference: " << rawReferenceSignal.size();
+        std::cout << "DEBUG, size corrected X: " << correctedXAxis.size();
+
+        // 3. make X-axis with even spacing
+
+        // 4. interpolate Y data from corrected X-axis to even X-axis
+
+}
 
 void SpectralToolbox::xAxisFromHilbert(const std::vector<float> &referenceSignal, float refLaserWavelength, std::vector<float> &outputHilbertPhase) {
     size_t n = referenceSignal.size();
@@ -73,6 +106,8 @@ void SpectralToolbox::xAxisFromHilbert(const std::vector<float> &referenceSignal
         outputHilbertPhase[i] = outputHilbertPhase[i - 1] + 
                                (diff[i - 1] / (2.0f * static_cast<float>(M_PI))) * (refLaserWavelength / 2.0f);
     }
+
+    std::cout<<refLaserWavelength<<std::endl;
 
     // Clean up FFTW resources
     fftw_destroy_plan(plan_forward);
