@@ -3,6 +3,7 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
+#include <numeric>
 
 void test_xAxisFromHilbert() {
     std::cout << "=== Testing xAxisFromHilbert Function ===" << std::endl;
@@ -13,23 +14,25 @@ void test_xAxisFromHilbert() {
     const float sampling_freq = 100.0f; // MHz
     const float signal_freq = 1.0f; // MHz
     
-    // Generate synthetic reference signal: cosine wave with linear phase modulation
-    // This better represents interferometric data where the mirror is moving
+    // Generate synthetic reference signal: pure mirror movement without carrier
+    // In real interferometers, we often work with the demodulated signal
+    // where the high-frequency carrier has been removed, leaving only the mirror movement
     std::vector<float> referenceSignal(n);
-    const float carrier_freq = 1.0f; // MHz (laser frequency)
-    const float phase_slope = 0.01f; // radians/sample (simulates mirror movement)
+    const float mirror_velocity = 0.1f; // micrometers per sample (slow mirror movement)
     
     for (size_t i = 0; i < n; i++) {
-        float t = static_cast<float>(i) / sampling_freq;
-        // Cosine wave with linearly increasing phase (chirp)
-        float instant_phase = 2.0f * M_PI * carrier_freq * t + phase_slope * static_cast<float>(i);
-        referenceSignal[i] = cosf(instant_phase);
+        // Pure cosine wave where phase represents mirror position
+        // Phase = 2π * (2 * position / wavelength) for round-trip interferometry
+        // position = mirror_velocity * i (in micrometers)
+        float phase = (4.0f * M_PI * mirror_velocity / wavelength) * static_cast<float>(i);
+        referenceSignal[i] = cosf(phase);
     }
     
     std::cout << "Input signal stats:" << std::endl;
     std::cout << "  Samples: " << n << std::endl;
     std::cout << "  Wavelength: " << wavelength << " micrometers" << std::endl;
-    std::cout << "  Signal: Cosine with linear phase modulation (carrier: " << carrier_freq << " MHz, slope: " << phase_slope << " rad/sample)" << std::endl;
+    std::cout << "  Signal: Pure mirror movement (velocity: " << mirror_velocity << " µm/sample)" << std::endl;
+    std::cout << "  Expected total mirror movement: " << mirror_velocity * static_cast<float>(n) << " micrometers" << std::endl;
     
     // Show first few samples
     std::cout << "First 10 samples: ";
@@ -136,6 +139,29 @@ void test_xAxisFromHilbert() {
         std::cout << debug_position[i] << " ";
     }
     std::cout << "..." << std::endl;
+    
+    // Check the scaling: one 2π phase change should correspond to wavelength/2 movement
+    std::cout << "\nScaling verification:" << std::endl;
+    std::cout << "  Wavelength: " << wavelength << " micrometers" << std::endl;
+    std::cout << "  Expected movement per 2π phase change: " << wavelength/2.0f << " micrometers" << std::endl;
+    
+    // Find some 2π phase changes and check the corresponding position changes
+    std::cout << "  Looking for 2π phase changes and corresponding position deltas:" << std::endl;
+    int found = 0;
+    for (size_t i = 0; i < debug_diff.size() && found < 5; i++) {
+        if (fabs(debug_diff[i] - 2.0f * static_cast<float>(M_PI)) < 0.1f) {
+            std::cout << "    Index " << i << ": phase_diff = " << debug_diff[i] 
+                      << " radians, position_delta = " << debug_position[i+1] - debug_position[i] 
+                      << " micrometers (expected: " << wavelength/2.0f << ")" << std::endl;
+            found++;
+        }
+    }
+    
+    if (found == 0) {
+        std::cout << "    No exact 2π phase changes found in first " << debug_diff.size() << " samples" << std::endl;
+        std::cout << "    Average phase difference: " << std::accumulate(debug_diff.begin(), debug_diff.end(), 0.0f) / debug_diff.size() << " radians" << std::endl;
+        std::cout << "    Average position delta: " << debug_position.back() / debug_position.size() << " micrometers" << std::endl;
+    }
     
     // Cleanup
     fftw_destroy_plan(plan_forward);
