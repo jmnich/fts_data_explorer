@@ -48,9 +48,11 @@ void SpectralToolbox::xAxisFromHilbert(const std::vector<float> &referenceSignal
     fftw_complex* out = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * n);
     fftw_complex* hilbert = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * n);
 
+    float ref_avg = std::accumulate(referenceSignal.begin(), referenceSignal.end(), 0.0) / referenceSignal.size();
+
     // Copy input data to FFTW complex array
     for (size_t i = 0; i < n; i++) {
-        in[i][0] = static_cast<double>(referenceSignal[i]); // Real part
+        in[i][0] = static_cast<double>(referenceSignal[i] - ref_avg); // Real part
         in[i][1] = 0.0; // Imaginary part
     }
 
