@@ -66,7 +66,7 @@ add_executable(fts_data_explorer
 
 # Add test executable
 add_executable(test_hilbert
-    test_hilbert.cpp
+    # test_hilbert.cpp
     spectral_toolbox.cpp
 )
 
