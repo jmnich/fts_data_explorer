@@ -5,6 +5,7 @@
 #include <sstream>
 #include <cmath>
 #include <algorithm>
+#include <chrono>
 
 // Global variable for dataset path - can be modified by user
 std::string DATASET_PATH = "../../example_datasets/2025-06-12_15-17-10_reference_3mm_2.0mms_30avg/raw_data/raw_15.csv";
@@ -102,9 +103,17 @@ void run_hilbert_comparison() {
     // Run C++ implementation
     std::vector<float> cpp_result;
     std::cout << "Running C++ xAxisFromHilbert..." << std::endl;
+
+    auto start = std::chrono::high_resolution_clock::now();
+
     SpectralToolbox::xAxisFromHilbert(referenceSignal, wavelength, cpp_result);
+
+    auto end = std::chrono::high_resolution_clock::now();
     
-    // Save results for Python comparison
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    std::cout << "Execution time: " << duration.count() << " microseconds" << std::endl;
+
+    // Save results focr Python comparison
     save_results_to_json("dataset_comparison", referenceSignal, cpp_result, wavelength);
     
     // Basic statistics

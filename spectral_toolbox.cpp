@@ -1,9 +1,12 @@
 #include "spectral_toolbox.h"
+#include "fftw3.h"
 #include <cmath>
 #include <complex>
+#include <cstddef>
 #include <cstring>
 #include <iostream>
 #include <numeric>
+#include <vector>
 
 #define REAL 0
 #define IMAG 1
@@ -47,6 +50,8 @@ void SpectralToolbox::xAxisFromHilbert(const std::vector<float> &referenceSignal
         return;
     }
 
+    // TODO: reuse plans and memory to improve exec time
+
     // Allocate memory for FFTW
     fftw_complex* in = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * n);
     fftw_complex* out = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * n);
@@ -82,46 +87,16 @@ void SpectralToolbox::xAxisFromHilbert(const std::vector<float> &referenceSignal
 
     memset(&hilbert[hN+1][REAL], 0, numRem*sizeof(fftw_complex));
 
-
-    // Apply Hilbert transform in frequency domain
-    // Hilbert transform: H(k) = -i * sign(k) for k != 0, H(0) = 0
-    // for (size_t k = 0; k < n; k++) {
-    //     if (k == 0 || k == n/2) {
-    //         // DC and Nyquist components
-    //         hilbert[k][0] = 0.0;
-    //         hilbert[k][1] = 0.0;
-    //     } else if (k < n/2) {
-    //         // Positive frequencies: multiply by -i (which is equivalent to rotating -90 degrees)
-    //         hilbert[k][0] = out[k][1];  // real = imag
-    //         hilbert[k][1] = -out[k][0]; // imag = -real
-    //     } else {
-    //         // Negative frequencies: multiply by i (which is equivalent to rotating +90 degrees)
-    //         hilbert[k][0] = -out[k][1]; // real = -imag
-    //         hilbert[k][1] = out[k][0];  // imag = real
-    //     }
-    // }
-
-
-
     // Compute inverse FFT to get analytic signal
     fftw_plan plan_inverse = fftw_plan_dft_1d(n, hilbert, out, FFTW_BACKWARD, FFTW_ESTIMATE);
     fftw_execute(plan_inverse);
 
-    // Compute phase from analytic signal (with proper normalization)
-    std::vector<double> phase(n);
-    for (size_t i = 0; i < n; i++) {
-        phase[i] = atan2(out[i][1] / (double)n, out[i][0] / (double)n); // Normalize by n
-    }
-
-    // Compute phase differences and unwrap
-    std::vector<float> diff(n - 1);
-    for (size_t i = 0; i < n - 1; i++) {
-        float phase_diff = phase[i + 1] - phase[i];
-        // Unwrap: if difference is negative, add 2π
-        if (phase_diff < 0) {
-            phase_diff += 2.0f * static_cast<float>(M_PI);
-        }
-        diff[i] = phase_diff;
+    // Compute phase difference without unwrapping througs complex division
+    std::vector<double> diff(n-1);
+    for(size_t i = 0; i < n - 1; i++) {
+        fftw_complex a;
+        complex_divide(&a, out[i+1], out[i]);
+        diff[i] = atan2(a[IMAG], a[REAL]);
     }
 
     // Compute cumulative sum (integration)

@@ -5,6 +5,7 @@ from scipy.signal import hilbert
 import json
 import sys
 import os
+import time
 
 import matplotlib.pyplot as plt
 
@@ -78,7 +79,18 @@ def main():
     
     # Run Python implementation
     print("Running Python reference implementation...")
+
+    start_time = time.perf_counter_ns()  # Start timer in nanoseconds for precision
+
     python_result = x_axis_from_hilbert_python(input_signal, wavelength)
+
+    end_time = time.perf_counter_ns()    # End timer
+
+
+    # Calculate duration in microseconds
+    execution_time_us = (end_time - start_time) / 1000
+
+    print(f"Execution time: {execution_time_us:.3f} microseconds")
     
     # Save Python results
     test_name = cpp_data["test_name"]
