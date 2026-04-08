@@ -55,8 +55,8 @@ void save_results_to_json(const std::string& test_name,
                          const std::vector<float>& input_signal,
                          const std::vector<float>& cpp_result,
                          float wavelength) {
-    std::cout<<"Opening: " << ("test_results/" + test_name + "_cpp.json");                       
-    std::ofstream out("test_results/" + test_name + "_cpp.json");
+    std::cout<<"Opening: " << ("../test_results/" + test_name + "_cpp.json");                       
+    std::ofstream out("../test_results/" + test_name + "_cpp.json");
     if (!out.is_open()) {
         std::cerr << "Error: Could not open output file" << std::endl;
         return;

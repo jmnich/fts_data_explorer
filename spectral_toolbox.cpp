@@ -1,8 +1,12 @@
 #include "spectral_toolbox.h"
 #include <cmath>
 #include <complex>
+#include <cstring>
 #include <iostream>
 #include <numeric>
+
+#define REAL 0
+#define IMAG 1
 
 void SpectralToolbox::complex_divide(fftw_complex * result, fftw_complex a, fftw_complex b) {
     double denominator = b[0] * b[0] + b[1] * b[1];
@@ -52,40 +56,61 @@ void SpectralToolbox::xAxisFromHilbert(const std::vector<float> &referenceSignal
 
     // Copy input data to FFTW complex array
     for (size_t i = 0; i < n; i++) {
-        in[i][0] = static_cast<double>(referenceSignal[i] - ref_avg); // Real part
-        in[i][1] = 0.0; // Imaginary part
+        in[i][REAL] = (double)(referenceSignal[i] - ref_avg);
+        in[i][IMAG] = 0.0;
     }
 
     // Compute FFT
-    fftw_plan plan_forward = fftw_plan_dft_1d(n, in, out, FFTW_FORWARD, FFTW_ESTIMATE);
+    fftw_plan plan_forward = fftw_plan_dft_1d(n, in, hilbert, FFTW_FORWARD, FFTW_ESTIMATE);
     fftw_execute(plan_forward);
+
+    int hN  = n >> 1; // N/2
+    int numRem = hN;
+
+    for(int i = 1; i < hN; ++i){
+        hilbert[i][REAL] *= 2;
+        hilbert[i][IMAG] *= 2;
+    }
+
+    if(n%2 == 0){
+        numRem--;
+    }
+    else if(n>1) {
+        hilbert[hN][REAL] *= 2;
+        hilbert[hN][IMAG] *= 2;
+    }
+
+    memset(&hilbert[hN+1][REAL], 0, numRem*sizeof(fftw_complex));
+
 
     // Apply Hilbert transform in frequency domain
     // Hilbert transform: H(k) = -i * sign(k) for k != 0, H(0) = 0
-    for (size_t k = 0; k < n; k++) {
-        if (k == 0 || k == n/2) {
-            // DC and Nyquist components
-            hilbert[k][0] = 0.0;
-            hilbert[k][1] = 0.0;
-        } else if (k < n/2) {
-            // Positive frequencies: multiply by -i (which is equivalent to rotating -90 degrees)
-            hilbert[k][0] = out[k][1];  // real = imag
-            hilbert[k][1] = -out[k][0]; // imag = -real
-        } else {
-            // Negative frequencies: multiply by i (which is equivalent to rotating +90 degrees)
-            hilbert[k][0] = -out[k][1]; // real = -imag
-            hilbert[k][1] = out[k][0];  // imag = real
-        }
-    }
+    // for (size_t k = 0; k < n; k++) {
+    //     if (k == 0 || k == n/2) {
+    //         // DC and Nyquist components
+    //         hilbert[k][0] = 0.0;
+    //         hilbert[k][1] = 0.0;
+    //     } else if (k < n/2) {
+    //         // Positive frequencies: multiply by -i (which is equivalent to rotating -90 degrees)
+    //         hilbert[k][0] = out[k][1];  // real = imag
+    //         hilbert[k][1] = -out[k][0]; // imag = -real
+    //     } else {
+    //         // Negative frequencies: multiply by i (which is equivalent to rotating +90 degrees)
+    //         hilbert[k][0] = -out[k][1]; // real = -imag
+    //         hilbert[k][1] = out[k][0];  // imag = real
+    //     }
+    // }
+
+
 
     // Compute inverse FFT to get analytic signal
     fftw_plan plan_inverse = fftw_plan_dft_1d(n, hilbert, out, FFTW_BACKWARD, FFTW_ESTIMATE);
     fftw_execute(plan_inverse);
 
     // Compute phase from analytic signal (with proper normalization)
-    std::vector<float> phase(n);
+    std::vector<double> phase(n);
     for (size_t i = 0; i < n; i++) {
-        phase[i] = static_cast<float>(atan2(out[i][1] / n, out[i][0] / n)); // Normalize by n
+        phase[i] = atan2(out[i][1] / (double)n, out[i][0] / (double)n); // Normalize by n
     }
 
     // Compute phase differences and unwrap
