@@ -188,7 +188,7 @@ void Spectrum::resetSpectrumWindow() {
     refLaserTextbox = 1.550; // Reset to default value
 }
 
-bool Spectrum::isSpectrumDirty(const std::string& fileId, const std::vector<float>& primaryDetector) {
+bool Spectrum::isSpectrumDirty(const std::string& fileId, const std::vector<double>& primaryDetector) {
     // Check if we have cached data for this file
     auto cachedSpectrumIt = cachedSpectra.find(fileId);
     auto cachedFrequenciesIt = cachedFrequencies.find(fileId);
@@ -216,7 +216,7 @@ bool Spectrum::isSpectrumDirty(const std::string& fileId, const std::vector<floa
     return false; // Data appears unchanged, use cached spectrum
 }
 
-void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std::vector<float>>>& primaryDetectors,
+void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std::vector<double>>>& primaryDetectors,
                                    const std::vector<InterferogramData>& rawDataCache,
                                    bool autoFitYAxis) {
     // Only set position/size on first use, then let user move/resize freely
@@ -505,7 +505,7 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
             for (size_t i = 0; i < primaryDetectors.size(); i++) {
                 const auto& fileData = primaryDetectors[i];
                 const std::string& fileId = fileData.first;
-                const std::vector<float>& primaryDetector = fileData.second;
+                const std::vector<double>& primaryDetector = fileData.second;
                 
                 // For spectrum computation, always use raw data to avoid downsampling and peak alignment artifacts
                 // Since primaryDetectors and rawDataCache should be parallel arrays, we can use the same index
@@ -526,12 +526,12 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                 // Check if we need to compute or can use cached data
                 bool needsComputation = isSpectrumDirty(fileId, rawData.primaryDetector);
                 
-                std::vector<float> spectrum;
-                std::vector<float> frequencies;
+                std::vector<double> spectrum;
+                std::vector<double> frequencies;
                 
                 // Always compute Hilbert phase for debugging (if we have reference data)
                 if (!rawData.referenceDetector.empty()) {
-                    std::vector<float> hilbertPhase;
+                    std::vector<double> hilbertPhase;
                     SpectralToolbox::xAxisFromHilbert(rawData.referenceDetector, refLaserTextbox, hilbertPhase);
                     cachedHilbertPhases[fileId] = hilbertPhase;
                     std::cout << "Computed Hilbert phase for file: " << fileId 

@@ -25,10 +25,10 @@ public:
     class AppState* appState;
     
     // Spectrum data caching for multiple files
-    std::map<std::string, std::vector<float>> cachedSpectra;
-    std::map<std::string, std::vector<float>> cachedFrequencies;
-    std::map<std::string, std::vector<float>> lastPrimaryDetectors;
-    std::map<std::string, std::vector<float>> cachedHilbertPhases;
+    std::map<std::string, std::vector<double>> cachedSpectra;
+    std::map<std::string, std::vector<double>> cachedFrequencies;
+    std::map<std::string, std::vector<double>> lastPrimaryDetectors;
+    std::map<std::string, std::vector<double>> cachedHilbertPhases;
     bool spectrumDirty;
     
     // X-range selection state for spectrum window
@@ -70,7 +70,7 @@ public:
     void initHilbertDebugWindow();
     
     // Render spectrum window for multiple files
-    void renderSpectrumWindow(const std::vector<std::pair<std::string, std::vector<float>>>& primaryDetectors,
+    void renderSpectrumWindow(const std::vector<std::pair<std::string, std::vector<double>>>& primaryDetectors,
                              const std::vector<InterferogramData>& rawDataCache = {},
                              bool autoFitYAxis = true);
     
@@ -84,8 +84,8 @@ public:
     void updateWindowState();
     
     // Compute FFT spectrum (with caching)
-    void computeSpectrum(const std::vector<float>& primaryDetector, std::vector<float>& spectrum, std::vector<float>& frequencies);
+    void computeSpectrum(const std::vector<double>& primaryDetector, std::vector<double>& spectrum, std::vector<double>& frequencies);
     
     // Check if spectrum needs recalculation for a specific file
-    bool isSpectrumDirty(const std::string& fileId, const std::vector<float>& primaryDetector);
+    bool isSpectrumDirty(const std::string& fileId, const std::vector<double>& primaryDetector);
 };

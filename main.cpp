@@ -309,7 +309,7 @@ void handleKeyboardNavigation(const std::vector<std::string>& csvFiles,
                         // Apply downsampling
                         if (enableDownsampling && data.referenceDetector.size() > maxPointsBeforeDownsampling) {
                             size_t localDownsampleFactor = data.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
-                            std::vector<float> downsampledRef, downsampledPrim;
+                            std::vector<double> downsampledRef, downsampledPrim;
                             for (size_t j = 0; j < data.referenceDetector.size(); j += localDownsampleFactor) {
                                 downsampledRef.push_back(data.referenceDetector[j]);
                                 downsampledPrim.push_back(data.primaryDetector[j]);
@@ -555,7 +555,7 @@ int main() {
                                 size_t localDownsampleFactor = data.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
                                 
                                 // Downsample both reference and primary detectors
-                                std::vector<float> downsampledRef, downsampledPrim;
+                                std::vector<double> downsampledRef, downsampledPrim;
                                 for (size_t j = 0; j < data.referenceDetector.size(); j += localDownsampleFactor) {
                                     downsampledRef.push_back(data.referenceDetector[j]);
                                     downsampledPrim.push_back(data.primaryDetector[j]);
@@ -695,7 +695,7 @@ int main() {
                     size_t localDownsampleFactor = processedData.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
                     
                     // Downsample both reference and primary detectors
-                    std::vector<float> downsampledRef, downsampledPrim;
+                    std::vector<double> downsampledRef, downsampledPrim;
                     for (size_t i = 0; i < processedData.referenceDetector.size(); i += localDownsampleFactor) {
                         downsampledRef.push_back(processedData.referenceDetector[i]);
                         downsampledPrim.push_back(processedData.primaryDetector[i]);
@@ -1089,7 +1089,7 @@ int main() {
                                         size_t localDownsampleFactor = data.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
                                         
                                         // Downsample both reference and primary detectors
-                                        std::vector<float> downsampledRef, downsampledPrim;
+                                        std::vector<double> downsampledRef, downsampledPrim;
                                         for (size_t j = 0; j < data.referenceDetector.size(); j += localDownsampleFactor) {
                                             downsampledRef.push_back(data.referenceDetector[j]);
                                             downsampledPrim.push_back(data.primaryDetector[j]);
@@ -1306,7 +1306,7 @@ int main() {
                                     size_t localDownsampleFactor = data.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
                                     
                                     // Downsample both reference and primary detectors
-                                    std::vector<float> downsampledRef, downsampledPrim;
+                                    std::vector<double> downsampledRef, downsampledPrim;
                                     for (size_t j = 0; j < data.referenceDetector.size(); j += localDownsampleFactor) {
                                         downsampledRef.push_back(data.referenceDetector[j]);
                                         downsampledPrim.push_back(data.primaryDetector[j]);
@@ -1352,7 +1352,7 @@ int main() {
                             // Apply downsampling
                             if (appState.enableDownsampling && data.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
                                 size_t localDownsampleFactor = data.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
-                                std::vector<float> downsampledRef, downsampledPrim;
+                                std::vector<double> downsampledRef, downsampledPrim;
                                 for (size_t k = 0; k < data.referenceDetector.size(); k += localDownsampleFactor) {
                                     downsampledRef.push_back(data.referenceDetector[k]);
                                     downsampledPrim.push_back(data.primaryDetector[k]);
@@ -1464,8 +1464,8 @@ int main() {
                     int shift = referencePeakPos - currentPeakPos;
                     
                     // Apply shift to both reference and primary detectors
-                    std::vector<float> shiftedRef(appState.loadedData[datasetIdx].referenceDetector.size(), 0.0f);
-                    std::vector<float> shiftedPrim(appState.loadedData[datasetIdx].primaryDetector.size(), 0.0f);
+                    std::vector<double> shiftedRef(appState.loadedData[datasetIdx].referenceDetector.size(), 0.0);
+                    std::vector<double> shiftedPrim(appState.loadedData[datasetIdx].primaryDetector.size(), 0.0);
                     
                     if (shift > 0) {
                         // Shift right - pad beginning with zeros
@@ -1945,7 +1945,7 @@ int main() {
         // Spectrum view window
         if (appState.spectrum.showSpectrumWindow && appState.dataLoaded && !appState.loadedData.empty()) {
             // Prepare data for all selected files
-            std::vector<std::pair<std::string, std::vector<float>>> primaryDetectors;
+            std::vector<std::pair<std::string, std::vector<double>>> primaryDetectors;
             for (size_t i = 0; i < appState.loadedData.size(); i++) {
                 primaryDetectors.emplace_back(appState.selectedFilenames[i], appState.loadedData[i].primaryDetector);
             }

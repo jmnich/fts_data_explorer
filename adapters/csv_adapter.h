@@ -9,8 +9,8 @@
 
 // Data structure to hold interferogram data
 struct InterferogramData {
-    std::vector<float> referenceDetector;
-    std::vector<float> primaryDetector;
+    std::vector<double> referenceDetector;
+    std::vector<double> primaryDetector;
     std::string metadata;
 };
 
@@ -46,9 +46,9 @@ public:
             // Parse CSV line (format: Reference detector [V],Primary detector [V])
             if (std::getline(iss, refValue, ',') && std::getline(iss, primaryValue, ',')) {
                 try {
-                    // Convert strings to floats and store in vectors
-                    data.referenceDetector.push_back(std::stof(refValue));
-                    data.primaryDetector.push_back(std::stof(primaryValue));
+                    // Convert strings to doubles and store in vectors
+                    data.referenceDetector.push_back(std::stod(refValue));
+                    data.primaryDetector.push_back(std::stod(primaryValue));
                 } catch (const std::exception& e) {
                     // Skip malformed lines but continue processing
                     std::cerr << "Warning: Error parsing line '" << line 
