@@ -64,21 +64,7 @@ add_executable(fts_data_explorer
     ${EXTRA_SOURCES}
 )
 
-# Add test executable
-add_executable(test_hilbert
-    # test_hilbert.cpp
-    spectral_toolbox.cpp
-)
 
-target_link_libraries(test_hilbert
-    fftw3
-    m
-)
-
-target_include_directories(test_hilbert PRIVATE
-    ${CMAKE_SOURCE_DIR}
-    ${CMAKE_SOURCE_DIR}/fftw-3.3.10/api
-)
 
 # Link libraries
 # Note: ImPlot is header-only, so we don't link to a library
