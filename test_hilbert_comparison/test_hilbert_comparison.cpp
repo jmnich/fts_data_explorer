@@ -11,7 +11,7 @@
 std::string DATASET_PATH = "../../example_datasets/2025-06-12_15-17-10_reference_3mm_2.0mms_30avg/raw_data/raw_15.csv";
 
 // Simple CSV parser for loading reference detector data
-bool load_reference_signal_from_csv(const std::string& filepath, std::vector<float>& referenceSignal) {
+bool load_reference_signal_from_csv(const std::string& filepath, std::vector<double>& referenceSignal) {
     std::ifstream file(filepath);
     if (!file.is_open()) {
         std::cerr << "Error: Could not open file " << filepath << std::endl;
@@ -36,7 +36,7 @@ bool load_reference_signal_from_csv(const std::string& filepath, std::vector<flo
         }
         
         try {
-            float value = std::stof(token);
+            double value = std::stod(token);
             referenceSignal.push_back(value);
         } catch (const std::exception& e) {
             // This might be the header line, skip it
@@ -53,9 +53,9 @@ bool load_reference_signal_from_csv(const std::string& filepath, std::vector<flo
 
 // Save results to JSON format for Python comparison
 void save_results_to_json(const std::string& test_name, 
-                         const std::vector<float>& input_signal,
-                         const std::vector<float>& cpp_result,
-                         float wavelength) {
+                         const std::vector<double>& input_signal,
+                         const std::vector<double>& cpp_result,
+                         double wavelength) {
     std::cout<<"Opening: " << ("../test_results/" + test_name + "_cpp.json");                       
     std::ofstream out("../test_results/" + test_name + "_cpp.json");
     if (!out.is_open()) {
@@ -91,17 +91,17 @@ void run_hilbert_comparison() {
     std::cout << "Dataset: " << DATASET_PATH << std::endl;
     
     // Load reference signal from dataset
-    std::vector<float> referenceSignal;
+    std::vector<double> referenceSignal;
     if (!load_reference_signal_from_csv(DATASET_PATH, referenceSignal)) {
         std::cerr << "Failed to load reference signal" << std::endl;
         return;
     }
     
     // Typical laser wavelength for FTIR spectrometers (micrometers)
-    float wavelength = 1.55f;
+    double wavelength = 1.55;
     
     // Run C++ implementation
-    std::vector<float> cpp_result;
+    std::vector<double> cpp_result;
     std::cout << "Running C++ xAxisFromHilbert..." << std::endl;
 
     auto start = std::chrono::high_resolution_clock::now();
