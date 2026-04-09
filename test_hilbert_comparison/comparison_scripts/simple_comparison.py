@@ -43,8 +43,8 @@ def plot_simple_comparison(test_name):
     python_output = python_output[:min_length]
     
     # Create figure with vertically stacked subplots sharing X axis
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True, 
-                                   gridspec_kw={'height_ratios': [1, 2]})
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 8), sharex=True, 
+                                   gridspec_kw={'height_ratios': [1, 1, 2]})
     
     # Plot 1: Input reference signal (top, smaller)
     ax1.plot(input_signal, 'b-', linewidth=1)
@@ -60,6 +60,10 @@ def plot_simple_comparison(test_name):
     ax2.set_ylabel("Position (micrometers)", fontsize=10)
     ax2.legend(fontsize=10)
     ax2.grid(True, alpha=0.3)
+
+    ax3.set_title("Difference (C++ - Python)", fontsize=12)
+    ax3.plot(cpp_output - python_output, linewidth=1)   
+    ax3.grid(True, alpha=0.3)
     
     # Adjust layout to prevent overlap
     plt.tight_layout()

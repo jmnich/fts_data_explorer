@@ -7,6 +7,7 @@
 #include <iostream>
 #include <numeric>
 #include <vector>
+#include <chrono>
 
 #define REAL 0
 #define IMAG 1
@@ -51,11 +52,14 @@ void SpectralToolbox::xAxisFromHilbert(const std::vector<float> &referenceSignal
     }
 
     // TODO: reuse plans and memory to improve exec time
+    // auto t1 = std::chrono::high_resolution_clock::now();                                   // deleteme
 
     // Allocate memory for FFTW
     fftw_complex* in = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * n);
     fftw_complex* out = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * n);
     fftw_complex* hilbert = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * n);
+
+    // auto t2 = std::chrono::high_resolution_clock::now();                                   // deleteme
 
     float ref_avg = std::accumulate(referenceSignal.begin(), referenceSignal.end(), 0.0) / referenceSignal.size();
 
@@ -68,6 +72,8 @@ void SpectralToolbox::xAxisFromHilbert(const std::vector<float> &referenceSignal
     // Compute FFT
     fftw_plan plan_forward = fftw_plan_dft_1d(n, in, hilbert, FFTW_FORWARD, FFTW_ESTIMATE);
     fftw_execute(plan_forward);
+
+    // auto t3 = std::chrono::high_resolution_clock::now();                                   // deleteme
 
     int hN  = n >> 1; // N/2
     int numRem = hN;
@@ -91,6 +97,8 @@ void SpectralToolbox::xAxisFromHilbert(const std::vector<float> &referenceSignal
     fftw_plan plan_inverse = fftw_plan_dft_1d(n, hilbert, out, FFTW_BACKWARD, FFTW_ESTIMATE);
     fftw_execute(plan_inverse);
 
+    // auto t4 = std::chrono::high_resolution_clock::now();                                   // deleteme
+
     // Compute phase difference without unwrapping througs complex division
     std::vector<double> diff(n-1);
     for(size_t i = 0; i < n - 1; i++) {
@@ -109,7 +117,20 @@ void SpectralToolbox::xAxisFromHilbert(const std::vector<float> &referenceSignal
                                (diff[i - 1] / (2.0f * static_cast<float>(M_PI))) * (refLaserWavelength / 2.0f);
     }
 
-    std::cout<<refLaserWavelength<<std::endl;
+    // std::cout<<refLaserWavelength<<std::endl;                                               // deleteme
+
+    // auto end = std::chrono::high_resolution_clock::now();                                   // deleteme
+    // auto duration1 = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1);     // deleteme
+    // auto duration2 = std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2);     // deleteme
+    // auto duration3 = std::chrono::duration_cast<std::chrono::microseconds>(t4 - t3);     // deleteme
+    // auto duration4 = std::chrono::duration_cast<std::chrono::microseconds>(end - t4);     // deleteme
+    // auto duration5 = std::chrono::duration_cast<std::chrono::microseconds>(end - t1);     // deleteme
+    // std::cout << "Execution time: " << duration1.count() << " microseconds" << std::endl;    // deleteme
+    // std::cout << "Execution time: " << duration2.count() << " microseconds" << std::endl;    // deleteme
+    // std::cout << "Execution time: " << duration3.count() << " microseconds" << std::endl;    // deleteme
+    // std::cout << "Execution time: " << duration4.count() << " microseconds" << std::endl;    // deleteme
+    // std::cout << "Execution time: " << duration5.count() << " microseconds" << std::endl;    // deleteme
+
 
     // Clean up FFTW resources
     fftw_destroy_plan(plan_forward);
