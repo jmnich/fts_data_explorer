@@ -401,6 +401,12 @@ int main() {
 
     // UI size settings
     appState.currentUiSize = config.uiSize;
+
+    // Helper to persist a dataset path to the recent datasets list
+    auto addToRecentDatasets = [&](const std::string& parentDir) {
+        config.addRecentDataset(parentDir);
+        config.saveToFile(configFilePath);
+    };
     
     // Initialize application
     GLFWwindow* window = nullptr;
@@ -761,15 +767,25 @@ int main() {
                 }
                 appState.filesChanged = false;
                 
-                // Mark that we should update recent datasets after this successful load
-                appState.shouldUpdateRecentDatasets = true;
+                // Add parent directory to recent datasets from the loaded file path
+                if (!appState.selectedFiles.empty()) {
+                    std::string datasetPath = appState.selectedFiles[0];
+                    size_t last_slash = datasetPath.find_last_of("/\\");
+                    if (last_slash != std::string::npos) {
+                        std::string parentDir = datasetPath.substr(0, last_slash);
+                        size_t raw_data_pos = parentDir.find_last_of("/\\");
+                        if (raw_data_pos != std::string::npos &&
+                            parentDir.substr(raw_data_pos + 1) == "raw_data") {
+                            parentDir = parentDir.substr(0, raw_data_pos);
+                        }
+                        addToRecentDatasets(parentDir);
+                    }
+                }
                 
             } catch (const std::exception& e) {
                 std::cerr << "Error loading file: " << e.what() << std::endl;
                 appState.dataLoaded = false;
                 appState.filesChanged = false;
-                // Don't update recent datasets on failure
-                appState.shouldUpdateRecentDatasets = false;
             }
         }
         
@@ -799,6 +815,7 @@ int main() {
             
             // Create a modal popup that blocks all interaction
             ImGui::OpenPopup("Welcome to FTS Data Explorer");
+            appState.needsRedraw = true;
             
             if (ImGui::BeginPopupModal("Welcome to FTS Data Explorer", NULL, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove)) {
                 // Set up welcome screen with minimal styling to avoid style stack issues
@@ -816,12 +833,19 @@ int main() {
                 ImGui::Text("Recent Datasets:");
                 ImGui::Spacing();
                 
-                if (config.recentDatasets.empty()) {
-                    ImGui::Text("No recent datasets found.");
-                    ImGui::Text("Use the button below to select a dataset directory.");
-                } else {
-                    // Create a child window for scrollable recent datasets list
-                    if (ImGui::BeginChild("RecentDatasetsChild", ImVec2(0, 500), true)) {
+                // Always use a fixed-height child region so the layout stays consistent
+                // regardless of whether recent datasets exist
+                if (ImGui::BeginChild("RecentDatasetsChild", ImVec2(0, 500), true)) {
+                    if (config.recentDatasets.empty()) {
+                        // Center the placeholder vertically in the child region
+                        float childHeight = ImGui::GetContentRegionAvail().y;
+                        float textHeight = ImGui::GetTextLineHeightWithSpacing() * 3;
+                        float offsetY = (childHeight - textHeight) * 0.5f;
+                        if (offsetY > 0) ImGui::SetCursorPosY(ImGui::GetCursorPosY() + offsetY);
+                        
+                        ImGui::Text("No recent datasets found.");
+                        ImGui::Text("Use the button below to select a dataset directory.");
+                    } else {
                         for (const auto& datasetPath : config.recentDatasets) {
                             // Extract the parent directory name for display (skip "raw_data" if present)
                             std::string displayName = datasetPath;
@@ -859,6 +883,7 @@ int main() {
                                     appState.welcomeScreenInitialized = true;
                                     appState.isFirstDataLoad = true;
                                     appState.needsRedraw = true;
+                                    addToRecentDatasets(datasetPath);
                                     std::cout << "Opened recent dataset: " << datasetPath << std::endl;
                                     ImGui::CloseCurrentPopup(); // Close the modal
                                 } else {
@@ -871,8 +896,8 @@ int main() {
                                 ImGui::SetTooltip("%s", datasetPath.c_str());
                             }
                         }
-                        ImGui::EndChild();
                     }
+                    ImGui::EndChild();
                 }
                 
                 ImGui::Spacing();
@@ -911,8 +936,9 @@ int main() {
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.15f, 0.35f, 0.15f, 0.9f)); // Lighter green on hover
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.05f, 0.25f, 0.05f, 1.0f)); // Even darker when active
                 
-                // Calculate available space for the button
+                // Calculate available space for the button, but clamp to a reasonable max height
                 float buttonHeight = ImGui::GetContentRegionAvail().y - ImGui::GetStyle().ItemSpacing.y * 2;
+                if (buttonHeight > 60.0f) buttonHeight = 60.0f;
                 bool buttonClicked = ImGui::Button("Select Dataset Directory", ImVec2(-FLT_MIN, buttonHeight));
                 ImGui::PopStyleColor(3); // Always pop styles after button
                 
@@ -938,6 +964,7 @@ int main() {
                         appState.showWelcomeScreen = false;
                         appState.welcomeScreenInitialized = true;
                         appState.needsRedraw = true;
+                        addToRecentDatasets(selectedDirectory);
                         std::cout << "Working directory set to: " << appState.currentDirectory << std::endl;
                         ImGui::CloseCurrentPopup(); // Close the modal
                     }
@@ -990,9 +1017,9 @@ int main() {
                             }
                             appState.csvFiles = FileBrowser::getCSVFilesInDirectory(appState.currentDirectory);
                             appState.dataLoaded = false;
-                            appState.shouldUpdateRecentDatasets = true;
                             appState.isFirstDataLoad = true;
                             appState.needsRedraw = true;
+                            addToRecentDatasets(selectedDirectory);
                             std::cout << "Working directory set to: " << appState.currentDirectory << std::endl;
                         }
                     }
@@ -1311,6 +1338,7 @@ int main() {
                             }
                         } else {
                             ImGui::OpenPopup("Selection Limit");
+                            appState.needsRedraw = true;
                         }
                     }
                 } else if (appState.shiftSelectMode) {
@@ -1971,26 +1999,7 @@ int main() {
     config.autoRestoreScale = appState.autoRestoreScale;
     config.lastWorkingDirectory = appState.currentDirectory;
     config.uiSize = appState.currentUiSize;
-    
-    // Update recent datasets if we had a successful load
-    if (appState.shouldUpdateRecentDatasets && appState.dataLoaded && !appState.selectedFiles.empty()) {
-        // Add the parent directory of the current dataset to recent datasets
-        std::string datasetPath = appState.selectedFiles[0];
-        size_t last_slash = datasetPath.find_last_of("/\\");
-        if (last_slash != std::string::npos) {
-            std::string parentDir = datasetPath.substr(0, last_slash);
-            // Check if this is a raw_data directory, if so, go up one more level
-            size_t raw_data_pos = parentDir.find_last_of("/\\");
-            if (raw_data_pos != std::string::npos) {
-                std::string dirName = parentDir.substr(raw_data_pos + 1);
-                if (dirName == "raw_data") {
-                    parentDir = parentDir.substr(0, raw_data_pos);
-                }
-            }
-            config.addRecentDataset(parentDir);
-        }
-    }
-    
+
     // Update config with current FPS setting before saving
     config.showFPS = appState.showFPS;
     

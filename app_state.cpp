@@ -11,7 +11,7 @@ AppState::AppState()
       dataLoaded(false),
       currentDatasetName("No dataset selected"),
       currentSortedFileIndex(0),
-      filesChanged(true),
+      filesChanged(false),
       keyboardNavigation(false),
       multiSelectMode(false),
       shiftSelectMode(false),
@@ -46,7 +46,6 @@ AppState::AppState()
       rightArrowPressedLastFrame(false),
       leftArrowHandleFlag(false),
       rightArrowHandleFlag(false),
-      shouldUpdateRecentDatasets(false),
       isFirstDataLoad(true),
       showWelcomeScreen(true),
       welcomeScreenInitialized(false),
@@ -65,7 +64,7 @@ void AppState::reset() {
     dataLoaded = false;
     currentDatasetName = "No dataset selected";
     currentSortedFileIndex = 0;
-    filesChanged = true;
+    filesChanged = false;
     keyboardNavigation = false;
     multiSelectMode = false;
     shiftSelectMode = false;
@@ -100,7 +99,6 @@ void AppState::reset() {
     rightArrowPressedLastFrame = false;
     leftArrowHandleFlag = false;
     rightArrowHandleFlag = false;
-    shouldUpdateRecentDatasets = false;
     isFirstDataLoad = true;
     sortedFiles.clear();
     showWelcomeScreen = true;

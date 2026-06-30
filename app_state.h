@@ -82,9 +82,6 @@ struct AppState {
     bool leftArrowHandleFlag;
     bool rightArrowHandleFlag;
     
-    // Recent datasets tracking
-    bool shouldUpdateRecentDatasets;
-    
     // First data load tracking
     bool isFirstDataLoad;
     
