@@ -11,6 +11,8 @@
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <thread>
+#include <chrono>
 
 // Include config header
 #include "config.h"
@@ -142,6 +144,42 @@ bool initializeApplication(AppConfig& config, GLFWwindow*& window) {
     }
 
     glfwMakeContextCurrent(window);
+
+    glfwSwapInterval(1);
+
+    glfwSetWindowUserPointer(window, &appState);
+
+    // Install dirty-flag callbacks BEFORE ImGui GLFW init (ImGui wraps them)
+    glfwSetCursorPosCallback(window, [](GLFWwindow* w, double, double) {
+        static_cast<AppState*>(glfwGetWindowUserPointer(w))->needsRedraw = true;
+    });
+    glfwSetMouseButtonCallback(window, [](GLFWwindow* w, int, int, int) {
+        static_cast<AppState*>(glfwGetWindowUserPointer(w))->needsRedraw = true;
+    });
+    glfwSetScrollCallback(window, [](GLFWwindow* w, double, double) {
+        static_cast<AppState*>(glfwGetWindowUserPointer(w))->needsRedraw = true;
+    });
+    glfwSetKeyCallback(window, [](GLFWwindow* w, int, int, int, int) {
+        static_cast<AppState*>(glfwGetWindowUserPointer(w))->needsRedraw = true;
+    });
+    glfwSetCharCallback(window, [](GLFWwindow* w, unsigned int) {
+        static_cast<AppState*>(glfwGetWindowUserPointer(w))->needsRedraw = true;
+    });
+    glfwSetDropCallback(window, [](GLFWwindow* w, int, const char**) {
+        static_cast<AppState*>(glfwGetWindowUserPointer(w))->needsRedraw = true;
+    });
+    glfwSetFramebufferSizeCallback(window, [](GLFWwindow* w, int, int) {
+        static_cast<AppState*>(glfwGetWindowUserPointer(w))->needsRedraw = true;
+    });
+    glfwSetWindowFocusCallback(window, [](GLFWwindow* w, int) {
+        static_cast<AppState*>(glfwGetWindowUserPointer(w))->needsRedraw = true;
+    });
+    glfwSetWindowRefreshCallback(window, [](GLFWwindow* w) {
+        static_cast<AppState*>(glfwGetWindowUserPointer(w))->needsRedraw = true;
+    });
+    glfwSetWindowPosCallback(window, [](GLFWwindow* w, int, int) {
+        static_cast<AppState*>(glfwGetWindowUserPointer(w))->needsRedraw = true;
+    });
 
     // Initialize ImGui
     IMGUI_CHECKVERSION();
@@ -453,6 +491,24 @@ int main() {
     // Main loop
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
+
+        // FPS overlay: force periodic redraw when idle so the counter stays live
+        static double lastForceRedrawTime = 0.0;
+        if (!appState.needsRedraw && appState.showFPS) {
+            double now = glfwGetTime();
+            if (now - lastForceRedrawTime >= 1.0) {
+                appState.needsRedraw = true;
+                lastForceRedrawTime = now;
+            }
+        }
+
+        // Skip rendering when UI is static — saves CPU/GPU
+        if (!appState.needsRedraw) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
+        }
+        appState.needsRedraw = false;
+
         appState.multiSelectMode = ImGui::GetIO().KeyCtrl;
         appState.shiftSelectMode = ImGui::GetIO().KeyShift;
         
@@ -590,8 +646,9 @@ int main() {
             appState.welcomeScreenInitialized = false;
             appState.dataLoaded = false;
             appState.filesChanged = false;
-            appState.spectrum.showSpectrumWindow = false; // Close spectrum window when returning to welcome screen
+            appState.spectrum.showSpectrumWindow = false;
             appState.spectrum.spectrumWindowInitialized = false;
+            appState.needsRedraw = true;
         }
 
         // 'Left/Right Arrow' - Pan left by 10% of current visible range
@@ -683,6 +740,7 @@ int main() {
                 }
                 
                 appState.dataLoaded = true;
+                appState.needsRedraw = true;
                 
                 // Handle autoscale behavior based on AGENTS.md requirements:
                 // "when the application loads a file for display for the first time after launch or work directory switch, axes zoom to fit all data."
@@ -799,7 +857,8 @@ int main() {
                                     appState.currentSortedFileIndex = 0;
                                     appState.showWelcomeScreen = false;
                                     appState.welcomeScreenInitialized = true;
-                                    appState.isFirstDataLoad = true; // Reset first load flag for new directory
+                                    appState.isFirstDataLoad = true;
+                                    appState.needsRedraw = true;
                                     std::cout << "Opened recent dataset: " << datasetPath << std::endl;
                                     ImGui::CloseCurrentPopup(); // Close the modal
                                 } else {
@@ -878,6 +937,7 @@ int main() {
                         appState.currentSortedFileIndex = 0;
                         appState.showWelcomeScreen = false;
                         appState.welcomeScreenInitialized = true;
+                        appState.needsRedraw = true;
                         std::cout << "Working directory set to: " << appState.currentDirectory << std::endl;
                         ImGui::CloseCurrentPopup(); // Close the modal
                     }
@@ -930,8 +990,9 @@ int main() {
                             }
                             appState.csvFiles = FileBrowser::getCSVFilesInDirectory(appState.currentDirectory);
                             appState.dataLoaded = false;
-                            appState.shouldUpdateRecentDatasets = true; // Mark to update recent datasets
-                            appState.isFirstDataLoad = true; // Reset first load flag for new directory
+                            appState.shouldUpdateRecentDatasets = true;
+                            appState.isFirstDataLoad = true;
+                            appState.needsRedraw = true;
                             std::cout << "Working directory set to: " << appState.currentDirectory << std::endl;
                         }
                     }
@@ -1780,6 +1841,7 @@ int main() {
         if (appState.dataLoaded) {
             if (ImGui::Button("Spectrum")) {
                 appState.spectrum.showSpectrumWindow = true;
+                appState.needsRedraw = true;
             }
             
             ImGui::SameLine();

@@ -78,6 +78,28 @@ It presents a tree view of information available in the dataset and then allows 
   - `peakAlignmentOffsets`: Calculated X-axis offsets for aligning peaks across multiple files
 - State persistence: Configuration settings are saved to and loaded from a config file for session restoration.
 
+## Idle rendering optimization (`needsRedraw`)
+The app uses a dirty-flag mechanism to avoid re-rendering the entire UI (including ImPlot line draws) when nothing has changed. This eliminates wasteful CPU/GPU work during idle periods.
+
+**Flag:** `AppState::needsRedraw` (default `true` so the first frame always renders).
+
+**How it works:**
+1. **GLFW callbacks** (installed in `initializeApplication()` before `ImGui_ImplGlfw_InitForOpenGL` so ImGui wraps/chains them) set `needsRedraw = true` on any input event: cursor move, mouse button, scroll, key, char, drop, framebuffer resize, window focus/refresh/position.
+2. **Explicit dirty marks** are set at visual-state transition points: `dataLoaded = true`, `showWelcomeScreen` toggled, spectrum window opened, directory changed.
+3. **Main loop** (`main.cpp`):
+   - After `glfwPollEvents()`, checks `needsRedraw`.
+   - If `false` → `std::this_thread::sleep_for(10ms)` + `continue` — skips `NewFrame`, `Render`, `SwapBuffers`, `glClear`. GPU does zero work.
+   - If `true` → clears the flag, runs full render frame.
+   - When `showFPS` is enabled, forces one redraw per second at idle so the FPS counter stays live (reads ~1.0 fps, accurately reflecting idle rate).
+
+**VSync:** `glfwSwapInterval(1)` caps the render loop at the monitor refresh rate (60 Hz) when active, letting the GPU sleep between frames.
+
+**Impact:** At idle, CPU wakes ~100×/sec for brief poll-events (negligible), GPU does nothing. During interaction (zoom/pan/click/type), callbacks fire and rendering resumes immediately with ≤10ms added latency.
+
+**Common pitfalls:**
+- If the UI appears frozen after a state change, the handler likely omitted `appState.needsRedraw = true`. Add it after the state mutation that should trigger a visual update.
+- Callbacks must be installed *before* `ImGui_ImplGlfw_InitForOpenGL` so ImGui chains them alongside its own input handling.
+
 # Key files and their purposes
 - `main.cpp` - Main application entry point with ImGui docking interface
 - `config.h` - Configuration header with build options

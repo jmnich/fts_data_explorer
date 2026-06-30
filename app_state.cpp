@@ -29,6 +29,7 @@ AppState::AppState()
       fps(0.0f),
       frameCount(0),
       lastTime(0.0f),
+      needsRedraw(true),
       isSelectingXRange(false),
       applyXRangeSelection(false),
       selectionStartX(0.0),
@@ -82,6 +83,7 @@ void AppState::reset() {
     fps = 0.0f;
     frameCount = 0;
     lastTime = 0.0f;
+    needsRedraw = true;
     isSelectingXRange = false;
     applyXRangeSelection = false;
     selectionStartX = 0.0;

@@ -54,6 +54,9 @@ struct AppState {
     float fps;
     int frameCount;
     float lastTime;
+
+    // Idle rendering optimization
+    bool needsRedraw;
     
     // X-range selection state
     bool isSelectingXRange;
