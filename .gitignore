@@ -46,5 +46,28 @@ imgui.ini
 # Build directory
 build/
 
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+CTestTestfile.cmake
+Makefile
+*.cmake
+
+# Downloaded/extracted tools (cmake distributions, etc.)
+cmake-*/
+
 # continue config
 .continue/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.orig
+
+# macOS
+.DS_Store

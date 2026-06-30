@@ -37,16 +37,23 @@ list(APPEND EXTRA_SOURCES
 # Add FFTW subdirectory - build it as part of our project
 add_subdirectory(fftw-3.3.10)
 
+# Download and include GLFW
+FetchContent_Declare(
+    glfw
+    GIT_REPOSITORY https://github.com/glfw/glfw.git
+    GIT_TAG 3.3.8
+)
+FetchContent_MakeAvailable(glfw)
+
 # Find required packages
 find_package(OpenGL REQUIRED)
-find_package(glfw3 REQUIRED)
 
 
 
 # ImGui is now handled by FetchContent
 include_directories(
     ${OPENGL_INCLUDE_DIR}
-    ${GLFW_INCLUDE_DIR}
+    ${glfw_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}
     ${imgui_SOURCE_DIR}
     ${imgui_SOURCE_DIR}/backends
@@ -71,25 +78,15 @@ add_executable(fts_data_explorer
 # Instead, we include the source files directly in our compilation
 target_link_libraries(fts_data_explorer
     ${OPENGL_LIBRARIES}
-    ${GLFW_LIBRARIES}
     glfw
     GL
     m
+    fftw3  # Use the FFTW target that was built
 )
 
 # Add compile definitions for imgui
 target_compile_definitions(fts_data_explorer PRIVATE
     IMGUI_IMPL_OPENGL_LOADER_GLAD=0
-)
-
-# Link FFTW to our executable - use the targets created by the FFTW build
-target_link_libraries(fts_data_explorer
-    ${OPENGL_LIBRARIES}
-    ${GLFW_LIBRARIES}
-    glfw
-    GL
-    m
-    fftw3  # Use the FFTW target that was built
 )
 
 # Install targets (optional)
