@@ -652,6 +652,10 @@ int main() {
             appState.welcomeScreenInitialized = false;
             appState.dataLoaded = false;
             appState.filesChanged = false;
+            appState.loadedData.clear();
+            appState.selectedFiles.clear();
+            appState.selectedFilenames.clear();
+            appState.rawDataCache.clear();
             appState.spectrum.showSpectrumWindow = false;
             appState.spectrum.spectrumWindowInitialized = false;
             appState.needsRedraw = true;
@@ -1219,8 +1223,8 @@ int main() {
             ImGui::PopStyleVar(2);
             
             // Create docking space
-            ImGuiID dockspace_id = ImGui::GetID("MainDockSpace");
-            ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);
+            ImGuiID dockspace_id = ImGui::GetID("MainDockSpace_v2");
+            ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             
             if (appState.showWelcomeScreen && !appState.welcomeScreenInitialized) {
                 ImGui::PopStyleColor(); // Restore window background color

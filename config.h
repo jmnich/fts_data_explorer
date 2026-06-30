@@ -32,16 +32,21 @@ struct AppConfig {
     float spectrumWindowSizeX = 600.0f;
     float spectrumWindowSizeY = 400.0f;
     
-    // Add a dataset to recent list (maintains max size)
+    // Add a dataset to recent list (maintains max size, deduplicates)
     void addRecentDataset(const std::string& datasetPath) {
+        // Normalize path: strip trailing slash to prevent formatting mismatches
+        std::string normalized = datasetPath;
+        while (!normalized.empty() && (normalized.back() == '/' || normalized.back() == '\\'))
+            normalized.pop_back();
+
         // Remove if already exists
-        auto it = std::find(recentDatasets.begin(), recentDatasets.end(), datasetPath);
+        auto it = std::find(recentDatasets.begin(), recentDatasets.end(), normalized);
         if (it != recentDatasets.end()) {
             recentDatasets.erase(it);
         }
         
         // Add to beginning
-        recentDatasets.insert(recentDatasets.begin(), datasetPath);
+        recentDatasets.insert(recentDatasets.begin(), normalized);
         
         // Trim to max size
         if (recentDatasets.size() > maxRecentDatasets) {
@@ -94,6 +99,7 @@ struct AppConfig {
             configFile << "size_x=" << spectrumWindowSizeX << "\n";
             configFile << "size_y=" << spectrumWindowSizeY << "\n";
             
+            configFile.flush();
             configFile.close();
             return true;
         } catch (const std::exception& e) {
