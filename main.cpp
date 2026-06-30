@@ -17,6 +17,7 @@
 #include "app_state.h"
 #include "spectrum.h"
 #include "adapters/csv_adapter.h"
+#include "tinyfiledialogs.h"
 
 // Include imgui and other dependencies
 #include "imgui.h"
@@ -93,74 +94,13 @@ public:
         return csvFiles;
     }
     
-    // Simple cross-platform directory selection dialog
+    // Cross-platform directory selection dialog using tinyfiledialogs
     static std::string showDirectorySelectionDialog() {
-        // For Linux/Unix systems, we'll use a simple approach
-        // In a production app, you might use Zenity, KDialog, or a proper GUI library
-        
-        std::string result;
-        
-        // Try using zenity if available (common on Ubuntu/GNOME)
-        FILE* pipe = popen("zenity --file-selection --directory --title='Select Dataset Directory' 2>/dev/null", "r");
-        if (pipe) {
-            char buffer[1024] = {0};
-            if (fgets(buffer, sizeof(buffer), pipe) != NULL) {
-                // Remove trailing newline
-                buffer[strcspn(buffer, "\n")] = 0;
-                // Only use the result if it's not empty and not just whitespace
-                if (strlen(buffer) > 0 && buffer[0] != '\0') {
-                    result = buffer;
-                }
-            }
-            pclose(pipe);
-            
-            // If zenity returned a valid path, use it
-            if (!result.empty()) {
-                return result;
-            }
+        const char* folder = tinyfd_selectFolderDialog("Select Dataset Directory", "");
+        if (!folder) {
+            return "";
         }
-        
-        // Fallback: use a simple ImGui-based directory selector
-        // Note: This is a basic implementation. For production use, consider:
-        // 1. Using a proper native file dialog library
-        // 2. Implementing a non-modal directory browser
-        // 3. Using a separate window for directory selection
-        
-        // For now, we'll use a simple approach that works within the modal context
-        static char tempDirectoryBuffer[1024] = "/home"; // Default starting directory
-        static bool directorySelectorActive = false;
-        
-        // Start directory selector if not already active
-        if (!directorySelectorActive) {
-            directorySelectorActive = true;
-            ImGui::OpenPopup("Select Directory");
-        }
-        
-        // Simple directory selector popup
-        if (ImGui::BeginPopupModal("Select Directory", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
-            ImGui::Text("Enter directory path:");
-            ImGui::InputText("##DirectoryPath", tempDirectoryBuffer, sizeof(tempDirectoryBuffer), ImGuiInputTextFlags_EnterReturnsTrue);
-            
-            if (ImGui::Button("OK") || ImGui::IsKeyPressed(ImGuiKey_Enter)) {
-                // Check if directory exists
-                if (std::filesystem::exists(tempDirectoryBuffer) && std::filesystem::is_directory(tempDirectoryBuffer)) {
-                    result = tempDirectoryBuffer;
-                    ImGui::CloseCurrentPopup();
-                    directorySelectorActive = false;
-                } else {
-                    ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Directory does not exist!");
-                }
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Cancel")) {
-                ImGui::CloseCurrentPopup();
-                directorySelectorActive = false;
-            }
-            
-            ImGui::EndPopup();
-        }
-        
-        return result;
+        return std::string(folder);
     }
 };
 
@@ -918,23 +858,9 @@ int main() {
                 ImGui::PopStyleColor(3); // Always pop styles after button
                 
                 if (buttonClicked) {
-                    // For welcome screen, use zenity directly since we're in a modal context
-                    std::string selectedDirectory;
-                    FILE* pipe = popen("zenity --file-selection --directory --title='Select Dataset Directory' 2>/dev/null", "r");
-                    if (pipe) {
-                        char buffer[1024] = {0};
-                        if (fgets(buffer, sizeof(buffer), pipe) != NULL) {
-                            // Remove trailing newline
-                            buffer[strcspn(buffer, "\n")] = 0;
-                            // Only use the result if it's not empty and not just whitespace
-                            if (strlen(buffer) > 0 && buffer[0] != '\0') {
-                                selectedDirectory = buffer;
-                            }
-                        }
-                        pclose(pipe);
-                    }
-                    
-                    if (!selectedDirectory.empty()) {
+                    const char* folder = tinyfd_selectFolderDialog("Select Dataset Directory", "");
+                    if (folder) {
+                        std::string selectedDirectory(folder);
                         // Check if the selected directory has a raw_data subdirectory
                         std::string rawDataPath = selectedDirectory + "/raw_data";
                         if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {

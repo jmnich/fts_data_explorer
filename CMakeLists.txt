@@ -22,6 +22,19 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(implot)
 
+# Download tinyfiledialogs for cross-platform directory selection
+FetchContent_Declare(
+    tinyfiledialogs
+    GIT_REPOSITORY https://github.com/native-toolkit/tinyfiledialogs.git
+    GIT_TAG 2.9.3
+)
+FetchContent_MakeAvailable(tinyfiledialogs)
+
+# Add tinyfiledialogs source directly (matching imgui/implot pattern)
+list(APPEND EXTRA_SOURCES
+    ${tinyfiledialogs_SOURCE_DIR}/tinyfiledialogs.c
+)
+
 # Add ImGui core and backend source files to the executable
 list(APPEND EXTRA_SOURCES
     ${imgui_SOURCE_DIR}/imgui.cpp
@@ -58,6 +71,7 @@ include_directories(
     ${imgui_SOURCE_DIR}
     ${imgui_SOURCE_DIR}/backends
     ${implot_SOURCE_DIR}
+    ${tinyfiledialogs_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/fftw-3.3.10/api  # FFTW headers
 )
 
