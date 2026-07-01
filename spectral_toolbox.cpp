@@ -201,7 +201,7 @@ SpectralToolbox::ProcessedSpectrum SpectralToolbox::processSpectrum(
     result.spectrumX.reserve(halfN);
     result.spectrumY.reserve(halfN);
     const double factor = OPD * static_cast<double>(K + 1);
-    const double invN   = 1.0 / static_cast<double>(N);
+    const double invN   = 1.0 / static_cast<double>(n);
     for (std::size_t i = 1; i <= halfN; ++i) {
         const double um = factor / static_cast<double>(i);
         result.spectrumX.push_back(
