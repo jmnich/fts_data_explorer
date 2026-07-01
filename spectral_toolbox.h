@@ -1,22 +1,91 @@
 #pragma once
 
 #include <vector>
-#include <cmath>
+#include <cstddef>
 #include <fftw3.h>
 
+/**
+ * @brief FFTW-based numerical toolbox for FTS spectrum processing.
+ *
+ * Mirrors the Python `spectral_toolbox.py` reference implementation in
+ * phd_thesis/JM_Thesis/workspace_misc/python/data_processing_experiments/.
+ * Apodization and Mertz phase correction are deferred to a later iteration;
+ * for now spectra are the magnitude of the FFT of the Hilbert-resampled,
+ * mean-removed, zero-padded interferogram (test17 steps 1-4 + magnitude + 10).
+ */
 class SpectralToolbox {
 public:
+    /// X-axis unit selector for the output spectrum.
+    enum class SpectrumXUnit { CmInv = 0, Um = 1, THz = 2 };
+
+    /// Output of processSpectrum: X axis (units per SpectrumXUnit, index 0 dropped) + magnitude.
+    struct ProcessedSpectrum {
+        std::vector<double> spectrumX;   ///< length N-1 (index 0 = Inf dropped)
+        std::vector<double> spectrumY;   ///< magnitude, normalized by N
+        std::vector<double> correctedX;  ///< Hilbert-corrected IGM X axis (um) - for debugging
+    };
+
+    // ---- primitives --------------------------------------------------------
+
+    /// Linear interpolation at a single point. Endpoints clamped.
     static double interpPoint(double x, const std::vector<double>& xp, const std::vector<double>& fp);
 
-    static std::vector<double> interpVector(const std::vector<double>& x, const std::vector<double>& xp, const std::vector<double>& fp);
+    /// Vectorised linear interpolation.
+    static std::vector<double> interpVector(const std::vector<double>& x,
+                                            const std::vector<double>& xp,
+                                            const std::vector<double>& fp);
 
-    static void complex_divide(fftw_complex * result, fftw_complex a, fftw_complex b);
+    /// Complex division: result = a / b.
+    static void complex_divide(fftw_complex* result, fftw_complex a, fftw_complex b);
 
-    // static void makeCorrectedInterferogram(const std::vector<float> &rawReferenceSignal, const std::vector<float> &rawPrimarySignal, float refLaserWavelength, std::vector<float> &outputxAxis, std::vector<float> &outputYAxis);
-    
-    static void xAxisFromHilbert(const std::vector<double>& referenceSignal, double refLaserWavelength, std::vector<double>& outputHilbertPhase);
-    
-    static void computeSpectrum(const std::vector<double>& primaryDetector, std::vector<double>& spectrum, std::vector<double>& frequencies);
+    /// Index of the element of @p v closest to @p value (port of np.argmin|...|).
+    static std::size_t findNearest(const std::vector<double>& v, double value);
 
-    static void computeSpectrum2(const std::vector<double>& primaryDetector, std::vector<double> &referenceDetector,std::vector<double>& outSpectrum, double refLaserWavelength, double detectorSensitivity, int Kpadding);
+    /// Port of np.linspace.
+    static std::vector<double> linspace(double start, double stop, std::size_t num, bool endpoint);
+
+    /// Convert wavelength [um] to wavenumber [cm-1].
+    static inline double convertUmToCm(double um)   { return (1.0 / um) * 10000.0; }
+    /// Convert wavelength [um] to frequency [THz].
+    static inline double convertUmToTHz(double um)   { return 299.792458 / um; }
+
+    // ---- interferogram axis -----------------------------------------------
+
+    /**
+     * @brief Build a corrected, monotonically increasing X axis (in um) from the
+     *        reference interferogram using the analytic-signal phase (Hilbert transform).
+     *
+     * Port of calculateXAxisFromHilbertTransform (V3 complex-division unwrap style).
+     * Validated against scipy.signal.hilbert by test_hilbert_comparison/.
+     */
+    static void xAxisFromHilbert(const std::vector<double>& referenceSignal,
+                                 double refLaserWavelength,
+                                 std::vector<double>& outputHilbertPhase);
+
+    // ---- main pipeline ----------------------------------------------------
+
+    /**
+     * @brief Compute a magnitude spectrum from raw interferogram detectors.
+     *
+     * Pipeline (mirrors test17 processSpectrum minus apodization/Mertz):
+     *   1. Hilbert-corrected X axis (um) from the reference detector.
+     *   2. Uniform resample on [0, maxOPD] via linear interpolation.
+     *   3. Mean removal (CSV adapter does not, Python loadDataset does).
+     *   4. Zero pad: N = n*(K+1).
+     *   5. FFT and magnitude spectrum.
+     *   6. Build X axis as wavelength um = OPD*(K+1)/i, drop index 0 (Inf).
+     *   7. Convert to requested unit.
+     *
+     * @param primaryDetector    Measurement interferogram [V].
+     * @param referenceDetector  Reference (laser) interferogram [V].
+     * @param refLaserWavelength Reference laser wavelength [um].
+     * @param K                  Zero-pad factor (N = n*(K+1)); 0 disables padding.
+     * @param xUnit              Output X-axis unit.
+     * @return ProcessedSpectrum with spectrumX/spectrumY/correctedX (empty on bad input).
+     */
+    static ProcessedSpectrum processSpectrum(const std::vector<double>& primaryDetector,
+                                            const std::vector<double>& referenceDetector,
+                                            double refLaserWavelength,
+                                            int  K,
+                                            SpectrumXUnit xUnit);
 };

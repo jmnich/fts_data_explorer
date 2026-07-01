@@ -4,6 +4,7 @@
 #include <string>
 #include <complex>
 #include <map>
+#include <array>
 #include "imgui.h"
 #include "implot.h"
 
@@ -54,6 +55,11 @@ public:
     // UI controls for spectrum panel
     int xUnitSelector; // 0: cm-1, 1: um, 2: THz
     float refLaserTextbox; // Reference laser wavelength in um
+    int Kpadding; // Zero-pad factor (N = n*(K+1)); 0 disables padding
+
+    // Per-file last-seen spectrum computation parameters (for cache invalidation)
+    // Stored as {K, xUnit, refLaser}
+    std::map<std::string, std::array<double, 3>> lastSpectrumParams;
     
     // Hilbert debug window state
     bool showHilbertDebugWindow;
@@ -75,16 +81,14 @@ public:
                              bool autoFitYAxis = true);
     
     // Render Hilbert debug window
-    void renderHilbertDebugWindow(const std::vector<InterferogramData>& rawDataCache = {});
+    void renderHilbertDebugWindow(const std::vector<std::string>& fileIds,
+                                  const std::vector<InterferogramData>& rawDataCache = {});
     
     // Reset spectrum window state
     void resetSpectrumWindow();
     
     // Update window position and size
     void updateWindowState();
-    
-    // Compute FFT spectrum (with caching)
-    void computeSpectrum(const std::vector<double>& primaryDetector, std::vector<double>& spectrum, std::vector<double>& frequencies);
     
     // Check if spectrum needs recalculation for a specific file
     bool isSpectrumDirty(const std::string& fileId, const std::vector<double>& primaryDetector);

@@ -1884,16 +1884,28 @@ int main() {
             // Add new controls to Spectrum panel
             ImGui::Separator();
             ImGui::Text("Controls:");
-            
+
+            // Lambda helper: invalidate spectrum caches when a control editing is finished
+            auto invalidateSpectrumCaches = [&]() {
+                appState.spectrum.cachedSpectra.clear();
+                appState.spectrum.cachedFrequencies.clear();
+                appState.spectrum.lastPrimaryDetectors.clear();
+                appState.spectrum.lastSpectrumParams.clear();
+                appState.spectrum.cachedHilbertPhases.clear();
+                appState.needsRedraw = true;
+            };
+
             // X unit selector
             const char* xUnitItems[] = { "cm-1", "um", "THz" };
             ImGui::Text("X unit:");
             ImGui::SameLine();
-            
+
             float remainingWidth = ImGui::GetContentRegionAvail().x;
             ImGui::SetNextItemWidth(remainingWidth);
-            ImGui::Combo("##XUnitSelector", &appState.spectrum.xUnitSelector, xUnitItems, IM_ARRAYSIZE(xUnitItems));
-            
+            if (ImGui::Combo("##XUnitSelector", &appState.spectrum.xUnitSelector, xUnitItems, IM_ARRAYSIZE(xUnitItems))) {
+                invalidateSpectrumCaches();
+            }
+
             // Reference laser textbox
             ImGui::Text("Ref laser [um]:");
             ImGui::SameLine();
@@ -1901,6 +1913,23 @@ int main() {
             remainingWidth = ImGui::GetContentRegionAvail().x;
             ImGui::SetNextItemWidth(remainingWidth);
             ImGui::InputFloat("##RefLaserTextbox", &(appState.spectrum.refLaserTextbox), 0.001, 0.01);
+            if (ImGui::IsItemDeactivatedAfterEdit()) {
+                invalidateSpectrumCaches();
+            }
+
+            // Zero-pad factor K
+            ImGui::Text("Zero-pad K:");
+            ImGui::SameLine();
+
+            remainingWidth = ImGui::GetContentRegionAvail().x;
+            ImGui::SetNextItemWidth(remainingWidth);
+            if (ImGui::InputInt("##Kpadding", &appState.spectrum.Kpadding, 1, 1)) {
+                appState.spectrum.Kpadding = std::clamp(appState.spectrum.Kpadding, 0, 16);
+                invalidateSpectrumCaches();
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Zero-pad factor K. Output bins = N*(K+1).\n0 disables padding.");
+            }
             
         } else {
             ImGui::Text("No data loaded.");
@@ -1973,7 +2002,7 @@ int main() {
             
             // Render Hilbert debug window
             if (appState.spectrum.showHilbertDebugWindow) {
-                appState.spectrum.renderHilbertDebugWindow(appState.rawDataCache);
+                appState.spectrum.renderHilbertDebugWindow(appState.selectedFilenames, appState.rawDataCache);
             }
         }
         

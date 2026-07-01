@@ -1,169 +1,138 @@
 #include "spectral_toolbox.h"
 #include "fftw3.h"
-#include <GL/gl.h>
-#include <GL/glext.h>
 #include <algorithm>
 #include <cmath>
-// #include <complex>
 #include <cstddef>
-#include <cstdint>
 #include <cstring>
-#include <iostream>
-#include <numeric>
-#include <vector>
 #include <limits>
-// #include <chrono>
+#include <numeric>
 
 #define REAL 0
 #define IMAG 1
 
+// ============================================================================
+// Primitives
+// ============================================================================
 
 double SpectralToolbox::interpPoint(double x, const std::vector<double>& xp, const std::vector<double>& fp) {
     if (xp.empty() || xp.size() != fp.size()) return std::numeric_limits<double>::quiet_NaN();
-    
+
     if (x <= xp.front()) return fp.front();
-    if (x >= xp.back()) return fp.back();
-    
-    // Binary search for interval
+    if (x >= xp.back())  return fp.back();
+
     auto it = std::lower_bound(xp.begin(), xp.end(), x);
     if (it == xp.begin()) return fp.front();
-    
+
     auto right = std::prev(it);
     double x0 = *right, x1 = *it;
     double y0 = fp[right - xp.begin()], y1 = fp[it - xp.begin()];
-    
+
     return y0 + (y1 - y0) * (x - x0) / (x1 - x0);
 }
 
 std::vector<double> SpectralToolbox::interpVector(const std::vector<double>& x, const std::vector<double>& xp, const std::vector<double>& fp) {
     std::vector<double> result(x.size());
-    for (size_t i = 0; i < x.size(); ++i) {
+    for (std::size_t i = 0; i < x.size(); ++i) {
         result[i] = interpPoint(x[i], xp, fp);
     }
     return result;
 }
 
-void SpectralToolbox::complex_divide(fftw_complex * result, fftw_complex a, fftw_complex b) {
+void SpectralToolbox::complex_divide(fftw_complex* result, fftw_complex a, fftw_complex b) {
     double denominator = b[0] * b[0] + b[1] * b[1];
-    if (denominator == 0) {
-        // Handle division by zero (set result to zero or handle as needed)
+    if (denominator == 0.0) {
         (*result)[0] = 0.0;
         (*result)[1] = 0.0;
         return;
     }
-
     (*result)[0] = (a[0] * b[0] + a[1] * b[1]) / denominator;
     (*result)[1] = (a[1] * b[0] - a[0] * b[1]) / denominator;
 }
 
-// void SpectralToolbox::makeCorrectedInterferogram(const std::vector<float> &rawReferenceSignal, 
-//     const std::vector<float> &rawPrimarySignal, float refLaserWavelength,
-//     std::vector<float> &outputxAxis, std::vector<float> &outputYAxis) {
-
-//         std::vector<float> correctedXAxis(rawReferenceSignal.size(),0);
-
-//         // 1. calculate corrected X-axis
-//         xAxisFromHilbert(rawReferenceSignal, refLaserWavelength, correctedXAxis);
-
-//         // 2. remove one point from Y-axis to match X-axis
-//         std::cout << "DEBUG, size raw primary: " << rawPrimarySignal.size();
-//         std::cout << "DEBUG, size raw reference: " << rawReferenceSignal.size();
-//         std::cout << "DEBUG, size corrected X: " << correctedXAxis.size();
-
-//         // 3. make X-axis with even spacing
-
-//         // 4. interpolate Y data from corrected X-axis to even X-axis
-
-// }
-
-void SpectralToolbox::xAxisFromHilbert(const std::vector<double> &referenceSignal, double refLaserWavelength, std::vector<double> &outputHilbertPhase) {
-    size_t n = referenceSignal.size();
-    if (n == 0) {
-        return;
+std::size_t SpectralToolbox::findNearest(const std::vector<double>& v, double value) {
+    if (v.empty()) return 0;
+    double best = std::abs(v.front() - value);
+    std::size_t idx = 0;
+    for (std::size_t i = 1; i < v.size(); ++i) {
+        double d = std::abs(v[i] - value);
+        if (d < best) { best = d; idx = i; }
     }
+    return idx;
+}
 
-    // TODO: reuse plans and memory to improve exec time
-    // auto t1 = std::chrono::high_resolution_clock::now();                                   // deleteme
+std::vector<double> SpectralToolbox::linspace(double start, double stop, std::size_t num, bool endpoint) {
+    std::vector<double> out;
+    if (num == 0) return out;
+    out.reserve(num);
+    if (num == 1) { out.push_back(start); return out; }
+    const double step = (stop - start) / (endpoint ? static_cast<double>(num - 1) : static_cast<double>(num));
+    for (std::size_t i = 0; i < num; ++i) out.push_back(start + step * static_cast<double>(i));
+    if (endpoint) out.back() = stop;
+    return out;
+}
 
-    // Allocate memory for FFTW
-    fftw_complex* in = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * n);
-    fftw_complex* out = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * n);
+// ============================================================================
+// Hilbert-transform based X axis (reference interferogram -> um)
+// ============================================================================
+
+void SpectralToolbox::xAxisFromHilbert(const std::vector<double>& referenceSignal,
+                                       double refLaserWavelength,
+                                       std::vector<double>& outputHilbertPhase) {
+    const std::size_t n = referenceSignal.size();
+    if (n == 0) return;
+
+    fftw_complex* in     = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * n);
+    fftw_complex* out    = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * n);
     fftw_complex* hilbert = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * n);
 
-    // auto t2 = std::chrono::high_resolution_clock::now();                                   // deleteme
+    double ref_avg = std::accumulate(referenceSignal.begin(), referenceSignal.end(), 0.0) / static_cast<double>(n);
 
-    double ref_avg = std::accumulate(referenceSignal.begin(), referenceSignal.end(), 0.0) / referenceSignal.size();
-
-    // Copy input data to FFTW complex array
-    for (size_t i = 0; i < n; i++) {
+    for (std::size_t i = 0; i < n; ++i) {
         in[i][REAL] = referenceSignal[i] - ref_avg;
         in[i][IMAG] = 0.0;
     }
 
-    // Compute FFT
-    fftw_plan plan_forward = fftw_plan_dft_1d(n, in, hilbert, FFTW_FORWARD, FFTW_ESTIMATE);
+    fftw_plan plan_forward = fftw_plan_dft_1d((int)n, in, hilbert, FFTW_FORWARD, FFTW_ESTIMATE);
     fftw_execute(plan_forward);
 
-    // auto t3 = std::chrono::high_resolution_clock::now();                                   // deleteme
-
-    int hN  = n >> 1; // N/2
+    int hN = static_cast<int>(n) >> 1; // N/2
     int numRem = hN;
 
-    for(int i = 1; i < hN; ++i){
-        hilbert[i][REAL] *= 2;
-        hilbert[i][IMAG] *= 2;
+    for (int i = 1; i < hN; ++i) {
+        hilbert[i][REAL] *= 2.0;
+        hilbert[i][IMAG] *= 2.0;
     }
 
-    if(n%2 == 0){
-        numRem--;
-    }
-    else if(n>1) {
-        hilbert[hN][REAL] *= 2;
-        hilbert[hN][IMAG] *= 2;
+    if (n % 2 == 0) {
+        --numRem;
+    } else if (n > 1) {
+        hilbert[hN][REAL] *= 2.0;
+        hilbert[hN][IMAG] *= 2.0;
     }
 
-    memset(&hilbert[hN+1][REAL], 0, numRem*sizeof(fftw_complex));
+    if (numRem > 0) {
+        std::memset(&hilbert[hN + 1][REAL], 0, static_cast<std::size_t>(numRem) * sizeof(fftw_complex));
+    }
 
-    // Compute inverse FFT to get analytic signal
-    fftw_plan plan_inverse = fftw_plan_dft_1d(n, hilbert, out, FFTW_BACKWARD, FFTW_ESTIMATE);
+    fftw_plan plan_inverse = fftw_plan_dft_1d((int)n, hilbert, out, FFTW_BACKWARD, FFTW_ESTIMATE);
     fftw_execute(plan_inverse);
 
-    // auto t4 = std::chrono::high_resolution_clock::now();                                   // deleteme
-
-    // Compute phase difference without unwrapping througs complex division
-    std::vector<double> diff(n-1);
-    for(size_t i = 0; i < n - 1; i++) {
-        fftw_complex a;
-        complex_divide(&a, out[i+1], out[i]);
-        diff[i] = atan2(a[IMAG], a[REAL]);
+    // Phase difference via complex division (wrap-robust), cumulative sum -> distance in um.
+    // (V3 style of calculateXAxisFromHilbertTransform.)
+    std::vector<double> diff(n - 1);
+    for (std::size_t i = 0; i + 1 < n; ++i) {
+        fftw_complex q;
+        complex_divide(&q, out[i + 1], out[i]);
+        diff[i] = std::atan2(q[IMAG], q[REAL]);
     }
 
-    // Compute cumulative sum (integration)
     outputHilbertPhase.resize(n);
-    outputHilbertPhase[0] = 0.0; // Start at 0
-    for (size_t i = 1; i < n; i++) {
-        // Convert phase to distance: phase/(2π) * (wavelength/2)
-        // The division by 2π converts radians to cycles, and wavelength/2 accounts for round-trip
-        outputHilbertPhase[i] = outputHilbertPhase[i - 1] + 
-                               (diff[i - 1] / (2.0 * M_PI)) * (refLaserWavelength / 2.0);
+    outputHilbertPhase[0] = 0.0;
+    for (std::size_t i = 1; i < n; ++i) {
+        outputHilbertPhase[i] = outputHilbertPhase[i - 1] +
+            (diff[i - 1] / (2.0 * M_PI)) * (refLaserWavelength / 2.0);
     }
 
-    // std::cout<<refLaserWavelength<<std::endl;                                               // deleteme
-
-    // auto end = std::chrono::high_resolution_clock::now();                                   // deleteme
-    // auto duration1 = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1);     // deleteme
-    // auto duration2 = std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2);     // deleteme
-    // auto duration3 = std::chrono::duration_cast<std::chrono::microseconds>(t4 - t3);     // deleteme
-    // auto duration4 = std::chrono::duration_cast<std::chrono::microseconds>(end - t4);     // deleteme
-    // auto duration5 = std::chrono::duration_cast<std::chrono::microseconds>(end - t1);     // deleteme
-    // std::cout << "Execution time: " << duration1.count() << " microseconds" << std::endl;    // deleteme
-    // std::cout << "Execution time: " << duration2.count() << " microseconds" << std::endl;    // deleteme
-    // std::cout << "Execution time: " << duration3.count() << " microseconds" << std::endl;    // deleteme
-    // std::cout << "Execution time: " << duration4.count() << " microseconds" << std::endl;    // deleteme
-    // std::cout << "Execution time: " << duration5.count() << " microseconds" << std::endl;    // deleteme
-
-
-    // Clean up FFTW resources
     fftw_destroy_plan(plan_forward);
     fftw_destroy_plan(plan_inverse);
     fftw_free(in);
@@ -171,73 +140,80 @@ void SpectralToolbox::xAxisFromHilbert(const std::vector<double> &referenceSigna
     fftw_free(hilbert);
 }
 
-void SpectralToolbox::computeSpectrum(const std::vector<double>& primaryDetector, std::vector<double>& spectrum, std::vector<double>& frequencies) {
-    size_t n = primaryDetector.size();
-    if (n == 0) {
-        return;
-    }
+// ============================================================================
+// Main pipeline: magnitude spectrum from raw primary + reference interferograms
+// (test17 steps 1-4 + magnitude FFT + 10; apodization + Mertz deferred)
+// ============================================================================
 
-    // Use FFTW for efficient FFT computation
-    fftw_plan plan;
-    fftw_complex* in;
-    fftw_complex* out;
-    
-    // Allocate memory for FFTW
-    in = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * n);
-    out = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * n);
-    
-    // Copy input data to FFTW complex array
-    for (size_t i = 0; i < n; i++) {
-        in[i][0] = primaryDetector[i]; // Real part
-        in[i][1] = 0.0;               // Imaginary part
+SpectralToolbox::ProcessedSpectrum SpectralToolbox::processSpectrum(
+    const std::vector<double>& primaryDetector,
+    const std::vector<double>& referenceDetector,
+    double refLaserWavelength,
+    int  K,
+    SpectrumXUnit xUnit)
+{
+    ProcessedSpectrum result;
+
+    const std::size_t n = primaryDetector.size();
+    if (n == 0 || referenceDetector.size() != n || K < 0) return result;
+
+    // 1. Hilbert-corrected X axis (um) from the reference interferogram
+    std::vector<double> correctedX;
+    xAxisFromHilbert(referenceDetector, refLaserWavelength, correctedX);
+    if (correctedX.empty()) return result;
+
+    // 2. Robust max OPD (skip index 0 to avoid start-of-cumsum contaminations)
+    double maxOPD = 0.0;
+    for (std::size_t i = 1; i < correctedX.size(); ++i) {
+        maxOPD = std::max(maxOPD, correctedX[i]);
     }
-    
-    // Create FFTW plan and execute
-    plan = fftw_plan_dft_1d(n, in, out, FFTW_FORWARD, FFTW_ESTIMATE);
+    if (maxOPD <= 0.0) return result;
+    const double OPD = 2.0 * maxOPD;   // round-trip; matches test17 exactly
+
+    // 3. Uniform resample on [0, maxOPD] with linear interpolation
+    std::vector<double> uniformX = linspace(0.0, maxOPD, n, /*endpoint*/true);
+    std::vector<double> uniformY = interpVector(uniformX, correctedX, primaryDetector);
+
+    // 4. Mean removal (Python loadDataset does meas -= mean; CSVAdapter does not)
+    double mean = std::accumulate(uniformY.begin(), uniformY.end(), 0.0) / static_cast<double>(n);
+    for (double& y : uniformY) y -= mean;
+
+    // 5. Zero pad: N = n*(K+1)
+    const std::size_t N = n * (static_cast<std::size_t>(K) + 1);
+    std::vector<double> padded(N, 0.0);
+    std::copy(uniformY.begin(), uniformY.end(), padded.begin());
+
+    // 6. FFT (FFTW complex forward, one-shot per file -> FFTW_ESTIMATE is cheap)
+    fftw_complex* in  = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * N);
+    fftw_complex* out = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * N);
+    for (std::size_t i = 0; i < N; ++i) {
+        in[i][REAL] = padded[i];
+        in[i][IMAG] = 0.0;
+    }
+    fftw_plan plan = fftw_plan_dft_1d((int)N, in, out, FFTW_FORWARD, FFTW_ESTIMATE);
     fftw_execute(plan);
-    
-    // Extract magnitude spectrum (first half for real FFT)
-    size_t spectrum_size = n / 2;
-    spectrum.resize(spectrum_size);
-    frequencies.resize(spectrum_size);
-    
-    for (size_t k = 0; k < spectrum_size; k++) {
-        double real = out[k][0];
-        double imag = out[k][1];
-        double magnitude = sqrt(real * real + imag * imag);
-        spectrum[k] = magnitude / n; // Normalize
-        frequencies[k] = static_cast<double>(k);
+
+    // 7. Magnitude + build X axis (drop index 0 -> Inf), convert unit
+    result.spectrumX.reserve(N - 1);
+    result.spectrumY.reserve(N - 1);
+    const double factor = OPD * static_cast<double>(K + 1);
+    const double invN   = 1.0 / static_cast<double>(N);
+    for (std::size_t i = 1; i < N; ++i) {
+        const double um = factor / static_cast<double>(i);
+        result.spectrumX.push_back(
+            xUnit == SpectrumXUnit::Um    ? um
+          : xUnit == SpectrumXUnit::CmInv ? convertUmToCm(um)
+                                          : convertUmToTHz(um));
+        const double re = out[i][REAL];
+        const double im = out[i][IMAG];
+        result.spectrumY.push_back(std::sqrt(re * re + im * im) * invN);
     }
-    
-    // Clean up FFTW resources
+    // Expose corrected X for Hilbert debug window (avoids recomputing there)
+    result.correctedX = std::move(correctedX);
+
     fftw_destroy_plan(plan);
     fftw_free(in);
     fftw_free(out);
+
+    return result;
 }
-
-void SpectralToolbox::computeSpectrum2(const std::vector<double>& primaryDetector, std::vector<double> &referenceDetector,std::vector<double>& outSpectrum, double refLaserWavelength, double detectorSensitivity, int Kpadding) {
-    // correct X axis
-    std::vector<double> xAxisIGM(referenceDetector.size());
-
-    SpectralToolbox::xAxisFromHilbert(referenceDetector, refLaserWavelength, xAxisIGM);
-
-    // xAxisIGM.
-    auto igmXmaxIter = std::max_element(xAxisIGM.begin(), xAxisIGM.end());
-
-    double maxOPD = *igmXmaxIter;
-    std::cout << "Total OPD: " << maxOPD << std::endl;
-
-    // create a uniform x axis
-    std::vector<double> xAxisUniform(xAxisIGM.size());
-
-    xAxisUniform[0] = 0.0;
-    for(int_fast32_t i = 1; i < xAxisUniform.size(); i++) {
-        xAxisUniform[i] = maxOPD / static_cast<double>(i); 
-    }
-
-    // interpolate the primary signal to the uniform x
-    std::vector<double> yAxisUniform = SpectralToolbox::interpVector(xAxisUniform, xAxisIGM, primaryDetector);
-
-
-}   
-

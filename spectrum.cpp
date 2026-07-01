@@ -3,8 +3,7 @@
 #include "adapters/csv_adapter.h"
 #include <cmath>
 #include <algorithm>
-// #include <complex>
-#include <ostream>
+#include <cstdio>
 #include <vector>
 #include "app_state.h"
 
@@ -31,6 +30,7 @@ Spectrum::Spectrum()
       appState(nullptr),
       xUnitSelector(0), // Default to cm-1
       refLaserTextbox(1.550f), // Default value
+      Kpadding(2), // Default zero-pad factor (matches test17)
       showHilbertDebugWindow(false),
       hilbertDebugWindowInitialized(false),
       hilbertDebugWindowPosX(700.0f),
@@ -46,7 +46,8 @@ void Spectrum::initSpectrumWindow() {
     }
 }
 
-void Spectrum::renderHilbertDebugWindow(const std::vector<InterferogramData>& rawDataCache) {
+void Spectrum::renderHilbertDebugWindow(const std::vector<std::string>& fileIds,
+                                         const std::vector<InterferogramData>& rawDataCache) {
     // Only set position/size on first use, then let user move/resize freely
     ImGui::SetNextWindowPos(ImVec2(hilbertDebugWindowPosX, hilbertDebugWindowPosY), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(hilbertDebugWindowSizeX, hilbertDebugWindowSizeY), ImGuiCond_FirstUseEver);
@@ -54,7 +55,7 @@ void Spectrum::renderHilbertDebugWindow(const std::vector<InterferogramData>& ra
     ImGuiWindowFlags debugFlags = ImGuiWindowFlags_None;
     
     if (ImGui::Begin("Hilbert Transform Debug", &showHilbertDebugWindow, debugFlags)) {
-        // Update our saved position and size when window is being moved/resized
+        // Update window position/size while being moved/resized
         if (ImGui::IsWindowFocused() && (ImGui::IsMouseDragging(ImGuiMouseButton_Left) || ImGui::IsMouseReleased(ImGuiMouseButton_Left)))
         {
             ImVec2 windowPos = ImGui::GetWindowPos();
@@ -67,86 +68,52 @@ void Spectrum::renderHilbertDebugWindow(const std::vector<InterferogramData>& ra
         
         hilbertDebugWindowInitialized = true;
         
-        if (rawDataCache.empty()) {
+        if (fileIds.empty() || rawDataCache.empty()) {
             ImGui::Text("No data available");
-        } else {
-            // Get the first dataset for display
-            const auto& rawData = rawDataCache[0];
-            
-            // Debug info
-            ImGui::Text("File metadata: %s", rawData.metadata.c_str());
-            ImGui::Text("Reference detector size: %zu", rawData.referenceDetector.size());
-            ImGui::Text("Cached Hilbert phases count: %zu", cachedHilbertPhases.size());
-            
-            // Check if we have cached Hilbert phase for this file
-            // We need to find the corresponding filename that was used as fileId in spectrum computation
-            // Since rawDataCache and primaryDetectors are parallel arrays, the fileId should be the same index
-            // Let's try to find a matching cache entry
-            std::string fileId = "";
-            bool foundMatch = false;
-            
-            // Try to find a cache entry that matches this raw data
-            for (const auto& cachePair : cachedHilbertPhases) {
-                // If the metadata matches, use this fileId
-                if (cachePair.first == rawData.metadata) {
-                    fileId = cachePair.first;
-                    foundMatch = true;
-                    break;
-                }
-                // Also try to see if any cache entry has data that matches our raw data size
-                // This is a fallback in case metadata doesn't match
-                if (cachePair.second.size() == rawData.referenceDetector.size()) {
-                    fileId = cachePair.first;
-                    foundMatch = true;
-                    break;
-                }
-            }
-            
-            if (foundMatch && !fileId.empty()) {
-                const auto& hilbertPhase = cachedHilbertPhases[fileId];
-                ImGui::Text("Hilbert phase size: %zu", hilbertPhase.size());
-                
-                if (!hilbertPhase.empty()) {
-                    // Create plot for Hilbert phase
-                    if (ImPlot::BeginPlot("Hilbert Phase Unwrapping", ImVec2(-1, -1))) {
-                        ImPlot::SetupAxes("Sample Index", "Distance (um)");
-                        ImPlot::SetupAxisLimits(ImAxis_X1, 0, hilbertPhase.size() - 1, ImGuiCond_Once);
-                        
-                        // Plot the Hilbert phase result
-                        ImPlot::PlotLine("Hilbert Phase", hilbertPhase.data(), hilbertPhase.size());
-                        
-                        // Add some statistics
-                        float max_val = *std::max_element(hilbertPhase.begin(), hilbertPhase.end());
-                        float min_val = *std::min_element(hilbertPhase.begin(), hilbertPhase.end());
-                        
-                        char stats_text[100];
-                        snprintf(stats_text, 100, "Range: %.3f - %.3f um", min_val, max_val);
-                        ImPlot::Annotation(max_val, 0.5, ImVec4(1,1,1,1), ImVec2(0, 20), true, stats_text);
-                        
-                        ImPlot::EndPlot();
-                    }
-                    
-                    // Show reference signal for comparison
-                    if (ImPlot::BeginPlot("Reference Signal", ImVec2(-1, -1))) {
-                        ImPlot::SetupAxes("Sample Index", "Amplitude");
-                        ImPlot::SetupAxisLimits(ImAxis_X1, 0, rawData.referenceDetector.size() - 1, ImGuiCond_Once);
-                        
-                        ImPlot::PlotLine("Reference", rawData.referenceDetector.data(), rawData.referenceDetector.size());
-                        
-                        ImPlot::EndPlot();
-                    }
-                } else {
-                    ImGui::Text("Hilbert phase data is empty");
-                }
-            } else {
-                ImGui::Text("Hilbert phase not found for this file. Try refreshing the spectrum.");
-                ImGui::Text("Searched for metadata: %s", rawData.metadata.c_str());
-                ImGui::Text("Available cache keys:");
-                for (const auto& pair : cachedHilbertPhases) {
-                    ImGui::Text("  - %s (size: %zu)", pair.first.c_str(), pair.second.size());
-                }
-                ImGui::Text("Expected reference detector size: %zu", rawData.referenceDetector.size());
-            }
+            ImGui::End();
+            return;
+        }
+
+        // Display the first selected file only (multi-file view is in the Spectrum window)
+        const std::string& fileId = fileIds.front();
+        const auto& rawData = rawDataCache.front();
+
+        ImGui::Text("File: %s", fileId.c_str());
+        ImGui::Text("Reference detector size: %zu", rawData.referenceDetector.size());
+        ImGui::Text("Cached Hilbert phases count: %zu", cachedHilbertPhases.size());
+
+        auto it = cachedHilbertPhases.find(fileId);
+        if (it == cachedHilbertPhases.end() || it->second.empty()) {
+            ImGui::Text("Hilbert phase not cached for this file.");
+            ImGui::Text("Open the Spectrum window to populate the cache.");
+            ImGui::End();
+            return;
+        }
+
+        const auto& hilbertPhase = it->second;
+        ImGui::Text("Hilbert phase size: %zu", hilbertPhase.size());
+
+        if (ImPlot::BeginPlot("Hilbert Phase Unwrapping", ImVec2(-1, -1))) {
+            ImPlot::SetupAxes("Sample Index", "Distance (um)");
+            ImPlot::SetupAxisLimits(ImAxis_X1, 0, static_cast<double>(hilbertPhase.size() - 1), ImGuiCond_Once);
+
+            ImPlot::PlotLine("Hilbert Phase", hilbertPhase.data(), hilbertPhase.size());
+
+            double max_val = *std::max_element(hilbertPhase.begin(), hilbertPhase.end());
+            double min_val = *std::min_element(hilbertPhase.begin(), hilbertPhase.end());
+            char stats_text[120];
+            std::snprintf(stats_text, sizeof(stats_text), "Range: %.3f - %.3f um", min_val, max_val);
+            ImPlot::Annotation(max_val, 0.5, ImVec4(1, 1, 1, 1), ImVec2(0, 20), true, stats_text);
+
+            ImPlot::EndPlot();
+        }
+
+        if (!rawData.referenceDetector.empty() &&
+            ImPlot::BeginPlot("Reference Signal", ImVec2(-1, -1))) {
+            ImPlot::SetupAxes("Sample Index", "Amplitude");
+            ImPlot::SetupAxisLimits(ImAxis_X1, 0, static_cast<double>(rawData.referenceDetector.size() - 1), ImGuiCond_Once);
+            ImPlot::PlotLine("Reference", rawData.referenceDetector.data(), rawData.referenceDetector.size());
+            ImPlot::EndPlot();
         }
         
         ImGui::End();
@@ -186,6 +153,8 @@ void Spectrum::resetSpectrumWindow() {
     // Reset UI controls
     xUnitSelector = 0; // Reset to cm-1
     refLaserTextbox = 1.550; // Reset to default value
+    Kpadding = 2; // Reset to default zero-pad factor
+    lastSpectrumParams.clear();
 }
 
 bool Spectrum::isSpectrumDirty(const std::string& fileId, const std::vector<double>& primaryDetector) {
@@ -193,27 +162,34 @@ bool Spectrum::isSpectrumDirty(const std::string& fileId, const std::vector<doub
     auto cachedSpectrumIt = cachedSpectra.find(fileId);
     auto cachedFrequenciesIt = cachedFrequencies.find(fileId);
     auto lastDetectorIt = lastPrimaryDetectors.find(fileId);
-    
-    if (cachedSpectrumIt == cachedSpectra.end() || cachedFrequenciesIt == cachedFrequencies.end() || 
+
+    if (cachedSpectrumIt == cachedSpectra.end() || cachedFrequenciesIt == cachedFrequencies.end() ||
         lastDetectorIt == lastPrimaryDetectors.end()) {
         return true; // No cached data for this file, need to calculate
     }
-    
-    // Check if the input data has changed
-    if (primaryDetector.size() != lastDetectorIt->second.size()) {
-        return true; // Size changed, need to recalculate
+
+    // Check if processing parameters changed (K, xUnit, refLaser)
+    const auto paramsIt = lastSpectrumParams.find(fileId);
+    if (paramsIt == lastSpectrumParams.end()) return true;
+    const auto& lp = paramsIt->second;
+    if (lp[0] != static_cast<double>(Kpadding)         ||
+        lp[1] != static_cast<double>(xUnitSelector)    ||
+        lp[2] != static_cast<double>(refLaserTextbox)) {
+        return true;
     }
-    
-    // Compare a few key points to detect changes (full comparison would be expensive)
-    // This is a heuristic - for exact comparison, we'd need to compare all points
-    size_t checkPoints = std::min(primaryDetector.size(), lastDetectorIt->second.size());
-    for (size_t i = 0; i < checkPoints; i += std::max(1UL, checkPoints / 10)) {
+
+    // Check if the input data has changed (size or sampled points)
+    if (primaryDetector.size() != lastDetectorIt->second.size()) {
+        return true;
+    }
+    std::size_t checkPoints = std::min(primaryDetector.size(), lastDetectorIt->second.size());
+    for (std::size_t i = 0; i < checkPoints; i += std::max<std::size_t>(1UL, checkPoints / 10)) {
         if (primaryDetector[i] != lastDetectorIt->second[i]) {
-            return true; // Data changed, need to recalculate
+            return true;
         }
     }
-    
-    return false; // Data appears unchanged, use cached spectrum
+
+    return false;
 }
 
 void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std::vector<double>>>& primaryDetectors,
@@ -506,61 +482,47 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                 const auto& fileData = primaryDetectors[i];
                 const std::string& fileId = fileData.first;
                 const std::vector<double>& primaryDetector = fileData.second;
-                
+
                 // For spectrum computation, always use raw data to avoid downsampling and peak alignment artifacts
-                // Since primaryDetectors and rawDataCache should be parallel arrays, we can use the same index
                 InterferogramData rawData;
-                
-                // Use raw data from cache if available and index is valid
-                // rawDataCache should have the same number of entries as primaryDetectors
                 if (i < rawDataCache.size()) {
                     rawData = rawDataCache[i];
                 } else {
-                    // If not found in cache, use the processed data as fallback
-                    // This can happen if raw data cache wasn't properly populated
-                    // This is a safe fallback - spectrum will still be computed correctly
-                    rawData.primaryDetector = primaryDetector;
-                    rawData.referenceDetector = primaryDetector; // Use same data for both
+                    // Fallback if raw data cache wasn't populated
+                    rawData.primaryDetector  = primaryDetector;
+                    rawData.referenceDetector = primaryDetector;
                 }
-                
-                // Check if we need to compute or can use cached data
-                bool needsComputation = isSpectrumDirty(fileId, rawData.primaryDetector);
-                
-                std::vector<double> spectrum;
-                std::vector<double> frequencies;
-                
-                // Always compute Hilbert phase for debugging (if we have reference data)
-                if (!rawData.referenceDetector.empty()) {
-                    std::vector<double> hilbertPhase;
-                    SpectralToolbox::xAxisFromHilbert(rawData.referenceDetector, refLaserTextbox, hilbertPhase);
-                    cachedHilbertPhases[fileId] = hilbertPhase;
-                    std::cout << "Computed Hilbert phase for file: " << fileId 
-                              << " (size: " << hilbertPhase.size() << ")" << std::endl;
-                } else {
-                    std::cout << "Warning: Empty reference detector for file: " << fileId << std::endl;
-                }
-                
-                if (needsComputation) {
-                    // Compute new spectrum using raw, unprocessed data
-                    SpectralToolbox::computeSpectrum(rawData.primaryDetector, spectrum, frequencies);                    
 
-                    // Cache the results
-                    cachedSpectra[fileId] = spectrum;
-                    cachedFrequencies[fileId] = frequencies;
+                const bool needsComputation = isSpectrumDirty(fileId, rawData.primaryDetector);
+
+                if (needsComputation) {
+                    if (rawData.primaryDetector.empty() || rawData.referenceDetector.empty()) {
+                        continue;
+                    }
+                    auto ps = SpectralToolbox::processSpectrum(
+                        rawData.primaryDetector, rawData.referenceDetector, refLaserTextbox,
+                        Kpadding, static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector));
+
+                    cachedSpectra[fileId]      = std::move(ps.spectrumY);
+                    cachedFrequencies[fileId]  = std::move(ps.spectrumX);
+                    cachedHilbertPhases[fileId] = std::move(ps.correctedX);
+
                     lastPrimaryDetectors[fileId] = rawData.primaryDetector;
-                } else {
-                    // Use cached data
-                    spectrum = cachedSpectra[fileId];
-                    frequencies = cachedFrequencies[fileId];
+                    lastSpectrumParams[fileId]   = { static_cast<double>(Kpadding),
+                                                     static_cast<double>(xUnitSelector),
+                                                     static_cast<double>(refLaserTextbox) };
                 }
-                
+
+                const auto& spectrum    = cachedSpectra.at(fileId);
+                const auto& frequencies = cachedFrequencies.at(fileId);
+                if (spectrum.empty() || frequencies.empty()) continue;
+
                 // Set up plot specifications with matching colors
                 plotSpecs[i].LineWeight = 2.0f;
                 // Colors already set in legend creation above
-                
+
                 // Plot this spectrum with filename as label (same as graphing panel)
-                std::string plotLabel = fileId; // Use the actual filename instead of "Spectrum 1", "Spectrum 2", etc.
-                ImPlot::PlotLine(plotLabel.c_str(), frequencies.data(), spectrum.data(), spectrum.size(), plotSpecs[i]);
+                ImPlot::PlotLine(fileId.c_str(), frequencies.data(), spectrum.data(), spectrum.size(), plotSpecs[i]);
             }
             
             // Handle X-range selection visualization
