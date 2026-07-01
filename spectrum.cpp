@@ -30,6 +30,7 @@ Spectrum::Spectrum()
       rightArrowHandleFlag(false),
       appState(nullptr),
       xUnitSelector(0), // Default to cm-1
+      prevXUnitSelector(0),
       yScaleSelector(0), // Default linear Y-axis
       prevYScaleSelector(0),
       refLaserTextbox(1.550f), // Default value
@@ -102,7 +103,7 @@ void Spectrum::renderHilbertDebugWindow(const std::vector<std::string>& fileIds,
         ImGui::Text("Hilbert phase size: %zu", hilbertPhase.size());
 
         if (ImPlot::BeginPlot("Hilbert Phase Unwrapping", ImVec2(-1, -1))) {
-            ImPlot::SetupAxes("Sample Index", "Distance (um)");
+            ImPlot::SetupAxes("Sample Index", "Distance (\xC2\xB5""m)");
             ImPlot::SetupAxisLimits(ImAxis_X1, 0, static_cast<double>(hilbertPhase.size() - 1), ImGuiCond_Once);
 
             ImPlot::PlotLine("Hilbert Phase", hilbertPhase.data(), hilbertPhase.size());
@@ -110,7 +111,7 @@ void Spectrum::renderHilbertDebugWindow(const std::vector<std::string>& fileIds,
             double max_val = *std::max_element(hilbertPhase.begin(), hilbertPhase.end());
             double min_val = *std::min_element(hilbertPhase.begin(), hilbertPhase.end());
             char stats_text[120];
-            std::snprintf(stats_text, sizeof(stats_text), "Range: %.3f - %.3f um", min_val, max_val);
+            std::snprintf(stats_text, sizeof(stats_text), "Range: %.3f - %.3f \xC2\xB5""m", min_val, max_val);
             ImPlot::Annotation(max_val, 0.5, ImVec4(1, 1, 1, 1), ImVec2(0, 20), true, stats_text);
 
             ImPlot::EndPlot();
@@ -163,6 +164,7 @@ void Spectrum::resetSpectrumWindow() {
     
     // Reset UI controls
     xUnitSelector = 0; // Reset to cm-1
+    prevXUnitSelector = 0;
     yScaleSelector = 0; // Reset to linear
     prevYScaleSelector = 0;
     refLaserTextbox = 1.550; // Reset to default value
@@ -378,6 +380,26 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
             ImPlot::SetNextAxisLimits(ImAxis_X1, pendingNextXMin, pendingNextXMax, ImPlotCond_Always);
             pendingNextXMin = 0.0;
             pendingNextXMax = -1.0; // invalidate
+        }
+
+        // When the X unit changes, convert the current manual X limits to the new unit
+        // so the user keeps looking at the equivalent spectral region (e.g. 1-30 um
+        // becomes 333-10000 cm-1). When shouldAutoscale is set, the auto-scale block
+        // inside BeginPlot will compute fresh limits from the new data, so conversion
+        // is unnecessary. The stale pending range is discarded - it was computed in
+        // the old unit and is meaningless in the new one.
+        if (xUnitSelector != prevXUnitSelector) {
+            if (!shouldAutoscale && manualXMin < manualXMax) {
+                auto oldUnit = static_cast<SpectralToolbox::SpectrumXUnit>(prevXUnitSelector);
+                auto newUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
+                double newMin = SpectralToolbox::convertXValue(manualXMin, oldUnit, newUnit);
+                double newMax = SpectralToolbox::convertXValue(manualXMax, oldUnit, newUnit);
+                if (newMin > newMax) std::swap(newMin, newMax);
+                ImPlot::SetNextAxisLimits(ImAxis_X1, newMin, newMax, ImPlotCond_Always);
+            }
+            pendingNextXMin = 0.0;
+            pendingNextXMax = -1.0;
+            prevXUnitSelector = xUnitSelector;
         }
 
         // When the Y scale (lin/log) selector changes, re-fit Y only - keep the

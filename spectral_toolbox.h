@@ -49,6 +49,14 @@ public:
     static inline double convertUmToCm(double um)   { return (1.0 / um) * 10000.0; }
     /// Convert wavelength [um] to frequency [THz].
     static inline double convertUmToTHz(double um)   { return 299.792458 / um; }
+    /// Convert wavenumber [cm-1] to wavelength [um].
+    static inline double convertCmToUm(double cm)   { return 10000.0 / cm; }
+    /// Convert frequency [THz] to wavelength [um].
+    static inline double convertTHzToUm(double thz) { return 299.792458 / thz; }
+
+    /// Convert a value between any two spectrum X-axis units (routed through um).
+    /// Returns @p value unchanged if from == to.
+    static double convertXValue(double value, SpectrumXUnit from, SpectrumXUnit to);
 
     // ---- interferogram axis -----------------------------------------------
 

@@ -14,6 +14,23 @@
 // Primitives
 // ============================================================================
 
+double SpectralToolbox::convertXValue(double value, SpectrumXUnit from, SpectrumXUnit to) {
+    if (from == to) return value;
+    // Route through um: from -> um -> to
+    double um;
+    switch (from) {
+        case SpectrumXUnit::Um:    um = value; break;
+        case SpectrumXUnit::CmInv: um = convertCmToUm(value); break;
+        case SpectrumXUnit::THz:   um = convertTHzToUm(value); break;
+    }
+    switch (to) {
+        case SpectrumXUnit::Um:    return um;
+        case SpectrumXUnit::CmInv: return convertUmToCm(um);
+        case SpectrumXUnit::THz:   return convertUmToTHz(um);
+    }
+    return value;
+}
+
 double SpectralToolbox::interpPoint(double x, const std::vector<double>& xp, const std::vector<double>& fp) {
     if (xp.empty() || xp.size() != fp.size()) return std::numeric_limits<double>::quiet_NaN();
 

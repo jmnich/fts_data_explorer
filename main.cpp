@@ -1898,31 +1898,67 @@ int main() {
                 appState.needsRedraw = true;
             };
 
-            // X unit selector
-            const char* xUnitItems[] = { "cm-1", "um", "THz" };
-            ImGui::Text("X unit:");
+            // Shared button style colors for X-unit and Y-scale toggle buttons
+            const ImVec4 btnColors[2] = {
+                ImVec4(0.0f, 0.0f, 0.0f, 0.0f), // unselected: transparent
+                ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive) // selected: highlight
+            };
+
+            // X unit selector (cm-1 / µm / THz) - changing unit invalidates spectrum cache
+            ImGui::Text("X unit");
             ImGui::SameLine();
 
-            float remainingWidth = ImGui::GetContentRegionAvail().x;
-            ImGui::SetNextItemWidth(remainingWidth);
-            if (ImGui::Combo("##XUnitSelector", &appState.spectrum.xUnitSelector, xUnitItems, IM_ARRAYSIZE(xUnitItems))) {
-                invalidateSpectrumCaches();
+            const bool cmSelected  = (appState.spectrum.xUnitSelector == 0);
+            const bool umSelected  = (appState.spectrum.xUnitSelector == 1);
+            const bool thzSelected = (appState.spectrum.xUnitSelector == 2);
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[cmSelected ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cmSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("cm-1##XUnitCm")) {
+                if (!cmSelected) {
+                    appState.spectrum.xUnitSelector = 0;
+                    invalidateSpectrumCaches();
+                }
             }
+            ImGui::PopStyleColor(3);
+
+            ImGui::SameLine();
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[umSelected ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  umSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("\xC2\xB5""m##XUnitUm")) {
+                if (!umSelected) {
+                    appState.spectrum.xUnitSelector = 1;
+                    invalidateSpectrumCaches();
+                }
+            }
+            ImGui::PopStyleColor(3);
+
+            ImGui::SameLine();
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[thzSelected ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  thzSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("THz##XUnitTHz")) {
+                if (!thzSelected) {
+                    appState.spectrum.xUnitSelector = 2;
+                    invalidateSpectrumCaches();
+                }
+            }
+            ImGui::PopStyleColor(3);
 
             // Y scale selector (lin / log) - rendering only, no cache invalidation needed
             ImGui::Text("Y scale");
             ImGui::SameLine();
 
-            const ImVec4 linBtnColors[2] = {
-                ImVec4(0.0f, 0.0f, 0.0f, 0.0f), // unselected: transparent
-                ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive) // selected: highlight
-            };
             const bool linSelected = (appState.spectrum.yScaleSelector == 0);
             const bool logSelected = (appState.spectrum.yScaleSelector == 1);
 
-            ImGui::PushStyleColor(ImGuiCol_Button,        linBtnColors[linSelected ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  linSelected ? linBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   linBtnColors[1]);
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[linSelected ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  linSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
             if (ImGui::Button("lin##YScaleLin")) {
                 if (!linSelected) {
                     appState.spectrum.yScaleSelector = 0;
@@ -1933,9 +1969,9 @@ int main() {
 
             ImGui::SameLine();
 
-            ImGui::PushStyleColor(ImGuiCol_Button,        linBtnColors[logSelected ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  logSelected ? linBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   linBtnColors[1]);
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[logSelected ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  logSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
             if (ImGui::Button("log##YScaleLog")) {
                 if (!logSelected) {
                     appState.spectrum.yScaleSelector = 1;
@@ -1979,10 +2015,10 @@ int main() {
             }
 
             // Reference laser textbox
-            ImGui::Text("Ref laser [um]:");
+            ImGui::Text("Ref laser [\xC2\xB5""m]:");
             ImGui::SameLine();
 
-            remainingWidth = ImGui::GetContentRegionAvail().x;
+            float remainingWidth = ImGui::GetContentRegionAvail().x;
             ImGui::SetNextItemWidth(remainingWidth);
             ImGui::InputFloat("##RefLaserTextbox", &(appState.spectrum.refLaserTextbox), 0.001, 0.01);
             if (ImGui::IsItemDeactivatedAfterEdit()) {
