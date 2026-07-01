@@ -1954,11 +1954,6 @@ int main() {
                 appState.needsRedraw = true;
             }
             
-            ImGui::SameLine();
-            if (ImGui::Button("Hilbert Debug")) {
-                appState.spectrum.showHilbertDebugWindow = true;
-            }
-            
             // Add new controls to Spectrum panel
             ImGui::Separator();
             ImGui::Text("Controls:");
@@ -1969,7 +1964,6 @@ int main() {
                 appState.spectrum.cachedFrequencies.clear();
                 appState.spectrum.lastPrimaryDetectors.clear();
                 appState.spectrum.lastSpectrumParams.clear();
-                appState.spectrum.cachedHilbertPhases.clear();
                 appState.needsRedraw = true;
             };
 
@@ -2245,11 +2239,6 @@ int main() {
                 primaryDetectors.emplace_back(appState.selectedFilenames[i], appState.loadedData[i].primaryDetector);
             }
             appState.spectrum.renderSpectrumWindow(primaryDetectors, appState.rawDataCache);
-            
-            // Render Hilbert debug window
-            if (appState.spectrum.showHilbertDebugWindow) {
-                appState.spectrum.renderHilbertDebugWindow(appState.selectedFilenames, appState.rawDataCache);
-            }
         }
         
         // Rendering

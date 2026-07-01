@@ -29,7 +29,6 @@ public:
     std::map<std::string, std::vector<double>> cachedSpectra;
     std::map<std::string, std::vector<double>> cachedFrequencies;
     std::map<std::string, std::vector<double>> lastPrimaryDetectors;
-    std::map<std::string, std::vector<double>> cachedHilbertPhases;
     bool spectrumDirty;
     
     // X-range selection state for spectrum window
@@ -89,27 +88,14 @@ public:
     // Stored as {K, xUnit, refLaser}
     std::map<std::string, std::array<double, 3>> lastSpectrumParams;
     
-    // Hilbert debug window state
-    bool showHilbertDebugWindow;
-    bool hilbertDebugWindowInitialized;
-    float hilbertDebugWindowPosX;
-    float hilbertDebugWindowPosY;
-    float hilbertDebugWindowSizeX;
-    float hilbertDebugWindowSizeY;
-    
     Spectrum();
     
     // Initialize spectrum window
     void initSpectrumWindow();
-    void initHilbertDebugWindow();
     
     // Render spectrum window for multiple files
     void renderSpectrumWindow(const std::vector<std::pair<std::string, std::vector<double>>>& primaryDetectors,
                              const std::vector<InterferogramData>& rawDataCache = {});
-    
-    // Render Hilbert debug window
-    void renderHilbertDebugWindow(const std::vector<std::string>& fileIds,
-                                  const std::vector<InterferogramData>& rawDataCache = {});
     
     // Reset spectrum window state
     void resetSpectrumWindow();

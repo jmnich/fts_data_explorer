@@ -229,8 +229,6 @@ SpectralToolbox::ProcessedSpectrum SpectralToolbox::processSpectrum(
         const double im = out[i][IMAG];
         result.spectrumY.push_back(std::sqrt(re * re + im * im) * invN);
     }
-    // Expose corrected X for Hilbert debug window (avoids recomputing there)
-    result.correctedX = std::move(correctedX);
 
     fftw_destroy_plan(plan);
     fftw_free(in);

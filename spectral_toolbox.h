@@ -23,7 +23,6 @@ public:
     struct ProcessedSpectrum {
         std::vector<double> spectrumX;   ///< length N/2 (positive freqs only, index 0 = Inf dropped)
         std::vector<double> spectrumY;   ///< magnitude, normalized by N
-        std::vector<double> correctedX;  ///< Hilbert-corrected IGM X axis (um) - for debugging
     };
 
     // ---- primitives --------------------------------------------------------

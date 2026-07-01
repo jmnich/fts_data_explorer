@@ -73,114 +73,15 @@ Spectrum::Spectrum()
       forcedYMax(1.0),
       pendingNextXMin(0.0),
       pendingNextXMax(-1.0), // sentinel: invalid range -> no pending value
-      xUnitSwitchedThisFrame(false),
-      convertedXMin(0.0),
-      convertedXMax(0.0),
-      showHilbertDebugWindow(false),
-      hilbertDebugWindowInitialized(false),
-      hilbertDebugWindowPosX(700.0f),
-      hilbertDebugWindowPosY(100.0f),
-      hilbertDebugWindowSizeX(600.0f),
-      hilbertDebugWindowSizeY(400.0f) {
+       xUnitSwitchedThisFrame(false),
+       convertedXMin(0.0),
+       convertedXMax(0.0) {
       
       }
 
 void Spectrum::initSpectrumWindow() {
     if (!spectrumWindowInitialized) {
         spectrumWindowInitialized = true;
-    }
-}
-
-void Spectrum::renderHilbertDebugWindow(const std::vector<std::string>& fileIds,
-                                         const std::vector<InterferogramData>& rawDataCache) {
-    // Only set position/size on first use, then let user move/resize freely
-    ImGui::SetNextWindowPos(ImVec2(hilbertDebugWindowPosX, hilbertDebugWindowPosY), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(hilbertDebugWindowSizeX, hilbertDebugWindowSizeY), ImGuiCond_FirstUseEver);
-
-    ImGuiWindowFlags debugFlags = ImGuiWindowFlags_None;
-    
-    if (ImGui::Begin("Hilbert Transform Debug", &showHilbertDebugWindow, debugFlags)) {
-        // Update window position/size while being moved/resized
-        if (ImGui::IsWindowFocused() && (ImGui::IsMouseDragging(ImGuiMouseButton_Left) || ImGui::IsMouseReleased(ImGuiMouseButton_Left)))
-        {
-            ImVec2 windowPos = ImGui::GetWindowPos();
-            ImVec2 windowSize = ImGui::GetWindowSize();
-            hilbertDebugWindowPosX = windowPos.x;
-            hilbertDebugWindowPosY = windowPos.y;
-            hilbertDebugWindowSizeX = windowSize.x;
-            hilbertDebugWindowSizeY = windowSize.y;
-        }
-        
-        hilbertDebugWindowInitialized = true;
-        
-        if (fileIds.empty() || rawDataCache.empty()) {
-            ImGui::Text("No data available");
-            ImGui::End();
-            return;
-        }
-
-        // Display the first selected file only (multi-file view is in the Spectrum window)
-        const std::string& fileId = fileIds.front();
-        const auto& rawData = rawDataCache.front();
-
-        ImGui::Text("File: %s", fileId.c_str());
-        ImGui::Text("Reference detector size: %zu", rawData.referenceDetector.size());
-        ImGui::Text("Cached Hilbert phases count: %zu", cachedHilbertPhases.size());
-
-        auto it = cachedHilbertPhases.find(fileId);
-        if (it == cachedHilbertPhases.end() || it->second.empty()) {
-            ImGui::Text("Hilbert phase not cached for this file.");
-            ImGui::Text("Open the Spectrum window to populate the cache.");
-            ImGui::End();
-            return;
-        }
-
-        const auto& hilbertPhase = it->second;
-        ImGui::Text("Hilbert phase size: %zu", hilbertPhase.size());
-
-        if (ImPlot::BeginPlot("Hilbert Phase Unwrapping", ImVec2(-1, -1))) {
-            ImPlot::SetupAxes("Sample Index", "Distance (\xC2\xB5""m)");
-            ImPlot::SetupAxisLimits(ImAxis_X1, 0, static_cast<double>(hilbertPhase.size() - 1), ImGuiCond_Once);
-
-            {
-                double xMax = static_cast<double>(hilbertPhase.size() - 1);
-                auto [yMinIt, yMaxIt] = std::minmax_element(hilbertPhase.begin(), hilbertPhase.end());
-                SetupAxisTicksLimited(ImAxis_X1, 0.0, xMax);
-                SetupAxisTicksLimited(ImAxis_Y1, *yMinIt, *yMaxIt);
-            }
-
-            ImPlot::PlotLine("Hilbert Phase", hilbertPhase.data(), hilbertPhase.size());
-
-            double max_val = *std::max_element(hilbertPhase.begin(), hilbertPhase.end());
-            double min_val = *std::min_element(hilbertPhase.begin(), hilbertPhase.end());
-            char stats_text[120];
-            std::snprintf(stats_text, sizeof(stats_text), "Range: %.3f - %.3f \xC2\xB5""m", min_val, max_val);
-            ImPlot::Annotation(max_val, 0.5, ImVec4(1, 1, 1, 1), ImVec2(0, 20), true, stats_text);
-
-            ImPlot::EndPlot();
-        }
-
-        if (!rawData.referenceDetector.empty() &&
-            ImPlot::BeginPlot("Reference Signal", ImVec2(-1, -1))) {
-            ImPlot::SetupAxes("Sample Index", "Amplitude");
-            ImPlot::SetupAxisLimits(ImAxis_X1, 0, static_cast<double>(rawData.referenceDetector.size() - 1), ImGuiCond_Once);
-            {
-                double xMax = static_cast<double>(rawData.referenceDetector.size() - 1);
-                auto [yMinIt, yMaxIt] = std::minmax_element(rawData.referenceDetector.begin(), rawData.referenceDetector.end());
-                SetupAxisTicksLimited(ImAxis_X1, 0.0, xMax);
-                SetupAxisTicksLimited(ImAxis_Y1, *yMinIt, *yMaxIt);
-            }
-            ImPlot::PlotLine("Reference", rawData.referenceDetector.data(), rawData.referenceDetector.size());
-            ImPlot::EndPlot();
-        }
-        
-        ImGui::End();
-    }
-}
-
-void Spectrum::initHilbertDebugWindow() {
-    if (!hilbertDebugWindowInitialized) {
-        hilbertDebugWindowInitialized = true;
     }
 }
 
@@ -638,7 +539,6 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
 
                     cachedSpectra[fileId]      = std::move(ps.spectrumY);
                     cachedFrequencies[fileId]  = std::move(ps.spectrumX);
-                    cachedHilbertPhases[fileId] = std::move(ps.correctedX);
 
                     lastPrimaryDetectors[fileId] = rawData.primaryDetector;
                     lastSpectrumParams[fileId]   = { static_cast<double>(Kpadding),
