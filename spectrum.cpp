@@ -22,6 +22,8 @@ Spectrum::Spectrum()
       firstLoadCompleted(false),
       manualXMin(0.0),
       manualXMax(0.0),
+      manualYMin(0.0),
+      manualYMax(0.0),
       leftArrowPressedLastFrame(false),
       rightArrowPressedLastFrame(false),
       leftArrowHandleFlag(false),
@@ -147,6 +149,10 @@ void Spectrum::resetSpectrumWindow() {
     // Reset zoom state
     shouldAutoscale = true;
     firstLoadCompleted = false;
+    manualXMin = 0.0;
+    manualXMax = 0.0;
+    manualYMin = 0.0;
+    manualYMax = 0.0;
     
     // Reset arrow key state
     leftArrowPressedLastFrame = false;
@@ -358,19 +364,14 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
         // NOTE: ImPlotCond_Once means "once per runtime session" - after the first call
         // it is silently ignored forever, so it CANNOT be used for ESC / pan / select.
         // We use ImPlotCond_Always here, which is safe because each branch consumes its
-        // trigger immediately (shouldAutoscale is cleared, pending is invalidated), so
-        // the call only fires for a single frame - leaving ImPlot's mouse pan/zoom free
-        // on all subsequent frames.
-        const bool effectiveForceY = forceYLimits && (forcedYMin < forcedYMax);
+        // trigger immediately (pending is invalidated), so the call only fires for a
+        // single frame - leaving ImPlot's mouse pan/zoom free on all subsequent frames.
+        // ESC / first-load auto-scale is handled inside BeginPlot below, where it can
+        // inspect freshly-computed cached spectrum data. SetNextAxisToFit is not used
+        // because its effect is unreliable in this setup (silently suppressed by
+        // ImPlot's internal auto-fit state after user zoom/pan interactions).
 
-        if (shouldAutoscale && !effectiveForceY) {
-            // ESC / first-load: force-fit both axes to the data that will be plotted
-            // in the upcoming BeginPlot. SetNextAxisToFit has no condition and always
-            // applies, so it works regardless of prior ImPlotCond_Once state.
-            ImPlot::SetNextAxisToFit(ImAxis_X1);
-            ImPlot::SetNextAxisToFit(ImAxis_Y1);
-            shouldAutoscale = false;
-        } else if (!shouldAutoscale && pendingNextXMin < pendingNextXMax) {
+        if (!shouldAutoscale && pendingNextXMin < pendingNextXMax) {
             // Arrow-key pan or shift-drag X-range selection: apply once, then consume.
             ImPlot::SetNextAxisLimits(ImAxis_X1, pendingNextXMin, pendingNextXMax, ImPlotCond_Always);
             pendingNextXMin = 0.0;
@@ -380,7 +381,9 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
         // Match graphing panel behavior: NoTitle only, no NoLegend to ensure full interactions
         ImPlotFlags plot_flags = ImPlotFlags_NoTitle;
 
+        bool plotRendered = false;
         if (ImPlot::BeginPlot("Spectrum", ImVec2(-1, -1), plot_flags)) {
+            plotRendered = true;
 
             // Setup axes with conditional auto-fit behavior (no labels to match graphing panel style)
             // Implement Auto-fit Y-axis (AFY) feature like in graphing panel
@@ -400,8 +403,15 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                 ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Log10);
             }
 
-            // Forced Y-axis limits: when enabled, lock the Y axis and skip all
-            // autoscale / manual-zoom logic below so zoom & autoscale are disallowed.
+            // (ESC fit-to-all and arrow-pan / shift-select are handled here and
+            //  before BeginPlot via SetNextAxisLimits - see the pre-BeginPlot block above.
+            //  SetupAxisLimits with ImPlotCond_Once is intentionally NOT used here because
+            //  ImPlotCond_Once means "once per runtime session" - it would be silently
+            //  ignored after the first call, breaking ESC and shift-select zoom.)
+
+            // Forced Y-axis limits: when enabled, lock the Y axis and skip the
+            // Y portion of auto-scale so the user's forced range is respected.
+            const bool effectiveForceY = forceYLimits && (forcedYMin < forcedYMax);
             if (effectiveForceY) {
                 // In log mode, ensure the lower bound stays positive.
                 double yMin = forcedYMin;
@@ -412,11 +422,62 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                 ImPlot::SetupAxisLimits(ImAxis_Y1, yMin, yMax, ImPlotCond_Always);
             }
 
-            // (ESC fit-to-all and arrow-pan / shift-select are handled before BeginPlot
-            //  via SetNextAxisToFit / SetNextAxisLimits - see the pre-BeginPlot block above.
-            //  SetupAxisLimits with ImPlotCond_Once is intentionally NOT used here because
-            //  ImPlotCond_Once means "once per runtime session" - it would be silently
-            //  ignored after the first call, breaking ESC and shift-select zoom.)
+            // Apply auto-scale when requested (ESC key or initial load).
+            // X-axis is always reset on ESC; Y-axis is only reset when not forced.
+            // The range is computed from cached spectrum data, which is valid because
+            // the spectrum computation loop above runs before this point.
+            if (shouldAutoscale) {
+                double globalXMin = 0.0;
+                double globalXMax = 0.0;
+                double globalYMin = 0.0;
+                double globalYMax = 0.0;
+                bool   haveRange  = false;
+
+                for (size_t i = 0; i < primaryDetectors.size(); i++) {
+                    const std::string& fileId = primaryDetectors[i].first;
+                    auto cfIt = cachedFrequencies.find(fileId);
+                    auto csIt = cachedSpectra.find(fileId);
+                    if (cfIt == cachedFrequencies.end() || csIt == cachedSpectra.end())
+                        continue;
+                    const auto& freqs = cfIt->second;
+                    const auto& spec  = csIt->second;
+                    if (freqs.empty() || spec.empty())
+                        continue;
+
+                    const double localXMin = freqs.front();
+                    const double localXMax = freqs.back();
+                    auto mmY = std::minmax_element(spec.begin(), spec.end());
+                    const double localYMin = *mmY.first;
+                    const double localYMax = *mmY.second;
+
+                    if (!haveRange) {
+                        globalXMin = localXMin; globalXMax = localXMax;
+                        globalYMin = localYMin; globalYMax = localYMax;
+                        haveRange  = true;
+                    } else {
+                        globalXMin = std::min(globalXMin, localXMin);
+                        globalXMax = std::max(globalXMax, localXMax);
+                        globalYMin = std::min(globalYMin, localYMin);
+                        globalYMax = std::max(globalYMax, localYMax);
+                    }
+                }
+
+                if (haveRange && globalXMin < globalXMax) {
+                    ImPlot::SetupAxisLimits(ImAxis_X1, globalXMin, globalXMax, ImPlotCond_Always);
+                }
+
+                if (!effectiveForceY && haveRange) {
+                    // Log scale requires strictly positive Y limits; magnitude can be 0,
+                    // so floor the lower bound to a small positive value when log mode is on.
+                    double yMin = globalYMin;
+                    if (yScaleSelector == 1 && yMin <= 0.0) {
+                        yMin = (globalYMax > 0.0 ? globalYMax * 1e-6 : 1e-6);
+                    }
+                    ImPlot::SetupAxisLimits(ImAxis_Y1, yMin, globalYMax, ImPlotCond_Always);
+                }
+
+                shouldAutoscale = false;
+            }
 
             // When AFY is disabled, we want X-axis only interactions
             // But we can't lock Y-axis completely as it breaks all interactions
@@ -574,6 +635,13 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                 ImPlot::PlotLine("##SelectionEnd", end_x, end_y, 2);
             }
             
+            if (plotRendered) {
+                const ImPlotRect lim = ImPlot::GetPlotLimits();
+                if (lim.X.Min < lim.X.Max && pendingNextXMin >= pendingNextXMax) {
+                    manualXMin = lim.X.Min;
+                    manualXMax = lim.X.Max;
+                }
+            }
             ImPlot::EndPlot();
         }
     }
