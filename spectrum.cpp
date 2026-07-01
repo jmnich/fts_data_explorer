@@ -16,7 +16,6 @@ Spectrum::Spectrum()
       spectrumWindowSizeY(400.0f),
       spectrumDirty(true),
       isSelectingXRange(false),
-      applyXRangeSelection(false),
       selectionStartX(0.0),
       selectionEndX(0.0),
       shouldAutoscale(true),
@@ -35,6 +34,8 @@ Spectrum::Spectrum()
       forceYLimits(false),
       forcedYMin(0.0),
       forcedYMax(1.0),
+      pendingNextXMin(0.0),
+      pendingNextXMax(-1.0), // sentinel: invalid range -> no pending value
       showHilbertDebugWindow(false),
       hilbertDebugWindowInitialized(false),
       hilbertDebugWindowPosX(700.0f),
@@ -140,7 +141,6 @@ void Spectrum::resetSpectrumWindow() {
     
     // Reset X-range selection state
     isSelectingXRange = false;
-    applyXRangeSelection = false;
     selectionStartX = 0.0;
     selectionEndX = 0.0;
     
@@ -162,6 +162,8 @@ void Spectrum::resetSpectrumWindow() {
     forceYLimits = false;
     forcedYMin = 0.0;
     forcedYMax = 1.0;
+    pendingNextXMin = 0.0;
+    pendingNextXMax = -1.0;
     lastSpectrumParams.clear();
 }
 
@@ -283,19 +285,96 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
         
         // Plot all spectra for selected files
         bool isSpectrumWindowFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
-        
-        // Handle ESC key to reset zoom (must be outside BeginPlot to work when plot is not rendered)
+
+        // Handle ESC key to reset zoom (must be outside BeginPlot to work when plot is not rendered).
+        // On press: enable autoscale AND clear any pending manual X range so the pre-BeginPlot
+        // pan/select block doesn't keep re-applying the previous zoom.
         if (isSpectrumWindowFocused && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-            // Reset spectrum window zoom when ESC is pressed
-            shouldAutoscale = true; // Always force redraw with full range when ESC is pressed
+            shouldAutoscale   = true;
+            pendingNextXMin   = 0.0;
+            pendingNextXMax   = -1.0; // invalidate pending range
+            manualXMin        = 0.0;
+            manualXMax        = 0.0;
         }
-        
+
         // Reset arrow key state when window loses focus
         if (!isSpectrumWindowFocused) {
             leftArrowPressedLastFrame = false;
             rightArrowPressedLastFrame = false;
             leftArrowHandleFlag = false;
             rightArrowHandleFlag = false;
+        }
+
+        // Arrow key pan: computed here, applied via SetNextAxisLimits BEFORE BeginPlot
+        // (ImPlot requires axis-limits setup before BeginPlot to avoid SetupLocked asserts).
+        if (isSpectrumWindowFocused) {
+            if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) && !leftArrowPressedLastFrame) {
+                leftArrowPressedLastFrame = true;
+                leftArrowHandleFlag = true;
+            }
+            else if (ImGui::IsKeyReleased(ImGuiKey_LeftArrow)) {
+                leftArrowPressedLastFrame = false;
+                leftArrowHandleFlag = false;
+            }
+
+            if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) && !rightArrowPressedLastFrame) {
+                rightArrowPressedLastFrame = true;
+                rightArrowHandleFlag = true;
+            }
+            else if (ImGui::IsKeyReleased(ImGuiKey_RightArrow)) {
+                rightArrowPressedLastFrame = false;
+                rightArrowHandleFlag = false;
+            }
+        }
+
+        // Convert arrow-handle flags into pending next-plot X limits, applied before BeginPlot.
+        if (isSpectrumWindowFocused) {
+            if (leftArrowHandleFlag || rightArrowHandleFlag) {
+                // Translate by 10% of the current visible range (fall back to stored manualX*).
+                double currentXMin = (manualXMin < manualXMax) ? manualXMin : 0.0;
+                double currentXMax = (manualXMin < manualXMax) ? manualXMax : 1.0;
+                const double currentRange = currentXMax - currentXMin;
+                const double translationAmount = currentRange * 0.1;
+                if (leftArrowHandleFlag) {
+                    pendingNextXMin = currentXMin - translationAmount;
+                    pendingNextXMax = currentXMax - translationAmount;
+                    manualXMin       = pendingNextXMin;
+                    manualXMax       = pendingNextXMax;
+                    shouldAutoscale  = false;
+                    leftArrowHandleFlag = false;
+                }
+                if (rightArrowHandleFlag) {
+                    pendingNextXMin = currentXMin + translationAmount;
+                    pendingNextXMax = currentXMax + translationAmount;
+                    manualXMin       = pendingNextXMin;
+                    manualXMax       = pendingNextXMax;
+                    shouldAutoscale  = false;
+                    rightArrowHandleFlag = false;
+                }
+            }
+        }
+
+        // Pre-apply axis limits BEFORE BeginPlot.
+        // NOTE: ImPlotCond_Once means "once per runtime session" - after the first call
+        // it is silently ignored forever, so it CANNOT be used for ESC / pan / select.
+        // We use ImPlotCond_Always here, which is safe because each branch consumes its
+        // trigger immediately (shouldAutoscale is cleared, pending is invalidated), so
+        // the call only fires for a single frame - leaving ImPlot's mouse pan/zoom free
+        // on all subsequent frames.
+        const bool effectiveForceY = forceYLimits && (forcedYMin < forcedYMax);
+
+        if (shouldAutoscale && !effectiveForceY) {
+            // ESC / first-load: force-fit both axes to the data that will be plotted
+            // in the upcoming BeginPlot. SetNextAxisToFit has no condition and always
+            // applies, so it works regardless of prior ImPlotCond_Once state.
+            ImPlot::SetNextAxisToFit(ImAxis_X1);
+            ImPlot::SetNextAxisToFit(ImAxis_Y1);
+            shouldAutoscale = false;
+        } else if (!shouldAutoscale && pendingNextXMin < pendingNextXMax) {
+            // Arrow-key pan or shift-drag X-range selection: apply once, then consume.
+            ImPlot::SetNextAxisLimits(ImAxis_X1, pendingNextXMin, pendingNextXMax, ImPlotCond_Always);
+            pendingNextXMin = 0.0;
+            pendingNextXMax = -1.0; // invalidate
         }
         
         // Match graphing panel behavior: NoTitle only, no NoLegend to ensure full interactions
@@ -323,7 +402,6 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
 
             // Forced Y-axis limits: when enabled, lock the Y axis and skip all
             // autoscale / manual-zoom logic below so zoom & autoscale are disallowed.
-            const bool effectiveForceY = forceYLimits && (forcedYMin < forcedYMax);
             if (effectiveForceY) {
                 // In log mode, ensure the lower bound stays positive.
                 double yMin = forcedYMin;
@@ -334,61 +412,12 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                 ImPlot::SetupAxisLimits(ImAxis_Y1, yMin, yMax, ImPlotCond_Always);
             }
 
-            // Apply auto-scale when requested (ESC key or initial load) - skipped when Y is forced.
-            if (!effectiveForceY && shouldAutoscale) {
-                // Find the overall frequency range from all spectra
-                double globalXMin = 0.0;
-                double globalXMax = 0.0;
-                double globalYMin = 0.0;
-                double globalYMax = 0.0;
-                
-                for (size_t i = 0; i < primaryDetectors.size(); i++) {
-                    const auto& fileData = primaryDetectors[i];
-                    const std::string& fileId = fileData.first;
-                    
-                    // Get cached spectrum data
-                    auto cachedFrequenciesIt = cachedFrequencies.find(fileId);
-                    auto cachedSpectrumIt = cachedSpectra.find(fileId);
-                    
-                    if (cachedFrequenciesIt != cachedFrequencies.end() && cachedSpectrumIt != cachedSpectra.end() && 
-                        !cachedFrequenciesIt->second.empty() && !cachedSpectrumIt->second.empty()) {
-                        
-                        const auto& frequencies = cachedFrequenciesIt->second;
-                        const auto& spectrum = cachedSpectrumIt->second;
-                        
-                        // Find min/max for this spectrum
-                        double localXMin = frequencies.front();
-                        double localXMax = frequencies.back();
-                        auto minmaxY = std::minmax_element(spectrum.begin(), spectrum.end());
-                        double localYMin = *minmaxY.first;
-                        double localYMax = *minmaxY.second;
-                        
-                        globalXMin = std::min(globalXMin, localXMin);
-                        globalXMax = std::max(globalXMax, localXMax);
-                        globalYMin = std::min(globalYMin, localYMin);
-                        globalYMax = std::max(globalYMax, localYMax);
-                    }
-                }
+            // (ESC fit-to-all and arrow-pan / shift-select are handled before BeginPlot
+            //  via SetNextAxisToFit / SetNextAxisLimits - see the pre-BeginPlot block above.
+            //  SetupAxisLimits with ImPlotCond_Once is intentionally NOT used here because
+            //  ImPlotCond_Once means "once per runtime session" - it would be silently
+            //  ignored after the first call, breaking ESC and shift-select zoom.)
 
-                ImPlot::SetupAxisLimits(ImAxis_X1, globalXMin, globalXMax, ImPlotCond_Always);
-
-                // Log scale requires strictly positive Y limits; magnitude can be 0,
-                // so floor the lower bound to a small positive value when log mode is on.
-                if (yScaleSelector == 1 && globalYMin <= 0.0) {
-                    globalYMin = (globalYMax > 0.0 ? globalYMax * 1e-6 : 1e-6);
-                }
-                ImPlot::SetupAxisLimits(ImAxis_Y1, globalYMin, globalYMax, ImPlotCond_Always);
-
-                // Reset the autoscale flag after applying
-                shouldAutoscale = false;
-            }
-            
-            // Apply X-range selection if requested (must be done before state management)
-            if (applyXRangeSelection && selectionStartX != selectionEndX) {
-                ImPlot::SetupAxisLimits(ImAxis_X1, selectionStartX, selectionEndX, ImPlotCond_Always);
-                applyXRangeSelection = false; // Reset flag after applying
-            }
-            
             // When AFY is disabled, we want X-axis only interactions
             // But we can't lock Y-axis completely as it breaks all interactions
             // Instead, we'll rely on the user to manually control Y-axis when needed
@@ -404,99 +433,32 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
             // Note: Ctrl+Y shortcut for toggling AFY is handled in main.cpp
             // The autoFitYAxis parameter is passed from the main application state
 
-            // Handle arrow key presses for panning (only when spectrum window is focused)
-            if (isSpectrumWindowFocused) {
-                // Left arrow handling
-                if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) && !leftArrowPressedLastFrame) {
-                    leftArrowPressedLastFrame = true;
-                    leftArrowHandleFlag = true;
-                }
-                else if (ImGui::IsKeyReleased(ImGuiKey_LeftArrow)) {
-                    leftArrowPressedLastFrame = false;
-                    leftArrowHandleFlag = false;
-                }
+            // (Arrow-key pan and X-range selection are now handled before BeginPlot
+            //  using SetNextAxisLimits, to avoid the ImPlot SetupLocked assert.)
 
-                // Right arrow handling
-                if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) && !rightArrowPressedLastFrame) {
-                    rightArrowPressedLastFrame = true;
-                    rightArrowHandleFlag = true;
-                }
-                else if (ImGui::IsKeyReleased(ImGuiKey_RightArrow)) {
-                    rightArrowPressedLastFrame = false;
-                    rightArrowHandleFlag = false;
-                }
-            }
-
-            // Apply arrow key panning if requested (must be done before any plot operations)
-            if (isSpectrumWindowFocused) {
-                if(leftArrowHandleFlag) {
-                    // Get current plot limits
-                    double currentXMin = ImPlot::GetPlotLimits().X.Min;
-                    double currentXMax = ImPlot::GetPlotLimits().X.Max;
-                    double currentRange = currentXMax - currentXMin;
-                    double translationAmount = currentRange / 10.0; // Pan by 10% of current visible range
-                    
-                    // Apply panning
-                    ImPlot::SetupAxisLimits(ImAxis_X1, currentXMin - translationAmount, currentXMax - translationAmount, ImPlotCond_Always);
-                    
-                    // Update manual zoom limits
-                    manualXMin = currentXMin - translationAmount;
-                    manualXMax = currentXMax - translationAmount;
-                    shouldAutoscale = false;
-                    
-                    leftArrowHandleFlag = false;
-                } else if(rightArrowHandleFlag) {
-                    // Get current plot limits
-                    double currentXMin = ImPlot::GetPlotLimits().X.Min;
-                    double currentXMax = ImPlot::GetPlotLimits().X.Max;
-                    double currentRange = currentXMax - currentXMin;
-                    double translationAmount = currentRange / 10.0; // Pan by 10% of current visible range
-                    
-                    // Apply panning
-                    ImPlot::SetupAxisLimits(ImAxis_X1, currentXMin + translationAmount, currentXMax + translationAmount, ImPlotCond_Always);
-                    
-                    // Update manual zoom limits
-                    manualXMin = currentXMin + translationAmount;
-                    manualXMax = currentXMax + translationAmount;
-                    shouldAutoscale = false;
-                    
-                    rightArrowHandleFlag = false;
-                }
-            }
-            
-            // Handle X-range selection with Shift key - state management (only when spectrum window is focused)
+            // X-range selection: still detect shift-drag here (for visualization),
+            // but record the result in pendingNextXMin/Max for pre-BeginPlot application.
             bool shiftPressed = ImGui::GetIO().KeyShift;
             bool isOverPlot = ImPlot::IsPlotHovered();
-            
+
             if (isSpectrumWindowFocused && isOverPlot && shiftPressed && !isSelectingXRange) {
                 // Start selection when Shift is pressed over plot
                 isSelectingXRange = true;
-                // Reset selection positions
                 selectionStartX = 0.0;
                 selectionEndX = 0.0;
             } else if (!shiftPressed && isSelectingXRange) {
-                // End selection when Shift is released
                 isSelectingXRange = false;
-                
-                // Only finalize if we have valid selection
-                if(selectionStartX != selectionEndX) {
-                    applyXRangeSelection = true;
-                    
-                    if(selectionStartX > selectionEndX)
-                    {
-                        // make sure start is always smaller
-                        double dum = selectionStartX;
-                        selectionStartX = selectionEndX;
-                        selectionEndX = dum;
-                    }
-                    
-                    // Store manual zoom limits
-                    manualXMin = selectionStartX;
-                    manualXMax = selectionEndX;
+                if (selectionStartX != selectionEndX) {
+                    double sX = selectionStartX;
+                    double eX = selectionEndX;
+                    if (sX > eX) std::swap(sX, eX);
+                    pendingNextXMin = sX;
+                    pendingNextXMax = eX;
+                    manualXMin = sX;
+                    manualXMax = eX;
                     shouldAutoscale = false;
                 }
             }
-            
             // Simple heuristic: if we have data but no valid zoom range, reset to auto-scale
             // Only apply this on first load to allow manual interactions after initial display
             if (!primaryDetectors.empty() && !firstLoadCompleted) {

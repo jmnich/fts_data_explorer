@@ -34,7 +34,6 @@ public:
     
     // X-range selection state for spectrum window
     bool isSelectingXRange;
-    bool applyXRangeSelection;
     double selectionStartX;
     double selectionEndX;
     
@@ -62,6 +61,11 @@ public:
     bool forceYLimits;
     double forcedYMin;
     double forcedYMax;
+
+    // Pending X-axis range to apply on next BeginPlot (used for arrow-key pan and
+    // X-range selection). Set to < min to indicate "no pending value".
+    double pendingNextXMin;
+    double pendingNextXMax;
 
     // Per-file last-seen spectrum computation parameters (for cache invalidation)
     // Stored as {K, xUnit, refLaser}
