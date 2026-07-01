@@ -54,6 +54,7 @@ public:
     // UI controls for spectrum panel
     int xUnitSelector; // 0: cm-1, 1: um, 2: THz
     int yScaleSelector; // 0: linear, 1: log10
+    int prevYScaleSelector; // tracks last rendered yScaleSelector for change detection
     float refLaserTextbox; // Reference laser wavelength in um
     int Kpadding; // Zero-pad factor (N = n*(K+1)); 0 disables padding
 

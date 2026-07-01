@@ -31,6 +31,7 @@ Spectrum::Spectrum()
       appState(nullptr),
       xUnitSelector(0), // Default to cm-1
       yScaleSelector(0), // Default linear Y-axis
+      prevYScaleSelector(0),
       refLaserTextbox(1.550f), // Default value
       Kpadding(2), // Default zero-pad factor (matches test17)
       forceYLimits(false),
@@ -163,6 +164,7 @@ void Spectrum::resetSpectrumWindow() {
     // Reset UI controls
     xUnitSelector = 0; // Reset to cm-1
     yScaleSelector = 0; // Reset to linear
+    prevYScaleSelector = 0;
     refLaserTextbox = 1.550; // Reset to default value
     Kpadding = 2; // Reset to default zero-pad factor
     forceYLimits = false;
@@ -376,6 +378,16 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
             ImPlot::SetNextAxisLimits(ImAxis_X1, pendingNextXMin, pendingNextXMax, ImPlotCond_Always);
             pendingNextXMin = 0.0;
             pendingNextXMax = -1.0; // invalidate
+        }
+
+        // When the Y scale (lin/log) selector changes, re-fit Y only - keep the
+        // current X range intact so the user keeps looking at the same spectral region.
+        if (yScaleSelector != prevYScaleSelector) {
+            const bool forceY = forceYLimits && (forcedYMin < forcedYMax);
+            if (!forceY) {
+                ImPlot::SetNextAxisToFit(ImAxis_Y1);
+            }
+            prevYScaleSelector = yScaleSelector;
         }
         
         // Match graphing panel behavior: NoTitle only, no NoLegend to ensure full interactions

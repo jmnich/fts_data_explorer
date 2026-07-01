@@ -1926,7 +1926,6 @@ int main() {
             if (ImGui::Button("lin##YScaleLin")) {
                 if (!linSelected) {
                     appState.spectrum.yScaleSelector = 0;
-                    appState.spectrum.shouldAutoscale = true;
                     appState.needsRedraw = true;
                 }
             }
@@ -1940,7 +1939,6 @@ int main() {
             if (ImGui::Button("log##YScaleLog")) {
                 if (!logSelected) {
                     appState.spectrum.yScaleSelector = 1;
-                    appState.spectrum.shouldAutoscale = true;
                     appState.needsRedraw = true;
                 }
             }
