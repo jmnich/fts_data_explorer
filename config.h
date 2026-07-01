@@ -31,7 +31,8 @@ struct AppConfig {
     float spectrumWindowPosY = 100.0f;
     float spectrumWindowSizeX = 600.0f;
     float spectrumWindowSizeY = 400.0f;
-    bool spectrumForceYLimits = false;
+    bool spectrumForceYLimits = false; // legacy: mapped to spectrumYAxisMode on load
+    int spectrumYAxisMode = 0; // 0: all, 1: tight, 2: force
     double spectrumForcedYMin = 0.0;
     double spectrumForcedYMax = 1.0;
     
@@ -101,7 +102,7 @@ struct AppConfig {
             configFile << "pos_y=" << spectrumWindowPosY << "\n";
             configFile << "size_x=" << spectrumWindowSizeX << "\n";
             configFile << "size_y=" << spectrumWindowSizeY << "\n";
-            configFile << "force_y_limits=" << (spectrumForceYLimits ? "true" : "false") << "\n";
+            configFile << "y_axis_mode=" << spectrumYAxisMode << "\n";
             configFile << "forced_y_min=" << spectrumForcedYMin << "\n";
             configFile << "forced_y_max=" << spectrumForcedYMax << "\n";
             
@@ -192,7 +193,11 @@ struct AppConfig {
                         } else if (key == "size_y") {
                             spectrumWindowSizeY = std::stof(value);
                         } else if (key == "force_y_limits") {
+                            // Legacy key: map "true" to force mode (2), "false" to all (0)
                             spectrumForceYLimits = (value == "true");
+                            if (spectrumForceYLimits) spectrumYAxisMode = 2;
+                        } else if (key == "y_axis_mode") {
+                            spectrumYAxisMode = std::stoi(value);
                         } else if (key == "forced_y_min") {
                             spectrumForcedYMin = std::stod(value);
                         } else if (key == "forced_y_max") {

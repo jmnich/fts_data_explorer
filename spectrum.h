@@ -59,8 +59,10 @@ public:
     float refLaserTextbox; // Reference laser wavelength in um
     int Kpadding; // Zero-pad factor (N = n*(K+1)); 0 disables padding
 
-    // Forced Y-axis limits (persisted in config)
-    bool forceYLimits;
+    // Y-axis mode for the spectrum plot (persisted in config)
+    // 0: auto-fit to all data, 1: auto-fit to visible data only, 2: force user-supplied min/max
+    int yAxisMode;
+    int prevYAxisMode;
     double forcedYMin;
     double forcedYMax;
 
@@ -68,10 +70,6 @@ public:
     // X-range selection). Set to < min to indicate "no pending value".
     double pendingNextXMin;
     double pendingNextXMax;
-
-    // Pending Y-axis-only auto-fit (used when "Force Y limits" is unchecked).
-    // Unlike shouldAutoscale, this does NOT touch the X-axis.
-    bool pendingAutoscaleYOnly;
 
     // Per-file last-seen spectrum computation parameters (for cache invalidation)
     // Stored as {K, xUnit, refLaser}
@@ -93,8 +91,7 @@ public:
     
     // Render spectrum window for multiple files
     void renderSpectrumWindow(const std::vector<std::pair<std::string, std::vector<double>>>& primaryDetectors,
-                             const std::vector<InterferogramData>& rawDataCache = {},
-                             bool autoFitYAxis = true);
+                             const std::vector<InterferogramData>& rawDataCache = {});
     
     // Render Hilbert debug window
     void renderHilbertDebugWindow(const std::vector<std::string>& fileIds,

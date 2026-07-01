@@ -35,12 +35,12 @@ Spectrum::Spectrum()
       prevYScaleSelector(0),
       refLaserTextbox(1.550f), // Default value
       Kpadding(2), // Default zero-pad factor (matches test17)
-      forceYLimits(false),
+      yAxisMode(0), // Default: auto-fit to all data
+      prevYAxisMode(0),
       forcedYMin(0.0),
       forcedYMax(1.0),
       pendingNextXMin(0.0),
       pendingNextXMax(-1.0), // sentinel: invalid range -> no pending value
-      pendingAutoscaleYOnly(false),
       showHilbertDebugWindow(false),
       hilbertDebugWindowInitialized(false),
       hilbertDebugWindowPosX(700.0f),
@@ -170,12 +170,12 @@ void Spectrum::resetSpectrumWindow() {
     prevYScaleSelector = 0;
     refLaserTextbox = 1.550; // Reset to default value
     Kpadding = 2; // Reset to default zero-pad factor
-    forceYLimits = false;
+    yAxisMode = 0; // Reset to auto-fit to all data
+    prevYAxisMode = 0;
     forcedYMin = 0.0;
     forcedYMax = 1.0;
     pendingNextXMin = 0.0;
     pendingNextXMax = -1.0;
-    pendingAutoscaleYOnly = false;
     lastSpectrumParams.clear();
 }
 
@@ -215,8 +215,7 @@ bool Spectrum::isSpectrumDirty(const std::string& fileId, const std::vector<doub
 }
 
 void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std::vector<double>>>& primaryDetectors,
-                                   const std::vector<InterferogramData>& rawDataCache,
-                                   bool autoFitYAxis) {
+                                   const std::vector<InterferogramData>& rawDataCache) {
     // Only set position/size on first use, then let user move/resize freely
     ImGui::SetNextWindowPos(ImVec2(spectrumWindowPosX, spectrumWindowPosY), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(spectrumWindowSizeX, spectrumWindowSizeY), ImGuiCond_FirstUseEver);
@@ -407,22 +406,24 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
         // When the Y scale (lin/log) selector changes, re-fit Y only - keep the
         // current X range intact so the user keeps looking at the same spectral region.
         if (yScaleSelector != prevYScaleSelector) {
-            const bool forceY = forceYLimits && (forcedYMin < forcedYMax);
-            if (!forceY) {
+            if (yAxisMode != 2) {
                 ImPlot::SetNextAxisToFit(ImAxis_Y1);
             }
             prevYScaleSelector = yScaleSelector;
         }
 
-        // When "Force Y limits" is unchecked, re-fit Y only - keep the X range intact.
-        if (pendingAutoscaleYOnly) {
-            const bool forceY = forceYLimits && (forcedYMin < forcedYMax);
-            if (!forceY) {
+        // When the Y-axis mode changes, apply the new behavior immediately.
+        // Mode 0 (all) / 1 (tight): re-fit Y to the relevant data range.
+        // Mode 2 (force): apply user-supplied limits if valid.
+        if (yAxisMode != prevYAxisMode) {
+            if (yAxisMode == 0 || yAxisMode == 1) {
                 ImPlot::SetNextAxisToFit(ImAxis_Y1);
+            } else if (yAxisMode == 2 && forcedYMin < forcedYMax) {
+                ImPlot::SetNextAxisLimits(ImAxis_Y1, forcedYMin, forcedYMax, ImPlotCond_Always);
             }
-            pendingAutoscaleYOnly = false;
+            prevYAxisMode = yAxisMode;
         }
-        
+
         // Match graphing panel behavior: NoTitle only, no NoLegend to ensure full interactions
         ImPlotFlags plot_flags = ImPlotFlags_NoTitle;
 
@@ -435,9 +436,12 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
             ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoTickMarks;
             ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
 
-            if (autoFitYAxis) {
-                y_flags |= ImPlotAxisFlags_AutoFit; // Auto-fit Y-axis when AFY is enabled
+            if (yAxisMode == 0) {
+                y_flags |= ImPlotAxisFlags_AutoFit; // Auto-fit Y-axis to all data
+            } else if (yAxisMode == 1) {
+                y_flags |= ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_RangeFit; // Auto-fit Y-axis to visible data only
             }
+            // yAxisMode == 2 (force): no auto-fit flag, Y axis is locked to forcedYMin/forcedYMax below
             // Note: When AFY is disabled, we don't lock the Y-axis here because it prevents all interactions
             // Instead, we handle the Y-axis locking separately after checking for manual limits
 
@@ -459,7 +463,7 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
 
             // Forced Y-axis limits: when enabled, lock the Y axis and skip the
             // Y portion of auto-scale so the user's forced range is respected.
-            const bool effectiveForceY = forceYLimits && (forcedYMin < forcedYMax);
+            const bool effectiveForceY = (yAxisMode == 2) && (forcedYMin < forcedYMax);
             if (effectiveForceY) {
                 // In log mode, ensure the lower bound stays positive.
                 double yMin = forcedYMin;
@@ -531,8 +535,8 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
             // But we can't lock Y-axis completely as it breaks all interactions
             // Instead, we'll rely on the user to manually control Y-axis when needed
             // and provide visual feedback through the legend.
-            // Skipped entirely when forceYLimits is on (axis already locked above).
-            if (!effectiveForceY && !autoFitYAxis && !shouldAutoscale) {
+            // Skipped entirely when force mode is on (axis already locked above).
+            if (!effectiveForceY && yAxisMode != 0 && yAxisMode != 1 && !shouldAutoscale) {
                 // Apply manual Y-axis limits if set, but only once to allow user interactions
                 if (manualYMin != manualYMax) {
                     ImPlot::SetupAxisLimits(ImAxis_Y1, manualYMin, manualYMax, ImPlotCond_Once);

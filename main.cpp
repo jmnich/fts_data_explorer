@@ -488,7 +488,7 @@ int main() {
     appState.spectrum.spectrumWindowPosY = config.spectrumWindowPosY;
     appState.spectrum.spectrumWindowSizeX = config.spectrumWindowSizeX;
     appState.spectrum.spectrumWindowSizeY = config.spectrumWindowSizeY;
-    appState.spectrum.forceYLimits  = config.spectrumForceYLimits;
+    appState.spectrum.yAxisMode     = config.spectrumYAxisMode;
     appState.spectrum.forcedYMin    = config.spectrumForcedYMin;
     appState.spectrum.forcedYMax    = config.spectrumForcedYMax;
     
@@ -1980,23 +1980,61 @@ int main() {
             }
             ImGui::PopStyleColor(3);
 
-            // Force Y-axis limits checkbox + min/max inputs
-            if (ImGui::Checkbox("Force Y limits", &appState.spectrum.forceYLimits)) {
-                if (!appState.spectrum.forceYLimits) {
-                    appState.spectrum.pendingAutoscaleYOnly = true; // recover Y range on uncheck
+            // Y-axis mode selector (all / tight / force) - matching X-unit / Y-scale button style
+            ImGui::Text("Y Axis");
+            ImGui::SameLine();
+
+            const bool allSelected   = (appState.spectrum.yAxisMode == 0);
+            const bool tightSelected = (appState.spectrum.yAxisMode == 1);
+            const bool forceSelected = (appState.spectrum.yAxisMode == 2);
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[allSelected ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("all##YAxisAll")) {
+                if (!allSelected) {
+                    appState.spectrum.yAxisMode = 0;
+                    appState.needsRedraw = true;
                 }
-                appState.needsRedraw = true;
             }
+            ImGui::PopStyleColor(3);
+
+            ImGui::SameLine();
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[tightSelected ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  tightSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("tight##YAxisTight")) {
+                if (!tightSelected) {
+                    appState.spectrum.yAxisMode = 1;
+                    appState.needsRedraw = true;
+                }
+            }
+            ImGui::PopStyleColor(3);
+
+            ImGui::SameLine();
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[forceSelected ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  forceSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("force##YAxisForce")) {
+                if (!forceSelected) {
+                    appState.spectrum.yAxisMode = 2;
+                    appState.needsRedraw = true;
+                }
+            }
+            ImGui::PopStyleColor(3);
+
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("When enabled, the Y-axis is locked to the given min/max\nand zoom/autoscale on Y is disabled.");
+                ImGui::SetTooltip("all: auto-fit Y to all data\n"
+                                  "tight: auto-fit Y to visible data only\n"
+                                  "force: lock Y to the given min/max");
             }
 
-            if (appState.spectrum.forceYLimits) {
-                ImGui::SameLine();
+            if (forceSelected) {
                 ImGui::Text("min:");
                 ImGui::SameLine();
                 ImGui::SetNextItemWidth(80.0f);
-                // InputDouble accepts only numeric input; invalid edits revert automatically.
                 if (ImGui::InputDouble("##ForcedYMin", &appState.spectrum.forcedYMin, 0.0, 0.0, "%.6g")) {
                     appState.needsRedraw = true;
                 }
@@ -2007,7 +2045,6 @@ int main() {
                 if (ImGui::InputDouble("##ForcedYMax", &appState.spectrum.forcedYMax, 0.0, 0.0, "%.6g")) {
                     appState.needsRedraw = true;
                 }
-                // Enforce min < max
                 if (appState.spectrum.forcedYMin >= appState.spectrum.forcedYMax) {
                     ImGui::SameLine();
                     ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "(min<max!)");
@@ -2106,7 +2143,7 @@ int main() {
             for (size_t i = 0; i < appState.loadedData.size(); i++) {
                 primaryDetectors.emplace_back(appState.selectedFilenames[i], appState.loadedData[i].primaryDetector);
             }
-            appState.spectrum.renderSpectrumWindow(primaryDetectors, appState.rawDataCache, appState.autoFitYAxis);
+            appState.spectrum.renderSpectrumWindow(primaryDetectors, appState.rawDataCache);
             
             // Render Hilbert debug window
             if (appState.spectrum.showHilbertDebugWindow) {
@@ -2149,7 +2186,7 @@ int main() {
     config.spectrumWindowPosY = appState.spectrum.spectrumWindowPosY;
     config.spectrumWindowSizeX = appState.spectrum.spectrumWindowSizeX;
     config.spectrumWindowSizeY = appState.spectrum.spectrumWindowSizeY;
-    config.spectrumForceYLimits = appState.spectrum.forceYLimits;
+    config.spectrumYAxisMode    = appState.spectrum.yAxisMode;
     config.spectrumForcedYMin   = appState.spectrum.forcedYMin;
     config.spectrumForcedYMax   = appState.spectrum.forcedYMax;
     
