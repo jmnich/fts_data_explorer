@@ -18,9 +18,10 @@ public:
     /// X-axis unit selector for the output spectrum.
     enum class SpectrumXUnit { CmInv = 0, Um = 1, THz = 2 };
 
-    /// Output of processSpectrum: X axis (units per SpectrumXUnit, index 0 dropped) + magnitude.
+    /// Output of processSpectrum: X axis (units per SpectrumXUnit, index 0 dropped,
+    /// negative-frequency half discarded) + magnitude.
     struct ProcessedSpectrum {
-        std::vector<double> spectrumX;   ///< length N-1 (index 0 = Inf dropped)
+        std::vector<double> spectrumX;   ///< length N/2 (positive freqs only, index 0 = Inf dropped)
         std::vector<double> spectrumY;   ///< magnitude, normalized by N
         std::vector<double> correctedX;  ///< Hilbert-corrected IGM X axis (um) - for debugging
     };

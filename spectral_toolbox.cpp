@@ -193,12 +193,16 @@ SpectralToolbox::ProcessedSpectrum SpectralToolbox::processSpectrum(
     fftw_plan plan = fftw_plan_dft_1d((int)N, in, out, FFTW_FORWARD, FFTW_ESTIMATE);
     fftw_execute(plan);
 
-    // 7. Magnitude + build X axis (drop index 0 -> Inf), convert unit
-    result.spectrumX.reserve(N - 1);
-    result.spectrumY.reserve(N - 1);
+    // 7. Magnitude + build X axis (drop index 0 -> Inf), convert unit.
+    //    Keep only the positive-frequency half [1, N/2] (Nyquist inclusive);
+    //    the right half [N/2+1, N-1] holds the conjugate-redundant negative
+    //    frequencies for a real-input FFT and is dropped.
+    const std::size_t halfN = N / 2;
+    result.spectrumX.reserve(halfN);
+    result.spectrumY.reserve(halfN);
     const double factor = OPD * static_cast<double>(K + 1);
     const double invN   = 1.0 / static_cast<double>(N);
-    for (std::size_t i = 1; i < N; ++i) {
+    for (std::size_t i = 1; i <= halfN; ++i) {
         const double um = factor / static_cast<double>(i);
         result.spectrumX.push_back(
             xUnit == SpectrumXUnit::Um    ? um

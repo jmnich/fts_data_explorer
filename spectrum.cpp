@@ -29,6 +29,7 @@ Spectrum::Spectrum()
       rightArrowHandleFlag(false),
       appState(nullptr),
       xUnitSelector(0), // Default to cm-1
+      yScaleSelector(0), // Default linear Y-axis
       refLaserTextbox(1.550f), // Default value
       Kpadding(2), // Default zero-pad factor (matches test17)
       showHilbertDebugWindow(false),
@@ -152,6 +153,7 @@ void Spectrum::resetSpectrumWindow() {
     
     // Reset UI controls
     xUnitSelector = 0; // Reset to cm-1
+    yScaleSelector = 0; // Reset to linear
     refLaserTextbox = 1.550; // Reset to default value
     Kpadding = 2; // Reset to default zero-pad factor
     lastSpectrumParams.clear();
@@ -307,6 +309,11 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
             // Instead, we handle the Y-axis locking separately after checking for manual limits
             
             ImPlot::SetupAxes("", "", x_flags, y_flags);
+
+            // Apply Y-axis scale (log10 / linear) selected in the Spectrum panel.
+            if (yScaleSelector == 1) {
+                ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Log10);
+            }
             
             // Apply auto-scale when requested (ESC key or initial load)
             if (shouldAutoscale) {
@@ -346,6 +353,11 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
 
                 ImPlot::SetupAxisLimits(ImAxis_X1, globalXMin, globalXMax, ImPlotCond_Always);
 
+                // Log scale requires strictly positive Y limits; magnitude can be 0,
+                // so floor the lower bound to a small positive value when log mode is on.
+                if (yScaleSelector == 1 && globalYMin <= 0.0) {
+                    globalYMin = (globalYMax > 0.0 ? globalYMax * 1e-6 : 1e-6);
+                }
                 ImPlot::SetupAxisLimits(ImAxis_Y1, globalYMin, globalYMax, ImPlotCond_Always);
 
                 // Reset the autoscale flag after applying

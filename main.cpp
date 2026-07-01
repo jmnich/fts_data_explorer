@@ -1906,6 +1906,19 @@ int main() {
                 invalidateSpectrumCaches();
             }
 
+            // Y scale selector (lin / log) - rendering only, no cache invalidation needed
+            const char* yScaleItems[] = { "lin", "log" };
+            ImGui::Text("Y scale:");
+            ImGui::SameLine();
+
+            remainingWidth = ImGui::GetContentRegionAvail().x;
+            ImGui::SetNextItemWidth(remainingWidth);
+            if (ImGui::Combo("##YScaleSelector", &appState.spectrum.yScaleSelector, yScaleItems, IM_ARRAYSIZE(yScaleItems))) {
+                // Force autoscale on scale change so limits are recomputed (log needs >0 floor)
+                appState.spectrum.shouldAutoscale = true;
+                appState.needsRedraw = true;
+            }
+
             // Reference laser textbox
             ImGui::Text("Ref laser [um]:");
             ImGui::SameLine();
