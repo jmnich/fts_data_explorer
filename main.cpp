@@ -554,6 +554,7 @@ int main() {
             bool yKeyPressed = glfwGetKey(window, GLFW_KEY_Y) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
             bool aKeyPressed = glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
             bool dKeyPressed = glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
+            bool qKeyPressed = glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
             
             // 'Ctrl+Y' - Toggle auto-fit Y-axis (only on initial press)
             if (yKeyPressed && !appState.yKeyPressedLastFrame) {
@@ -630,14 +631,22 @@ int main() {
                 }
             }
             
+            // 'Ctrl+Q' - Toggle tracking cursor (only on initial press)
+            if (qKeyPressed && !appState.qKeyPressedLastFrame) {
+                appState.spectrum.showTrackingCursor = !appState.spectrum.showTrackingCursor;
+                appState.needsRedraw = true;
+            }
+
             // Update key state tracking for next frame
             appState.yKeyPressedLastFrame = yKeyPressed;
             appState.aKeyPressedLastFrame = aKeyPressed;
             appState.dKeyPressedLastFrame = dKeyPressed;
+            appState.qKeyPressedLastFrame = qKeyPressed;
         } else {
             // Reset key states when keyboard is captured (e.g., typing in text field)
             appState.yKeyPressedLastFrame = false;
             appState.aKeyPressedLastFrame = false;
+            appState.qKeyPressedLastFrame = false;
         }
 
         // Reapply UI scaling if size changed
@@ -1227,6 +1236,7 @@ int main() {
                     ImGui::Text("Ctrl+A: Toggle align peaks");
                     ImGui::Text("Ctrl+D: Toggle downsampling");
                     ImGui::Text("Ctrl+H: Go back to home");
+                    ImGui::Text("Ctrl+Q: Toggle tracking cursor");
                     ImGui::EndMenu();
                 }
                 
@@ -1968,6 +1978,32 @@ int main() {
                 ImVec4(0.0f, 0.0f, 0.0f, 0.0f), // unselected: transparent
                 ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive) // selected: highlight
             };
+
+            // Tracking cursor toggle
+            const bool cursorOn = appState.spectrum.showTrackingCursor;
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[cursorOn ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cursorOn ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("On##CursorOn")) {
+                if (!cursorOn) {
+                    appState.spectrum.showTrackingCursor = true;
+                    appState.needsRedraw = true;
+                }
+            }
+            ImGui::PopStyleColor(3);
+            ImGui::SameLine(0.0f, 0.0f);
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[!cursorOn ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  !cursorOn ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("Off##CursorOff")) {
+                if (cursorOn) {
+                    appState.spectrum.showTrackingCursor = false;
+                    appState.needsRedraw = true;
+                }
+            }
+            ImGui::PopStyleColor(3);
 
             // X unit selector (cm-1 / µm / THz) - changing unit invalidates spectrum cache
             ImGui::Text("X unit");

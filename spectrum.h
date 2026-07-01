@@ -49,6 +49,9 @@ public:
     double savedYMin;
     double savedYMax;
 
+    // Tracking cursor state
+    bool showTrackingCursor;
+
     // Arrow key handling for spectrum window
     bool leftArrowPressedLastFrame;
     bool rightArrowPressedLastFrame;

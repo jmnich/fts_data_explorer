@@ -39,6 +39,7 @@ struct AppState {
     bool yKeyPressedLastFrame;
     bool aKeyPressedLastFrame;
     bool dKeyPressedLastFrame;
+    bool qKeyPressedLastFrame;
     
     // Performance optimization
     bool enableDownsampling;

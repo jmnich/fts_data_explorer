@@ -21,6 +21,7 @@ AppState::AppState()
       yKeyPressedLastFrame(false),
       aKeyPressedLastFrame(false),
       dKeyPressedLastFrame(false),
+      qKeyPressedLastFrame(false),
       enableDownsampling(true),
       zoomRange({0, 0}),
       shouldAutoscale(false),
@@ -78,6 +79,7 @@ void AppState::reset() {
     yKeyPressedLastFrame = false;
     aKeyPressedLastFrame = false;
     dKeyPressedLastFrame = false;
+    qKeyPressedLastFrame = false;
     enableDownsampling = true;
     zoomRange = {0, 0};
     shouldAutoscale = false;
