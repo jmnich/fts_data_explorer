@@ -69,6 +69,10 @@ public:
     double pendingNextXMin;
     double pendingNextXMax;
 
+    // Pending Y-axis-only auto-fit (used when "Force Y limits" is unchecked).
+    // Unlike shouldAutoscale, this does NOT touch the X-axis.
+    bool pendingAutoscaleYOnly;
+
     // Per-file last-seen spectrum computation parameters (for cache invalidation)
     // Stored as {K, xUnit, refLaser}
     std::map<std::string, std::array<double, 3>> lastSpectrumParams;

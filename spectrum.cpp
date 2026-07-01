@@ -40,6 +40,7 @@ Spectrum::Spectrum()
       forcedYMax(1.0),
       pendingNextXMin(0.0),
       pendingNextXMax(-1.0), // sentinel: invalid range -> no pending value
+      pendingAutoscaleYOnly(false),
       showHilbertDebugWindow(false),
       hilbertDebugWindowInitialized(false),
       hilbertDebugWindowPosX(700.0f),
@@ -174,6 +175,7 @@ void Spectrum::resetSpectrumWindow() {
     forcedYMax = 1.0;
     pendingNextXMin = 0.0;
     pendingNextXMax = -1.0;
+    pendingAutoscaleYOnly = false;
     lastSpectrumParams.clear();
 }
 
@@ -410,6 +412,15 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                 ImPlot::SetNextAxisToFit(ImAxis_Y1);
             }
             prevYScaleSelector = yScaleSelector;
+        }
+
+        // When "Force Y limits" is unchecked, re-fit Y only - keep the X range intact.
+        if (pendingAutoscaleYOnly) {
+            const bool forceY = forceYLimits && (forcedYMin < forcedYMax);
+            if (!forceY) {
+                ImPlot::SetNextAxisToFit(ImAxis_Y1);
+            }
+            pendingAutoscaleYOnly = false;
         }
         
         // Match graphing panel behavior: NoTitle only, no NoLegend to ensure full interactions

@@ -1983,7 +1983,7 @@ int main() {
             // Force Y-axis limits checkbox + min/max inputs
             if (ImGui::Checkbox("Force Y limits", &appState.spectrum.forceYLimits)) {
                 if (!appState.spectrum.forceYLimits) {
-                    appState.spectrum.shouldAutoscale = true; // recover full range on uncheck
+                    appState.spectrum.pendingAutoscaleYOnly = true; // recover Y range on uncheck
                 }
                 appState.needsRedraw = true;
             }
