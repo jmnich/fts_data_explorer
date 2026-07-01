@@ -75,6 +75,12 @@ struct AppState {
     // Last x axis limits
     double last_x_min;
     double last_x_max;
+
+    // Last y axis limits (saved from previous frame visible range)
+    float last_ref_y_min;
+    float last_ref_y_max;
+    float last_prim_y_min;
+    float last_prim_y_max;
     
     // Arrow key handling
     bool leftArrowPressedLastFrame;

@@ -8,6 +8,34 @@
 #include <limits>
 #include "app_state.h"
 
+static void SetupAxisTicksLimited(ImAxis axis, double min, double max, int maxTicks = 12) {
+    double range = max - min;
+    if (range <= 0.0) return;
+
+    double roughStep = range / (maxTicks - 1);
+    double exponent = std::floor(std::log10(roughStep));
+    double fraction = roughStep / std::pow(10.0, exponent);
+
+    double niceFraction;
+    if (fraction <= 1.0) niceFraction = 1.0;
+    else if (fraction <= 2.0) niceFraction = 2.0;
+    else if (fraction <= 5.0) niceFraction = 5.0;
+    else niceFraction = 10.0;
+
+    double step = niceFraction * std::pow(10.0, exponent);
+    double firstTick = std::ceil(min / step) * step;
+
+    std::vector<double> ticks;
+    ticks.reserve(maxTicks);
+    for (double tick = firstTick; tick <= max + step * 0.5; tick += step) {
+        ticks.push_back(tick);
+    }
+
+    if (!ticks.empty()) {
+        ImPlot::SetupAxisTicks(axis, ticks.data(), ticks.size(), nullptr);
+    }
+}
+
 Spectrum::Spectrum()
     : showSpectrumWindow(false),
       spectrumWindowInitialized(false),
@@ -23,8 +51,10 @@ Spectrum::Spectrum()
       firstLoadCompleted(false),
       manualXMin(0.0),
       manualXMax(0.0),
-      manualYMin(0.0),
-      manualYMax(0.0),
+       manualYMin(0.0),
+       manualYMax(0.0),
+       savedYMin(0.0),
+       savedYMax(0.0),
       leftArrowPressedLastFrame(false),
       rightArrowPressedLastFrame(false),
       leftArrowHandleFlag(false),
@@ -111,6 +141,13 @@ void Spectrum::renderHilbertDebugWindow(const std::vector<std::string>& fileIds,
             ImPlot::SetupAxes("Sample Index", "Distance (\xC2\xB5""m)");
             ImPlot::SetupAxisLimits(ImAxis_X1, 0, static_cast<double>(hilbertPhase.size() - 1), ImGuiCond_Once);
 
+            {
+                double xMax = static_cast<double>(hilbertPhase.size() - 1);
+                auto [yMinIt, yMaxIt] = std::minmax_element(hilbertPhase.begin(), hilbertPhase.end());
+                SetupAxisTicksLimited(ImAxis_X1, 0.0, xMax);
+                SetupAxisTicksLimited(ImAxis_Y1, *yMinIt, *yMaxIt);
+            }
+
             ImPlot::PlotLine("Hilbert Phase", hilbertPhase.data(), hilbertPhase.size());
 
             double max_val = *std::max_element(hilbertPhase.begin(), hilbertPhase.end());
@@ -126,6 +163,12 @@ void Spectrum::renderHilbertDebugWindow(const std::vector<std::string>& fileIds,
             ImPlot::BeginPlot("Reference Signal", ImVec2(-1, -1))) {
             ImPlot::SetupAxes("Sample Index", "Amplitude");
             ImPlot::SetupAxisLimits(ImAxis_X1, 0, static_cast<double>(rawData.referenceDetector.size() - 1), ImGuiCond_Once);
+            {
+                double xMax = static_cast<double>(rawData.referenceDetector.size() - 1);
+                auto [yMinIt, yMaxIt] = std::minmax_element(rawData.referenceDetector.begin(), rawData.referenceDetector.end());
+                SetupAxisTicksLimited(ImAxis_X1, 0.0, xMax);
+                SetupAxisTicksLimited(ImAxis_Y1, *yMinIt, *yMaxIt);
+            }
             ImPlot::PlotLine("Reference", rawData.referenceDetector.data(), rawData.referenceDetector.size());
             ImPlot::EndPlot();
         }
@@ -160,6 +203,8 @@ void Spectrum::resetSpectrumWindow() {
     manualXMax = 0.0;
     manualYMin = 0.0;
     manualYMax = 0.0;
+    savedYMin = 0.0;
+    savedYMax = 0.0;
     
     // Reset arrow key state
     leftArrowPressedLastFrame = false;
@@ -633,6 +678,48 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                 }
             }
 
+            {
+                double xMin = manualXMin;
+                double xMax = manualXMax;
+                double yMin = savedYMin;
+                double yMax = savedYMax;
+                if (yMin >= yMax) {
+                    for (const auto& entry : primaryDetectors) {
+                        auto csIt = cachedSpectra.find(entry.first);
+                        if (csIt == cachedSpectra.end() || csIt->second.empty())
+                            continue;
+                        auto mmY = std::minmax_element(csIt->second.begin(), csIt->second.end());
+                        if (yMin >= yMax) {
+                            yMin = *mmY.first; yMax = *mmY.second;
+                        } else {
+                            yMin = std::min(yMin, *mmY.first);
+                            yMax = std::max(yMax, *mmY.second);
+                        }
+                    }
+                }
+                if (xMin >= xMax) {
+                    for (const auto& entry : primaryDetectors) {
+                        auto cfIt = cachedFrequencies.find(entry.first);
+                        if (cfIt != cachedFrequencies.end() && !cfIt->second.empty()) {
+                            double localXMin = std::min(cfIt->second.front(), cfIt->second.back());
+                            double localXMax = std::max(cfIt->second.front(), cfIt->second.back());
+                            if (xMin >= xMax) {
+                                xMin = localXMin; xMax = localXMax;
+                            } else {
+                                xMin = std::min(xMin, localXMin);
+                                xMax = std::max(xMax, localXMax);
+                            }
+                        }
+                    }
+                }
+                if (xMin < xMax) {
+                    SetupAxisTicksLimited(ImAxis_X1, xMin, xMax);
+                }
+                if (yMin < yMax) {
+                    SetupAxisTicksLimited(ImAxis_Y1, yMin, yMax);
+                }
+            }
+
             // X-range selection: still detect shift-drag here (for visualization),
             // but record the result in pendingNextXMin/Max for pre-BeginPlot application.
             // Positioned AFTER axis setup to avoid ImPlot's SetupLocked assertion.
@@ -748,6 +835,8 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                     manualXMin = lim.X.Min;
                     manualXMax = lim.X.Max;
                 }
+                savedYMin = lim.Y.Min;
+                savedYMax = lim.Y.Max;
             }
             ImPlot::EndPlot();
         }

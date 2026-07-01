@@ -45,6 +45,10 @@ public:
     double manualYMin;
     double manualYMax;
 
+    // Saved Y-axis limits from previous frame (for tick limiting based on visible range)
+    double savedYMin;
+    double savedYMax;
+
     // Arrow key handling for spectrum window
     bool leftArrowPressedLastFrame;
     bool rightArrowPressedLastFrame;

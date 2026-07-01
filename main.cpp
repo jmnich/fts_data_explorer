@@ -37,6 +37,34 @@
 
 
 
+static void SetupAxisTicksLimited(ImAxis axis, double min, double max, int maxTicks = 12) {
+    double range = max - min;
+    if (range <= 0.0) return;
+
+    double roughStep = range / (maxTicks - 1);
+    double exponent = std::floor(std::log10(roughStep));
+    double fraction = roughStep / std::pow(10.0, exponent);
+
+    double niceFraction;
+    if (fraction <= 1.0) niceFraction = 1.0;
+    else if (fraction <= 2.0) niceFraction = 2.0;
+    else if (fraction <= 5.0) niceFraction = 5.0;
+    else niceFraction = 10.0;
+
+    double step = niceFraction * std::pow(10.0, exponent);
+    double firstTick = std::ceil(min / step) * step;
+
+    std::vector<double> ticks;
+    ticks.reserve(maxTicks);
+    for (double tick = firstTick; tick <= max + step * 0.5; tick += step) {
+        ticks.push_back(tick);
+    }
+
+    if (!ticks.empty()) {
+        ImPlot::SetupAxisTicks(axis, ticks.data(), ticks.size(), nullptr);
+    }
+}
+
 // Natural sort comparison function for filenames with numbers
 static bool naturalSortCompare(const std::string& a, const std::string& b) {
     size_t i = 0, j = 0;
@@ -1632,7 +1660,7 @@ int main() {
                     if (appState.autoFitYAxis) {
                         y_flags |= ImPlotAxisFlags_AutoFit;
                     }
-                    ImPlot::SetupAxes("Sample", "Voltage [V]", ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks | ImPlotAxisFlags_NoTickLabels, y_flags);
+                    ImPlot::SetupAxes("Sample", "Voltage [V]", ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks, y_flags);
                     // Conditionally optimize grid rendering for large datasets
                     if (appState.dataLoaded && appState.loadedData[0].referenceDetector.size() > 50000) {
                         ImPlot::PushStyleColor(ImPlotCol_AxisGrid, ImVec4(0.3f, 0.3f, 0.3f, 0.5f));
@@ -1657,6 +1685,22 @@ int main() {
                     if (appState.applyXRangeSelection && appState.selectionStartX != appState.selectionEndX) {
                         ImPlot::SetupAxisLimits(ImAxis_X1, appState.selectionStartX, appState.selectionEndX, ImPlotCond_Always);
                         appState.applyXRangeSelection = false; // Reset flag after applying
+                    }
+                    {
+                        double xMin = appState.last_x_min;
+                        double xMax = appState.last_x_max;
+                        if (xMin >= xMax && appState.dataLoaded) {
+                            xMin = 0.0;
+                            xMax = static_cast<double>(appState.loadedData[0].referenceDetector.size());
+                        }
+                        float yMin = appState.last_ref_y_min;
+                        float yMax = appState.last_ref_y_max;
+                        if (yMin >= yMax) {
+                            yMin = appState.ref_y_min;
+                            yMax = appState.ref_y_max;
+                        }
+                        SetupAxisTicksLimited(ImAxis_X1, xMin, xMax);
+                        SetupAxisTicksLimited(ImAxis_Y1, yMin, yMax);
                     }
                     // Plot all selected datasets with pre-allocated specs
                     if (appState.dataLoaded) {  // Only plot if data is loaded
@@ -1717,9 +1761,12 @@ int main() {
                         ImPlot::PlotLine("##SelectionStart", start_x, start_y, 2);
                         
                         // Draw vertical line at end position
+                                                
                         ImPlot::PlotLine("##SelectionEnd", end_x, end_y, 2);
                     }
                     
+                    appState.last_ref_y_min = static_cast<float>(ImPlot::GetPlotLimits().Y.Min);
+                    appState.last_ref_y_max = static_cast<float>(ImPlot::GetPlotLimits().Y.Max);
                     ImPlot::EndPlot();
                     if (appState.dataLoaded && appState.loadedData[0].referenceDetector.size() > 50000) {
                         ImPlot::PopStyleColor(); // Pop grid color only if we pushed it
@@ -1778,6 +1825,22 @@ int main() {
                     if (appState.applyXRangeSelection && appState.selectionStartX != appState.selectionEndX) {
                         ImPlot::SetupAxisLimits(ImAxis_X1, appState.selectionStartX, appState.selectionEndX, ImPlotCond_Always);
                         appState.applyXRangeSelection = false; // Reset flag after applying
+                    }
+                    {
+                        double xMin = appState.last_x_min;
+                        double xMax = appState.last_x_max;
+                        if (xMin >= xMax && appState.dataLoaded) {
+                            xMin = 0.0;
+                            xMax = static_cast<double>(appState.loadedData[0].primaryDetector.size());
+                        }
+                        float yMin = appState.last_prim_y_min;
+                        float yMax = appState.last_prim_y_max;
+                        if (yMin >= yMax) {
+                            yMin = appState.prim_y_min;
+                            yMax = appState.prim_y_max;
+                        }
+                        SetupAxisTicksLimited(ImAxis_X1, xMin, xMax);
+                        SetupAxisTicksLimited(ImAxis_Y1, yMin, yMax);
                     }
                     // Reuse the same plot specs as reference plot (already pre-allocated)
                     // Plot all selected datasets with same colors as reference
@@ -1850,6 +1913,8 @@ int main() {
                     
                     appState.last_x_max = ImPlot::GetPlotLimits().X.Max;
                     appState.last_x_min = ImPlot::GetPlotLimits().X.Min;
+                    appState.last_prim_y_min = static_cast<float>(ImPlot::GetPlotLimits().Y.Min);
+                    appState.last_prim_y_max = static_cast<float>(ImPlot::GetPlotLimits().Y.Max);
 
                     ImPlot::EndPlot();
                     if (appState.dataLoaded && appState.loadedData[0].primaryDetector.size() > 50000) {

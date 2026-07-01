@@ -42,6 +42,10 @@ AppState::AppState()
       autoFitYAxis(true),
       last_x_min(0),
       last_x_max(0),
+      last_ref_y_min(0.0f),
+      last_ref_y_max(0.0f),
+      last_prim_y_min(0.0f),
+      last_prim_y_max(0.0f),
       leftArrowPressedLastFrame(false),
       rightArrowPressedLastFrame(false),
       leftArrowHandleFlag(false),
@@ -95,6 +99,10 @@ void AppState::reset() {
     autoFitYAxis = true;
     last_x_min = 0;
     last_x_max = 0;
+    last_ref_y_min = 0.0f;
+    last_ref_y_max = 0.0f;
+    last_prim_y_min = 0.0f;
+    last_prim_y_max = 0.0f;
     leftArrowPressedLastFrame = false;
     rightArrowPressedLastFrame = false;
     leftArrowHandleFlag = false;
