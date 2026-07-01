@@ -71,6 +71,13 @@ public:
     double pendingNextXMin;
     double pendingNextXMax;
 
+    // Set true on the frame the X unit changes, with the raw converted limits
+    // stashed in convertedXMin/Max. The clamping block inside BeginPlot refines
+    // these to the actual data range after spectrum recomputation.
+    bool xUnitSwitchedThisFrame;
+    double convertedXMin;
+    double convertedXMax;
+
     // Per-file last-seen spectrum computation parameters (for cache invalidation)
     // Stored as {K, xUnit, refLaser}
     std::map<std::string, std::array<double, 3>> lastSpectrumParams;

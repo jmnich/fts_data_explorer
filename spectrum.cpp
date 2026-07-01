@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <vector>
+#include <limits>
 #include "app_state.h"
 
 Spectrum::Spectrum()
@@ -41,6 +42,9 @@ Spectrum::Spectrum()
       forcedYMax(1.0),
       pendingNextXMin(0.0),
       pendingNextXMax(-1.0), // sentinel: invalid range -> no pending value
+      xUnitSwitchedThisFrame(false),
+      convertedXMin(0.0),
+      convertedXMax(0.0),
       showHilbertDebugWindow(false),
       hilbertDebugWindowInitialized(false),
       hilbertDebugWindowPosX(700.0f),
@@ -176,6 +180,9 @@ void Spectrum::resetSpectrumWindow() {
     forcedYMax = 1.0;
     pendingNextXMin = 0.0;
     pendingNextXMax = -1.0;
+    xUnitSwitchedThisFrame = false;
+    convertedXMin = 0.0;
+    convertedXMax = 0.0;
     lastSpectrumParams.clear();
 }
 
@@ -397,6 +404,10 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                 double newMax = SpectralToolbox::convertXValue(manualXMax, oldUnit, newUnit);
                 if (newMin > newMax) std::swap(newMin, newMax);
                 ImPlot::SetNextAxisLimits(ImAxis_X1, newMin, newMax, ImPlotCond_Always);
+                // Stash for post-computation clamping to the data range
+                xUnitSwitchedThisFrame = true;
+                convertedXMin = newMin;
+                convertedXMax = newMax;
             }
             pendingNextXMin = 0.0;
             pendingNextXMax = -1.0;
@@ -496,8 +507,10 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                     if (freqs.empty() || spec.empty())
                         continue;
 
-                    const double localXMin = freqs.front();
-                    const double localXMax = freqs.back();
+                    // Sorted ascending for cm-1/THz, descending for um.
+                    // Use min/max of front/back to handle both directions.
+                    const double localXMin = std::min(freqs.front(), freqs.back());
+                    const double localXMax = std::max(freqs.front(), freqs.back());
                     auto mmY = std::minmax_element(spec.begin(), spec.end());
                     const double localYMin = *mmY.first;
                     const double localYMax = *mmY.second;
@@ -549,8 +562,80 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
             // (Arrow-key pan and X-range selection are now handled before BeginPlot
             //  using SetNextAxisLimits, to avoid the ImPlot SetupLocked assert.)
 
+            // First pass: compute spectra and populate caches for all files.
+            // Must complete BEFORE SetupAxisLimits clamping (below), which in turn
+            // must run before IsPlotHovered/PlotLine, which lock ImPlot axis setup
+            // via SetupLock().
+            for (size_t i = 0; i < primaryDetectors.size(); i++) {
+                const auto& fileData = primaryDetectors[i];
+                const std::string& fileId = fileData.first;
+                const std::vector<double>& primaryDetector = fileData.second;
+
+                InterferogramData rawData;
+                if (i < rawDataCache.size()) {
+                    rawData = rawDataCache[i];
+                } else {
+                    rawData.primaryDetector  = primaryDetector;
+                    rawData.referenceDetector = primaryDetector;
+                }
+
+                const bool needsComputation = isSpectrumDirty(fileId, rawData.primaryDetector);
+
+                if (needsComputation) {
+                    if (rawData.primaryDetector.empty() || rawData.referenceDetector.empty()) {
+                        continue;
+                    }
+                    auto ps = SpectralToolbox::processSpectrum(
+                        rawData.primaryDetector, rawData.referenceDetector, refLaserTextbox,
+                        Kpadding, static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector));
+
+                    cachedSpectra[fileId]      = std::move(ps.spectrumY);
+                    cachedFrequencies[fileId]  = std::move(ps.spectrumX);
+                    cachedHilbertPhases[fileId] = std::move(ps.correctedX);
+
+                    lastPrimaryDetectors[fileId] = rawData.primaryDetector;
+                    lastSpectrumParams[fileId]   = { static_cast<double>(Kpadding),
+                                                     static_cast<double>(xUnitSelector),
+                                                     static_cast<double>(refLaserTextbox) };
+                }
+            }
+
+            // After a unit switch, clamp converted X-axis limits to the actual data range.
+            // Must run AFTER cache population but BEFORE IsPlotHovered/PlotLine, which
+            // both call ImPlot's SetupLock() and lock axis setup.
+            if (xUnitSwitchedThisFrame) {
+                xUnitSwitchedThisFrame = false;
+                double dataXMin = std::numeric_limits<double>::max();
+                double dataXMax = std::numeric_limits<double>::lowest();
+                for (const auto& entry : primaryDetectors) {
+                    auto it = cachedFrequencies.find(entry.first);
+                    if (it != cachedFrequencies.end() && !it->second.empty()) {
+                        // Sorted ascending for cm-1/THz, descending for um.
+                        // Use min/max of front/back to handle both.
+                        double localMin = std::min(it->second.front(), it->second.back());
+                        double localMax = std::max(it->second.front(), it->second.back());
+                        dataXMin = std::min(dataXMin, localMin);
+                        dataXMax = std::max(dataXMax, localMax);
+                    }
+                }
+                if (dataXMin < dataXMax) {
+                    double clampedMin = std::max(convertedXMin, dataXMin);
+                    double clampedMax = std::min(convertedXMax, dataXMax);
+                    if (clampedMin < clampedMax) {
+                        ImPlot::SetupAxisLimits(ImAxis_X1, clampedMin, clampedMax, ImPlotCond_Always);
+                        manualXMin = clampedMin;
+                        manualXMax = clampedMax;
+                    } else {
+                        ImPlot::SetupAxisLimits(ImAxis_X1, dataXMin, dataXMax, ImPlotCond_Always);
+                        manualXMin = dataXMin;
+                        manualXMax = dataXMax;
+                    }
+                }
+            }
+
             // X-range selection: still detect shift-drag here (for visualization),
             // but record the result in pendingNextXMin/Max for pre-BeginPlot application.
+            // Positioned AFTER axis setup to avoid ImPlot's SetupLocked assertion.
             bool shiftPressed = ImGui::GetIO().KeyShift;
             bool isOverPlot = ImPlot::IsPlotHovered();
 
@@ -583,55 +668,25 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                     }
                 }
             }
-            
-            // Plot each spectrum with a unique color and label
+
+            // Second pass: plot each spectrum
             for (size_t i = 0; i < primaryDetectors.size(); i++) {
                 const auto& fileData = primaryDetectors[i];
                 const std::string& fileId = fileData.first;
-                const std::vector<double>& primaryDetector = fileData.second;
 
-                // For spectrum computation, always use raw data to avoid downsampling and peak alignment artifacts
-                InterferogramData rawData;
-                if (i < rawDataCache.size()) {
-                    rawData = rawDataCache[i];
-                } else {
-                    // Fallback if raw data cache wasn't populated
-                    rawData.primaryDetector  = primaryDetector;
-                    rawData.referenceDetector = primaryDetector;
-                }
-
-                const bool needsComputation = isSpectrumDirty(fileId, rawData.primaryDetector);
-
-                if (needsComputation) {
-                    if (rawData.primaryDetector.empty() || rawData.referenceDetector.empty()) {
-                        continue;
-                    }
-                    auto ps = SpectralToolbox::processSpectrum(
-                        rawData.primaryDetector, rawData.referenceDetector, refLaserTextbox,
-                        Kpadding, static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector));
-
-                    cachedSpectra[fileId]      = std::move(ps.spectrumY);
-                    cachedFrequencies[fileId]  = std::move(ps.spectrumX);
-                    cachedHilbertPhases[fileId] = std::move(ps.correctedX);
-
-                    lastPrimaryDetectors[fileId] = rawData.primaryDetector;
-                    lastSpectrumParams[fileId]   = { static_cast<double>(Kpadding),
-                                                     static_cast<double>(xUnitSelector),
-                                                     static_cast<double>(refLaserTextbox) };
-                }
-
-                const auto& spectrum    = cachedSpectra.at(fileId);
-                const auto& frequencies = cachedFrequencies.at(fileId);
+                auto specIt = cachedSpectra.find(fileId);
+                auto freqIt = cachedFrequencies.find(fileId);
+                if (specIt == cachedSpectra.end() || freqIt == cachedFrequencies.end())
+                    continue;
+                const auto& spectrum    = specIt->second;
+                const auto& frequencies = freqIt->second;
                 if (spectrum.empty() || frequencies.empty()) continue;
 
-                // Set up plot specifications with matching colors
                 plotSpecs[i].LineWeight = 2.0f;
-                // Colors already set in legend creation above
 
-                // Plot this spectrum with filename as label (same as graphing panel)
                 ImPlot::PlotLine(fileId.c_str(), frequencies.data(), spectrum.data(), spectrum.size(), plotSpecs[i]);
             }
-            
+
             // Handle X-range selection visualization
             if (isSelectingXRange) {
                 // Get current mouse position in plot coordinates
