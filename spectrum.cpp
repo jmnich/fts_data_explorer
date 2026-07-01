@@ -421,16 +421,19 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
 
             // Setup axes with conditional auto-fit behavior (no labels to match graphing panel style)
             // Implement Auto-fit Y-axis (AFY) feature like in graphing panel
-            ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
+            ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoTickMarks;
             ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
-            
+
             if (autoFitYAxis) {
                 y_flags |= ImPlotAxisFlags_AutoFit; // Auto-fit Y-axis when AFY is enabled
             }
             // Note: When AFY is disabled, we don't lock the Y-axis here because it prevents all interactions
             // Instead, we handle the Y-axis locking separately after checking for manual limits
-            
-            ImPlot::SetupAxes("", "", x_flags, y_flags);
+
+            const char* xLabel = (xUnitSelector == 0) ? "Wavenumber (cm-1)"
+                               : (xUnitSelector == 1) ? "Wavelength (\xC2\xB5" "m)"
+                                                     : "Frequency (THz)";
+            ImPlot::SetupAxes(xLabel, "", x_flags, y_flags);
 
             // Apply Y-axis scale (log10 / linear) selected in the Spectrum panel.
             if (yScaleSelector == 1) {
