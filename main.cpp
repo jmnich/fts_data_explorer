@@ -1910,17 +1910,41 @@ int main() {
             }
 
             // Y scale selector (lin / log) - rendering only, no cache invalidation needed
-            const char* yScaleItems[] = { "lin", "log" };
-            ImGui::Text("Y scale:");
+            ImGui::Text("Y scale");
             ImGui::SameLine();
 
-            remainingWidth = ImGui::GetContentRegionAvail().x;
-            ImGui::SetNextItemWidth(remainingWidth);
-            if (ImGui::Combo("##YScaleSelector", &appState.spectrum.yScaleSelector, yScaleItems, IM_ARRAYSIZE(yScaleItems))) {
-                // Force autoscale on scale change so limits are recomputed (log needs >0 floor)
-                appState.spectrum.shouldAutoscale = true;
-                appState.needsRedraw = true;
+            const ImVec4 linBtnColors[2] = {
+                ImVec4(0.0f, 0.0f, 0.0f, 0.0f), // unselected: transparent
+                ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive) // selected: highlight
+            };
+            const bool linSelected = (appState.spectrum.yScaleSelector == 0);
+            const bool logSelected = (appState.spectrum.yScaleSelector == 1);
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        linBtnColors[linSelected ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  linSelected ? linBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   linBtnColors[1]);
+            if (ImGui::Button("lin##YScaleLin")) {
+                if (!linSelected) {
+                    appState.spectrum.yScaleSelector = 0;
+                    appState.spectrum.shouldAutoscale = true;
+                    appState.needsRedraw = true;
+                }
             }
+            ImGui::PopStyleColor(3);
+
+            ImGui::SameLine();
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        linBtnColors[logSelected ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  logSelected ? linBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   linBtnColors[1]);
+            if (ImGui::Button("log##YScaleLog")) {
+                if (!logSelected) {
+                    appState.spectrum.yScaleSelector = 1;
+                    appState.spectrum.shouldAutoscale = true;
+                    appState.needsRedraw = true;
+                }
+            }
+            ImGui::PopStyleColor(3);
 
             // Force Y-axis limits checkbox + min/max inputs
             if (ImGui::Checkbox("Force Y limits", &appState.spectrum.forceYLimits)) {
