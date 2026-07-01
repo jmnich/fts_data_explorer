@@ -1974,6 +1974,8 @@ int main() {
             };
 
             // Tracking cursor toggle
+            ImGui::Text("Cursor");
+            ImGui::SameLine();
             const bool cursorOn = appState.spectrum.showTrackingCursor;
 
             ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[cursorOn ? 1 : 0]);
