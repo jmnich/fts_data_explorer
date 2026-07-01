@@ -58,6 +58,11 @@ public:
     float refLaserTextbox; // Reference laser wavelength in um
     int Kpadding; // Zero-pad factor (N = n*(K+1)); 0 disables padding
 
+    // Forced Y-axis limits (persisted in config)
+    bool forceYLimits;
+    double forcedYMin;
+    double forcedYMax;
+
     // Per-file last-seen spectrum computation parameters (for cache invalidation)
     // Stored as {K, xUnit, refLaser}
     std::map<std::string, std::array<double, 3>> lastSpectrumParams;

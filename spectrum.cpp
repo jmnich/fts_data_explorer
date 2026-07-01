@@ -32,6 +32,9 @@ Spectrum::Spectrum()
       yScaleSelector(0), // Default linear Y-axis
       refLaserTextbox(1.550f), // Default value
       Kpadding(2), // Default zero-pad factor (matches test17)
+      forceYLimits(false),
+      forcedYMin(0.0),
+      forcedYMax(1.0),
       showHilbertDebugWindow(false),
       hilbertDebugWindowInitialized(false),
       hilbertDebugWindowPosX(700.0f),
@@ -156,6 +159,9 @@ void Spectrum::resetSpectrumWindow() {
     yScaleSelector = 0; // Reset to linear
     refLaserTextbox = 1.550; // Reset to default value
     Kpadding = 2; // Reset to default zero-pad factor
+    forceYLimits = false;
+    forcedYMin = 0.0;
+    forcedYMax = 1.0;
     lastSpectrumParams.clear();
 }
 
@@ -314,9 +320,22 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
             if (yScaleSelector == 1) {
                 ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Log10);
             }
-            
-            // Apply auto-scale when requested (ESC key or initial load)
-            if (shouldAutoscale) {
+
+            // Forced Y-axis limits: when enabled, lock the Y axis and skip all
+            // autoscale / manual-zoom logic below so zoom & autoscale are disallowed.
+            const bool effectiveForceY = forceYLimits && (forcedYMin < forcedYMax);
+            if (effectiveForceY) {
+                // In log mode, ensure the lower bound stays positive.
+                double yMin = forcedYMin;
+                double yMax = forcedYMax;
+                if (yScaleSelector == 1 && yMin <= 0.0) {
+                    yMin = (yMax > 0.0 ? yMax * 1e-6 : 1e-6);
+                }
+                ImPlot::SetupAxisLimits(ImAxis_Y1, yMin, yMax, ImPlotCond_Always);
+            }
+
+            // Apply auto-scale when requested (ESC key or initial load) - skipped when Y is forced.
+            if (!effectiveForceY && shouldAutoscale) {
                 // Find the overall frequency range from all spectra
                 double globalXMin = 0.0;
                 double globalXMax = 0.0;
@@ -373,8 +392,9 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
             // When AFY is disabled, we want X-axis only interactions
             // But we can't lock Y-axis completely as it breaks all interactions
             // Instead, we'll rely on the user to manually control Y-axis when needed
-            // and provide visual feedback through the legend
-            if (!autoFitYAxis && !shouldAutoscale) {
+            // and provide visual feedback through the legend.
+            // Skipped entirely when forceYLimits is on (axis already locked above).
+            if (!effectiveForceY && !autoFitYAxis && !shouldAutoscale) {
                 // Apply manual Y-axis limits if set, but only once to allow user interactions
                 if (manualYMin != manualYMax) {
                     ImPlot::SetupAxisLimits(ImAxis_Y1, manualYMin, manualYMax, ImPlotCond_Once);

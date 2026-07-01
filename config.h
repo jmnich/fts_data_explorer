@@ -31,6 +31,9 @@ struct AppConfig {
     float spectrumWindowPosY = 100.0f;
     float spectrumWindowSizeX = 600.0f;
     float spectrumWindowSizeY = 400.0f;
+    bool spectrumForceYLimits = false;
+    double spectrumForcedYMin = 0.0;
+    double spectrumForcedYMax = 1.0;
     
     // Add a dataset to recent list (maintains max size, deduplicates)
     void addRecentDataset(const std::string& datasetPath) {
@@ -98,6 +101,9 @@ struct AppConfig {
             configFile << "pos_y=" << spectrumWindowPosY << "\n";
             configFile << "size_x=" << spectrumWindowSizeX << "\n";
             configFile << "size_y=" << spectrumWindowSizeY << "\n";
+            configFile << "force_y_limits=" << (spectrumForceYLimits ? "true" : "false") << "\n";
+            configFile << "forced_y_min=" << spectrumForcedYMin << "\n";
+            configFile << "forced_y_max=" << spectrumForcedYMax << "\n";
             
             configFile.flush();
             configFile.close();
@@ -185,6 +191,12 @@ struct AppConfig {
                             spectrumWindowSizeX = std::stof(value);
                         } else if (key == "size_y") {
                             spectrumWindowSizeY = std::stof(value);
+                        } else if (key == "force_y_limits") {
+                            spectrumForceYLimits = (value == "true");
+                        } else if (key == "forced_y_min") {
+                            spectrumForcedYMin = std::stod(value);
+                        } else if (key == "forced_y_max") {
+                            spectrumForcedYMax = std::stod(value);
                         }
                     }
                 }

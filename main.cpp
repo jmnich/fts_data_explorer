@@ -488,6 +488,9 @@ int main() {
     appState.spectrum.spectrumWindowPosY = config.spectrumWindowPosY;
     appState.spectrum.spectrumWindowSizeX = config.spectrumWindowSizeX;
     appState.spectrum.spectrumWindowSizeY = config.spectrumWindowSizeY;
+    appState.spectrum.forceYLimits  = config.spectrumForceYLimits;
+    appState.spectrum.forcedYMin    = config.spectrumForcedYMin;
+    appState.spectrum.forcedYMax    = config.spectrumForcedYMax;
     
     // Set the appState pointer in the spectrum object for raw data access
     appState.spectrum.appState = &appState;
@@ -1919,6 +1922,40 @@ int main() {
                 appState.needsRedraw = true;
             }
 
+            // Force Y-axis limits checkbox + min/max inputs
+            if (ImGui::Checkbox("Force Y limits", &appState.spectrum.forceYLimits)) {
+                if (!appState.spectrum.forceYLimits) {
+                    appState.spectrum.shouldAutoscale = true; // recover full range on uncheck
+                }
+                appState.needsRedraw = true;
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("When enabled, the Y-axis is locked to the given min/max\nand zoom/autoscale on Y is disabled.");
+            }
+
+            if (appState.spectrum.forceYLimits) {
+                ImGui::SameLine();
+                ImGui::Text("min:");
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(80.0f);
+                // InputDouble accepts only numeric input; invalid edits revert automatically.
+                if (ImGui::InputDouble("##ForcedYMin", &appState.spectrum.forcedYMin, 0.0, 0.0, "%.6g")) {
+                    appState.needsRedraw = true;
+                }
+                ImGui::SameLine();
+                ImGui::Text("max:");
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(80.0f);
+                if (ImGui::InputDouble("##ForcedYMax", &appState.spectrum.forcedYMax, 0.0, 0.0, "%.6g")) {
+                    appState.needsRedraw = true;
+                }
+                // Enforce min < max
+                if (appState.spectrum.forcedYMin >= appState.spectrum.forcedYMax) {
+                    ImGui::SameLine();
+                    ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "(min<max!)");
+                }
+            }
+
             // Reference laser textbox
             ImGui::Text("Ref laser [um]:");
             ImGui::SameLine();
@@ -2054,6 +2091,9 @@ int main() {
     config.spectrumWindowPosY = appState.spectrum.spectrumWindowPosY;
     config.spectrumWindowSizeX = appState.spectrum.spectrumWindowSizeX;
     config.spectrumWindowSizeY = appState.spectrum.spectrumWindowSizeY;
+    config.spectrumForceYLimits = appState.spectrum.forceYLimits;
+    config.spectrumForcedYMin   = appState.spectrum.forcedYMin;
+    config.spectrumForcedYMax   = appState.spectrum.forcedYMax;
     
     // Save config to file
     if (!config.saveToFile(configFilePath)) {
