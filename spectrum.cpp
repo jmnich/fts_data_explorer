@@ -67,6 +67,8 @@ Spectrum::Spectrum()
       prevYScaleSelector(0),
       refLaserTextbox(1.550f), // Default value
       Kpadding(2), // Default zero-pad factor (matches test17)
+      apodizationSelector(0),
+      apodizationParams(),
       yAxisMode(0), // Default: auto-fit to all data
       prevYAxisMode(0),
       forcedYMin(0.0),
@@ -122,6 +124,8 @@ void Spectrum::resetSpectrumWindow() {
     prevYScaleSelector = 0;
     refLaserTextbox = 1.550; // Reset to default value
     Kpadding = 2; // Reset to default zero-pad factor
+    apodizationSelector = 0;
+    apodizationParams = ApodizationParams();
     yAxisMode = 0; // Reset to auto-fit to all data
     prevYAxisMode = 0;
     forcedYMin = 0.0;
@@ -145,13 +149,22 @@ bool Spectrum::isSpectrumDirty(const std::string& fileId, const std::vector<doub
         return true; // No cached data for this file, need to calculate
     }
 
-    // Check if processing parameters changed (K, xUnit, refLaser)
+    // Check if processing parameters changed (K, xUnit, refLaser, apodization)
     const auto paramsIt = lastSpectrumParams.find(fileId);
     if (paramsIt == lastSpectrumParams.end()) return true;
     const auto& lp = paramsIt->second;
-    if (lp[0] != static_cast<double>(Kpadding)         ||
-        lp[1] != static_cast<double>(xUnitSelector)    ||
-        lp[2] != static_cast<double>(refLaserTextbox)) {
+
+    double activeParam = 0.0;
+    if (apodizationSelector == static_cast<int>(ApodizationWindow::Gauss))
+        activeParam = static_cast<double>(apodizationParams.gaussSigma);
+    else if (apodizationSelector == static_cast<int>(ApodizationWindow::Rectangular))
+        activeParam = static_cast<double>(apodizationParams.rectWidth);
+
+    if (lp[0] != static_cast<double>(Kpadding)               ||
+        lp[1] != static_cast<double>(xUnitSelector)          ||
+        lp[2] != static_cast<double>(refLaserTextbox)        ||
+        lp[3] != static_cast<double>(apodizationSelector)    ||
+        lp[4] != activeParam) {
         return true;
     }
 
@@ -535,15 +548,25 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                     }
                     auto ps = SpectralToolbox::processSpectrum(
                         rawData.primaryDetector, rawData.referenceDetector, refLaserTextbox,
-                        Kpadding, static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector));
+                        Kpadding, static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector),
+                        static_cast<ApodizationWindow>(apodizationSelector),
+                        apodizationParams);
 
                     cachedSpectra[fileId]      = std::move(ps.spectrumY);
                     cachedFrequencies[fileId]  = std::move(ps.spectrumX);
 
+                    double activeParam = 0.0;
+                    if (apodizationSelector == static_cast<int>(ApodizationWindow::Gauss))
+                        activeParam = static_cast<double>(apodizationParams.gaussSigma);
+                    else if (apodizationSelector == static_cast<int>(ApodizationWindow::Rectangular))
+                        activeParam = static_cast<double>(apodizationParams.rectWidth);
+
                     lastPrimaryDetectors[fileId] = rawData.primaryDetector;
                     lastSpectrumParams[fileId]   = { static_cast<double>(Kpadding),
                                                      static_cast<double>(xUnitSelector),
-                                                     static_cast<double>(refLaserTextbox) };
+                                                     static_cast<double>(refLaserTextbox),
+                                                     static_cast<double>(apodizationSelector),
+                                                     activeParam };
                 }
             }
 

@@ -519,6 +519,9 @@ int main() {
     appState.spectrum.yAxisMode     = config.spectrumYAxisMode;
     appState.spectrum.forcedYMin    = config.spectrumForcedYMin;
     appState.spectrum.forcedYMax    = config.spectrumForcedYMax;
+    appState.spectrum.apodizationSelector = config.apodizationSelector;
+    appState.spectrum.apodizationParams.gaussSigma = config.apodGaussSigma;
+    appState.spectrum.apodizationParams.rectWidth  = config.apodRectWidth;
     
     // Set the appState pointer in the spectrum object for raw data access
     appState.spectrum.appState = &appState;
@@ -1863,12 +1866,35 @@ int main() {
                                     size_t actual_count = std::min(data_count, dataToPlot.primaryDetector.size() - ref_start);
                                     ImPlot::PlotLine("", 
                                                    &dataToPlot.primaryDetector[ref_start], 
-                                                   actual_count, 1.0, 0.0, plotSpecs[i]);
+                                                    actual_count, 1.0, 0.0, plotSpecs[i]);
                                 }
                             }
                         }
+                        
+                        // Draw apodization window overlay when spectrum view is open
+                        if (appState.spectrum.showSpectrumWindow) {
+                            const auto& primData = (appState.alignPeaks && !alignedData.empty())
+                                ? alignedData[0].primaryDetector
+                                : appState.loadedData[0].primaryDetector;
+                            if (!primData.empty()) {
+                                auto w = static_cast<ApodizationWindow>(appState.spectrum.apodizationSelector);
+                                auto window = Apodization::createWindow(
+                                    w, primData.size(),
+                                    std::max_element(primData.begin(), primData.end()) - primData.begin(),
+                                    appState.spectrum.apodizationParams);
+                                double scale = *std::max_element(primData.begin(), primData.end());
+                                if (scale > 0.0) {
+                                    for (auto& v : window) v *= scale;
+                                }
+                                ImPlotSpec windowSpec;
+                                windowSpec.LineColor = ImVec4(0.0f, 1.0f, 1.0f, 0.5f);
+                                windowSpec.LineWeight = 2.0f;
+                                ImPlot::PlotLine("##ApodWindow", window.data(), static_cast<int>(window.size()),
+                                                 1.0, 0.0, windowSpec);
+                            }
+                        }
                     }
-                    
+
                     // Handle X-range selection within plot context
                     if (appState.isSelectingXRange) {
                         // Get current mouse position in plot coordinates
@@ -2172,6 +2198,34 @@ int main() {
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("Zero-pad factor K. Output bins = N*(K+1).\n0 disables padding.");
             }
+
+            // Apodization window selector
+            ImGui::Text("Apodization");
+            ImGui::SameLine();
+            const auto& windowNames = Apodization::getWindowNames();
+            if (ImGui::Combo("##ApodizationSelector", &appState.spectrum.apodizationSelector,
+                             windowNames.data(), static_cast<int>(windowNames.size()))) {
+                invalidateSpectrumCaches();
+            }
+
+            // Conditional parametric controls based on selected window
+            if (appState.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Gauss)) {
+                if (ImGui::SliderFloat("Sigma##GaussSigma", &appState.spectrum.apodizationParams.gaussSigma,
+                                       1.0f, 3.0f, "%.1f")) {
+                    invalidateSpectrumCaches();
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Gauss sigma fraction (1.0-3.0).\n1.0 = narrow, 3.0 = wide.");
+                }
+            } else if (appState.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Rectangular)) {
+                if (ImGui::SliderFloat("Width##RectWidth", &appState.spectrum.apodizationParams.rectWidth,
+                                       0.05f, 1.0f, "%.2f")) {
+                    invalidateSpectrumCaches();
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Rectangular window width fraction (0.05-1.0).\n1.0 = full signal, 0.05 = 5%% of signal.");
+                }
+            }
             
         } else {
             ImGui::Text("No data loaded.");
@@ -2281,6 +2335,9 @@ int main() {
     config.spectrumYAxisMode    = appState.spectrum.yAxisMode;
     config.spectrumForcedYMin   = appState.spectrum.forcedYMin;
     config.spectrumForcedYMax   = appState.spectrum.forcedYMax;
+    config.apodizationSelector  = appState.spectrum.apodizationSelector;
+    config.apodGaussSigma       = appState.spectrum.apodizationParams.gaussSigma;
+    config.apodRectWidth        = appState.spectrum.apodizationParams.rectWidth;
     
     // Save config to file
     if (!config.saveToFile(configFilePath)) {

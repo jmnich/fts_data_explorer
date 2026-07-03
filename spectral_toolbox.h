@@ -3,6 +3,7 @@
 #include <vector>
 #include <cstddef>
 #include <fftw3.h>
+#include "apodization.h"
 
 /**
  * @brief FFTW-based numerical toolbox for FTS spectrum processing.
@@ -75,25 +76,30 @@ public:
     /**
      * @brief Compute a magnitude spectrum from raw interferogram detectors.
      *
-     * Pipeline (mirrors test17 processSpectrum minus apodization/Mertz):
+     * Pipeline (mirrors test17 processSpectrum minus Mertz):
      *   1. Hilbert-corrected X axis (um) from the reference detector.
      *   2. Uniform resample on [0, maxOPD] via linear interpolation.
      *   3. Mean removal (CSV adapter does not, Python loadDataset does).
-     *   4. Zero pad: N = n*(K+1).
-     *   5. FFT and magnitude spectrum.
-     *   6. Build X axis as wavelength um = OPD*(K+1)/i, drop index 0 (Inf).
-     *   7. Convert to requested unit.
+     *   4. Apodization: apply selected window function to resampled signal.
+     *   5. Zero pad: N = n*(K+1).
+     *   6. FFT and magnitude spectrum.
+     *   7. Build X axis as wavelength um = OPD*(K+1)/i, drop index 0 (Inf).
+     *   8. Convert to requested unit.
      *
      * @param primaryDetector    Measurement interferogram [V].
      * @param referenceDetector  Reference (laser) interferogram [V].
      * @param refLaserWavelength Reference laser wavelength [um].
      * @param K                  Zero-pad factor (N = n*(K+1)); 0 disables padding.
      * @param xUnit              Output X-axis unit.
+     * @param apodizationWindow  Apodization window function (default: Rectangular).
+     * @param apodizationParams  Window-specific parameters (sigma, width, etc.).
      * @return ProcessedSpectrum with spectrumX/spectrumY/correctedX (empty on bad input).
      */
     static ProcessedSpectrum processSpectrum(const std::vector<double>& primaryDetector,
                                             const std::vector<double>& referenceDetector,
                                             double refLaserWavelength,
                                             int  K,
-                                            SpectrumXUnit xUnit);
+                                            SpectrumXUnit xUnit,
+                                            ApodizationWindow apodizationWindow = ApodizationWindow::Rectangular,
+                                            const ApodizationParams& apodizationParams = {});
 };

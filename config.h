@@ -35,6 +35,10 @@ struct AppConfig {
     int spectrumYAxisMode = 0; // 0: all, 1: tight, 2: force
     double spectrumForcedYMin = 0.0;
     double spectrumForcedYMax = 1.0;
+
+    int apodizationSelector = 0;
+    float apodGaussSigma = 1.0f;
+    float apodRectWidth = 1.0f;
     
     // Add a dataset to recent list (maintains max size, deduplicates)
     void addRecentDataset(const std::string& datasetPath) {
@@ -105,6 +109,9 @@ struct AppConfig {
             configFile << "y_axis_mode=" << spectrumYAxisMode << "\n";
             configFile << "forced_y_min=" << spectrumForcedYMin << "\n";
             configFile << "forced_y_max=" << spectrumForcedYMax << "\n";
+            configFile << "apod_selector=" << apodizationSelector << "\n";
+            configFile << "apod_gauss_sigma=" << apodGaussSigma << "\n";
+            configFile << "apod_rect_width=" << apodRectWidth << "\n";
             
             configFile.flush();
             configFile.close();
@@ -202,6 +209,12 @@ struct AppConfig {
                             spectrumForcedYMin = std::stod(value);
                         } else if (key == "forced_y_max") {
                             spectrumForcedYMax = std::stod(value);
+                        } else if (key == "apod_selector") {
+                            apodizationSelector = std::stoi(value);
+                        } else if (key == "apod_gauss_sigma") {
+                            apodGaussSigma = std::stof(value);
+                        } else if (key == "apod_rect_width") {
+                            apodRectWidth = std::stof(value);
                         }
                     }
                 }

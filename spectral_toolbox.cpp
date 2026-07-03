@@ -167,7 +167,9 @@ SpectralToolbox::ProcessedSpectrum SpectralToolbox::processSpectrum(
     const std::vector<double>& referenceDetector,
     double refLaserWavelength,
     int  K,
-    SpectrumXUnit xUnit)
+    SpectrumXUnit xUnit,
+    ApodizationWindow apodizationWindow,
+    const ApodizationParams& apodizationParams)
 {
     ProcessedSpectrum result;
 
@@ -194,6 +196,9 @@ SpectralToolbox::ProcessedSpectrum SpectralToolbox::processSpectrum(
     // 4. Mean removal (Python loadDataset does meas -= mean; CSVAdapter does not)
     double mean = std::accumulate(uniformY.begin(), uniformY.end(), 0.0) / static_cast<double>(n);
     for (double& y : uniformY) y -= mean;
+
+    // 4.5 Apodization: apply selected window function
+    Apodization::applyWindow(apodizationWindow, uniformY, apodizationParams);
 
     // 5. Zero pad: N = n*(K+1)
     const std::size_t N = n * (static_cast<std::size_t>(K) + 1);

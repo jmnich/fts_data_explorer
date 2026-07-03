@@ -7,6 +7,7 @@
 #include <array>
 #include "imgui.h"
 #include "implot.h"
+#include "apodization.h"
 
 // Forward declaration to avoid circular dependency
 class AppState;
@@ -65,6 +66,10 @@ public:
     float refLaserTextbox; // Reference laser wavelength in um
     int Kpadding; // Zero-pad factor (N = n*(K+1)); 0 disables padding
 
+    // Apodization
+    int apodizationSelector; // index into Apodization::getWindowNames()
+    ApodizationParams apodizationParams; // per-window parameters (sigma, rect width)
+
     // Y-axis mode for the spectrum plot (persisted in config)
     // 0: auto-fit to all data, 1: auto-fit to visible data only, 2: force user-supplied min/max
     int yAxisMode;
@@ -85,8 +90,8 @@ public:
     double convertedXMax;
 
     // Per-file last-seen spectrum computation parameters (for cache invalidation)
-    // Stored as {K, xUnit, refLaser}
-    std::map<std::string, std::array<double, 3>> lastSpectrumParams;
+    // Stored as {K, xUnit, refLaser, apodizationSelector, activeParam}
+    std::map<std::string, std::array<double, 5>> lastSpectrumParams;
     
     Spectrum();
     

@@ -81,6 +81,7 @@ add_executable(fts_data_explorer
     app_state.cpp
     spectrum.cpp
     spectral_toolbox.cpp
+    apodization.cpp
     adapters/csv_adapter.cpp
     ${EXTRA_SOURCES}
 )
