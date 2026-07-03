@@ -66,12 +66,18 @@ It presents a tree view of information available in the dataset and then allows 
         - Y-axis mode: "all" (auto-fit to full data), "tight" (auto-fit to visible X range), "force" (lock to user min/max with validation).
         - Reference laser wavelength input: float textbox in µm (default 1.550). Changing invalidates caches and recomputes spectra.
         - Zero-pad factor K: integer input (0–16). Increases FFT frequency resolution (N = n*(K+1)). K=0 disables padding.
+        - Apodization window droplist: Rectangular / Gauss / Triangular. Changing selection invalidates caches and recomputes spectra.
+          - Gauss: slider for sigma fraction (1.0–3.0). Narrower sigma = more aggressive apodization.
+          - Rectangular: slider for window width fraction (0.05–1.0). 1.0 = full signal (no change), 0.05 = 5% of signal retained.
+          - Triangular: no parameters.
         - Tracking cursor: On/Off buttons + Ctrl+Q shortcut. Shows vertical line + annotation at mouse position with filename, X values in all 3 units, and Y magnitude.
-    - **Spectrum computation pipeline** (SpectralToolbox): Hilbert X-axis correction from reference interferogram → resample to uniform grid → remove mean → zero-pad → FFT → magnitude → unit conversion.
-    - **Spectrum cache:** Magnitude spectra are cached per-file. Cache is invalidated when K, xUnit, refLaser wavelength, or raw data changes. Changing Y-scale or Y-axis mode does NOT invalidate caches.
+    - **Spectrum computation pipeline** (SpectralToolbox): Hilbert X-axis correction from reference interferogram → resample to uniform grid → remove mean → apply apodization window → zero-pad → FFT → magnitude → unit conversion.
+    - **Spectrum cache:** Magnitude spectra are cached per-file. Cache is invalidated when K, xUnit, refLaser wavelength, apodization window/params, or raw data changes. Changing Y-scale or Y-axis mode does NOT invalidate caches.
     - **Multi-file comparison:** Up to 5 simultaneously selected files rendered in different colors with legend (same color scheme as main plot). `AppState::rawDataCache` stores unprocessed data for spectrum use, separate from the downsampled `loadedData` used in main plots.
     - **Spectrum View interaction:** Shift+drag X-range selection (translucent purple), arrow-key pan (10% of visible range), ESC reset zoom to fit all, mouse-wheel zoom, ImPlot-native interactions.
+    - **Apodization overlay:** When Spectrum View is open, the computed apodization window is drawn as a semi-transparent cyan overlay on the primary interferogram plot, scaled to the interferogram's peak amplitude for visual alignment.
     - **State persistence:** Spectrum window position, size, `yAxisMode`, `forcedYMin`, and `forcedYMax` are saved/restored via `[SpectrumWindow]` config section. Legacy key `force_y_limits` is mapped to `yAxisMode=2` on load.
+      Apodization selector, `gaussSigma`, and `rectWidth` are also persisted in `[SpectrumWindow]`.
     - **Hilbert validation:** `test_hilbert_comparison/` contains a standalone test validating Hilbert X-axis correction against a Python reference implementation.
 
 # Application structure
@@ -81,6 +87,7 @@ It presents a tree view of information available in the dataset and then allows 
     - `app_state.h` / `app_state.cpp` — global AppState struct (Spectrum, rawDataCache, visualization settings)
     - `spectrum.h` / `spectrum.cpp` — SpectrumView floating window (ImPlot rendering, caching, zoom/cursor)
     - `spectral_toolbox.h` / `spectral_toolbox.cpp` — FFTW DSP pipeline (Hilbert correction, FFT, unit conversion)
+    - `apodization.h` / `apodization.cpp` — Apodization window functions (Rectangular, Gauss, Triangular) with parametric controls; applied before zero-padding in the FFT pipeline
     - `config.h` — AppConfig with load/save to `~/.fts_data_explorer_config`
     - `adapters/` — adapter classes for different data formats
 
