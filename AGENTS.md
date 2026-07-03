@@ -7,6 +7,7 @@ It presents a tree view of information available in the dataset and then allows 
 - imgui for GUI, docking branch
 - glfw, opengl3, glfw3
 - CMake 3.10+ build system
+- FFTW3 for FFT-based spectrum computation
 
 # Functionality and GUI description
 - Main window consists of 4 docked panels:
@@ -34,6 +35,7 @@ It presents a tree view of information available in the dataset and then allows 
           - Ctrl+A: Toggle align peaks
           - Ctrl+D: Toggle downsampling
           - Ctrl+H: Return to welcome screen
+          - Ctrl+Q: Toggle tracking cursor in spectrum view
           - ESC: Reset zoom to fit all data
 - Detailed description of axis ranging in data plots:
     - when application is launched, 'auto fit y axis' option must be enabled. This enables/disables the native "Auto-Fit" option from implot.
@@ -56,17 +58,31 @@ It presents a tree view of information available in the dataset and then allows 
       - "LARGE DATA" indicator shown in the top-right of plots
 
 - Spectrum functionality
-    - pressing button "Spectrum" invokes a new "Spectrum view" window that stays always on top of the application
-    - Spectrum view window contains a plot of the spectrum of the currently selected file, which is FFT of the primary detector signal
-    - Spectrum view window closes with the rest of the application and whenever user returns to the welcome screen
-    - Spectrum view window size and position are stored in config file and restored on next launch
-    
+    - The docked "Spectrum" panel (bottom of main window) contains controls and a "Spectrum" button that opens the floating "Spectrum View" window.
+    - Spectrum View window stays always-on-top and closes when returning to the welcome screen.
+    - **Spectrum panel controls:**
+        - X-axis unit selector: cm⁻¹ / µm / THz (toggle buttons). Changing units converts current X-axis zoom range and invalidates spectrum caches.
+        - Y-axis scale: Linear / Log10 (toggle buttons). Switching preserves X range.
+        - Y-axis mode: "all" (auto-fit to full data), "tight" (auto-fit to visible X range), "force" (lock to user min/max with validation).
+        - Reference laser wavelength input: float textbox in µm (default 1.550). Changing invalidates caches and recomputes spectra.
+        - Zero-pad factor K: integer input (0–16). Increases FFT frequency resolution (N = n*(K+1)). K=0 disables padding.
+        - Tracking cursor: On/Off buttons + Ctrl+Q shortcut. Shows vertical line + annotation at mouse position with filename, X values in all 3 units, and Y magnitude.
+    - **Spectrum computation pipeline** (SpectralToolbox): Hilbert X-axis correction from reference interferogram → resample to uniform grid → remove mean → zero-pad → FFT → magnitude → unit conversion.
+    - **Spectrum cache:** Magnitude spectra are cached per-file. Cache is invalidated when K, xUnit, refLaser wavelength, or raw data changes. Changing Y-scale or Y-axis mode does NOT invalidate caches.
+    - **Multi-file comparison:** Up to 5 simultaneously selected files rendered in different colors with legend (same color scheme as main plot). `AppState::rawDataCache` stores unprocessed data for spectrum use, separate from the downsampled `loadedData` used in main plots.
+    - **Spectrum View interaction:** Shift+drag X-range selection (translucent purple), arrow-key pan (10% of visible range), ESC reset zoom to fit all, mouse-wheel zoom, ImPlot-native interactions.
+    - **State persistence:** Spectrum window position, size, `yAxisMode`, `forcedYMin`, and `forcedYMax` are saved/restored via `[SpectrumWindow]` config section. Legacy key `force_y_limits` is mapped to `yAxisMode=2` on load.
+    - **Hilbert validation:** `test_hilbert_comparison/` contains a standalone test validating Hilbert X-axis correction against a Python reference implementation.
 
 # Application structure
 - the application uses 'adapter classes' which convert different data storage formats into a unified object carrying primary and reference interferograms as well as metadata. These unified data objects are then used to display the information in gui.
-- file organization: root directory contains main.cpp and the directories listed below:
-    - 'gui' - contains all code for handling the gui interface
-    - 'adapters' - contains adapter classes 
+- file organization: all source files live in the root directory:
+    - `main.cpp` — entry point, ImGui docking, ribbon menu, all GUI panels
+    - `app_state.h` / `app_state.cpp` — global AppState struct (Spectrum, rawDataCache, visualization settings)
+    - `spectrum.h` / `spectrum.cpp` — SpectrumView floating window (ImPlot rendering, caching, zoom/cursor)
+    - `spectral_toolbox.h` / `spectral_toolbox.cpp` — FFTW DSP pipeline (Hilbert correction, FFT, unit conversion)
+    - `config.h` — AppConfig with load/save to `~/.fts_data_explorer_config`
+    - `adapters/` — adapter classes for different data formats
 
 # App State Description
 - The application maintains state for the current working directory, selected files, and visualization settings.
@@ -76,6 +92,8 @@ It presents a tree view of information available in the dataset and then allows 
   - `visualizationSettings`: Contains toggle states for features like peak alignment, auto-fit Y-axis, downsampling, and autorestore scale
   - `axisRanges`: Stores the current X and Y axis ranges for the plots
   - `peakAlignmentOffsets`: Calculated X-axis offsets for aligning peaks across multiple files
+  - `rawDataCache`: Unprocessed `InterferogramData` for spectrum computation, separate from the downsampled `loadedData` used in main plots
+  - `Spectrum spectrum`: Embedded Spectrum instance managing the spectrum view window state, caches, and UI controls
 - State persistence: Configuration settings are saved to and loaded from a config file for session restoration.
 
 ## Idle rendering optimization (`needsRedraw`)
@@ -101,16 +119,13 @@ The app uses a dirty-flag mechanism to avoid re-rendering the entire UI (includi
 - Callbacks must be installed *before* `ImGui_ImplGlfw_InitForOpenGL` so ImGui chains them alongside its own input handling.
 
 # Key files and their purposes
-- `main.cpp` - Main application entry point with ImGui docking interface
-- `config.h` - Configuration header with build options
-- `adapters/csv_adapter.h` - CSV file adapter for interferogram data
-- `adapters/csv_adapter.cpp` - CSV adapter implementation
+See file listing under **# Application structure** above for all key files and their purposes.
 
 # Build system
 - CMake-based build with dependencies automatically fetched
 - Build directory: `build/`
 - Main targets: `fts_data_explorer`
-- Dependencies: ImGui, ImPlot, GLFW, OpenGL
+- Dependencies: ImGui, ImPlot, GLFW, OpenGL, FFTW3
 
 # Coding style
 - Use consistent naming conventions (camelCase for variables/functions, PascalCase for classes)
@@ -147,3 +162,4 @@ The app uses a dirty-flag mechanism to avoid re-rendering the entire UI (includi
 3. Keep GUI code separate from data processing logic
 4. Document new public APIs with Doxygen comments
 5. Test with various CSV formats and edge cases
+6. When modifying spectrum logic, check spectrum.h, spectral_toolbox.h, and the Spectrum panel code in main.cpp together — they form a tight integration
