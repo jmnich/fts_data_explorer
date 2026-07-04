@@ -33,7 +33,7 @@ struct AppState {
     bool shiftSelectMode;
     const size_t MAX_SELECTABLE_FILES;
     size_t lastSelectedIndex;
-    bool alignPeaks;
+    bool maxAtZero;
     
     // Keyboard shortcut state tracking
     bool yKeyPressedLastFrame;

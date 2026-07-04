@@ -13,7 +13,7 @@ struct AppConfig {
     std::vector<std::string> recentDatasets;
     size_t maxRecentDatasets = 10;
     bool autoFitYAxis = true;
-    bool alignPeaks = false;
+    bool maxAtZero = false;
     bool showFPS = false; // FPS counter display setting
     bool enableDownsampling = true;
     int xAxisBase = 0;
@@ -29,6 +29,8 @@ struct AppConfig {
     
     // Spectrum window state
     int spectrumYAxisMode = 0; // 0: all, 1: tight, 2: force
+    int spectrumXUnitSelector = 0; // 0: cm-1, 1: um, 2: THz
+    int spectrumYScaleSelector = 0; // 0: linear, 1: log10, 2: dB
     double spectrumForcedYMin = 0.0;
     double spectrumForcedYMax = 1.0;
 
@@ -85,7 +87,7 @@ struct AppConfig {
             configFile << "[Settings]\n";
             configFile << "max_recent_datasets=" << maxRecentDatasets << "\n";
 
-            configFile << "align_peaks=" << (alignPeaks ? "true" : "false") << "\n";
+            configFile << "max_at_zero=" << (maxAtZero ? "true" : "false") << "\n";
             configFile << "auto_fit_y_axis=" << (autoFitYAxis ? "true" : "false") << "\n";
             configFile << "enable_downsampling=" << (enableDownsampling ? "true" : "false") << "\n";
             configFile << "x_axis_base=" << xAxisBase << "\n";
@@ -104,6 +106,8 @@ struct AppConfig {
             // Write spectrum window settings
             configFile << "\n[SpectrumWindow]\n";
             configFile << "y_axis_mode=" << spectrumYAxisMode << "\n";
+            configFile << "x_unit_selector=" << spectrumXUnitSelector << "\n";
+            configFile << "y_scale_selector=" << spectrumYScaleSelector << "\n";
             configFile << "forced_y_min=" << spectrumForcedYMin << "\n";
             configFile << "forced_y_max=" << spectrumForcedYMax << "\n";
             configFile << "apod_selector=" << apodizationSelector << "\n";
@@ -167,8 +171,8 @@ struct AppConfig {
                         if (key == "max_recent_datasets") {
                             maxRecentDatasets = std::stoul(value);
 
-                        } else if (key == "align_peaks") {
-                            alignPeaks = (value == "true");
+                        } else if (key == "max_at_zero") {
+                            maxAtZero = (value == "true");
                         } else if (key == "auto_fit_y_axis") {
                             autoFitYAxis = (value == "true");
                         } else if (key == "enable_downsampling") {
@@ -197,6 +201,10 @@ struct AppConfig {
                     } else if (currentSection == "SpectrumWindow") {
                         if (key == "y_axis_mode") {
                             spectrumYAxisMode = std::stoi(value);
+                        } else if (key == "x_unit_selector") {
+                            spectrumXUnitSelector = std::stoi(value);
+                        } else if (key == "y_scale_selector") {
+                            spectrumYScaleSelector = std::stoi(value);
                         } else if (key == "forced_y_min") {
                             spectrumForcedYMin = std::stod(value);
                         } else if (key == "forced_y_max") {

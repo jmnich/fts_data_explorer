@@ -12,7 +12,7 @@ It presents a tree view of information available in the dataset and then allows 
 # Functionality and GUI description
 - Main window consists of 5 docked panels:
     - primary, large Interferogram View panel, which shows selected primary and reference interferograms on 2 vertically stacked plots with shared x axis. These graphs support zoom with mouse.
-    - Interferogram panel (docked), containing toggle buttons for X axis base (sample/OPD), Align peaks, Auto-fit Y, and Downsample settings.
+    - Interferogram panel (docked), containing toggle buttons for X axis base (sample/OPD), Max at zero, Auto-fit Y, and Downsample settings.
     - metadata panel, docked to the right of the Interferogram View panel, showing all available metadata
     - files panel, docked to the left, showing tree view with files in the selected directory
     - spectrum controls panel with display and processing settings
@@ -24,7 +24,7 @@ It presents a tree view of information available in the dataset and then allows 
     - Settings
         - FPS display toggle
         - UI size selection droplist
-        - Note: Align peaks, Auto-fit Y, and Downsample toggles are now in the Interferogram panel
+        - Note: Max at zero, Auto-fit Y, and Downsample toggles are now in the Interferogram panel
     - Help
         - non-interactive list of all implemented keyboard shortcuts
         - keyboard shortcuts include:
@@ -32,7 +32,7 @@ It presents a tree view of information available in the dataset and then allows 
           - Left/Right Arrows: Pan view horizontally
           - Shift + mouse / Right click: X-axis range selection
           - Ctrl+Y: Toggle auto-fit Y-axis
-          - Ctrl+A: Toggle align peaks
+          - Ctrl+A: Toggle max at zero
           - Ctrl+D: Toggle downsampling
           - Ctrl+H: Return to welcome screen
           - Ctrl+Q: Toggle tracking cursor in spectrum view
@@ -44,7 +44,7 @@ It presents a tree view of information available in the dataset and then allows 
     - feature: pressing 'esc' button resets zoom to fit all data. This feature is always active when any data is displayed.
     - feature: when user selects additional data files to display, the current range of axes is preseved. 
     - feature: when user switches between data files using mouse click or up/down arrows, the current range of X and Y axes is preserved.
-    - feature: peak alignment functionality that shifts datasets on the x-axis to align the maximum values of primary interferograms across multiple selected files, enabling direct comparison of signal shapes.
+    - feature: "max at zero" functionality that adjusts the x-axis so each dataset's maximum value is positioned at zero, enabling direct comparison of signal shapes.
     - feature: mouse scroll allows to zoom into the region over witch mouse is currently hovering.
     - feature: left/right arrow keys allow panning the view by 10% of the current visible range in the respective direction.
     - feature: when the application loads a file for display for the first time after launch or work directory switch, axes zoom to fit all data.
@@ -95,7 +95,7 @@ It presents a tree view of information available in the dataset and then allows 
 - Key state variables include:
   - `currentWorkingDirectory`: Path to the dataset directory being explored
   - `selectedFiles`: List of currently selected files for comparison (up to 5 files)
-  - `visualizationSettings`: Contains toggle states for features like peak alignment, auto-fit Y-axis, and downsampling
+  - `visualizationSettings`: Contains toggle states for features like max at zero, auto-fit Y-axis, and downsampling
   - `axisRanges`: Stores the current X and Y axis ranges for the plots
   - `peakAlignmentOffsets`: Calculated X-axis offsets for aligning peaks across multiple files
   - `rawDataCache`: Unprocessed `InterferogramData` for spectrum computation, separate from the downsampled `loadedData` used in main plots

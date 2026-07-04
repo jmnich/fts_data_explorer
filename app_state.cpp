@@ -16,7 +16,7 @@ AppState::AppState()
       multiSelectMode(false),
       shiftSelectMode(false),
       lastSelectedIndex(0),
-      alignPeaks(false),
+      maxAtZero(false),
       yKeyPressedLastFrame(false),
       aKeyPressedLastFrame(false),
       dKeyPressedLastFrame(false),
@@ -74,7 +74,7 @@ void AppState::reset() {
     multiSelectMode = false;
     shiftSelectMode = false;
     lastSelectedIndex = 0;
-    alignPeaks = false;
+    maxAtZero = false;
     yKeyPressedLastFrame = false;
     aKeyPressedLastFrame = false;
     dKeyPressedLastFrame = false;

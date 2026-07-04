@@ -508,15 +508,20 @@ int main() {
     }
     
     appState.csvFiles = FileBrowser::getCSVFilesInDirectory(appState.currentDirectory);
-    appState.alignPeaks = config.alignPeaks; // Use config setting for peak alignment
+    appState.maxAtZero = config.maxAtZero; // Use config setting for peak alignment
     appState.autoFitYAxis = config.autoFitYAxis; // Load from config
     appState.enableDownsampling = config.enableDownsampling; // Load from config
     appState.xAxisBase = config.xAxisBase; // Load from config
     appState.showFPS = config.showFPS; // Load from config
     
     // Load spectrum window settings from config
-    appState.spectrum.yAxisMode     = config.spectrumYAxisMode;
-    appState.spectrum.forcedYMin    = config.spectrumForcedYMin;
+    appState.spectrum.yAxisMode           = config.spectrumYAxisMode;
+    appState.spectrum.prevYAxisMode       = config.spectrumYAxisMode;
+    appState.spectrum.xUnitSelector       = config.spectrumXUnitSelector;
+    appState.spectrum.yScaleSelector  = config.spectrumYScaleSelector;
+    appState.spectrum.prevXUnitSelector = config.spectrumXUnitSelector;
+    appState.spectrum.prevYScaleSelector = config.spectrumYScaleSelector;
+    appState.spectrum.forcedYMin      = config.spectrumForcedYMin;
     appState.spectrum.forcedYMax    = config.spectrumForcedYMax;
     appState.spectrum.apodizationSelector = config.apodizationSelector;
     appState.spectrum.apodizationParams.gaussSigma = config.apodGaussSigma;
@@ -574,9 +579,9 @@ int main() {
                 }
             }
             
-            // 'Ctrl+A' - Toggle align peaks (only on initial press)
+            // 'Ctrl+A' - Toggle max at zero (only on initial press)
             if (aKeyPressed && !appState.aKeyPressedLastFrame) {
-                appState.alignPeaks = !appState.alignPeaks;
+                appState.maxAtZero = !appState.maxAtZero;
                 appState.shouldAutoscale = true;
             }
             
@@ -1159,7 +1164,7 @@ int main() {
                     ImGui::Text("ESC: Reset zoom");
                     ImGui::Text("Mouse Scroll: Zoom in/out");
                     ImGui::Text("Ctrl+Y: Toggle auto-fit Y-axis");
-                    ImGui::Text("Ctrl+A: Toggle align peaks");
+                    ImGui::Text("Ctrl+A: Toggle max at zero");
                     ImGui::Text("Ctrl+D: Toggle downsampling");
                     ImGui::Text("Ctrl+H: Go back to home");
                     ImGui::Text("Ctrl+Q: Toggle tracking cursor");
@@ -1423,7 +1428,7 @@ int main() {
             size_t prim_end =  appState.loadedData[0].primaryDetector.size();
             // Compute peak positions for X-axis alignment
             std::vector<size_t> peakPositions;
-            if (appState.alignPeaks) {
+            if (appState.maxAtZero) {
                 for (size_t i = 0; i < appState.loadedData.size(); i++) {
                     auto peakIt = std::max_element(appState.loadedData[i].primaryDetector.begin(),
                                                    appState.loadedData[i].primaryDetector.end());
@@ -1549,8 +1554,8 @@ int main() {
                     if (appState.autoFitYAxis) {
                         y_flags |= ImPlotAxisFlags_AutoFit;
                     }
-                    const char* refXLabel = (appState.xAxisBase == 1) ? "OPD [\xC2\xB5m]" : "Sample";
-                    ImPlot::SetupAxes(refXLabel, "Voltage [V]", ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks, y_flags);
+                    const char* refXLabel = (appState.xAxisBase == 1) ? "OPD [\xC2\xB5m]" : "Sample num";
+                    ImPlot::SetupAxes(refXLabel, "Voltage [V]", ImPlotAxisFlags_NoTickMarks, y_flags);
                     // Conditionally optimize grid rendering for large datasets
                     if (appState.dataLoaded && appState.loadedData[0].referenceDetector.size() > 50000) {
                         ImPlot::PushStyleColor(ImPlotCol_AxisGrid, ImVec4(0.3f, 0.3f, 0.3f, 0.5f));
@@ -1582,7 +1587,7 @@ int main() {
                             for (size_t i = 0; i < appState.loadedData.size(); i++) {
                                 const auto& hx = appState.hilbertXCache[appState.selectedFilenames[i]];
                                 if (!hx.empty()) {
-                                    double off = (appState.alignPeaks && i < peakPositions.size()) ? hx[peakPositions[i]] : 0.0;
+                                    double off = (appState.maxAtZero && i < peakPositions.size()) ? hx[peakPositions[i]] : 0.0;
                                     xMin = std::min(xMin, hx.front() - off);
                                     xMax = std::max(xMax, hx.back() - off);
                                 }
@@ -1595,7 +1600,7 @@ int main() {
                                 }
                             }
                         } else {
-                            if (appState.alignPeaks && !peakPositions.empty()) {
+                            if (appState.maxAtZero && !peakPositions.empty()) {
                                 double xMin = std::numeric_limits<double>::max();
                                 double xMax = std::numeric_limits<double>::lowest();
                                 for (size_t i = 0; i < appState.loadedData.size(); i++) {
@@ -1636,14 +1641,14 @@ int main() {
                             if (appState.xAxisBase == 1) {
                                 const auto& hx = appState.hilbertXCache[appState.selectedFilenames[0]];
                                 if (!hx.empty()) {
-                                    double off = (appState.alignPeaks && !peakPositions.empty()) ? hx[peakPositions[0]] : 0.0;
+                                    double off = (appState.maxAtZero && !peakPositions.empty()) ? hx[peakPositions[0]] : 0.0;
                                     xMin = hx.front() - off;
                                     xMax = hx.back() - off;
                                 } else {
                                     xMin = 0.0;
                                     xMax = static_cast<double>(appState.loadedData[0].referenceDetector.size());
                                 }
-                            } else if (appState.alignPeaks && !peakPositions.empty()) {
+                            } else if (appState.maxAtZero && !peakPositions.empty()) {
                                 double N = static_cast<double>(appState.loadedData[0].referenceDetector.size());
                                 double off = static_cast<double>(peakPositions[0]);
                                 xMin = -off;
@@ -1673,7 +1678,7 @@ int main() {
                                     if (appState.xAxisBase == 1) {
                                         const auto& hilbX = appState.hilbertXCache[appState.selectedFilenames[i]];
                                         if (!hilbX.empty()) {
-                                            if (appState.alignPeaks && !peakPositions.empty()) {
+                                            if (appState.maxAtZero && !peakPositions.empty()) {
                                                 std::vector<double> shiftedX(actual_count);
                                                 double peakHilbX = hilbX[peakPositions[i]];
                                                 for (size_t j = 0; j < actual_count; j++)
@@ -1683,7 +1688,7 @@ int main() {
                                                 ImPlot::PlotLine("", hilbX.data(), &refData[ref_start], static_cast<int>(actual_count), plotSpecs[i]);
                                             }
                                         }
-                                    } else if (appState.alignPeaks && !peakPositions.empty()) {
+                                    } else if (appState.maxAtZero && !peakPositions.empty()) {
                                         std::vector<double> shiftedX(actual_count);
                                         int peak = static_cast<int>(peakPositions[i]);
                                         for (size_t j = 0; j < actual_count; j++)
@@ -1771,8 +1776,8 @@ int main() {
                     }
 
 
-                    const char* primXLabel = (appState.xAxisBase == 1) ? "OPD [\xC2\xB5m]" : "Sample";
-                    ImPlot::SetupAxes(primXLabel, "Voltage [V]", ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks, y_flags);
+                    const char* primXLabel = (appState.xAxisBase == 1) ? "OPD [\xC2\xB5m]" : "Sample num";
+                    ImPlot::SetupAxes(primXLabel, "Voltage [V]", ImPlotAxisFlags_NoTickMarks, y_flags);
 
                     // Conditionally optimize grid rendering for large datasets
                     if (appState.dataLoaded && appState.loadedData[0].primaryDetector.size() > 50000) {
@@ -1801,7 +1806,7 @@ int main() {
                             for (size_t i = 0; i < appState.loadedData.size(); i++) {
                                 const auto& hx = appState.hilbertXCache[appState.selectedFilenames[i]];
                                 if (!hx.empty()) {
-                                    double off = (appState.alignPeaks && i < peakPositions.size()) ? hx[peakPositions[i]] : 0.0;
+                                    double off = (appState.maxAtZero && i < peakPositions.size()) ? hx[peakPositions[i]] : 0.0;
                                     xMin = std::min(xMin, hx.front() - off);
                                     xMax = std::max(xMax, hx.back() - off);
                                 }
@@ -1814,7 +1819,7 @@ int main() {
                                 }
                             }
                         } else {
-                            if (appState.alignPeaks && !peakPositions.empty()) {
+                            if (appState.maxAtZero && !peakPositions.empty()) {
                                 double xMin = std::numeric_limits<double>::max();
                                 double xMax = std::numeric_limits<double>::lowest();
                                 for (size_t i = 0; i < appState.loadedData.size(); i++) {
@@ -1851,14 +1856,14 @@ int main() {
                             if (appState.xAxisBase == 1) {
                                 const auto& hx = appState.hilbertXCache[appState.selectedFilenames[0]];
                                 if (!hx.empty()) {
-                                    double off = (appState.alignPeaks && !peakPositions.empty()) ? hx[peakPositions[0]] : 0.0;
+                                    double off = (appState.maxAtZero && !peakPositions.empty()) ? hx[peakPositions[0]] : 0.0;
                                     xMin = hx.front() - off;
                                     xMax = hx.back() - off;
                                 } else {
                                     xMin = 0.0;
                                     xMax = static_cast<double>(appState.loadedData[0].primaryDetector.size());
                                 }
-                            } else if (appState.alignPeaks && !peakPositions.empty()) {
+                            } else if (appState.maxAtZero && !peakPositions.empty()) {
                                 double N = static_cast<double>(appState.loadedData[0].primaryDetector.size());
                                 double off = static_cast<double>(peakPositions[0]);
                                 xMin = -off;
@@ -1889,7 +1894,7 @@ int main() {
                                     if (appState.xAxisBase == 1) {
                                         const auto& hilbX = appState.hilbertXCache[appState.selectedFilenames[i]];
                                         if (!hilbX.empty()) {
-                                            if (appState.alignPeaks && !peakPositions.empty()) {
+                                            if (appState.maxAtZero && !peakPositions.empty()) {
                                                 std::vector<double> shiftedX(actual_count);
                                                 double peakHilbX = hilbX[peakPositions[i]];
                                                 for (size_t j = 0; j < actual_count; j++)
@@ -1899,7 +1904,7 @@ int main() {
                                                 ImPlot::PlotLine("", hilbX.data(), &primData[ref_start], static_cast<int>(actual_count), plotSpecs[i]);
                                             }
                                         }
-                                    } else if (appState.alignPeaks && !peakPositions.empty()) {
+                                    } else if (appState.maxAtZero && !peakPositions.empty()) {
                                         std::vector<double> shiftedX(actual_count);
                                         int peak = static_cast<int>(peakPositions[i]);
                                         for (size_t j = 0; j < actual_count; j++)
@@ -1933,7 +1938,7 @@ int main() {
                                 if (appState.xAxisBase == 1 && !appState.selectedFilenames.empty()) {
                                     const auto& hilbX = appState.hilbertXCache[appState.selectedFilenames[0]];
                                     if (!hilbX.empty()) {
-                                        if (appState.alignPeaks && !peakPositions.empty()) {
+                                        if (appState.maxAtZero && !peakPositions.empty()) {
                                             std::vector<double> shiftedHilbX(hilbX.size());
                                             double peakHilbX = hilbX[peakPositions[0]];
                                             for (size_t j = 0; j < hilbX.size(); j++)
@@ -1943,7 +1948,7 @@ int main() {
                                             ImPlot::PlotLine("##ApodWindow", hilbX.data(), window.data(), static_cast<int>(window.size()), windowSpec);
                                         }
                                     }
-                                } else if (appState.alignPeaks && !peakPositions.empty()) {
+                                } else if (appState.maxAtZero && !peakPositions.empty()) {
                                     std::vector<double> shiftedX(window.size());
                                     int peak = static_cast<int>(peakPositions[0]);
                                     for (size_t j = 0; j < window.size(); j++)
@@ -2378,18 +2383,18 @@ int main() {
             }
             ImGui::PopStyleColor(3);
 
-            // Row 2: Align peaks (off / on)
-            ImGui::Text("Align peaks");
+            // Row 2: Max at zero (off / on)
+            ImGui::Text("Max at zero");
             ImGui::SameLine();
-            const bool alignOff = !appState.alignPeaks;
-            const bool alignOn  =  appState.alignPeaks;
+            const bool alignOff = !appState.maxAtZero;
+            const bool alignOn  =  appState.maxAtZero;
 
             ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[alignOff ? 1 : 0]);
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  alignOff ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
             if (ImGui::Button("off##AlignOff")) {
-                if (appState.alignPeaks) {
-                    appState.alignPeaks = false;
+                if (appState.maxAtZero) {
+                    appState.maxAtZero = false;
                     appState.shouldAutoscale = true;
                     appState.needsRedraw = true;
                 }
@@ -2401,8 +2406,8 @@ int main() {
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  alignOn ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
             if (ImGui::Button("on##AlignOn")) {
-                if (!appState.alignPeaks) {
-                    appState.alignPeaks = true;
+                if (!appState.maxAtZero) {
+                    appState.maxAtZero = true;
                     appState.shouldAutoscale = true;
                     appState.needsRedraw = true;
                 }
@@ -2644,7 +2649,7 @@ int main() {
     cleanupApplication(window);
     
     // Save configuration before exiting
-    config.alignPeaks = appState.alignPeaks;
+    config.maxAtZero = appState.maxAtZero;
     config.autoFitYAxis = appState.autoFitYAxis;
     config.enableDownsampling = appState.enableDownsampling;
     config.xAxisBase = appState.xAxisBase;
@@ -2655,8 +2660,10 @@ int main() {
     config.showFPS = appState.showFPS;
     
     // Save spectrum window settings
-    config.spectrumYAxisMode    = appState.spectrum.yAxisMode;
-    config.spectrumForcedYMin   = appState.spectrum.forcedYMin;
+    config.spectrumYAxisMode           = appState.spectrum.yAxisMode;
+    config.spectrumXUnitSelector       = appState.spectrum.xUnitSelector;
+    config.spectrumYScaleSelector      = appState.spectrum.yScaleSelector;
+    config.spectrumForcedYMin          = appState.spectrum.forcedYMin;
     config.spectrumForcedYMax   = appState.spectrum.forcedYMax;
     config.apodizationSelector  = appState.spectrum.apodizationSelector;
     config.apodGaussSigma       = appState.spectrum.apodizationParams.gaussSigma;
