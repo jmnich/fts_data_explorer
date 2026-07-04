@@ -8,6 +8,9 @@
 
 class AverageSpectrum {
 public:
+    // Reference to app state for accessing spectrum's shared settings
+    class AppState* appState;
+
     // Cached average data (Y = magnitude, X = frequency/wavelength axis)
     std::vector<double> cachedAverageY;
     std::vector<double> cachedAverageX;
@@ -38,11 +41,6 @@ public:
     int prevXUnitSelector;
     int yScaleSelector;         // 0: linear, 1: log10, 2: dB
     int prevYScaleSelector;
-    float refLaserTextbox;      // Reference laser wavelength in um
-    float detectorSensitivity;  // kV/W
-    int Kpadding;               // Zero-pad factor
-    int apodizationSelector;
-    ApodizationParams apodizationParams;
     int yAxisMode;              // 0: all, 1: tight, 2: force
     int prevYAxisMode;
     double forcedYMin;

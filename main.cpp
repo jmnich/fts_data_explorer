@@ -533,6 +533,7 @@ int main() {
     
     // Set the appState pointer in the spectrum object for raw data access
     appState.spectrum.appState = &appState;
+    appState.averageSpectrum.appState = &appState;
     
     // Load average window settings from config
     appState.averageSpectrum.yAxisMode           = config.avgYAxisMode;
@@ -543,12 +544,6 @@ int main() {
     appState.averageSpectrum.prevYScaleSelector  = config.avgYScaleSelector;
     appState.averageSpectrum.forcedYMin          = config.avgForcedYMin;
     appState.averageSpectrum.forcedYMax          = config.avgForcedYMax;
-    appState.averageSpectrum.apodizationSelector = config.avgApodizationSelector;
-    appState.averageSpectrum.apodizationParams.gaussSigma    = config.avgApodGaussSigma;
-    appState.averageSpectrum.apodizationParams.rectWidth     = config.avgApodRectWidth;
-    appState.averageSpectrum.apodizationParams.nortonBeerFwhm = config.avgApodNortonBeerFwhm;
-    appState.averageSpectrum.apodizationParams.dolphChebyshevAt = config.avgApodDolphChebyshevAt;
-    appState.averageSpectrum.detectorSensitivity = config.avgDetectorSensitivity;
     
     // No initialization needed for simple file dialog
     
@@ -2416,11 +2411,11 @@ int main() {
                 for (const auto& raw : selectedData) {
                     auto ps = SpectralToolbox::processSpectrum(
                         raw.primaryDetector, raw.referenceDetector,
-                        appState.averageSpectrum.refLaserTextbox,
-                        appState.averageSpectrum.Kpadding,
+                        appState.spectrum.refLaserTextbox,
+                        appState.spectrum.Kpadding,
                         static_cast<SpectralToolbox::SpectrumXUnit>(appState.averageSpectrum.xUnitSelector),
-                        static_cast<ApodizationWindow>(appState.averageSpectrum.apodizationSelector),
-                        appState.averageSpectrum.apodizationParams);
+                        static_cast<ApodizationWindow>(appState.spectrum.apodizationSelector),
+                        appState.spectrum.apodizationParams);
 
                     allSpectraY.push_back(ps.spectrumY);
                     if (firstFile) {
@@ -2654,78 +2649,6 @@ int main() {
                 }
             }
 
-            ImGui::Separator();
-
-            // Detector sensitivity
-            ImGui::Text("Detector sensitivity [kV/W]:");
-            ImGui::SameLine();
-            float remW = ImGui::GetContentRegionAvail().x;
-            ImGui::SetNextItemWidth(remW);
-            ImGui::InputFloat("##AvgDetectorSensitivity", &appState.averageSpectrum.detectorSensitivity, 0.0f, 0.0f, "%.4f");
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Detector sensitivity in kV/W. Converts spectrum from V to W and enables dBm units.\nLeave at 0 to skip conversion.");
-            if (ImGui::IsItemDeactivatedAfterEdit())
-                appState.needsRedraw = true;
-
-            // Ref laser
-            ImGui::Text("Ref laser [\xC2\xB5""m]:");
-            ImGui::SameLine();
-            float rw = ImGui::GetContentRegionAvail().x;
-            ImGui::SetNextItemWidth(rw);
-            ImGui::InputFloat("##AvgRefLaserTextbox", &appState.averageSpectrum.refLaserTextbox, 0.001f, 0.01f);
-            if (ImGui::IsItemDeactivatedAfterEdit())
-                appState.needsRedraw = true;
-
-            // Zero-pad K
-            ImGui::Text("Zero-pad K:");
-            ImGui::SameLine();
-            rw = ImGui::GetContentRegionAvail().x;
-            ImGui::SetNextItemWidth(rw);
-            if (ImGui::InputInt("##AvgKpadding", &appState.averageSpectrum.Kpadding, 1, 1)) {
-                appState.averageSpectrum.Kpadding = std::clamp(appState.averageSpectrum.Kpadding, 0, 16);
-                appState.needsRedraw = true;
-            }
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Zero-pad factor K. Output bins = N*(K+1).\n0 disables padding.");
-
-            // Apodization
-            ImGui::Text("Apodization");
-            ImGui::SameLine();
-            const auto& windowNames = Apodization::getWindowNames();
-            if (ImGui::Combo("##AvgApodizationSelector", &appState.averageSpectrum.apodizationSelector,
-                             windowNames.data(), static_cast<int>(windowNames.size()))) {
-                appState.needsRedraw = true;
-            }
-
-            if (appState.averageSpectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Gauss)) {
-                if (ImGui::SliderFloat("Sigma##AvgGaussSigma", &appState.averageSpectrum.apodizationParams.gaussSigma,
-                                       1.0f, 3.0f, "%.1f"))
-                    appState.needsRedraw = true;
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("Gauss sigma fraction (1.0-3.0).\n1.0 = narrow, 3.0 = wide.");
-            } else if (appState.averageSpectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Rectangular)) {
-                if (ImGui::SliderFloat("Width##AvgRectWidth", &appState.averageSpectrum.apodizationParams.rectWidth,
-                                       0.05f, 1.0f, "%.2f"))
-                    appState.needsRedraw = true;
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("Rectangular window width fraction (0.05-1.0).\n1.0 = full signal, 0.05 = 5%% of signal.");
-            } else if (appState.averageSpectrum.apodizationSelector == static_cast<int>(ApodizationWindow::NortonBeer)) {
-                if (ImGui::SliderFloat("FWHM##AvgNortonBeerFwhm", &appState.averageSpectrum.apodizationParams.nortonBeerFwhm,
-                                       1.0f, 2.0f, "%.1f"))
-                    appState.needsRedraw = true;
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("Norton-Beer FWHM parameter (1.0-2.0 step 0.1).\nControls the relative full-width at half maximum.");
-            } else if (appState.averageSpectrum.apodizationSelector == static_cast<int>(ApodizationWindow::DolphChebyshev)) {
-                float at = appState.averageSpectrum.apodizationParams.dolphChebyshevAt;
-                ImGui::SliderFloat("Attenuation##AvgDolphChebyshevAt", &at, 50.0f, 160.0f, "%.0f dB");
-                at = std::round(at / 10.0f) * 10.0f;
-                if (at != appState.averageSpectrum.apodizationParams.dolphChebyshevAt) {
-                    appState.averageSpectrum.apodizationParams.dolphChebyshevAt = at;
-                    appState.needsRedraw = true;
-                }
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("Dolph-Chebyshev attenuation (50-160 dB, step 10).\nHigher values produce lower sidelobes.");
-            }
         } else {
             ImGui::Text("No data loaded.");
         }
@@ -3070,12 +2993,6 @@ int main() {
     config.avgYScaleSelector      = appState.averageSpectrum.yScaleSelector;
     config.avgForcedYMin          = appState.averageSpectrum.forcedYMin;
     config.avgForcedYMax          = appState.averageSpectrum.forcedYMax;
-    config.avgApodizationSelector = appState.averageSpectrum.apodizationSelector;
-    config.avgApodGaussSigma      = appState.averageSpectrum.apodizationParams.gaussSigma;
-    config.avgApodRectWidth       = appState.averageSpectrum.apodizationParams.rectWidth;
-    config.avgApodNortonBeerFwhm  = appState.averageSpectrum.apodizationParams.nortonBeerFwhm;
-    config.avgApodDolphChebyshevAt = appState.averageSpectrum.apodizationParams.dolphChebyshevAt;
-    config.avgDetectorSensitivity = appState.averageSpectrum.detectorSensitivity;
     
     // Save config to file
     if (!config.saveToFile(configFilePath)) {
