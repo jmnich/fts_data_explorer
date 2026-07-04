@@ -512,10 +512,6 @@ int main() {
     appState.showFPS = config.showFPS; // Load from config
     
     // Load spectrum window settings from config
-    appState.spectrum.spectrumWindowPosX = config.spectrumWindowPosX;
-    appState.spectrum.spectrumWindowPosY = config.spectrumWindowPosY;
-    appState.spectrum.spectrumWindowSizeX = config.spectrumWindowSizeX;
-    appState.spectrum.spectrumWindowSizeY = config.spectrumWindowSizeY;
     appState.spectrum.yAxisMode     = config.spectrumYAxisMode;
     appState.spectrum.forcedYMin    = config.spectrumForcedYMin;
     appState.spectrum.forcedYMax    = config.spectrumForcedYMax;
@@ -702,8 +698,6 @@ int main() {
             appState.selectedFiles.clear();
             appState.selectedFilenames.clear();
             appState.rawDataCache.clear();
-            appState.spectrum.showSpectrumWindow = false;
-            appState.spectrum.spectrumWindowInitialized = false;
             appState.needsRedraw = true;
         }
 
@@ -1874,8 +1868,8 @@ int main() {
                             }
                         }
                         
-                        // Draw apodization window overlay when spectrum view is open
-                        if (appState.spectrum.showSpectrumWindow) {
+                        // Draw apodization window overlay (spectrum view is always available)
+                        if (appState.dataLoaded) {
                             const auto& primData = (appState.alignPeaks && !alignedData.empty())
                                 ? alignedData[0].primaryDetector
                                 : appState.loadedData[0].primaryDetector;
@@ -1978,11 +1972,6 @@ int main() {
         // Spectrum panel (bottom)
         ImGui::Begin("Spectrum");
         if (appState.dataLoaded) {
-            if (ImGui::Button("show spectrum")) {
-                appState.spectrum.showSpectrumWindow = true;
-                appState.needsRedraw = true;
-            }
-            
             // Spectrum panel controls
             ImGui::Separator();
 
@@ -2319,9 +2308,19 @@ int main() {
         ImGui::PopTextWrapPos(); // Disable text wrapping
         ImGui::End();
         
+        // Spectrum View panel (docked)
+        ImGui::Begin("Spectrum View");
+        if (appState.dataLoaded && !appState.loadedData.empty()) {
+            std::vector<std::pair<std::string, std::vector<double>>> primaryDetectors;
+            for (size_t i = 0; i < appState.loadedData.size(); i++) {
+                primaryDetectors.emplace_back(appState.selectedFilenames[i], appState.loadedData[i].primaryDetector);
+            }
+            appState.spectrum.renderSpectrumContents(primaryDetectors, appState.rawDataCache);
+        } else {
+            ImGui::Text("No data loaded.");
+        }
+        ImGui::End();
 
-
-        
         // Close the docking condition
         }
         
@@ -2340,16 +2339,6 @@ int main() {
             ImGui::End();
         }
 
-        // Spectrum view window
-        if (appState.spectrum.showSpectrumWindow && appState.dataLoaded && !appState.loadedData.empty()) {
-            // Prepare data for all selected files
-            std::vector<std::pair<std::string, std::vector<double>>> primaryDetectors;
-            for (size_t i = 0; i < appState.loadedData.size(); i++) {
-                primaryDetectors.emplace_back(appState.selectedFilenames[i], appState.loadedData[i].primaryDetector);
-            }
-            appState.spectrum.renderSpectrumWindow(primaryDetectors, appState.rawDataCache);
-        }
-        
         // Rendering
         ImGui::Render();
         int display_w, display_h;
@@ -2381,10 +2370,6 @@ int main() {
     config.showFPS = appState.showFPS;
     
     // Save spectrum window settings
-    config.spectrumWindowPosX = appState.spectrum.spectrumWindowPosX;
-    config.spectrumWindowPosY = appState.spectrum.spectrumWindowPosY;
-    config.spectrumWindowSizeX = appState.spectrum.spectrumWindowSizeX;
-    config.spectrumWindowSizeY = appState.spectrum.spectrumWindowSizeY;
     config.spectrumYAxisMode    = appState.spectrum.yAxisMode;
     config.spectrumForcedYMin   = appState.spectrum.forcedYMin;
     config.spectrumForcedYMax   = appState.spectrum.forcedYMax;

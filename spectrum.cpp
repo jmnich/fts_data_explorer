@@ -37,13 +37,7 @@ static void SetupAxisTicksLimited(ImAxis axis, double min, double max, int maxTi
 }
 
 Spectrum::Spectrum()
-    : showSpectrumWindow(false),
-      spectrumWindowInitialized(false),
-      spectrumWindowPosX(100.0f),
-      spectrumWindowPosY(100.0f),
-      spectrumWindowSizeX(600.0f),
-      spectrumWindowSizeY(400.0f),
-      spectrumDirty(true),
+    : spectrumDirty(true),
       isSelectingXRange(false),
       selectionStartX(0.0),
       selectionEndX(0.0),
@@ -82,20 +76,7 @@ Spectrum::Spectrum()
       
       }
 
-void Spectrum::initSpectrumWindow() {
-    if (!spectrumWindowInitialized) {
-        spectrumWindowInitialized = true;
-    }
-}
-
 void Spectrum::resetSpectrumWindow() {
-    showSpectrumWindow = false;
-    spectrumWindowInitialized = false;
-    spectrumWindowPosX = 100.0f;
-    spectrumWindowPosY = 100.0f;
-    spectrumWindowSizeX = 600.0f;
-    spectrumWindowSizeY = 400.0f;
-    
     // Reset X-range selection state
     isSelectingXRange = false;
     selectionStartX = 0.0;
@@ -188,27 +169,8 @@ bool Spectrum::isSpectrumDirty(const std::string& fileId, const std::vector<doub
     return false;
 }
 
-void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std::vector<double>>>& primaryDetectors,
-                                   const std::vector<InterferogramData>& rawDataCache) {
-    // Only set position/size on first use, then let user move/resize freely
-    ImGui::SetNextWindowPos(ImVec2(spectrumWindowPosX, spectrumWindowPosY), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(spectrumWindowSizeX, spectrumWindowSizeY), ImGuiCond_FirstUseEver);
-
-    ImGuiWindowFlags spectrumFlags = ImGuiWindowFlags_None;
-    
-    if (ImGui::Begin("Spectrum View", &showSpectrumWindow, spectrumFlags)) {
-        // Update our saved position and size when window is being moved/resized
-        if (ImGui::IsWindowFocused() && (ImGui::IsMouseDragging(ImGuiMouseButton_Left) || ImGui::IsMouseReleased(ImGuiMouseButton_Left)))
-        {
-            ImVec2 windowPos = ImGui::GetWindowPos();
-            ImVec2 windowSize = ImGui::GetWindowSize();
-            spectrumWindowPosX = windowPos.x;
-            spectrumWindowPosY = windowPos.y;
-            spectrumWindowSizeX = windowSize.x;
-            spectrumWindowSizeY = windowSize.y;
-        }
-        
-        spectrumWindowInitialized = true;
+void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, std::vector<double>>>& primaryDetectors,
+                                     const std::vector<InterferogramData>& rawDataCache) {
 
 
         
@@ -890,18 +852,5 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
             }
             ImPlot::EndPlot();
         }
-    }
-    ImGui::End();
-}
-
-void Spectrum::updateWindowState() {
-    if (spectrumWindowInitialized) {
-        ImVec2 windowPos = ImGui::GetWindowPos();
-        ImVec2 windowSize = ImGui::GetWindowSize();
-        spectrumWindowPosX = windowPos.x;
-        spectrumWindowPosY = windowPos.y;
-        spectrumWindowSizeX = windowSize.x;
-        spectrumWindowSizeY = windowSize.y;
-    }
 }
 

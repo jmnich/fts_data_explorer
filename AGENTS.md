@@ -14,7 +14,7 @@ It presents a tree view of information available in the dataset and then allows 
     - primary, large graphing panel, which shows selected primary and reference interferograms on 2 vertically stacked plots with shared x axis. These graphs support zoom with mouse.
     - metadata panel, docked to the right of the graphing panel, showing all available metadata
     - files panel, docked to the left, showing tree view with files in the selected directory
-    - spectrum panel showing button "spectrum"
+    - spectrum controls panel with display and processing settings
 - Main window contains a ribbon menu, which is hidden in the welcome screen. The structure of the menu is as follows:
     - File
         - a single button "set working directory", which invokes directory browsing window and switches working directory
@@ -58,8 +58,8 @@ It presents a tree view of information available in the dataset and then allows 
       - "LARGE DATA" indicator shown in the top-right of plots
 
 - Spectrum functionality
-    - The docked "Spectrum" panel (bottom of main window) contains controls and a "Spectrum" button that opens the floating "Spectrum View" window.
-    - Spectrum View window stays always-on-top and closes when returning to the welcome screen.
+    - The docked "Spectrum" panel (bottom of main window) contains spectrum controls.
+    - Spectrum View is a permanent docked panel alongside Files, Metadata, and Graphing Panel.
     - **Spectrum panel controls:**
         - X-axis unit selector: cm⁻¹ / µm / THz (toggle buttons). Changing units converts current X-axis zoom range and invalidates spectrum caches.
         - Y-axis scale: Linear / Log10 (toggle buttons). Switching preserves X range.
@@ -76,7 +76,7 @@ It presents a tree view of information available in the dataset and then allows 
     - **Multi-file comparison:** Up to 5 simultaneously selected files rendered in different colors with legend (same color scheme as main plot). `AppState::rawDataCache` stores unprocessed data for spectrum use, separate from the downsampled `loadedData` used in main plots.
     - **Spectrum View interaction:** Shift+drag X-range selection (translucent purple), arrow-key pan (10% of visible range), ESC reset zoom to fit all, mouse-wheel zoom, ImPlot-native interactions.
     - **Apodization overlay:** When Spectrum View is open, the computed apodization window is drawn as a semi-transparent cyan overlay on the primary interferogram plot, scaled to the interferogram's peak amplitude for visual alignment.
-    - **State persistence:** Spectrum window position, size, `yAxisMode`, `forcedYMin`, and `forcedYMax` are saved/restored via `[SpectrumWindow]` config section. Legacy key `force_y_limits` is mapped to `yAxisMode=2` on load.
+    - **State persistence:** Spectrum `yAxisMode`, `forcedYMin`, `forcedYMax`, apodization selector, apodization params, and detector sensitivity are saved/restored via `[SpectrumWindow]` config section.
       Apodization selector, `gaussSigma`, and `rectWidth` are also persisted in `[SpectrumWindow]`.
     - **Hilbert validation:** `test_hilbert_comparison/` contains a standalone test validating Hilbert X-axis correction against a Python reference implementation.
 
@@ -110,7 +110,7 @@ The app uses a dirty-flag mechanism to avoid re-rendering the entire UI (includi
 
 **How it works:**
 1. **GLFW callbacks** (installed in `initializeApplication()` before `ImGui_ImplGlfw_InitForOpenGL` so ImGui wraps/chains them) set `needsRedraw = true` on any input event: cursor move, mouse button, scroll, key, char, drop, framebuffer resize, window focus/refresh/position.
-2. **Explicit dirty marks** are set at visual-state transition points: `dataLoaded = true`, `showWelcomeScreen` toggled, spectrum window opened, directory changed.
+2. **Explicit dirty marks** are set at visual-state transition points: `dataLoaded = true`, `showWelcomeScreen` toggled, directory changed.
 3. **Main loop** (`main.cpp`):
    - After `glfwPollEvents()`, checks `needsRedraw`.
    - If `false` → `std::this_thread::sleep_for(10ms)` + `continue` — skips `NewFrame`, `Render`, `SwapBuffers`, `glClear`. GPU does zero work.

@@ -27,11 +27,6 @@ struct AppConfig {
     bool windowMaximized = false;
     
     // Spectrum window state
-    float spectrumWindowPosX = 100.0f;
-    float spectrumWindowPosY = 100.0f;
-    float spectrumWindowSizeX = 600.0f;
-    float spectrumWindowSizeY = 400.0f;
-    bool spectrumForceYLimits = false; // legacy: mapped to spectrumYAxisMode on load
     int spectrumYAxisMode = 0; // 0: all, 1: tight, 2: force
     double spectrumForcedYMin = 0.0;
     double spectrumForcedYMax = 1.0;
@@ -105,10 +100,6 @@ struct AppConfig {
             
             // Write spectrum window settings
             configFile << "\n[SpectrumWindow]\n";
-            configFile << "pos_x=" << spectrumWindowPosX << "\n";
-            configFile << "pos_y=" << spectrumWindowPosY << "\n";
-            configFile << "size_x=" << spectrumWindowSizeX << "\n";
-            configFile << "size_y=" << spectrumWindowSizeY << "\n";
             configFile << "y_axis_mode=" << spectrumYAxisMode << "\n";
             configFile << "forced_y_min=" << spectrumForcedYMin << "\n";
             configFile << "forced_y_max=" << spectrumForcedYMax << "\n";
@@ -197,19 +188,7 @@ struct AppConfig {
                             windowMaximized = (value == "true");
                         }
                     } else if (currentSection == "SpectrumWindow") {
-                        if (key == "pos_x") {
-                            spectrumWindowPosX = std::stof(value);
-                        } else if (key == "pos_y") {
-                            spectrumWindowPosY = std::stof(value);
-                        } else if (key == "size_x") {
-                            spectrumWindowSizeX = std::stof(value);
-                        } else if (key == "size_y") {
-                            spectrumWindowSizeY = std::stof(value);
-                        } else if (key == "force_y_limits") {
-                            // Legacy key: map "true" to force mode (2), "false" to all (0)
-                            spectrumForceYLimits = (value == "true");
-                            if (spectrumForceYLimits) spectrumYAxisMode = 2;
-                        } else if (key == "y_axis_mode") {
+                        if (key == "y_axis_mode") {
                             spectrumYAxisMode = std::stoi(value);
                         } else if (key == "forced_y_min") {
                             spectrumForcedYMin = std::stod(value);
