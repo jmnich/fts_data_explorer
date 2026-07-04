@@ -534,6 +534,7 @@ int main() {
     // Set the appState pointer in the spectrum object for raw data access
     appState.spectrum.appState = &appState;
     appState.averageSpectrum.appState = &appState;
+    appState.exportPanel.appState = &appState;
     
     // Load average window settings from config
     appState.averageSpectrum.yAxisMode           = config.avgYAxisMode;
@@ -2793,6 +2794,15 @@ int main() {
                 }
             }
             ImGui::PopStyleColor(3);
+        } else {
+            ImGui::Text("No data loaded.");
+        }
+        ImGui::End();
+
+        // Export panel (docked)
+        ImGui::Begin("Export");
+        if (appState.dataLoaded) {
+            appState.exportPanel.render();
         } else {
             ImGui::Text("No data loaded.");
         }

@@ -1,0 +1,296 @@
+#include "export.h"
+#include "app_state.h"
+#include "spectrum.h"
+#include "average_spectrum.h"
+#include "spectral_toolbox.h"
+#include "adapters/csv_adapter.h"
+
+#include "imgui.h"
+#include "tinyfiledialogs.h"
+#include <fstream>
+#include <filesystem>
+#include <cmath>
+#include <algorithm>
+#include <cstring>
+
+ExportPanel::ExportPanel()
+{
+    artifactLabels = {
+        ARTIFACT_CORR_IFG,
+        ARTIFACT_UNCORR_IFG,
+        ARTIFACT_AVG_SPECT,
+        ARTIFACT_SPECTRA
+    };
+    artifactChecked.assign(artifactLabels.size(), 0);
+}
+
+bool ExportPanel::isArtifactAvailable(const char* label) const
+{
+    if (!appState) return false;
+    std::string lbl(label);
+    if (lbl == ARTIFACT_CORR_IFG || lbl == ARTIFACT_UNCORR_IFG || lbl == ARTIFACT_SPECTRA)
+        return appState->dataLoaded && !appState->selectedFiles.empty();
+    if (lbl == ARTIFACT_AVG_SPECT)
+        return appState->averageSpectrum.averageAvailable;
+    return false;
+}
+
+void ExportPanel::refreshArtifacts()
+{
+    for (size_t i = 0; i < artifactLabels.size(); i++) {
+        if (!isArtifactAvailable(artifactLabels[i].c_str())) {
+            artifactChecked[i] = 0;
+        }
+    }
+}
+
+static std::string sanitizeFilename(const std::string& s)
+{
+    std::string out = s;
+    for (auto& ch : out) {
+        if (ch == ' ' || ch == '/' || ch == '\\' || ch == ':')
+            ch = '_';
+    }
+    return out;
+}
+
+void ExportPanel::render()
+{
+    refreshArtifacts();
+
+    if (!appState || !appState->dataLoaded) {
+        ImGui::Text("No data loaded.");
+        return;
+    }
+
+    ImGui::Text("Format: .csv");
+
+    ImGui::Separator();
+
+    if (ImGui::BeginChild("ExportArtifacts", ImVec2(0, -ImGui::GetFrameHeightWithSpacing() - 8), true)) {
+        for (size_t i = 0; i < artifactLabels.size(); i++) {
+            bool avail = isArtifactAvailable(artifactLabels[i].c_str());
+            if (!avail) {
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 0.4f, 0.4f, 0.7f));
+                bool dummy = false;
+                ImGui::Checkbox(artifactLabels[i].c_str(), &dummy);
+                ImGui::PopStyleColor();
+            } else {
+                bool checked = (artifactChecked[i] != 0);
+                if (ImGui::Checkbox(artifactLabels[i].c_str(), &checked)) {
+                    artifactChecked[i] = checked ? 1 : 0;
+                    appState->needsRedraw = true;
+                }
+            }
+        }
+    }
+    ImGui::EndChild();
+
+    ImGui::Separator();
+
+    if (ImGui::Button("Export", ImVec2(-1, 0))) {
+        bool anySelected = false;
+        for (size_t i = 0; i < artifactChecked.size(); i++) {
+            if (artifactChecked[i] != 0 && isArtifactAvailable(artifactLabels[i].c_str())) {
+                anySelected = true;
+                break;
+            }
+        }
+        if (!anySelected) {
+            ImGui::OpenPopup("Export Warning");
+        } else {
+            const char* folder = tinyfd_selectFolderDialog("Select Export Directory", "");
+            if (folder) {
+                performExport(std::string(folder));
+                ImGui::OpenPopup("Export Complete");
+            }
+        }
+    }
+
+    if (ImGui::BeginPopupModal("Export Warning", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("No artifacts selected or available for export.");
+        if (ImGui::Button("OK")) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+
+    if (ImGui::BeginPopupModal("Export Complete", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Export completed successfully.");
+        if (ImGui::Button("OK")) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+}
+
+void ExportPanel::performExport(const std::string& dir)
+{
+    if (artifactChecked[0]) writeCorrectedIFGCsv(dir);
+    if (artifactChecked[1]) writeUncorrectedIFGCsv(dir);
+    if (artifactChecked[2]) writeAvgSpectrumCsv(dir);
+    if (artifactChecked[3]) writeSpectraCsv(dir);
+}
+
+// ---------------------------------------------------------------------------
+//  CSV exports
+// ---------------------------------------------------------------------------
+
+void ExportPanel::writeCorrectedIFGCsv(const std::string& dir)
+{
+    std::string dsName = sanitizeFilename(appState->currentDatasetName);
+    for (size_t i = 0; i < appState->selectedFiles.size(); i++) {
+        if (i >= appState->rawDataCache.size()) continue;
+        const auto& raw = appState->rawDataCache[i];
+        if (raw.referenceDetector.empty() || raw.primaryDetector.empty()) continue;
+
+        std::vector<double> hilbX;
+        SpectralToolbox::xAxisFromHilbert(raw.referenceDetector,
+                                          appState->spectrum.refLaserTextbox,
+                                          hilbX);
+        if (hilbX.empty()) continue;
+
+        std::string fname = appState->selectedFilenames[i];
+        size_t dot = fname.rfind('.');
+        if (dot != std::string::npos) fname = fname.substr(0, dot);
+        fname = sanitizeFilename(fname);
+
+        std::string path = dir + "/" + dsName + "_corrected_ifg_" + fname + ".csv";
+        std::ofstream ofs(path);
+        if (!ofs.is_open()) continue;
+        ofs << "OPD [um],Primary Detector [V]\n";
+        size_t n = std::min(hilbX.size(), raw.primaryDetector.size());
+        for (size_t j = 0; j < n; j++) {
+            ofs << hilbX[j] << "," << raw.primaryDetector[j] << "\n";
+        }
+        ofs.close();
+    }
+}
+
+void ExportPanel::writeUncorrectedIFGCsv(const std::string& dir)
+{
+    std::string dsName = sanitizeFilename(appState->currentDatasetName);
+    std::string path = dir + "/" + dsName + "_uncorrected_ifgs.csv";
+    std::ofstream ofs(path);
+    if (!ofs.is_open()) return;
+
+    size_t nFiles = std::min(appState->selectedFiles.size(), appState->rawDataCache.size());
+    size_t maxLen = 0;
+    for (size_t i = 0; i < nFiles; i++) {
+        maxLen = std::max(maxLen, appState->rawDataCache[i].referenceDetector.size());
+        maxLen = std::max(maxLen, appState->rawDataCache[i].primaryDetector.size());
+    }
+
+    ofs << "Index";
+    for (size_t i = 0; i < nFiles; i++) {
+        ofs << ",Reference_" << i << ",Primary_" << i;
+    }
+    ofs << "\n";
+
+    for (size_t row = 0; row < maxLen; row++) {
+        ofs << row;
+        for (size_t i = 0; i < nFiles; i++) {
+            const auto& raw = appState->rawDataCache[i];
+            if (row < raw.referenceDetector.size())
+                ofs << "," << raw.referenceDetector[row];
+            else
+                ofs << ",";
+            if (row < raw.primaryDetector.size())
+                ofs << "," << raw.primaryDetector[row];
+            else
+                ofs << ",";
+        }
+        ofs << "\n";
+    }
+    ofs.close();
+}
+
+void ExportPanel::writeAvgSpectrumCsv(const std::string& dir)
+{
+    const auto& avg = appState->averageSpectrum;
+    if (!avg.averageAvailable || avg.cachedAverageX.empty() || avg.cachedAverageY.empty())
+        return;
+
+    std::string dsName = sanitizeFilename(appState->currentDatasetName);
+    std::string path = dir + "/" + dsName + "_average_spectrum.csv";
+    std::ofstream ofs(path);
+    if (!ofs.is_open()) return;
+
+    const char* xLabel = "Wavenumber [cm-1]";
+    if (avg.xUnitSelector == 1) xLabel = "Wavelength [um]";
+    else if (avg.xUnitSelector == 2) xLabel = "Frequency [THz]";
+
+    ofs << xLabel << ",Magnitude [V]\n";
+    size_t n = std::min(avg.cachedAverageX.size(), avg.cachedAverageY.size());
+    for (size_t j = 0; j < n; j++) {
+        ofs << avg.cachedAverageX[j] << "," << avg.cachedAverageY[j] << "\n";
+    }
+    ofs.close();
+}
+
+void ExportPanel::writeSpectraCsv(const std::string& dir)
+{
+    std::string dsName = sanitizeFilename(appState->currentDatasetName);
+    std::string path = dir + "/" + dsName + "_spectra.csv";
+    std::ofstream ofs(path);
+    if (!ofs.is_open()) return;
+
+    size_t nFiles = appState->selectedFilenames.size();
+    bool hasData = false;
+    for (size_t i = 0; i < nFiles; i++) {
+        const auto& fid = appState->selectedFilenames[i];
+        if (appState->spectrum.cachedFrequencies.count(fid) &&
+            appState->spectrum.cachedSpectra.count(fid))
+            hasData = true;
+    }
+    if (!hasData) { ofs.close(); return; }
+
+    const char* xLabel = "Wavenumber [cm-1]";
+    if (appState->spectrum.xUnitSelector == 1) xLabel = "Wavelength [um]";
+    else if (appState->spectrum.xUnitSelector == 2) xLabel = "Frequency [THz]";
+
+    ofs << xLabel;
+    for (size_t i = 0; i < nFiles; i++) {
+        std::string fn = appState->selectedFilenames[i];
+        size_t dot = fn.rfind('.');
+        if (dot != std::string::npos) fn = fn.substr(0, dot);
+        ofs << ",Magnitude_" << i << " [" << fn << "]";
+    }
+    ofs << "\n";
+
+    const auto& masterFreq = appState->spectrum.cachedFrequencies.at(appState->selectedFilenames[0]);
+    size_t nRows = masterFreq.size();
+    for (size_t r = 0; r < nRows; r++) {
+        ofs << masterFreq[r];
+        for (size_t i = 0; i < nFiles; i++) {
+            const auto& fid = appState->selectedFilenames[i];
+            const auto& freq = appState->spectrum.cachedFrequencies.at(fid);
+            const auto& spec = appState->spectrum.cachedSpectra.at(fid);
+            if (freq.empty() || spec.empty()) {
+                ofs << ",";
+                continue;
+            }
+            double val;
+            if (freq.front() <= freq.back()) {
+                if (masterFreq[r] <= freq.front()) val = spec.front();
+                else if (masterFreq[r] >= freq.back()) val = spec.back();
+                else {
+                    auto it = std::lower_bound(freq.begin(), freq.end(), masterFreq[r]);
+                    size_t hi = it - freq.begin();
+                    size_t lo = hi - 1;
+                    double frac = (masterFreq[r] - freq[lo]) / (freq[hi] - freq[lo]);
+                    val = spec[lo] * (1.0 - frac) + spec[hi] * frac;
+                }
+            } else {
+                if (masterFreq[r] >= freq.front()) val = spec.front();
+                else if (masterFreq[r] <= freq.back()) val = spec.back();
+                else {
+                    auto it = std::lower_bound(freq.begin(), freq.end(), masterFreq[r], std::greater<double>());
+                    size_t hi = it - freq.begin();
+                    size_t lo = hi - 1;
+                    double frac = (masterFreq[r] - freq[lo]) / (freq[hi] - freq[lo]);
+                    val = spec[lo] * (1.0 - frac) + spec[hi] * frac;
+                }
+            }
+            ofs << "," << val;
+        }
+        ofs << "\n";
+    }
+    ofs.close();
+}

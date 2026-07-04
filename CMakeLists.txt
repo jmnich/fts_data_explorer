@@ -83,6 +83,7 @@ add_executable(fts_data_explorer
     average_spectrum.cpp
     spectral_toolbox.cpp
     apodization.cpp
+    export.cpp
     adapters/csv_adapter.cpp
     ${EXTRA_SOURCES}
 )

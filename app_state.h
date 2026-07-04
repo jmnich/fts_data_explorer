@@ -7,6 +7,7 @@
 #include "config.h"
 #include "spectrum.h"
 #include "average_spectrum.h"
+#include "export.h"
 #include "adapters/csv_adapter.h"
 
 // Use InterferogramData from csv_adapter.h
@@ -105,6 +106,9 @@ struct AppState {
     
     // Average spectrum state
     AverageSpectrum averageSpectrum;
+
+    // Export panel state
+    ExportPanel exportPanel;
 
     // Per-file checkbox state for averaging selection.
     // Indexed identically to sortedFiles.
