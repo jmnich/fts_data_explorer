@@ -2490,7 +2490,7 @@ int main() {
         if (appState.dataLoaded) {
             // Button: Calculate average
             if (ImGui::Button("Calculate average")) {
-                recalcAverageSpectrum(true);
+                recalcAverageSpectrum(false);
             }
 
             ImGui::Separator();
