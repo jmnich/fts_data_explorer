@@ -6,6 +6,8 @@
 #include "implot.h"
 #include "apodization.h"
 
+struct InterferogramData;
+
 class AverageSpectrum {
 public:
     // Reference to app state for accessing spectrum's shared settings
@@ -16,6 +18,11 @@ public:
     std::vector<double> cachedAverageX;
     int averageCount;           // N in "Average of N"
     bool averageAvailable;      // true after "Calculate average" completes successfully
+
+    // Calculation progress (multi-frame state machine)
+    bool calcInProgress;
+    int progressTotal;
+    int progressCurrent;
 
     // Zoom/pan state (independent per window)
     bool isSelectingXRange;
@@ -55,9 +62,19 @@ public:
     double convertedXMin;
     double convertedXMax;
 
+    // Intermediate calculation state (persisted across frames for multi-file average)
+    std::vector<double> calcCommonX;
+    size_t calcNumBins;
+    int calcValidFiles;
+    bool calcFirstFile;
+
     AverageSpectrum();
     void reset();
 
     // Render the average spectrum plot
     void renderAverageContents(bool showTrackingCursor);
+
+    // Multi-frame average calculation
+    void startCalculation();
+    bool tickCalculation();
 };

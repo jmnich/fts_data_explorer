@@ -31,6 +31,9 @@ static void SetupAxisTicksLimited(ImAxis axis, double min, double max, int maxTi
 AverageSpectrum::AverageSpectrum()
     : averageCount(0),
       averageAvailable(false),
+      calcInProgress(false),
+      progressTotal(0),
+      progressCurrent(0),
       appState(nullptr),
       isSelectingXRange(false),
       selectionStartX(0.0),
@@ -59,7 +62,10 @@ AverageSpectrum::AverageSpectrum()
       pendingNextXMax(-1.0),
       xUnitSwitchedThisFrame(false),
       convertedXMin(0.0),
-      convertedXMax(0.0)
+      convertedXMax(0.0),
+      calcNumBins(0),
+      calcValidFiles(0),
+      calcFirstFile(true)
 {}
 
 void AverageSpectrum::reset() {
@@ -67,6 +73,13 @@ void AverageSpectrum::reset() {
     cachedAverageX.clear();
     averageCount = 0;
     averageAvailable = false;
+    calcInProgress = false;
+    progressTotal = 0;
+    progressCurrent = 0;
+    calcCommonX.clear();
+    calcNumBins = 0;
+    calcValidFiles = 0;
+    calcFirstFile = true;
 
     isSelectingXRange = false;
     selectionStartX = 0.0;
@@ -477,4 +490,110 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
 
         ImPlot::EndPlot();
     }
+}
+
+void AverageSpectrum::startCalculation() {
+    calcCommonX.clear();
+    calcNumBins = 0;
+    calcValidFiles = 0;
+    calcFirstFile = true;
+    calcInProgress = true;
+    progressCurrent = 0;
+    progressTotal = 0;
+    cachedAverageY.clear();
+    cachedAverageX.clear();
+    averageAvailable = false;
+    averageCount = 0;
+}
+
+bool AverageSpectrum::tickCalculation() {
+    if (!calcInProgress) return false;
+
+    // Count total checked files each frame (handles checkbox changes during calc)
+    progressTotal = 0;
+    for (size_t i = 0; i < appState->sortedFiles.size() && i < appState->filesSelectedForAveraging.size(); i++) {
+        if (appState->filesSelectedForAveraging[i]) progressTotal++;
+    }
+
+    // Find the next unchecked file starting from progressCurrent
+    size_t idx = static_cast<size_t>(progressCurrent);
+    while (idx < appState->sortedFiles.size() && idx < appState->filesSelectedForAveraging.size()
+           && !appState->filesSelectedForAveraging[idx]) {
+        idx++;
+    }
+
+    if (idx >= appState->sortedFiles.size() || idx >= appState->filesSelectedForAveraging.size()) {
+        // No more files — finalize
+        if (calcValidFiles > 0) {
+            for (size_t j = 0; j < calcNumBins; j++)
+                cachedAverageY[j] /= calcValidFiles;
+            cachedAverageX = calcCommonX;
+            averageCount = calcValidFiles;
+            averageAvailable = true;
+        } else {
+            averageAvailable = false;
+            averageCount = 0;
+        }
+        calcInProgress = false;
+        return true;
+    }
+
+    // Load and process this file
+    auto raw = CSVAdapter::loadFromCSV(appState->sortedFiles[idx]);
+    auto ps = SpectralToolbox::processSpectrum(
+        raw.primaryDetector, raw.referenceDetector,
+        appState->spectrum.refLaserTextbox,
+        appState->spectrum.Kpadding,
+        static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector),
+        static_cast<ApodizationWindow>(appState->spectrum.apodizationSelector),
+        appState->spectrum.apodizationParams);
+
+    if (calcFirstFile) {
+        calcCommonX = ps.spectrumX;
+        calcNumBins = calcCommonX.size();
+        calcFirstFile = false;
+        cachedAverageY.assign(calcNumBins, 0.0);
+    }
+
+    std::vector<double> toAdd;
+    if (!calcFirstFile && ps.spectrumX.size() == calcNumBins &&
+        std::equal(calcCommonX.begin(), calcCommonX.end(), ps.spectrumX.begin())) {
+        toAdd = ps.spectrumY;
+    } else {
+        toAdd.reserve(calcNumBins);
+        for (size_t j = 0; j < calcNumBins; j++) {
+            double targetX = calcCommonX[j];
+            const auto& sx = ps.spectrumX;
+            if (sx.front() < sx.back()) {
+                auto it = std::lower_bound(sx.begin(), sx.end(), targetX);
+                if (it == sx.begin()) toAdd.push_back(ps.spectrumY[0]);
+                else if (it == sx.end()) toAdd.push_back(ps.spectrumY.back());
+                else {
+                    size_t hi = it - sx.begin();
+                    size_t lo = hi - 1;
+                    double frac = (targetX - sx[lo]) / (sx[hi] - sx[lo]);
+                    toAdd.push_back(ps.spectrumY[lo] * (1.0 - frac) + ps.spectrumY[hi] * frac);
+                }
+            } else {
+                auto it = std::lower_bound(sx.begin(), sx.end(), targetX, std::greater<double>());
+                if (it == sx.begin()) toAdd.push_back(ps.spectrumY[0]);
+                else if (it == sx.end()) toAdd.push_back(ps.spectrumY.back());
+                else {
+                    size_t hi = it - sx.begin();
+                    size_t lo = hi - 1;
+                    double frac = (targetX - sx[lo]) / (sx[hi] - sx[lo]);
+                    toAdd.push_back(ps.spectrumY[lo] * (1.0 - frac) + ps.spectrumY[hi] * frac);
+                }
+            }
+        }
+    }
+
+    if (toAdd.size() == calcNumBins) {
+        for (size_t j = 0; j < calcNumBins; j++)
+            cachedAverageY[j] += toAdd[j];
+        calcValidFiles++;
+    }
+
+    progressCurrent = static_cast<int>(idx) + 1;
+    return false;
 }
