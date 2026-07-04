@@ -524,6 +524,7 @@ int main() {
     appState.spectrum.apodizationParams.rectWidth  = config.apodRectWidth;
     appState.spectrum.apodizationParams.nortonBeerFwhm = config.apodNortonBeerFwhm;
     appState.spectrum.apodizationParams.dolphChebyshevAt = config.apodDolphChebyshevAt;
+    appState.spectrum.detectorSensitivity = config.spectrumDetectorSensitivity;
     
     // Set the appState pointer in the spectrum object for raw data access
     appState.spectrum.appState = &appState;
@@ -1977,14 +1978,14 @@ int main() {
         // Spectrum panel (bottom)
         ImGui::Begin("Spectrum");
         if (appState.dataLoaded) {
-            if (ImGui::Button("Spectrum")) {
+            if (ImGui::Button("show spectrum")) {
                 appState.spectrum.showSpectrumWindow = true;
                 appState.needsRedraw = true;
             }
             
-            // Add new controls to Spectrum panel
+            // Spectrum panel controls
             ImGui::Separator();
-            ImGui::Text("Controls:");
+
 
             // Lambda helper: invalidate spectrum caches when a control editing is finished
             auto invalidateSpectrumCaches = [&]() {
@@ -2024,6 +2025,51 @@ int main() {
             if (ImGui::Button("Off##CursorOff")) {
                 if (cursorOn) {
                     appState.spectrum.showTrackingCursor = false;
+                    appState.needsRedraw = true;
+                }
+            }
+            ImGui::PopStyleColor(3);
+
+            // Y scale selector (lin / log / dB) - rendering only, no cache invalidation needed
+            ImGui::Text("Y scale");
+            ImGui::SameLine();
+
+            const bool linSelected = (appState.spectrum.yScaleSelector == 0);
+            const bool logSelected = (appState.spectrum.yScaleSelector == 1);
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[linSelected ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  linSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("lin##YScaleLin")) {
+                if (!linSelected) {
+                    appState.spectrum.yScaleSelector = 0;
+                    appState.needsRedraw = true;
+                }
+            }
+            ImGui::PopStyleColor(3);
+
+            ImGui::SameLine();
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[logSelected ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  logSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("log##YScaleLog")) {
+                if (!logSelected) {
+                    appState.spectrum.yScaleSelector = 1;
+                    appState.needsRedraw = true;
+                }
+            }
+            ImGui::PopStyleColor(3);
+
+            ImGui::SameLine();
+
+            const bool dbSelected = (appState.spectrum.yScaleSelector == 2);
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[dbSelected ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  dbSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("dB##YScaleDb")) {
+                if (!dbSelected) {
+                    appState.spectrum.yScaleSelector = 2;
                     appState.needsRedraw = true;
                 }
             }
@@ -2070,37 +2116,6 @@ int main() {
                 if (!thzSelected) {
                     appState.spectrum.xUnitSelector = 2;
                     invalidateSpectrumCaches();
-                }
-            }
-            ImGui::PopStyleColor(3);
-
-            // Y scale selector (lin / log) - rendering only, no cache invalidation needed
-            ImGui::Text("Y scale");
-            ImGui::SameLine();
-
-            const bool linSelected = (appState.spectrum.yScaleSelector == 0);
-            const bool logSelected = (appState.spectrum.yScaleSelector == 1);
-
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[linSelected ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  linSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("lin##YScaleLin")) {
-                if (!linSelected) {
-                    appState.spectrum.yScaleSelector = 0;
-                    appState.needsRedraw = true;
-                }
-            }
-            ImGui::PopStyleColor(3);
-
-            ImGui::SameLine();
-
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[logSelected ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  logSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("log##YScaleLog")) {
-                if (!logSelected) {
-                    appState.spectrum.yScaleSelector = 1;
-                    appState.needsRedraw = true;
                 }
             }
             ImGui::PopStyleColor(3);
@@ -2176,6 +2191,22 @@ int main() {
                 }
             }
 
+            ImGui::Separator();
+
+            // Detector sensitivity textbox
+            ImGui::Text("Detector sensitivity [kV/W]:");
+            ImGui::SameLine();
+
+            float remWidth = ImGui::GetContentRegionAvail().x;
+            ImGui::SetNextItemWidth(remWidth);
+            ImGui::InputFloat("##DetectorSensitivity", &appState.spectrum.detectorSensitivity, 0.0f, 0.0f, "%.4f");
+            if (ImGui::IsItemDeactivatedAfterEdit()) {
+                invalidateSpectrumCaches();
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Detector sensitivity in kV/W. Converts spectrum from V to W and enables dBm units.\nLeave at 0 to skip conversion.");
+            }
+
             // Reference laser textbox
             ImGui::Text("Ref laser [\xC2\xB5""m]:");
             ImGui::SameLine();
@@ -2237,14 +2268,15 @@ int main() {
                 }
             } else if (appState.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::DolphChebyshev)) {
                 float at = appState.spectrum.apodizationParams.dolphChebyshevAt;
-                if (ImGui::SliderFloat("Attenuation##DolphChebyshevAt", &at,
-                                       50.0f, 140.0f, "%.0f dB")) {
-                    at = std::round(at / 10.0f) * 10.0f;
+                ImGui::SliderFloat("Attenuation##DolphChebyshevAt", &at,
+                                   50.0f, 160.0f, "%.0f dB");
+                at = std::round(at / 10.0f) * 10.0f;
+                if (at != appState.spectrum.apodizationParams.dolphChebyshevAt) {
                     appState.spectrum.apodizationParams.dolphChebyshevAt = at;
                     invalidateSpectrumCaches();
                 }
                 if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("Dolph-Chebyshev attenuation (50-140 dB, step 10).\nHigher values produce lower sidelobes.");
+                    ImGui::SetTooltip("Dolph-Chebyshev attenuation (50-160 dB, step 10).\nHigher values produce lower sidelobes.");
                 }
             }
             
@@ -2361,6 +2393,7 @@ int main() {
     config.apodRectWidth        = appState.spectrum.apodizationParams.rectWidth;
     config.apodNortonBeerFwhm  = appState.spectrum.apodizationParams.nortonBeerFwhm;
     config.apodDolphChebyshevAt = appState.spectrum.apodizationParams.dolphChebyshevAt;
+    config.spectrumDetectorSensitivity = appState.spectrum.detectorSensitivity;
     
     // Save config to file
     if (!config.saveToFile(configFilePath)) {

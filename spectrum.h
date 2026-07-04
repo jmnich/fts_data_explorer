@@ -61,9 +61,10 @@ public:
     // UI controls for spectrum panel
     int xUnitSelector; // 0: cm-1, 1: um, 2: THz
     int prevXUnitSelector; // tracks last rendered xUnitSelector for axis-limit conversion on change
-    int yScaleSelector; // 0: linear, 1: log10
+    int yScaleSelector; // 0: linear, 1: log10, 2: dB
     int prevYScaleSelector; // tracks last rendered yScaleSelector for change detection
     float refLaserTextbox; // Reference laser wavelength in um
+    float detectorSensitivity; // Detector sensitivity in kV/W (0 = no conversion)
     int Kpadding; // Zero-pad factor (N = n*(K+1)); 0 disables padding
 
     // Apodization
