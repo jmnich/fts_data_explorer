@@ -14,7 +14,7 @@ struct ApodizationParams {
 };
 
 // Precalculated Norton-Beer coefficients for FWHM values 1.0 to 2.0 (step 0.1)
-// These coefficients are from the Python reference implementation
+// These coefficients are from "K. F. F. Ntokas, J. Ungermann, and M. Kaufmann, “Norton-Beer apodization and its Fourier transform,” Journal of the Optical Society of America A, vol. 40, p. 2026, Nov. 2023"
 constexpr std::array<std::array<double, 9>, 11> NORTON_BEER_COEFFS = {{
     {{1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}},              // 1.0
     {{0.701551, -0.639244, 0.937693, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}}, // 1.1

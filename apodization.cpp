@@ -60,6 +60,12 @@ std::vector<double> Apodization::createWindow(ApodizationWindow w,
             break;
         }
         case ApodizationWindow::NortonBeer: {
+            /*
+            Implementation based on:
+            K. F. F. Ntokas, J. Ungermann, and M. Kaufmann, “Norton-Beer apodization and its Fourier transform,” Journal of the Optical Society of America A, vol. 40, p. 2026, Nov. 2023
+            */
+
+
             // Quantize FWHM parameter to nearest 0.1 (1.0, 1.1, ..., 2.0)
             int coeffIndex = static_cast<int>((p.nortonBeerFwhm - 1.0f) * 10.0f + 0.5f);
             coeffIndex = std::clamp(coeffIndex, 0, 10);
