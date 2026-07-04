@@ -40,6 +40,19 @@ struct AppConfig {
     float apodNortonBeerFwhm = 1.5f; // Norton-Beer FWHM parameter (1.0-2.0)
     float apodDolphChebyshevAt = 60.0f; // Dolph-Chebyshev attenuation in dB
     float spectrumDetectorSensitivity = 0.0f; // Detector sensitivity in kV/W
+
+    // Average window state (independent from SpectrumWindow)
+    int avgYAxisMode = 0;
+    int avgXUnitSelector = 0;
+    int avgYScaleSelector = 0;
+    double avgForcedYMin = 0.0;
+    double avgForcedYMax = 1.0;
+    int avgApodizationSelector = 0;
+    float avgApodGaussSigma = 1.0f;
+    float avgApodRectWidth = 1.0f;
+    float avgApodNortonBeerFwhm = 1.5f;
+    float avgApodDolphChebyshevAt = 60.0f;
+    float avgDetectorSensitivity = 0.0f;
     
     // Add a dataset to recent list (maintains max size, deduplicates)
     void addRecentDataset(const std::string& datasetPath) {
@@ -116,6 +129,20 @@ struct AppConfig {
             configFile << "apod_norton_beer_fwhm=" << apodNortonBeerFwhm << "\n";
             configFile << "apod_dolph_chebyshev_at=" << apodDolphChebyshevAt << "\n";
             configFile << "detector_sensitivity=" << spectrumDetectorSensitivity << "\n";
+            
+            // Write average window settings
+            configFile << "\n[AverageWindow]\n";
+            configFile << "y_axis_mode=" << avgYAxisMode << "\n";
+            configFile << "x_unit_selector=" << avgXUnitSelector << "\n";
+            configFile << "y_scale_selector=" << avgYScaleSelector << "\n";
+            configFile << "forced_y_min=" << avgForcedYMin << "\n";
+            configFile << "forced_y_max=" << avgForcedYMax << "\n";
+            configFile << "apod_selector=" << avgApodizationSelector << "\n";
+            configFile << "apod_gauss_sigma=" << avgApodGaussSigma << "\n";
+            configFile << "apod_rect_width=" << avgApodRectWidth << "\n";
+            configFile << "apod_norton_beer_fwhm=" << avgApodNortonBeerFwhm << "\n";
+            configFile << "apod_dolph_chebyshev_at=" << avgApodDolphChebyshevAt << "\n";
+            configFile << "detector_sensitivity=" << avgDetectorSensitivity << "\n";
             
             configFile.flush();
             configFile.close();
@@ -221,6 +248,30 @@ struct AppConfig {
                             apodDolphChebyshevAt = std::stof(value);
                         } else if (key == "detector_sensitivity") {
                             spectrumDetectorSensitivity = std::stof(value);
+                        }
+                    } else if (currentSection == "AverageWindow") {
+                        if (key == "y_axis_mode") {
+                            avgYAxisMode = std::stoi(value);
+                        } else if (key == "x_unit_selector") {
+                            avgXUnitSelector = std::stoi(value);
+                        } else if (key == "y_scale_selector") {
+                            avgYScaleSelector = std::stoi(value);
+                        } else if (key == "forced_y_min") {
+                            avgForcedYMin = std::stod(value);
+                        } else if (key == "forced_y_max") {
+                            avgForcedYMax = std::stod(value);
+                        } else if (key == "apod_selector") {
+                            avgApodizationSelector = std::stoi(value);
+                        } else if (key == "apod_gauss_sigma") {
+                            avgApodGaussSigma = std::stof(value);
+                        } else if (key == "apod_rect_width") {
+                            avgApodRectWidth = std::stof(value);
+                        } else if (key == "apod_norton_beer_fwhm") {
+                            avgApodNortonBeerFwhm = std::stof(value);
+                        } else if (key == "apod_dolph_chebyshev_at") {
+                            avgApodDolphChebyshevAt = std::stof(value);
+                        } else if (key == "detector_sensitivity") {
+                            avgDetectorSensitivity = std::stof(value);
                         }
                     }
                 }

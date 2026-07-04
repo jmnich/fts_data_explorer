@@ -1,0 +1,457 @@
+#include "average_spectrum.h"
+#include "spectral_toolbox.h"
+#include "adapters/csv_adapter.h"
+#include "app_state.h"
+#include <cmath>
+#include <algorithm>
+#include <cstdio>
+#include <limits>
+
+static void SetupAxisTicksLimited(ImAxis axis, double min, double max, int maxTicks = 12) {
+    double range = max - min;
+    if (range <= 0.0) return;
+    double roughStep = range / (maxTicks - 1);
+    double exponent = std::floor(std::log10(roughStep));
+    double fraction = roughStep / std::pow(10.0, exponent);
+    double niceFraction;
+    if (fraction <= 1.0) niceFraction = 1.0;
+    else if (fraction <= 2.0) niceFraction = 2.0;
+    else if (fraction <= 5.0) niceFraction = 5.0;
+    else niceFraction = 10.0;
+    double step = niceFraction * std::pow(10.0, exponent);
+    double firstTick = std::ceil(min / step) * step;
+    std::vector<double> ticks;
+    ticks.reserve(maxTicks);
+    for (double tick = firstTick; tick <= max + step * 0.5; tick += step)
+        ticks.push_back(tick);
+    if (!ticks.empty())
+        ImPlot::SetupAxisTicks(axis, ticks.data(), ticks.size(), nullptr);
+}
+
+AverageSpectrum::AverageSpectrum()
+    : averageCount(0),
+      averageAvailable(false),
+      isSelectingXRange(false),
+      selectionStartX(0.0),
+      selectionEndX(0.0),
+      shouldAutoscale(true),
+      firstLoadCompleted(false),
+      manualXMin(0.0),
+      manualXMax(0.0),
+      manualYMin(0.0),
+      manualYMax(0.0),
+      savedYMin(0.0),
+      savedYMax(0.0),
+      leftArrowPressedLastFrame(false),
+      rightArrowPressedLastFrame(false),
+      leftArrowHandleFlag(false),
+      rightArrowHandleFlag(false),
+      xUnitSelector(0),
+      prevXUnitSelector(0),
+      yScaleSelector(0),
+      prevYScaleSelector(0),
+      refLaserTextbox(1.550f),
+      detectorSensitivity(0.0f),
+      Kpadding(2),
+      apodizationSelector(0),
+      apodizationParams(),
+      yAxisMode(0),
+      prevYAxisMode(0),
+      forcedYMin(0.0),
+      forcedYMax(1.0),
+      pendingNextXMin(0.0),
+      pendingNextXMax(-1.0),
+      xUnitSwitchedThisFrame(false),
+      convertedXMin(0.0),
+      convertedXMax(0.0)
+{}
+
+void AverageSpectrum::reset() {
+    cachedAverageY.clear();
+    cachedAverageX.clear();
+    averageCount = 0;
+    averageAvailable = false;
+
+    isSelectingXRange = false;
+    selectionStartX = 0.0;
+    selectionEndX = 0.0;
+    shouldAutoscale = true;
+    firstLoadCompleted = false;
+    manualXMin = 0.0;
+    manualXMax = 0.0;
+    manualYMin = 0.0;
+    manualYMax = 0.0;
+    savedYMin = 0.0;
+    savedYMax = 0.0;
+    leftArrowPressedLastFrame = false;
+    rightArrowPressedLastFrame = false;
+    leftArrowHandleFlag = false;
+    rightArrowHandleFlag = false;
+    pendingNextXMin = 0.0;
+    pendingNextXMax = -1.0;
+    xUnitSwitchedThisFrame = false;
+    convertedXMin = 0.0;
+    convertedXMax = 0.0;
+}
+
+void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
+    // ---- 1. Placeholder when no average data available ----
+    if (!averageAvailable || cachedAverageX.empty() || cachedAverageY.empty()) {
+        ImVec2 avail = ImGui::GetContentRegionAvail();
+        ImVec2 textSize = ImGui::CalcTextSize("No average spectrum available");
+        ImGui::SetCursorPos(ImVec2(
+            (avail.x - textSize.x) * 0.5f,
+            (avail.y - textSize.y) * 0.5f));
+        ImGui::Text("No average spectrum available");
+        return;
+    }
+
+    // ---- 2. Top-right "Average of N" ----
+    {
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "Average of %d", averageCount);
+        ImVec2 textSz = ImGui::CalcTextSize(buf);
+        float availWidth = ImGui::GetContentRegionAvail().x;
+        ImGui::SameLine(availWidth - textSz.x - ImGui::GetStyle().ItemSpacing.x);
+        ImGui::Text("%s", buf);
+    }
+
+    // ---- 3. ESC handler ----
+    bool isFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
+    if (isFocused && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        shouldAutoscale = true;
+        pendingNextXMin = 0.0;
+        pendingNextXMax = -1.0;
+        manualXMin = 0.0;
+        manualXMax = 0.0;
+    }
+    if (!isFocused) {
+        leftArrowPressedLastFrame = false;
+        rightArrowPressedLastFrame = false;
+        leftArrowHandleFlag = false;
+        rightArrowHandleFlag = false;
+    }
+
+    // ---- 4. Arrow key pan ----
+    if (isFocused) {
+        if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) && !leftArrowPressedLastFrame) {
+            leftArrowPressedLastFrame = true;
+            leftArrowHandleFlag = true;
+        } else if (ImGui::IsKeyReleased(ImGuiKey_LeftArrow)) {
+            leftArrowPressedLastFrame = false;
+            leftArrowHandleFlag = false;
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) && !rightArrowPressedLastFrame) {
+            rightArrowPressedLastFrame = true;
+            rightArrowHandleFlag = true;
+        } else if (ImGui::IsKeyReleased(ImGuiKey_RightArrow)) {
+            rightArrowPressedLastFrame = false;
+            rightArrowHandleFlag = false;
+        }
+    }
+
+    if (!shouldAutoscale && pendingNextXMin >= pendingNextXMax) {
+        double range = manualXMax - manualXMin;
+        if (range > 0.0 && manualXMin < manualXMax) {
+            if (leftArrowHandleFlag) {
+                double panAmount = range * 0.1;
+                double newMin = manualXMin - panAmount;
+                double newMax = manualXMax - panAmount;
+                ImPlot::SetNextAxisLimits(ImAxis_X1, newMin, newMax, ImPlotCond_Always);
+            }
+            if (rightArrowHandleFlag) {
+                double panAmount = range * 0.1;
+                double newMin = manualXMin + panAmount;
+                double newMax = manualXMax + panAmount;
+                ImPlot::SetNextAxisLimits(ImAxis_X1, newMin, newMax, ImPlotCond_Always);
+            }
+        }
+    }
+
+    if (pendingNextXMin < pendingNextXMax) {
+        ImPlot::SetNextAxisLimits(ImAxis_X1, pendingNextXMin, pendingNextXMax, ImPlotCond_Always);
+        manualXMin = pendingNextXMin;
+        manualXMax = pendingNextXMax;
+        shouldAutoscale = false;
+        pendingNextXMin = 0.0;
+        pendingNextXMax = -1.0;
+    }
+
+    // ---- 5. X-unit change: convert limits ----
+    if (xUnitSelector != prevXUnitSelector) {
+        if (!shouldAutoscale && manualXMin < manualXMax) {
+            auto oldUnit = static_cast<SpectralToolbox::SpectrumXUnit>(prevXUnitSelector);
+            auto newUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
+            double newMin = SpectralToolbox::convertXValue(manualXMin, oldUnit, newUnit);
+            double newMax = SpectralToolbox::convertXValue(manualXMax, oldUnit, newUnit);
+            if (newMin > newMax) std::swap(newMin, newMax);
+            ImPlot::SetNextAxisLimits(ImAxis_X1, newMin, newMax, ImPlotCond_Always);
+            xUnitSwitchedThisFrame = true;
+            convertedXMin = newMin;
+            convertedXMax = newMax;
+        }
+        pendingNextXMin = 0.0;
+        pendingNextXMax = -1.0;
+        prevXUnitSelector = xUnitSelector;
+    }
+
+    // ---- 6. Y-scale change: re-fit Y ----
+    if (yScaleSelector != prevYScaleSelector) {
+        if (yAxisMode != 2)
+            ImPlot::SetNextAxisToFit(ImAxis_Y1);
+        prevYScaleSelector = yScaleSelector;
+    }
+
+    // ---- 7. Y-axis mode change ----
+    if (yAxisMode != prevYAxisMode) {
+        if (yAxisMode == 0 || yAxisMode == 1)
+            ImPlot::SetNextAxisToFit(ImAxis_Y1);
+        else if (yAxisMode == 2 && forcedYMin < forcedYMax)
+            ImPlot::SetNextAxisLimits(ImAxis_Y1, forcedYMin, forcedYMax, ImPlotCond_Always);
+        prevYAxisMode = yAxisMode;
+    }
+
+    // ---- 8. BeginPlot ----
+    ImPlotFlags plot_flags = ImPlotFlags_NoTitle;
+    if (ImPlot::BeginPlot("AverageViewPlot", ImVec2(-1, -1), plot_flags)) {
+
+        ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoTickMarks;
+        ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
+
+        if (yAxisMode == 0)
+            y_flags |= ImPlotAxisFlags_AutoFit;
+        else if (yAxisMode == 1)
+            y_flags |= ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_RangeFit;
+
+        const char* xLabel = (xUnitSelector == 0) ? "Wavenumber (cm-1)"
+                           : (xUnitSelector == 1) ? "Wavelength (\xC2\xB5" "m)"
+                                                 : "Frequency (THz)";
+        const char* yLabel = (yScaleSelector == 2 && detectorSensitivity > 0.0f) ? "dBm" : "";
+        ImPlot::SetupAxes(xLabel, yLabel, x_flags, y_flags);
+
+        if (yScaleSelector == 1)
+            ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Log10);
+
+        auto toDisplay = [&](double raw) -> double {
+            if (yScaleSelector == 2) {
+                if (detectorSensitivity > 0.0f)
+                    return 10.0 * std::log10(std::max(raw / detectorSensitivity, 1e-300));
+                return 10.0 * std::log10(std::max(raw, 1e-300));
+            }
+            if (detectorSensitivity > 0.0f)
+                return raw / (detectorSensitivity * 1000.0);
+            return raw;
+        };
+
+        const bool effectiveForceY = (yAxisMode == 2) && (forcedYMin < forcedYMax);
+        if (effectiveForceY) {
+            double yMin = forcedYMin;
+            double yMax = forcedYMax;
+            if (yScaleSelector == 1 && yMin <= 0.0)
+                yMin = (yMax > 0.0 ? yMax * 1e-6 : 1e-6);
+            ImPlot::SetupAxisLimits(ImAxis_Y1, yMin, yMax, ImPlotCond_Always);
+        }
+
+        // Autoscale
+        if (shouldAutoscale && !cachedAverageX.empty()) {
+            double xMin = std::min(cachedAverageX.front(), cachedAverageX.back());
+            double xMax = std::max(cachedAverageX.front(), cachedAverageX.back());
+
+            double yMin, yMax;
+            if (yScaleSelector == 2 || detectorSensitivity > 0.0f) {
+                yMin = std::numeric_limits<double>::max();
+                yMax = std::numeric_limits<double>::lowest();
+                for (double v : cachedAverageY) {
+                    double d = toDisplay(v);
+                    yMin = std::min(yMin, d);
+                    yMax = std::max(yMax, d);
+                }
+            } else {
+                auto mmY = std::minmax_element(cachedAverageY.begin(), cachedAverageY.end());
+                yMin = *mmY.first;
+                yMax = *mmY.second;
+            }
+
+            if (xMin < xMax)
+                ImPlot::SetupAxisLimits(ImAxis_X1, xMin, xMax, ImPlotCond_Always);
+            if (!effectiveForceY) {
+                if (yScaleSelector == 1 && yMin <= 0.0)
+                    yMin = (yMax > 0.0 ? yMax * 1e-6 : 1e-6);
+                ImPlot::SetupAxisLimits(ImAxis_Y1, yMin, yMax, ImPlotCond_Always);
+            }
+            shouldAutoscale = false;
+        }
+
+        if (!firstLoadCompleted && !cachedAverageX.empty()) {
+            if (manualXMin == 0.0 && manualXMax == 0.0)
+                shouldAutoscale = true;
+            firstLoadCompleted = true;
+        }
+
+        // ---- 9. Ticks setup ----
+        {
+            double xMin = std::min(cachedAverageX.front(), cachedAverageX.back());
+            double xMax = std::max(cachedAverageX.front(), cachedAverageX.back());
+            double yMin, yMax;
+            if (yScaleSelector == 2 || detectorSensitivity > 0.0f) {
+                yMin = std::numeric_limits<double>::max();
+                yMax = std::numeric_limits<double>::lowest();
+                for (double v : cachedAverageY) {
+                    double d = toDisplay(v);
+                    yMin = std::min(yMin, d);
+                    yMax = std::max(yMax, d);
+                }
+            } else {
+                auto mmY = std::minmax_element(cachedAverageY.begin(), cachedAverageY.end());
+                yMin = *mmY.first;
+                yMax = *mmY.second;
+            }
+            if (xMin < xMax) SetupAxisTicksLimited(ImAxis_X1, xMin, xMax);
+            if (yMin < yMax) SetupAxisTicksLimited(ImAxis_Y1, yMin, yMax);
+        }
+
+        // ---- 10. Shift+drag X-range selection ----
+        {
+            bool shift = ImGui::GetIO().KeyShift;
+            bool overPlot = ImPlot::IsPlotHovered();
+            if (isFocused && overPlot && shift && !isSelectingXRange) {
+                isSelectingXRange = true;
+                selectionStartX = 0.0;
+                selectionEndX = 0.0;
+            } else if (!shift && isSelectingXRange) {
+                isSelectingXRange = false;
+                if (selectionStartX != selectionEndX) {
+                    double sX = selectionStartX;
+                    double eX = selectionEndX;
+                    if (sX > eX) std::swap(sX, eX);
+                    pendingNextXMin = sX;
+                    pendingNextXMax = eX;
+                    manualXMin = sX;
+                    manualXMax = eX;
+                    shouldAutoscale = false;
+                }
+            }
+        }
+
+        // ---- 11. Plot the average line (yellow) ----
+        {
+            const double* plotData = cachedAverageY.data();
+            std::vector<double> displayBuf;
+            if (yScaleSelector == 2 || detectorSensitivity > 0.0f) {
+                displayBuf.resize(cachedAverageY.size());
+                for (size_t i = 0; i < cachedAverageY.size(); ++i)
+                    displayBuf[i] = toDisplay(cachedAverageY[i]);
+                plotData = displayBuf.data();
+            }
+
+            ImPlotSpec spec;
+            spec.LineColor = ImVec4(0.6f, 0.5f, 0.1f, 1.0f);
+            spec.LineWeight = 2.0f;
+            ImPlot::PlotLine("Average", cachedAverageX.data(), plotData,
+                             cachedAverageY.size(), spec);
+        }
+
+        // ---- 12. Selection visualization ----
+        if (isSelectingXRange) {
+            ImPlotPoint mousePos = ImPlot::GetPlotMousePos();
+            double x_min_plot = ImPlot::GetPlotLimits().X.Min;
+            double x_max_plot = ImPlot::GetPlotLimits().X.Max;
+            double y_min_plot = ImPlot::GetPlotLimits().Y.Min;
+            double y_max_plot = ImPlot::GetPlotLimits().Y.Max;
+            if (selectionStartX == 0.0 && selectionEndX == 0.0)
+                selectionStartX = mousePos.x;
+            double constrainedMouseX = std::clamp(mousePos.x, x_min_plot, x_max_plot);
+            selectionEndX = constrainedMouseX;
+            double selection_left = std::min(selectionStartX, selectionEndX);
+            double selection_right = std::max(selectionStartX, selectionEndX);
+            selection_left = std::clamp(selection_left, x_min_plot, x_max_plot);
+            selection_right = std::clamp(selection_right, x_min_plot, x_max_plot);
+            double shade_x[2] = {selection_left, selection_right};
+            double shade_y1[2] = {y_min_plot, y_min_plot};
+            double shade_y2[2] = {y_max_plot, y_max_plot};
+            ImPlotSpec fillSpec;
+            fillSpec.FillColor = ImVec4(0.5f, 0.0f, 0.5f, 0.3f);
+            ImPlot::PlotShaded("##AvgSelectionFill", shade_x, shade_y1, shade_y2, 2, fillSpec);
+            double start_x[2] = {selectionStartX, selectionStartX};
+            double start_y[2] = {y_min_plot, y_max_plot};
+            double end_x[2] = {selectionEndX, selectionEndX};
+            double end_y[2] = {y_min_plot, y_max_plot};
+            ImPlot::PlotLine("##AvgSelectionStart", start_x, start_y, 2);
+            ImPlot::PlotLine("##AvgSelectionEnd", end_x, end_y, 2);
+        }
+
+        // ---- 13. Tracking cursor ----
+        if (showTrackingCursor && ImPlot::IsPlotHovered()) {
+            ImPlotPoint mousePos = ImPlot::GetPlotMousePos();
+            double signalY = mousePos.y;
+            if (!cachedAverageX.empty() && !cachedAverageY.empty()) {
+                const auto& freqs = cachedAverageX;
+                const auto& specs = cachedAverageY;
+                size_t idx = 0;
+                if (freqs.front() < freqs.back()) {
+                    auto it = std::lower_bound(freqs.begin(), freqs.end(), mousePos.x);
+                    if (it == freqs.begin()) idx = 0;
+                    else if (it == freqs.end()) idx = freqs.size() - 1;
+                    else {
+                        size_t hi = it - freqs.begin();
+                        size_t lo = hi - 1;
+                        idx = (mousePos.x - freqs[lo] <= freqs[hi] - mousePos.x) ? lo : hi;
+                    }
+                } else {
+                    auto it = std::lower_bound(freqs.begin(), freqs.end(), mousePos.x,
+                                                std::greater<double>());
+                    if (it == freqs.begin()) idx = 0;
+                    else if (it == freqs.end()) idx = freqs.size() - 1;
+                    else {
+                        size_t hi = it - freqs.begin();
+                        size_t lo = hi - 1;
+                        idx = (std::abs(mousePos.x - freqs[lo]) <=
+                               std::abs(freqs[hi] - mousePos.x)) ? lo : hi;
+                    }
+                }
+                signalY = specs[idx];
+                if (yScaleSelector == 2 || detectorSensitivity > 0.0f)
+                    signalY = toDisplay(signalY);
+            }
+
+            double yAxisMin = ImPlot::GetPlotLimits().Y.Min;
+            double lineX[2] = { mousePos.x, mousePos.x };
+            double lineY[2] = { yAxisMin, signalY };
+            ImPlot::PlotLine("##AvgCursorLine", lineX, lineY, 2);
+
+            ImPlotSpec cursorSpec;
+            cursorSpec.Marker = ImPlotMarker_Circle;
+            cursorSpec.MarkerSize = 4.0f;
+            cursorSpec.MarkerFillColor = ImVec4(1, 1, 1, 1);
+            ImPlot::PlotScatter("##AvgCursorPoint", &mousePos.x, &signalY, 1, cursorSpec);
+
+            using ST = SpectralToolbox::SpectrumXUnit;
+            auto unit = static_cast<ST>(xUnitSelector);
+            double cm1 = (unit == ST::CmInv) ? mousePos.x :
+                         SpectralToolbox::convertXValue(mousePos.x, unit, ST::CmInv);
+            double um  = (unit == ST::Um) ? mousePos.x :
+                         SpectralToolbox::convertXValue(mousePos.x, unit, ST::Um);
+            double thz = (unit == ST::THz) ? mousePos.x :
+                          SpectralToolbox::convertXValue(mousePos.x, unit, ST::THz);
+            const char* yUnit = (yScaleSelector == 2 && detectorSensitivity > 0.0f) ? " dBm" : "";
+            char txt[512];
+            std::snprintf(txt, sizeof(txt), "Average\n%.2f cm-1\n%.4f um\n%.4f THz\nY: %.4e%s",
+                          cm1, um, thz, signalY, yUnit);
+            ImPlot::Annotation(mousePos.x, signalY, ImVec4(1, 1, 1, 1),
+                               ImVec2(10, -10), true, "%s", txt);
+        }
+
+        // Save current limits
+        {
+            const ImPlotRect lim = ImPlot::GetPlotLimits();
+            if (lim.X.Min < lim.X.Max && pendingNextXMin >= pendingNextXMax) {
+                manualXMin = lim.X.Min;
+                manualXMax = lim.X.Max;
+            }
+            savedYMin = lim.Y.Min;
+            savedYMax = lim.Y.Max;
+        }
+
+        ImPlot::EndPlot();
+    }
+}

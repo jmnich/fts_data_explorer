@@ -18,6 +18,7 @@
 #include "config.h"
 #include "app_state.h"
 #include "spectrum.h"
+#include "average_spectrum.h"
 #include "spectral_toolbox.h"
 #include "adapters/csv_adapter.h"
 #include "tinyfiledialogs.h"
@@ -533,6 +534,22 @@ int main() {
     // Set the appState pointer in the spectrum object for raw data access
     appState.spectrum.appState = &appState;
     
+    // Load average window settings from config
+    appState.averageSpectrum.yAxisMode           = config.avgYAxisMode;
+    appState.averageSpectrum.prevYAxisMode       = config.avgYAxisMode;
+    appState.averageSpectrum.xUnitSelector       = config.avgXUnitSelector;
+    appState.averageSpectrum.yScaleSelector      = config.avgYScaleSelector;
+    appState.averageSpectrum.prevXUnitSelector   = config.avgXUnitSelector;
+    appState.averageSpectrum.prevYScaleSelector  = config.avgYScaleSelector;
+    appState.averageSpectrum.forcedYMin          = config.avgForcedYMin;
+    appState.averageSpectrum.forcedYMax          = config.avgForcedYMax;
+    appState.averageSpectrum.apodizationSelector = config.avgApodizationSelector;
+    appState.averageSpectrum.apodizationParams.gaussSigma    = config.avgApodGaussSigma;
+    appState.averageSpectrum.apodizationParams.rectWidth     = config.avgApodRectWidth;
+    appState.averageSpectrum.apodizationParams.nortonBeerFwhm = config.avgApodNortonBeerFwhm;
+    appState.averageSpectrum.apodizationParams.dolphChebyshevAt = config.avgApodDolphChebyshevAt;
+    appState.averageSpectrum.detectorSensitivity = config.avgDetectorSensitivity;
+    
     // No initialization needed for simple file dialog
     
     // Main loop
@@ -688,6 +705,12 @@ int main() {
             return naturalSortCompare(nameA, nameB);
         });
         
+        // Ensure averaging checkboxes match the sorted files size
+        if (appState.filesSelectedForAveraging.size() != appState.sortedFiles.size()) {
+            appState.filesSelectedForAveraging.clear();
+            appState.filesSelectedForAveraging.resize(appState.sortedFiles.size(), true);
+        }
+        
         // Handle keyboard navigation for file selection
         handleKeyboardNavigation(appState.csvFiles, appState.currentSortedFileIndex, appState.filesChanged, appState.keyboardNavigation, 
                                 appState.shiftSelectMode, appState.selectedFiles, appState.selectedFilenames, appState.loadedData, appState.rawDataCache, appState.dataLoaded, 
@@ -708,6 +731,7 @@ int main() {
             appState.selectedFiles.clear();
             appState.selectedFilenames.clear();
             appState.rawDataCache.clear();
+            appState.clearAverageSpectrum();
             appState.needsRedraw = true;
         }
 
@@ -930,6 +954,7 @@ int main() {
                                     appState.currentDatasetName = datasetPath.substr(datasetPath.find_last_of("/\\") + 1);
                                     
                                     appState.csvFiles = FileBrowser::getCSVFilesInDirectory(appState.currentDirectory);
+                                    appState.clearAverageSpectrum();
                                     appState.dataLoaded = false;
                                     appState.filesChanged = true;
                                     appState.currentSortedFileIndex = 0;
@@ -1012,6 +1037,7 @@ int main() {
                             appState.currentDatasetName = selectedDirectory.substr(selectedDirectory.find_last_of("/\\") + 1);
                         }
                         appState.csvFiles = FileBrowser::getCSVFilesInDirectory(appState.currentDirectory);
+                        appState.clearAverageSpectrum();
                         appState.dataLoaded = false;
                         appState.filesChanged = true;
                         appState.currentSortedFileIndex = 0;
@@ -1070,6 +1096,7 @@ int main() {
                                 appState.currentDatasetName = selectedDirectory.substr(selectedDirectory.find_last_of("/\\") + 1);
                             }
                             appState.csvFiles = FileBrowser::getCSVFilesInDirectory(appState.currentDirectory);
+                            appState.clearAverageSpectrum();
                             appState.dataLoaded = false;
                             appState.isFirstDataLoad = true;
                             appState.needsRedraw = true;
@@ -1102,6 +1129,7 @@ int main() {
                                         appState.currentDatasetName = datasetPath.substr(datasetPath.find_last_of("/\\") + 1);
                                         
                                         appState.csvFiles = FileBrowser::getCSVFilesInDirectory(appState.currentDirectory);
+                                        appState.clearAverageSpectrum();
                                         appState.dataLoaded = false;
                                         appState.filesChanged = true;
                                         appState.currentSortedFileIndex = 0;
@@ -1268,7 +1296,11 @@ int main() {
                 ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.15f, 0.15f, 0.5f)); // Default button color
             }
             
-            if (ImGui::Button(filename.c_str())) {
+            // Compute widths: button on left, checkbox on right
+            float chkWidth = ImGui::GetFrameHeight();
+            float btnWidth = ImGui::GetContentRegionAvail().x - chkWidth - ImGui::GetStyle().ItemSpacing.x;
+            
+            if (ImGui::Button(filename.c_str(), ImVec2(btnWidth, 0))) {
                 // Handle multi-select with Ctrl key
                 if (appState.multiSelectMode) {
                     // Toggle selection for this file
@@ -1383,6 +1415,26 @@ int main() {
             
             // Pop the correct number of styles
             ImGui::PopStyleColor(stylesPushed);
+            
+            // Averaging checkbox (right-aligned)
+            ImGui::SameLine();
+            if (i < appState.filesSelectedForAveraging.size()) {
+                bool chk = appState.filesSelectedForAveraging[i];
+                bool wasUnchecked = !chk;
+                if (wasUnchecked) {
+                    ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.3f, 0.3f, 0.3f, 0.8f));
+                    ImGui::PushStyleColor(ImGuiCol_CheckMark, ImVec4(0.5f, 0.5f, 0.5f, 0.6f));
+                }
+                ImGui::PushID(static_cast<int>(i + 100000));
+                if (ImGui::Checkbox("##AvgSel", &chk)) {
+                    appState.filesSelectedForAveraging[i] = chk;
+                    appState.needsRedraw = true;
+                }
+                ImGui::PopID();
+                if (wasUnchecked) {
+                    ImGui::PopStyleColor(2);
+                }
+            }
             
             // Auto-scroll to keep selected item visible only when selection changes via keyboard
             if (i == appState.currentSortedFileIndex && appState.keyboardNavigation) {
@@ -2344,6 +2396,341 @@ int main() {
         }
         ImGui::End();
         
+        // Average config panel
+        ImGui::Begin("Average");
+        if (appState.dataLoaded) {
+            // Button: Calculate average
+            if (ImGui::Button("Calculate average")) {
+                // Gather all csv files that are checked for averaging
+                std::vector<InterferogramData> selectedData;
+                for (size_t i = 0; i < appState.sortedFiles.size() && i < appState.filesSelectedForAveraging.size(); i++) {
+                    if (appState.filesSelectedForAveraging[i]) {
+                        try {
+                            InterferogramData data = CSVAdapter::loadFromCSV(appState.sortedFiles[i]);
+                            selectedData.push_back(data);
+                        } catch (...) {}
+                    }
+                }
+
+                if (!selectedData.empty()) {
+                    std::vector<std::vector<double>> allSpectraY;
+                    std::vector<double> commonX;
+                    bool firstFile = true;
+
+                    for (const auto& raw : selectedData) {
+                        auto ps = SpectralToolbox::processSpectrum(
+                            raw.primaryDetector, raw.referenceDetector,
+                            appState.averageSpectrum.refLaserTextbox,
+                            appState.averageSpectrum.Kpadding,
+                            static_cast<SpectralToolbox::SpectrumXUnit>(appState.averageSpectrum.xUnitSelector),
+                            static_cast<ApodizationWindow>(appState.averageSpectrum.apodizationSelector),
+                            appState.averageSpectrum.apodizationParams);
+
+                        allSpectraY.push_back(ps.spectrumY);
+                        if (firstFile) {
+                            commonX = ps.spectrumX;
+                            firstFile = false;
+                        } else {
+                            // Interpolate subsequent spectra onto the first file's X grid
+                            if (commonX.size() != ps.spectrumX.size() ||
+                                !std::equal(commonX.begin(), commonX.end(), ps.spectrumX.begin())) {
+                                std::vector<double> interpolated;
+                                interpolated.reserve(commonX.size());
+                                for (size_t j = 0; j < commonX.size(); j++) {
+                                    double targetX = commonX[j];
+                                    const auto& sx = ps.spectrumX;
+                                    if (sx.front() < sx.back()) {
+                                        auto it = std::lower_bound(sx.begin(), sx.end(), targetX);
+                                        if (it == sx.begin()) {
+                                            interpolated.push_back(ps.spectrumY[0]);
+                                        } else if (it == sx.end()) {
+                                            interpolated.push_back(ps.spectrumY.back());
+                                        } else {
+                                            size_t hi = it - sx.begin();
+                                            size_t lo = hi - 1;
+                                            double frac = (targetX - sx[lo]) / (sx[hi] - sx[lo]);
+                                            interpolated.push_back(ps.spectrumY[lo] * (1.0 - frac) + ps.spectrumY[hi] * frac);
+                                        }
+                                    } else {
+                                        auto it = std::lower_bound(sx.begin(), sx.end(), targetX, std::greater<double>());
+                                        if (it == sx.begin()) {
+                                            interpolated.push_back(ps.spectrumY[0]);
+                                        } else if (it == sx.end()) {
+                                            interpolated.push_back(ps.spectrumY.back());
+                                        } else {
+                                            size_t hi = it - sx.begin();
+                                            size_t lo = hi - 1;
+                                            double frac = (targetX - sx[lo]) / (sx[hi] - sx[lo]);
+                                            interpolated.push_back(ps.spectrumY[lo] * (1.0 - frac) + ps.spectrumY[hi] * frac);
+                                        }
+                                    }
+                                }
+                                allSpectraY.back() = std::move(interpolated);
+                            }
+                        }
+                    }
+
+                    // Average point-by-point
+                    size_t numBins = commonX.size();
+                    appState.averageSpectrum.cachedAverageY.assign(numBins, 0.0);
+                    int validFiles = 0;
+                    for (size_t i = 0; i < allSpectraY.size(); i++) {
+                        if (allSpectraY[i].size() == numBins) {
+                            for (size_t j = 0; j < numBins; j++)
+                                appState.averageSpectrum.cachedAverageY[j] += allSpectraY[i][j];
+                            validFiles++;
+                        }
+                    }
+                    if (validFiles > 0) {
+                        for (size_t j = 0; j < numBins; j++)
+                            appState.averageSpectrum.cachedAverageY[j] /= validFiles;
+                    }
+
+                    appState.averageSpectrum.cachedAverageX = commonX;
+                    appState.averageSpectrum.averageCount = validFiles;
+                    appState.averageSpectrum.averageAvailable = true;
+                    appState.averageSpectrum.shouldAutoscale = true;
+                    appState.averageSpectrum.firstLoadCompleted = false;
+                } else {
+                    appState.averageSpectrum.averageAvailable = false;
+                    appState.averageSpectrum.averageCount = 0;
+                }
+                appState.needsRedraw = true;
+            }
+
+            ImGui::Separator();
+
+            // Select All / Select None
+            ImGui::Text("Select");
+            ImGui::SameLine();
+            if (ImGui::Button("All")) {
+                for (size_t i = 0; i < appState.filesSelectedForAveraging.size(); i++)
+                    appState.filesSelectedForAveraging[i] = true;
+                appState.needsRedraw = true;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("None")) {
+                for (size_t i = 0; i < appState.filesSelectedForAveraging.size(); i++)
+                    appState.filesSelectedForAveraging[i] = false;
+                appState.needsRedraw = true;
+            }
+
+            ImGui::Separator();
+
+            const ImVec4 btnColors[2] = {
+                ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
+                ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
+            };
+
+            // ---- Cursor toggle (SYNCHRONIZED with Spectrum) ----
+            ImGui::Text("Cursor");
+            ImGui::SameLine();
+            const bool cursorOn = appState.spectrum.showTrackingCursor;
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[cursorOn ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cursorOn ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("On##AvgCursorOn")) {
+                if (!cursorOn) {
+                    appState.spectrum.showTrackingCursor = true;
+                    appState.needsRedraw = true;
+                }
+            }
+            ImGui::PopStyleColor(3);
+            ImGui::SameLine(0.0f, 0.0f);
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[!cursorOn ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  !cursorOn ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("Off##AvgCursorOff")) {
+                if (cursorOn) {
+                    appState.spectrum.showTrackingCursor = false;
+                    appState.needsRedraw = true;
+                }
+            }
+            ImGui::PopStyleColor(3);
+
+            // ---- Y scale selector (INDEPENDENT) ----
+            ImGui::Text("Y scale");
+            ImGui::SameLine();
+            const bool linSel = (appState.averageSpectrum.yScaleSelector == 0);
+            const bool logSel = (appState.averageSpectrum.yScaleSelector == 1);
+            const bool dbSel  = (appState.averageSpectrum.yScaleSelector == 2);
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[linSel ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  linSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("lin##AvgYScaleLin")) { appState.averageSpectrum.yScaleSelector = 0; appState.needsRedraw = true; }
+            ImGui::PopStyleColor(3);
+            ImGui::SameLine();
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[logSel ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  logSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("log##AvgYScaleLog")) { appState.averageSpectrum.yScaleSelector = 1; appState.needsRedraw = true; }
+            ImGui::PopStyleColor(3);
+            ImGui::SameLine();
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[dbSel ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  dbSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("dB##AvgYScaleDb")) { appState.averageSpectrum.yScaleSelector = 2; appState.needsRedraw = true; }
+            ImGui::PopStyleColor(3);
+
+            // ---- X unit selector (INDEPENDENT) ----
+            ImGui::Text("X unit");
+            ImGui::SameLine();
+            const bool cmSel  = (appState.averageSpectrum.xUnitSelector == 0);
+            const bool umSel  = (appState.averageSpectrum.xUnitSelector == 1);
+            const bool thzSel = (appState.averageSpectrum.xUnitSelector == 2);
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[cmSel ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cmSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("cm-1##AvgXUnitCm")) { appState.averageSpectrum.xUnitSelector = 0; appState.needsRedraw = true; }
+            ImGui::PopStyleColor(3);
+            ImGui::SameLine();
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[umSel ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  umSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("\xC2\xB5""m##AvgXUnitUm")) { appState.averageSpectrum.xUnitSelector = 1; appState.needsRedraw = true; }
+            ImGui::PopStyleColor(3);
+            ImGui::SameLine();
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[thzSel ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  thzSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("THz##AvgXUnitTHz")) { appState.averageSpectrum.xUnitSelector = 2; appState.needsRedraw = true; }
+            ImGui::PopStyleColor(3);
+
+            // ---- Y Axis mode selector (INDEPENDENT) ----
+            ImGui::Text("Y Axis");
+            ImGui::SameLine();
+            const bool allSel   = (appState.averageSpectrum.yAxisMode == 0);
+            const bool tightSel = (appState.averageSpectrum.yAxisMode == 1);
+            const bool forceSel = (appState.averageSpectrum.yAxisMode == 2);
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[allSel ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("all##AvgYAxisAll")) { appState.averageSpectrum.yAxisMode = 0; appState.needsRedraw = true; }
+            ImGui::PopStyleColor(3);
+            ImGui::SameLine();
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[tightSel ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  tightSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("tight##AvgYAxisTight")) { appState.averageSpectrum.yAxisMode = 1; appState.needsRedraw = true; }
+            ImGui::PopStyleColor(3);
+            ImGui::SameLine();
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[forceSel ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  forceSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("force##AvgYAxisForce")) { appState.averageSpectrum.yAxisMode = 2; appState.needsRedraw = true; }
+            ImGui::PopStyleColor(3);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("all: auto-fit Y to all data\n"
+                                  "tight: auto-fit Y to visible data only\n"
+                                  "force: lock Y to the given min/max");
+            }
+
+            if (appState.averageSpectrum.yAxisMode == 2) {
+                ImGui::Text("min:");
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(80.0f);
+                if (ImGui::InputDouble("##AvgForcedYMin", &appState.averageSpectrum.forcedYMin, 0.0, 0.0, "%.6g"))
+                    appState.needsRedraw = true;
+                ImGui::SameLine();
+                ImGui::Text("max:");
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(80.0f);
+                if (ImGui::InputDouble("##AvgForcedYMax", &appState.averageSpectrum.forcedYMax, 0.0, 0.0, "%.6g"))
+                    appState.needsRedraw = true;
+                if (appState.averageSpectrum.forcedYMin >= appState.averageSpectrum.forcedYMax) {
+                    ImGui::SameLine();
+                    ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "(min<max!)");
+                }
+            }
+
+            ImGui::Separator();
+
+            // Detector sensitivity
+            ImGui::Text("Detector sensitivity [kV/W]:");
+            ImGui::SameLine();
+            float remW = ImGui::GetContentRegionAvail().x;
+            ImGui::SetNextItemWidth(remW);
+            ImGui::InputFloat("##AvgDetectorSensitivity", &appState.averageSpectrum.detectorSensitivity, 0.0f, 0.0f, "%.4f");
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Detector sensitivity in kV/W. Converts spectrum from V to W and enables dBm units.\nLeave at 0 to skip conversion.");
+            if (ImGui::IsItemDeactivatedAfterEdit())
+                appState.needsRedraw = true;
+
+            // Ref laser
+            ImGui::Text("Ref laser [\xC2\xB5""m]:");
+            ImGui::SameLine();
+            float rw = ImGui::GetContentRegionAvail().x;
+            ImGui::SetNextItemWidth(rw);
+            ImGui::InputFloat("##AvgRefLaserTextbox", &appState.averageSpectrum.refLaserTextbox, 0.001f, 0.01f);
+            if (ImGui::IsItemDeactivatedAfterEdit())
+                appState.needsRedraw = true;
+
+            // Zero-pad K
+            ImGui::Text("Zero-pad K:");
+            ImGui::SameLine();
+            rw = ImGui::GetContentRegionAvail().x;
+            ImGui::SetNextItemWidth(rw);
+            if (ImGui::InputInt("##AvgKpadding", &appState.averageSpectrum.Kpadding, 1, 1)) {
+                appState.averageSpectrum.Kpadding = std::clamp(appState.averageSpectrum.Kpadding, 0, 16);
+                appState.needsRedraw = true;
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Zero-pad factor K. Output bins = N*(K+1).\n0 disables padding.");
+
+            // Apodization
+            ImGui::Text("Apodization");
+            ImGui::SameLine();
+            const auto& windowNames = Apodization::getWindowNames();
+            if (ImGui::Combo("##AvgApodizationSelector", &appState.averageSpectrum.apodizationSelector,
+                             windowNames.data(), static_cast<int>(windowNames.size()))) {
+                appState.needsRedraw = true;
+            }
+
+            if (appState.averageSpectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Gauss)) {
+                if (ImGui::SliderFloat("Sigma##AvgGaussSigma", &appState.averageSpectrum.apodizationParams.gaussSigma,
+                                       1.0f, 3.0f, "%.1f"))
+                    appState.needsRedraw = true;
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Gauss sigma fraction (1.0-3.0).\n1.0 = narrow, 3.0 = wide.");
+            } else if (appState.averageSpectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Rectangular)) {
+                if (ImGui::SliderFloat("Width##AvgRectWidth", &appState.averageSpectrum.apodizationParams.rectWidth,
+                                       0.05f, 1.0f, "%.2f"))
+                    appState.needsRedraw = true;
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Rectangular window width fraction (0.05-1.0).\n1.0 = full signal, 0.05 = 5%% of signal.");
+            } else if (appState.averageSpectrum.apodizationSelector == static_cast<int>(ApodizationWindow::NortonBeer)) {
+                if (ImGui::SliderFloat("FWHM##AvgNortonBeerFwhm", &appState.averageSpectrum.apodizationParams.nortonBeerFwhm,
+                                       1.0f, 2.0f, "%.1f"))
+                    appState.needsRedraw = true;
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Norton-Beer FWHM parameter (1.0-2.0 step 0.1).\nControls the relative full-width at half maximum.");
+            } else if (appState.averageSpectrum.apodizationSelector == static_cast<int>(ApodizationWindow::DolphChebyshev)) {
+                float at = appState.averageSpectrum.apodizationParams.dolphChebyshevAt;
+                ImGui::SliderFloat("Attenuation##AvgDolphChebyshevAt", &at, 50.0f, 160.0f, "%.0f dB");
+                at = std::round(at / 10.0f) * 10.0f;
+                if (at != appState.averageSpectrum.apodizationParams.dolphChebyshevAt) {
+                    appState.averageSpectrum.apodizationParams.dolphChebyshevAt = at;
+                    appState.needsRedraw = true;
+                }
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Dolph-Chebyshev attenuation (50-160 dB, step 10).\nHigher values produce lower sidelobes.");
+            }
+        } else {
+            ImGui::Text("No data loaded.");
+        }
+        ImGui::End();
+        
         // Interferogram Config panel (docked)
         ImGui::Begin("Interferogram");
         if (appState.dataLoaded) {
@@ -2609,6 +2996,11 @@ int main() {
         }
         ImGui::End();
 
+        // Average View panel (docked)
+        ImGui::Begin("Average View");
+        appState.averageSpectrum.renderAverageContents(appState.spectrum.showTrackingCursor);
+        ImGui::End();
+
         // Close the docking condition
         }
         
@@ -2671,6 +3063,19 @@ int main() {
     config.apodNortonBeerFwhm  = appState.spectrum.apodizationParams.nortonBeerFwhm;
     config.apodDolphChebyshevAt = appState.spectrum.apodizationParams.dolphChebyshevAt;
     config.spectrumDetectorSensitivity = appState.spectrum.detectorSensitivity;
+    
+    // Save average window settings
+    config.avgYAxisMode           = appState.averageSpectrum.yAxisMode;
+    config.avgXUnitSelector       = appState.averageSpectrum.xUnitSelector;
+    config.avgYScaleSelector      = appState.averageSpectrum.yScaleSelector;
+    config.avgForcedYMin          = appState.averageSpectrum.forcedYMin;
+    config.avgForcedYMax          = appState.averageSpectrum.forcedYMax;
+    config.avgApodizationSelector = appState.averageSpectrum.apodizationSelector;
+    config.avgApodGaussSigma      = appState.averageSpectrum.apodizationParams.gaussSigma;
+    config.avgApodRectWidth       = appState.averageSpectrum.apodizationParams.rectWidth;
+    config.avgApodNortonBeerFwhm  = appState.averageSpectrum.apodizationParams.nortonBeerFwhm;
+    config.avgApodDolphChebyshevAt = appState.averageSpectrum.apodizationParams.dolphChebyshevAt;
+    config.avgDetectorSensitivity = appState.averageSpectrum.detectorSensitivity;
     
     // Save config to file
     if (!config.saveToFile(configFilePath)) {

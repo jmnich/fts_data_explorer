@@ -6,6 +6,7 @@
 #include <filesystem>
 #include "config.h"
 #include "spectrum.h"
+#include "average_spectrum.h"
 #include "adapters/csv_adapter.h"
 
 // Use InterferogramData from csv_adapter.h
@@ -102,6 +103,14 @@ struct AppState {
     // Spectrum window state
     Spectrum spectrum;
     
+    // Average spectrum state
+    AverageSpectrum averageSpectrum;
+
+    // Per-file checkbox state for averaging selection.
+    // Indexed identically to sortedFiles.
+    // Default: all true (checked) after loading a dataset.
+    std::vector<bool> filesSelectedForAveraging;
+    
     // OPD X-axis state
     int xAxisBase = 0;  // 0 = sample, 1 = OPD
     std::map<std::string, std::vector<double>> hilbertXCache;
@@ -112,6 +121,9 @@ struct AppState {
     
     // Method to reset state
     void reset();
+    
+    // Clear average spectrum data (call when dataset changes)
+    void clearAverageSpectrum();
 };
 
 // Global application state instance
