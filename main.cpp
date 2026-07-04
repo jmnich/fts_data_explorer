@@ -523,6 +523,7 @@ int main() {
     appState.spectrum.apodizationParams.gaussSigma = config.apodGaussSigma;
     appState.spectrum.apodizationParams.rectWidth  = config.apodRectWidth;
     appState.spectrum.apodizationParams.nortonBeerFwhm = config.apodNortonBeerFwhm;
+    appState.spectrum.apodizationParams.dolphChebyshevAt = config.apodDolphChebyshevAt;
     
     // Set the appState pointer in the spectrum object for raw data access
     appState.spectrum.appState = &appState;
@@ -2234,6 +2235,17 @@ int main() {
                 if (ImGui::IsItemHovered()) {
                     ImGui::SetTooltip("Norton-Beer FWHM parameter (1.0-2.0 step 0.1).\nControls the relative full-width at half maximum.");
                 }
+            } else if (appState.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::DolphChebyshev)) {
+                float at = appState.spectrum.apodizationParams.dolphChebyshevAt;
+                if (ImGui::SliderFloat("Attenuation##DolphChebyshevAt", &at,
+                                       50.0f, 140.0f, "%.0f dB")) {
+                    at = std::round(at / 10.0f) * 10.0f;
+                    appState.spectrum.apodizationParams.dolphChebyshevAt = at;
+                    invalidateSpectrumCaches();
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Dolph-Chebyshev attenuation (50-140 dB, step 10).\nHigher values produce lower sidelobes.");
+                }
             }
             
         } else {
@@ -2348,6 +2360,7 @@ int main() {
     config.apodGaussSigma       = appState.spectrum.apodizationParams.gaussSigma;
     config.apodRectWidth        = appState.spectrum.apodizationParams.rectWidth;
     config.apodNortonBeerFwhm  = appState.spectrum.apodizationParams.nortonBeerFwhm;
+    config.apodDolphChebyshevAt = appState.spectrum.apodizationParams.dolphChebyshevAt;
     
     // Save config to file
     if (!config.saveToFile(configFilePath)) {

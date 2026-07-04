@@ -40,6 +40,7 @@ struct AppConfig {
     float apodGaussSigma = 1.0f;
     float apodRectWidth = 1.0f;
     float apodNortonBeerFwhm = 1.5f; // Norton-Beer FWHM parameter (1.0-2.0)
+    float apodDolphChebyshevAt = 60.0f; // Dolph-Chebyshev attenuation in dB
     
     // Add a dataset to recent list (maintains max size, deduplicates)
     void addRecentDataset(const std::string& datasetPath) {
@@ -114,6 +115,7 @@ struct AppConfig {
             configFile << "apod_gauss_sigma=" << apodGaussSigma << "\n";
             configFile << "apod_rect_width=" << apodRectWidth << "\n";
             configFile << "apod_norton_beer_fwhm=" << apodNortonBeerFwhm << "\n";
+            configFile << "apod_dolph_chebyshev_at=" << apodDolphChebyshevAt << "\n";
             
             configFile.flush();
             configFile.close();
@@ -219,6 +221,8 @@ struct AppConfig {
                             apodRectWidth = std::stof(value);
                         } else if (key == "apod_norton_beer_fwhm") {
                             apodNortonBeerFwhm = std::stof(value);
+                        } else if (key == "apod_dolph_chebyshev_at") {
+                            apodDolphChebyshevAt = std::stof(value);
                         }
                     }
                 }

@@ -1,9 +1,13 @@
 #include "apodization.h"
 #include <cmath>
 #include <algorithm>
+#include "fftw3.h"
+
+#define REAL 0
+#define IMAG 1
 
 std::vector<const char*> Apodization::getWindowNames() {
-    return { "Rectangular", "Gauss", "Triangular", "Norton-Beer" };
+    return { "Rectangular", "Gauss", "Triangular", "Norton-Beer", "Dolph-Chebyshev" };
 }
 
 std::vector<double> Apodization::createWindow(ApodizationWindow w,
@@ -94,6 +98,88 @@ std::vector<double> Apodization::createWindow(ApodizationWindow w,
                 }
                 window[i] = window_val;
             }
+            break;
+        }
+        case ApodizationWindow::DolphChebyshev: {
+            if (n < 2) {
+                std::fill(window.begin(), window.end(), 1.0);
+                break;
+            }
+
+            const double at    = static_cast<double>(p.dolphChebyshevAt);
+            const double order = static_cast<double>(n) - 1.0;
+
+            const double beta = std::cosh(
+                std::acosh(std::pow(10.0, std::abs(at) / 20.0)) / order);
+
+            fftw_complex* in  = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * n);
+            fftw_complex* out = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * n);
+
+            for (std::size_t k = 0; k < n; ++k) {
+                const double x = beta * std::cos(M_PI * k / static_cast<double>(n));
+                double val;
+                if (x > 1.0) {
+                    val = std::cosh(order * std::acosh(x));
+                } else if (x < -1.0) {
+                    val = (2.0 * (n % 2) - 1.0) * std::cosh(order * std::acosh(-x));
+                } else {
+                    val = std::cos(order * std::acos(std::clamp(x, -1.0, 1.0)));
+                }
+                in[k][REAL] = val;
+                in[k][IMAG] = 0.0;
+            }
+
+            if (n % 2 == 0) {
+                for (std::size_t k = 0; k < n; ++k) {
+                    const double phase = M_PI * k / static_cast<double>(n);
+                    const double re = in[k][REAL] * std::cos(phase);
+                    const double im = in[k][REAL] * std::sin(phase);
+                    in[k][REAL] = re;
+                    in[k][IMAG] = im;
+                }
+            }
+
+            fftw_plan plan = fftw_plan_dft_1d(
+                static_cast<int>(n), in, out, FFTW_FORWARD, FFTW_ESTIMATE);
+            fftw_execute(plan);
+
+            if (n % 2) {
+                const std::size_t half = (n + 1) / 2;
+                std::vector<double> halfW(half);
+                for (std::size_t i = 0; i < half; ++i)
+                    halfW[i] = out[i][REAL];
+
+                window[half - 1] = halfW[0];
+                for (std::size_t i = 1; i < half; ++i) {
+                    window[half - 1 - i] = halfW[i];
+                    window[half - 1 + i] = halfW[i];
+                }
+            } else {
+                const std::size_t half = n / 2 + 1;
+                std::vector<double> halfW(half);
+                for (std::size_t i = 0; i < half; ++i)
+                    halfW[i] = out[i][REAL];
+
+                for (std::size_t i = 0; i < half - 1; ++i) {
+                    window[i]            = halfW[half - 1 - i];
+                    window[half - 1 + i] = halfW[i + 1];
+                }
+            }
+
+            fftw_destroy_plan(plan);
+            fftw_free(in);
+            fftw_free(out);
+
+            // Find max in central 50% to avoid endpoint impulses dominating normalization
+            const std::size_t quarter = n / 4;
+            const std::size_t centralStart = quarter;
+            const std::size_t centralEnd   = n - quarter;
+            double maxVal = 0.0;
+            for (std::size_t i = centralStart; i < centralEnd; ++i)
+                maxVal = std::max(maxVal, window[i]);
+            if (maxVal > 0.0)
+                for (auto& v : window) v /= maxVal;
+
             break;
         }
     }

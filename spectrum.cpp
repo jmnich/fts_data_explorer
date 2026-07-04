@@ -161,6 +161,8 @@ bool Spectrum::isSpectrumDirty(const std::string& fileId, const std::vector<doub
         activeParam = static_cast<double>(apodizationParams.rectWidth);
     else if (apodizationSelector == static_cast<int>(ApodizationWindow::NortonBeer))
         activeParam = static_cast<double>(apodizationParams.nortonBeerFwhm);
+    else if (apodizationSelector == static_cast<int>(ApodizationWindow::DolphChebyshev))
+        activeParam = static_cast<double>(apodizationParams.dolphChebyshevAt);
 
     if (lp[0] != static_cast<double>(Kpadding)               ||
         lp[1] != static_cast<double>(xUnitSelector)          ||
@@ -562,6 +564,8 @@ void Spectrum::renderSpectrumWindow(const std::vector<std::pair<std::string, std
                         activeParam = static_cast<double>(apodizationParams.gaussSigma);
                     else if (apodizationSelector == static_cast<int>(ApodizationWindow::Rectangular))
                         activeParam = static_cast<double>(apodizationParams.rectWidth);
+                    else if (apodizationSelector == static_cast<int>(ApodizationWindow::DolphChebyshev))
+                        activeParam = static_cast<double>(apodizationParams.dolphChebyshevAt);
 
                     lastPrimaryDetectors[fileId] = rawData.primaryDetector;
                     lastSpectrumParams[fileId]   = { static_cast<double>(Kpadding),
