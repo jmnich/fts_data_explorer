@@ -2396,106 +2396,106 @@ int main() {
         }
         ImGui::End();
         
+        // Lambda to compute average spectrum from checked files
+        auto recalcAverageSpectrum = [&](bool forceAutoscale) {
+            std::vector<InterferogramData> selectedData;
+            for (size_t i = 0; i < appState.sortedFiles.size() && i < appState.filesSelectedForAveraging.size(); i++) {
+                if (appState.filesSelectedForAveraging[i]) {
+                    try {
+                        InterferogramData data = CSVAdapter::loadFromCSV(appState.sortedFiles[i]);
+                        selectedData.push_back(data);
+                    } catch (...) {}
+                }
+            }
+
+            if (!selectedData.empty()) {
+                std::vector<std::vector<double>> allSpectraY;
+                std::vector<double> commonX;
+                bool firstFile = true;
+
+                for (const auto& raw : selectedData) {
+                    auto ps = SpectralToolbox::processSpectrum(
+                        raw.primaryDetector, raw.referenceDetector,
+                        appState.averageSpectrum.refLaserTextbox,
+                        appState.averageSpectrum.Kpadding,
+                        static_cast<SpectralToolbox::SpectrumXUnit>(appState.averageSpectrum.xUnitSelector),
+                        static_cast<ApodizationWindow>(appState.averageSpectrum.apodizationSelector),
+                        appState.averageSpectrum.apodizationParams);
+
+                    allSpectraY.push_back(ps.spectrumY);
+                    if (firstFile) {
+                        commonX = ps.spectrumX;
+                        firstFile = false;
+                    } else {
+                        if (commonX.size() != ps.spectrumX.size() ||
+                            !std::equal(commonX.begin(), commonX.end(), ps.spectrumX.begin())) {
+                            std::vector<double> interpolated;
+                            interpolated.reserve(commonX.size());
+                            for (size_t j = 0; j < commonX.size(); j++) {
+                                double targetX = commonX[j];
+                                const auto& sx = ps.spectrumX;
+                                if (sx.front() < sx.back()) {
+                                    auto it = std::lower_bound(sx.begin(), sx.end(), targetX);
+                                    if (it == sx.begin()) interpolated.push_back(ps.spectrumY[0]);
+                                    else if (it == sx.end()) interpolated.push_back(ps.spectrumY.back());
+                                    else {
+                                        size_t hi = it - sx.begin();
+                                        size_t lo = hi - 1;
+                                        double frac = (targetX - sx[lo]) / (sx[hi] - sx[lo]);
+                                        interpolated.push_back(ps.spectrumY[lo] * (1.0 - frac) + ps.spectrumY[hi] * frac);
+                                    }
+                                } else {
+                                    auto it = std::lower_bound(sx.begin(), sx.end(), targetX, std::greater<double>());
+                                    if (it == sx.begin()) interpolated.push_back(ps.spectrumY[0]);
+                                    else if (it == sx.end()) interpolated.push_back(ps.spectrumY.back());
+                                    else {
+                                        size_t hi = it - sx.begin();
+                                        size_t lo = hi - 1;
+                                        double frac = (targetX - sx[lo]) / (sx[hi] - sx[lo]);
+                                        interpolated.push_back(ps.spectrumY[lo] * (1.0 - frac) + ps.spectrumY[hi] * frac);
+                                    }
+                                }
+                            }
+                            allSpectraY.back() = std::move(interpolated);
+                        }
+                    }
+                }
+
+                size_t numBins = commonX.size();
+                appState.averageSpectrum.cachedAverageY.assign(numBins, 0.0);
+                int validFiles = 0;
+                for (size_t i = 0; i < allSpectraY.size(); i++) {
+                    if (allSpectraY[i].size() == numBins) {
+                        for (size_t j = 0; j < numBins; j++)
+                            appState.averageSpectrum.cachedAverageY[j] += allSpectraY[i][j];
+                        validFiles++;
+                    }
+                }
+                if (validFiles > 0) {
+                    for (size_t j = 0; j < numBins; j++)
+                        appState.averageSpectrum.cachedAverageY[j] /= validFiles;
+                }
+
+                appState.averageSpectrum.cachedAverageX = commonX;
+                appState.averageSpectrum.averageCount = validFiles;
+                appState.averageSpectrum.averageAvailable = true;
+                if (forceAutoscale) {
+                    appState.averageSpectrum.shouldAutoscale = true;
+                    appState.averageSpectrum.firstLoadCompleted = false;
+                }
+            } else {
+                appState.averageSpectrum.averageAvailable = false;
+                appState.averageSpectrum.averageCount = 0;
+            }
+            appState.needsRedraw = true;
+        };
+
         // Average config panel
         ImGui::Begin("Average");
         if (appState.dataLoaded) {
             // Button: Calculate average
             if (ImGui::Button("Calculate average")) {
-                // Gather all csv files that are checked for averaging
-                std::vector<InterferogramData> selectedData;
-                for (size_t i = 0; i < appState.sortedFiles.size() && i < appState.filesSelectedForAveraging.size(); i++) {
-                    if (appState.filesSelectedForAveraging[i]) {
-                        try {
-                            InterferogramData data = CSVAdapter::loadFromCSV(appState.sortedFiles[i]);
-                            selectedData.push_back(data);
-                        } catch (...) {}
-                    }
-                }
-
-                if (!selectedData.empty()) {
-                    std::vector<std::vector<double>> allSpectraY;
-                    std::vector<double> commonX;
-                    bool firstFile = true;
-
-                    for (const auto& raw : selectedData) {
-                        auto ps = SpectralToolbox::processSpectrum(
-                            raw.primaryDetector, raw.referenceDetector,
-                            appState.averageSpectrum.refLaserTextbox,
-                            appState.averageSpectrum.Kpadding,
-                            static_cast<SpectralToolbox::SpectrumXUnit>(appState.averageSpectrum.xUnitSelector),
-                            static_cast<ApodizationWindow>(appState.averageSpectrum.apodizationSelector),
-                            appState.averageSpectrum.apodizationParams);
-
-                        allSpectraY.push_back(ps.spectrumY);
-                        if (firstFile) {
-                            commonX = ps.spectrumX;
-                            firstFile = false;
-                        } else {
-                            // Interpolate subsequent spectra onto the first file's X grid
-                            if (commonX.size() != ps.spectrumX.size() ||
-                                !std::equal(commonX.begin(), commonX.end(), ps.spectrumX.begin())) {
-                                std::vector<double> interpolated;
-                                interpolated.reserve(commonX.size());
-                                for (size_t j = 0; j < commonX.size(); j++) {
-                                    double targetX = commonX[j];
-                                    const auto& sx = ps.spectrumX;
-                                    if (sx.front() < sx.back()) {
-                                        auto it = std::lower_bound(sx.begin(), sx.end(), targetX);
-                                        if (it == sx.begin()) {
-                                            interpolated.push_back(ps.spectrumY[0]);
-                                        } else if (it == sx.end()) {
-                                            interpolated.push_back(ps.spectrumY.back());
-                                        } else {
-                                            size_t hi = it - sx.begin();
-                                            size_t lo = hi - 1;
-                                            double frac = (targetX - sx[lo]) / (sx[hi] - sx[lo]);
-                                            interpolated.push_back(ps.spectrumY[lo] * (1.0 - frac) + ps.spectrumY[hi] * frac);
-                                        }
-                                    } else {
-                                        auto it = std::lower_bound(sx.begin(), sx.end(), targetX, std::greater<double>());
-                                        if (it == sx.begin()) {
-                                            interpolated.push_back(ps.spectrumY[0]);
-                                        } else if (it == sx.end()) {
-                                            interpolated.push_back(ps.spectrumY.back());
-                                        } else {
-                                            size_t hi = it - sx.begin();
-                                            size_t lo = hi - 1;
-                                            double frac = (targetX - sx[lo]) / (sx[hi] - sx[lo]);
-                                            interpolated.push_back(ps.spectrumY[lo] * (1.0 - frac) + ps.spectrumY[hi] * frac);
-                                        }
-                                    }
-                                }
-                                allSpectraY.back() = std::move(interpolated);
-                            }
-                        }
-                    }
-
-                    // Average point-by-point
-                    size_t numBins = commonX.size();
-                    appState.averageSpectrum.cachedAverageY.assign(numBins, 0.0);
-                    int validFiles = 0;
-                    for (size_t i = 0; i < allSpectraY.size(); i++) {
-                        if (allSpectraY[i].size() == numBins) {
-                            for (size_t j = 0; j < numBins; j++)
-                                appState.averageSpectrum.cachedAverageY[j] += allSpectraY[i][j];
-                            validFiles++;
-                        }
-                    }
-                    if (validFiles > 0) {
-                        for (size_t j = 0; j < numBins; j++)
-                            appState.averageSpectrum.cachedAverageY[j] /= validFiles;
-                    }
-
-                    appState.averageSpectrum.cachedAverageX = commonX;
-                    appState.averageSpectrum.averageCount = validFiles;
-                    appState.averageSpectrum.averageAvailable = true;
-                    appState.averageSpectrum.shouldAutoscale = true;
-                    appState.averageSpectrum.firstLoadCompleted = false;
-                } else {
-                    appState.averageSpectrum.averageAvailable = false;
-                    appState.averageSpectrum.averageCount = 0;
-                }
-                appState.needsRedraw = true;
+                recalcAverageSpectrum(true);
             }
 
             ImGui::Separator();
@@ -2587,21 +2587,21 @@ int main() {
             ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[cmSel ? 1 : 0]);
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cmSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("cm-1##AvgXUnitCm")) { appState.averageSpectrum.xUnitSelector = 0; appState.needsRedraw = true; }
+            if (ImGui::Button("cm-1##AvgXUnitCm")) { appState.averageSpectrum.xUnitSelector = 0; if (appState.averageSpectrum.averageAvailable) recalcAverageSpectrum(false); }
             ImGui::PopStyleColor(3);
             ImGui::SameLine();
 
             ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[umSel ? 1 : 0]);
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  umSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("\xC2\xB5""m##AvgXUnitUm")) { appState.averageSpectrum.xUnitSelector = 1; appState.needsRedraw = true; }
+            if (ImGui::Button("\xC2\xB5""m##AvgXUnitUm")) { appState.averageSpectrum.xUnitSelector = 1; if (appState.averageSpectrum.averageAvailable) recalcAverageSpectrum(false); }
             ImGui::PopStyleColor(3);
             ImGui::SameLine();
 
             ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[thzSel ? 1 : 0]);
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  thzSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("THz##AvgXUnitTHz")) { appState.averageSpectrum.xUnitSelector = 2; appState.needsRedraw = true; }
+            if (ImGui::Button("THz##AvgXUnitTHz")) { appState.averageSpectrum.xUnitSelector = 2; if (appState.averageSpectrum.averageAvailable) recalcAverageSpectrum(false); }
             ImGui::PopStyleColor(3);
 
             // ---- Y Axis mode selector (INDEPENDENT) ----

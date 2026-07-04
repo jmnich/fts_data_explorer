@@ -212,7 +212,7 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
     }
 
     // ---- 8. BeginPlot ----
-    ImPlotFlags plot_flags = ImPlotFlags_NoTitle;
+    ImPlotFlags plot_flags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend;
     if (ImPlot::BeginPlot("AverageViewPlot", ImVec2(-1, -1), plot_flags)) {
 
         ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoTickMarks;
@@ -288,23 +288,50 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
             firstLoadCompleted = true;
         }
 
-        // ---- 9. Ticks setup ----
-        {
-            double xMin = std::min(cachedAverageX.front(), cachedAverageX.back());
-            double xMax = std::max(cachedAverageX.front(), cachedAverageX.back());
-            double yMin, yMax;
-            if (yScaleSelector == 2 || detectorSensitivity > 0.0f) {
-                yMin = std::numeric_limits<double>::max();
-                yMax = std::numeric_limits<double>::lowest();
-                for (double v : cachedAverageY) {
-                    double d = toDisplay(v);
-                    yMin = std::min(yMin, d);
-                    yMax = std::max(yMax, d);
+        // Clamp converted X limits to actual data range after unit switch
+        if (xUnitSwitchedThisFrame) {
+            xUnitSwitchedThisFrame = false;
+            double dataXMin = std::min(cachedAverageX.front(), cachedAverageX.back());
+            double dataXMax = std::max(cachedAverageX.front(), cachedAverageX.back());
+            if (dataXMin < dataXMax) {
+                double clampedMin = std::max(convertedXMin, dataXMin);
+                double clampedMax = std::min(convertedXMax, dataXMax);
+                if (clampedMin < clampedMax) {
+                    ImPlot::SetupAxisLimits(ImAxis_X1, clampedMin, clampedMax, ImPlotCond_Always);
+                    manualXMin = clampedMin;
+                    manualXMax = clampedMax;
+                } else {
+                    ImPlot::SetupAxisLimits(ImAxis_X1, dataXMin, dataXMax, ImPlotCond_Always);
+                    manualXMin = dataXMin;
+                    manualXMax = dataXMax;
                 }
-            } else {
-                auto mmY = std::minmax_element(cachedAverageY.begin(), cachedAverageY.end());
-                yMin = *mmY.first;
-                yMax = *mmY.second;
+            }
+        }
+
+        // ---- 9. Ticks setup (from current view range) ----
+        {
+            double xMin = manualXMin;
+            double xMax = manualXMax;
+            double yMin = savedYMin;
+            double yMax = savedYMax;
+            if (yMin >= yMax) {
+                if (yScaleSelector == 2 || detectorSensitivity > 0.0f) {
+                    yMin = std::numeric_limits<double>::max();
+                    yMax = std::numeric_limits<double>::lowest();
+                    for (double v : cachedAverageY) {
+                        double d = toDisplay(v);
+                        yMin = std::min(yMin, d);
+                        yMax = std::max(yMax, d);
+                    }
+                } else {
+                    auto mmY = std::minmax_element(cachedAverageY.begin(), cachedAverageY.end());
+                    yMin = *mmY.first;
+                    yMax = *mmY.second;
+                }
+            }
+            if (xMin >= xMax) {
+                xMin = std::min(cachedAverageX.front(), cachedAverageX.back());
+                xMax = std::max(cachedAverageX.front(), cachedAverageX.back());
             }
             if (xMin < xMax) SetupAxisTicksLimited(ImAxis_X1, xMin, xMax);
             if (yMin < yMax) SetupAxisTicksLimited(ImAxis_Y1, yMin, yMax);

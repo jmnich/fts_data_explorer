@@ -365,7 +365,7 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
         }
 
         // Match Interferogram panel behavior: NoTitle only, no NoLegend to ensure full interactions
-        ImPlotFlags plot_flags = ImPlotFlags_NoTitle;
+        ImPlotFlags plot_flags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend;
 
         bool plotRendered = false;
         if (ImPlot::BeginPlot("Spectrum", ImVec2(-1, -1), plot_flags)) {
