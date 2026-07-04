@@ -10,12 +10,14 @@ It presents a tree view of information available in the dataset and then allows 
 - FFTW3 for FFT-based spectrum computation
 
 # Functionality and GUI description
-- Main window consists of 5 docked panels:
+- Main window consists of 7 docked panels:
     - primary, large Interferogram View panel, which shows selected primary and reference interferograms on 2 vertically stacked plots with shared x axis. These graphs support zoom with mouse.
     - Interferogram panel (docked), containing toggle buttons for X axis base (sample/OPD), Max at zero, Auto-fit Y, and Downsample settings.
     - metadata panel, docked to the right of the Interferogram View panel, showing all available metadata
-    - files panel, docked to the left, showing tree view with files in the selected directory
-    - spectrum controls panel with display and processing settings
+    - files panel, docked to the left, showing tree view with files in the selected directory. Each file row has a checkbox for including that file in Average/SNR computations.
+    - spectrum controls panel (docked) with spectrum display and FFT processing settings
+    - Average config panel (docked) + Average View panel with mean-spectrum computation and plot
+    - SNR config panel (docked) + SNR View panel with SNR-spectrum computation and plot
 - OPD X-axis: When X axis base is set to "OPD" in the Interferogram panel, the interferogram plots use Hilbert-transform-derived optical path difference (in µm) on the x-axis instead of sample indices. Hilbert X values are cached per-file and automatically recomputed when the reference laser wavelength changes in the Spectrum panel.
 - Main window contains a ribbon menu, which is hidden in the welcome screen. The structure of the menu is as follows:
     - File
@@ -79,12 +81,32 @@ It presents a tree view of information available in the dataset and then allows 
       Apodization selector, `gaussSigma`, and `rectWidth` are also persisted in `[SpectrumWindow]`.
     - **Hilbert validation:** `test_hilbert_comparison/` contains a standalone test validating Hilbert X-axis correction against a Python reference implementation.
 
+- Average Spectrum functionality
+    - **File selection:** Shared checkboxes in the Files panel (together with SNR). All/None buttons in the Average panel control the same `filesSelectedForAveraging` vector.
+    - **Average panel controls:** Independent display controls — X unit selector (cm⁻¹/µm/THz), Y scale (lin/log/dB), Y axis mode (all/tight/force), tracking cursor toggle (synchronized with Spectrum panel).
+    - **"Calculate average" button:** On-demand multi-frame computation (one file per frame via `tickCalculation()`), shows progress bar. Uses Spectrum panel's `processSpectrum()` with Spectrum panel's apodization/refLaser/K parameters and Average panel's independent X unit.
+    - **Average computation:** Accumulates magnitude spectra from selected files onto a common X grid, then divides by count. Cached in `cachedAverageX/Y`.
+    - **Average View panel:** ImPlot with shift+drag X-range selection, arrow-key pan, ESC reset zoom, mouse-wheel zoom, tracking cursor annotation. Line color: yellow. Shows "Average of N" label.
+    - **State persistence:** `[AverageWindow]` config section (yAxisMode, xUnitSelector, yScaleSelector, forcedYMin/Max).
+    - **Files:** `average_spectrum.h` / `average_spectrum.cpp` — `AverageSpectrum` class.
+
+- SNR Spectrum functionality
+    - **File selection:** Shares the same checkboxes as Average (`filesSelectedForAveraging`). All/None buttons in the SNR panel control the same vector.
+    - **SNR panel controls:** Independent display controls — X unit selector (cm⁻¹/µm/THz), Y scale (lin/log), Y axis mode (all/tight/force), tracking cursor toggle (synchronized with Spectrum panel).
+    - **"Calculate SNR" button:** On-demand multi-frame computation. Shows "Selected: N files" counter before calculation.
+    - **SNR computation:** Per-file: calls `processSpectrum()` with Spectrum panel's apodization/refLaser/K parameters and SNR panel's independent X unit. Accumulates sum and sum-of-squares (online variance). Finalize: `SNR = mean / std_dev` per wavelength bin (requires ≥2 files). Cached in `cachedSnrX/Y`.
+    - **SNR View panel:** Same interaction model as Average View (shift+drag, arrow pan, ESC, scroll, cursor). Line color: reddish-orange. Shows "SNR of N" label.
+    - **State persistence:** `[SNRWindow]` config section (yAxisMode, xUnitSelector, yScaleSelector, forcedYMin/Max).
+    - **Files:** `snr_spectrum.h` / `snr_spectrum.cpp` — `SnrSpectrum` class.
+
 # Application structure
 - the application uses 'adapter classes' which convert different data storage formats into a unified object carrying primary and reference interferograms as well as metadata. These unified data objects are then used to display the information in gui.
 - file organization: all source files live in the root directory:
     - `main.cpp` — entry point, ImGui docking, ribbon menu, all GUI panels
     - `app_state.h` / `app_state.cpp` — global AppState struct (Spectrum, rawDataCache, visualization settings)
     - `spectrum.h` / `spectrum.cpp` — SpectrumView floating window (ImPlot rendering, caching, zoom/cursor)
+    - `average_spectrum.h` / `average_spectrum.cpp` — AverageSpectrum class
+    - `snr_spectrum.h` / `snr_spectrum.cpp` — SnrSpectrum class
     - `spectral_toolbox.h` / `spectral_toolbox.cpp` — FFTW DSP pipeline (Hilbert correction, FFT, unit conversion)
     - `apodization.h` / `apodization.cpp` — Apodization window functions (Rectangular, Gauss, Triangular) with parametric controls; applied before zero-padding in the FFT pipeline
     - `config.h` — AppConfig with load/save to `~/.fts_data_explorer_config`
@@ -100,6 +122,9 @@ It presents a tree view of information available in the dataset and then allows 
   - `peakAlignmentOffsets`: Calculated X-axis offsets for aligning peaks across multiple files
   - `rawDataCache`: Unprocessed `InterferogramData` for spectrum computation, separate from the downsampled `loadedData` used in main plots
   - `Spectrum spectrum`: Embedded Spectrum instance managing the spectrum view window state, caches, and UI controls
+  - `AverageSpectrum averageSpectrum`: Average spectrum computation and display state
+  - `SnrSpectrum snrSpectrum`: SNR spectrum computation and display state
+  - `filesSelectedForAveraging`: Per-file checkbox state (shared by Average and SNR panels), indexed identically to sortedFiles
 - State persistence: Configuration settings are saved to and loaded from a config file for session restoration.
 
 ## Idle rendering optimization (`needsRedraw`)

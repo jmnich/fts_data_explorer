@@ -81,6 +81,7 @@ add_executable(fts_data_explorer
     app_state.cpp
     spectrum.cpp
     average_spectrum.cpp
+    snr_spectrum.cpp
     spectral_toolbox.cpp
     apodization.cpp
     export.cpp

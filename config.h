@@ -47,6 +47,13 @@ struct AppConfig {
     int avgYScaleSelector = 0;
     double avgForcedYMin = 0.0;
     double avgForcedYMax = 1.0;
+
+    // SNR window state (independent from SpectrumWindow, persisted subset)
+    int snrYAxisMode = 0;
+    int snrXUnitSelector = 0;
+    int snrYScaleSelector = 0;
+    double snrForcedYMin = 0.0;
+    double snrForcedYMax = 1.0;
     
     // Add a dataset to recent list (maintains max size, deduplicates)
     void addRecentDataset(const std::string& datasetPath) {
@@ -131,6 +138,14 @@ struct AppConfig {
             configFile << "y_scale_selector=" << avgYScaleSelector << "\n";
             configFile << "forced_y_min=" << avgForcedYMin << "\n";
             configFile << "forced_y_max=" << avgForcedYMax << "\n";
+
+            // Write SNR window settings
+            configFile << "\n[SNRWindow]\n";
+            configFile << "y_axis_mode=" << snrYAxisMode << "\n";
+            configFile << "x_unit_selector=" << snrXUnitSelector << "\n";
+            configFile << "y_scale_selector=" << snrYScaleSelector << "\n";
+            configFile << "forced_y_min=" << snrForcedYMin << "\n";
+            configFile << "forced_y_max=" << snrForcedYMax << "\n";
             
             configFile.flush();
             configFile.close();
@@ -248,6 +263,18 @@ struct AppConfig {
                             avgForcedYMin = std::stod(value);
                         } else if (key == "forced_y_max") {
                             avgForcedYMax = std::stod(value);
+                        }
+                    } else if (currentSection == "SNRWindow") {
+                        if (key == "y_axis_mode") {
+                            snrYAxisMode = std::stoi(value);
+                        } else if (key == "x_unit_selector") {
+                            snrXUnitSelector = std::stoi(value);
+                        } else if (key == "y_scale_selector") {
+                            snrYScaleSelector = std::stoi(value);
+                        } else if (key == "forced_y_min") {
+                            snrForcedYMin = std::stod(value);
+                        } else if (key == "forced_y_max") {
+                            snrForcedYMax = std::stod(value);
                         }
                     }
                 }

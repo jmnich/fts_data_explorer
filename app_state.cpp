@@ -114,11 +114,16 @@ void AppState::reset() {
     welcomeScreenInitialized = false;
     spectrum.resetSpectrumWindow();
     averageSpectrum.reset();
+    snrSpectrum.reset();
     filesSelectedForAveraging.clear();
 }
 
 void AppState::clearAverageSpectrum() {
     averageSpectrum.reset();
+}
+
+void AppState::clearSnrSpectrum() {
+    snrSpectrum.reset();
 }
 
 // Global application state instance

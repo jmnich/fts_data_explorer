@@ -7,6 +7,7 @@
 #include "config.h"
 #include "spectrum.h"
 #include "average_spectrum.h"
+#include "snr_spectrum.h"
 #include "export.h"
 #include "adapters/csv_adapter.h"
 
@@ -107,10 +108,13 @@ struct AppState {
     // Average spectrum state
     AverageSpectrum averageSpectrum;
 
+    // SNR spectrum state
+    SnrSpectrum snrSpectrum;
+
     // Export panel state
     ExportPanel exportPanel;
 
-    // Per-file checkbox state for averaging selection.
+    // Per-file checkbox state for file selection (shared by Average and SNR panels).
     // Indexed identically to sortedFiles.
     // Default: all true (checked) after loading a dataset.
     std::vector<bool> filesSelectedForAveraging;
@@ -128,6 +132,9 @@ struct AppState {
     
     // Clear average spectrum data (call when dataset changes)
     void clearAverageSpectrum();
+
+    // Clear SNR spectrum data (call when dataset changes)
+    void clearSnrSpectrum();
 };
 
 // Global application state instance
