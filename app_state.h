@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <string>
+#include <map>
 #include <filesystem>
 #include "config.h"
 #include "spectrum.h"
@@ -33,7 +34,6 @@ struct AppState {
     const size_t MAX_SELECTABLE_FILES;
     size_t lastSelectedIndex;
     bool alignPeaks;
-    bool autoRestoreScale;
     
     // Keyboard shortcut state tracking
     bool yKeyPressedLastFrame;
@@ -101,6 +101,11 @@ struct AppState {
     
     // Spectrum window state
     Spectrum spectrum;
+    
+    // OPD X-axis state
+    int xAxisBase = 0;  // 0 = sample, 1 = OPD
+    std::map<std::string, std::vector<double>> hilbertXCache;
+    float hilbertCacheLaserWavelength = 0.0f;
     
     // Constructor to initialize constants
     AppState();

@@ -177,7 +177,7 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
         // Create plot specifications with matching colors (needed for legend)
         std::vector<ImPlotSpec> plotSpecs(primaryDetectors.size());
         
-        // Add legend at the top (matching graphing panel style with dataset patches)
+        // Add legend at the top (matching Interferogram panel style with dataset patches)
         if (!primaryDetectors.empty()) {
             ImGui::BeginGroup(); // Start horizontal group for legend
             for (size_t i = 0; i < primaryDetectors.size(); i++) {
@@ -206,7 +206,7 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                 }
                 plotSpecs[i].LineColor = color;
                 
-                // Draw colored square patch (same style as graphing panel)
+                // Draw colored square patch (same style as Interferogram panel)
                 ImDrawList* draw_list = ImGui::GetWindowDrawList();
                 ImVec2 cursor_pos = ImGui::GetCursorScreenPos();
                 ImVec2 square_size(12, 12); // Size of the color square
@@ -364,15 +364,15 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
             prevYAxisMode = yAxisMode;
         }
 
-        // Match graphing panel behavior: NoTitle only, no NoLegend to ensure full interactions
+        // Match Interferogram panel behavior: NoTitle only, no NoLegend to ensure full interactions
         ImPlotFlags plot_flags = ImPlotFlags_NoTitle;
 
         bool plotRendered = false;
         if (ImPlot::BeginPlot("Spectrum", ImVec2(-1, -1), plot_flags)) {
             plotRendered = true;
 
-            // Setup axes with conditional auto-fit behavior (no labels to match graphing panel style)
-            // Implement Auto-fit Y-axis (AFY) feature like in graphing panel
+            // Setup axes with conditional auto-fit behavior (no labels to match Interferogram panel style)
+            // Implement Auto-fit Y-axis (AFY) feature like in Interferogram panel
             ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoTickMarks;
             ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
 

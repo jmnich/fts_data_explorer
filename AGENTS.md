@@ -10,21 +10,21 @@ It presents a tree view of information available in the dataset and then allows 
 - FFTW3 for FFT-based spectrum computation
 
 # Functionality and GUI description
-- Main window consists of 4 docked panels:
-    - primary, large graphing panel, which shows selected primary and reference interferograms on 2 vertically stacked plots with shared x axis. These graphs support zoom with mouse.
-    - metadata panel, docked to the right of the graphing panel, showing all available metadata
+- Main window consists of 5 docked panels:
+    - primary, large Interferogram View panel, which shows selected primary and reference interferograms on 2 vertically stacked plots with shared x axis. These graphs support zoom with mouse.
+    - Interferogram panel (docked), containing toggle buttons for X axis base (sample/OPD), Align peaks, Auto-fit Y, and Downsample settings.
+    - metadata panel, docked to the right of the Interferogram View panel, showing all available metadata
     - files panel, docked to the left, showing tree view with files in the selected directory
     - spectrum controls panel with display and processing settings
+- OPD X-axis: When X axis base is set to "OPD" in the Interferogram panel, the interferogram plots use Hilbert-transform-derived optical path difference (in µm) on the x-axis instead of sample indices. Hilbert X values are cached per-file and automatically recomputed when the reference laser wavelength changes in the Spectrum panel.
 - Main window contains a ribbon menu, which is hidden in the welcome screen. The structure of the menu is as follows:
     - File
         - a single button "set working directory", which invokes directory browsing window and switches working directory
         - recent datasets selector, allowing to quickly switch between recently opened datasets stored in the config
     - Settings
-        - checkbox "Align peaks", which shifts the data in x axis to align the max value of primary interferogram
-        - checkbox "Autorestore scale"
-        - checkbox "Auto-fit Y-axis"
-        - checkbox "Enable downsampling"
+        - FPS display toggle
         - UI size selection droplist
+        - Note: Align peaks, Auto-fit Y, and Downsample toggles are now in the Interferogram panel
     - Help
         - non-interactive list of all implemented keyboard shortcuts
         - keyboard shortcuts include:
@@ -39,12 +39,11 @@ It presents a tree view of information available in the dataset and then allows 
           - ESC: Reset zoom to fit all data
 - Detailed description of axis ranging in data plots:
     - when application is launched, 'auto fit y axis' option must be enabled. This enables/disables the native "Auto-Fit" option from implot.
-    - when application is launched, 'autorestore scale' option loads the last used value from config. The effect of this option is described below.
     - feature: select range to zoom - with mouse hovering over plot area, when user presses shift button, a selection of x-axis range begins, and when shift is released the selection is finalized. During selection, the range is indicated by two vertical cursors with area between them painted in translucent purple. When shift is released, the range of displayed x-axis values is set to the selected range.
     - feature: multi-file selection with Ctrl+Click for individual files and Shift+Click for range selection, supporting up to 5 simultaneously selected files for comparison.
     - feature: pressing 'esc' button resets zoom to fit all data. This feature is always active when any data is displayed.
     - feature: when user selects additional data files to display, the current range of axes is preseved. 
-    - feature: when user switches between data files using mouse click or up/down arrows, axis ranging depends on option "autorestore scale". If enabled then autoscale to fit all data, if disabled then preserve the range of XY axes used for previous file.
+    - feature: when user switches between data files using mouse click or up/down arrows, the current range of X and Y axes is preserved.
     - feature: peak alignment functionality that shifts datasets on the x-axis to align the maximum values of primary interferograms across multiple selected files, enabling direct comparison of signal shapes.
     - feature: mouse scroll allows to zoom into the region over witch mouse is currently hovering.
     - feature: left/right arrow keys allow panning the view by 10% of the current visible range in the respective direction.
@@ -59,7 +58,7 @@ It presents a tree view of information available in the dataset and then allows 
 
 - Spectrum functionality
     - The docked "Spectrum" panel (bottom of main window) contains spectrum controls.
-    - Spectrum View is a permanent docked panel alongside Files, Metadata, and Graphing Panel.
+    - Spectrum View is a permanent docked panel alongside Files, Metadata, and Interferogram panel.
     - **Spectrum panel controls:**
         - X-axis unit selector: cm⁻¹ / µm / THz (toggle buttons). Changing units converts current X-axis zoom range and invalidates spectrum caches.
         - Y-axis scale: Linear / Log10 (toggle buttons). Switching preserves X range.
@@ -96,7 +95,7 @@ It presents a tree view of information available in the dataset and then allows 
 - Key state variables include:
   - `currentWorkingDirectory`: Path to the dataset directory being explored
   - `selectedFiles`: List of currently selected files for comparison (up to 5 files)
-  - `visualizationSettings`: Contains toggle states for features like peak alignment, auto-fit Y-axis, downsampling, and autorestore scale
+  - `visualizationSettings`: Contains toggle states for features like peak alignment, auto-fit Y-axis, and downsampling
   - `axisRanges`: Stores the current X and Y axis ranges for the plots
   - `peakAlignmentOffsets`: Calculated X-axis offsets for aligning peaks across multiple files
   - `rawDataCache`: Unprocessed `InterferogramData` for spectrum computation, separate from the downsampled `loadedData` used in main plots

@@ -17,7 +17,6 @@ AppState::AppState()
       shiftSelectMode(false),
       lastSelectedIndex(0),
       alignPeaks(false),
-      autoRestoreScale(false),
       yKeyPressedLastFrame(false),
       aKeyPressedLastFrame(false),
       dKeyPressedLastFrame(false),
@@ -54,7 +53,8 @@ AppState::AppState()
       isFirstDataLoad(true),
       showWelcomeScreen(true),
       welcomeScreenInitialized(false),
-      spectrum()
+      spectrum(),
+      xAxisBase(0)
 {
     // Constructor body
 }
@@ -75,7 +75,6 @@ void AppState::reset() {
     shiftSelectMode = false;
     lastSelectedIndex = 0;
     alignPeaks = false;
-    autoRestoreScale = false;
     yKeyPressedLastFrame = false;
     aKeyPressedLastFrame = false;
     dKeyPressedLastFrame = false;

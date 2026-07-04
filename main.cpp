@@ -18,6 +18,7 @@
 #include "config.h"
 #include "app_state.h"
 #include "spectrum.h"
+#include "spectral_toolbox.h"
 #include "adapters/csv_adapter.h"
 #include "tinyfiledialogs.h"
 
@@ -508,7 +509,9 @@ int main() {
     
     appState.csvFiles = FileBrowser::getCSVFilesInDirectory(appState.currentDirectory);
     appState.alignPeaks = config.alignPeaks; // Use config setting for peak alignment
-    appState.autoRestoreScale = config.autoRestoreScale; // Use config setting for scale restoration
+    appState.autoFitYAxis = config.autoFitYAxis; // Load from config
+    appState.enableDownsampling = config.enableDownsampling; // Load from config
+    appState.xAxisBase = config.xAxisBase; // Load from config
     appState.showFPS = config.showFPS; // Load from config
     
     // Load spectrum window settings from config
@@ -574,11 +577,13 @@ int main() {
             // 'Ctrl+A' - Toggle align peaks (only on initial press)
             if (aKeyPressed && !appState.aKeyPressedLastFrame) {
                 appState.alignPeaks = !appState.alignPeaks;
+                appState.shouldAutoscale = true;
             }
             
             // 'Ctrl+D' - Toggle downsampling (only on initial press)
             if (dKeyPressed && !appState.dKeyPressedLastFrame) {
                 appState.enableDownsampling = !appState.enableDownsampling;
+                appState.hilbertXCache.clear();
                 if (appState.dataLoaded) {
                     // Reload all selected files with new downsampling setting while preserving selection
                     std::vector<InterferogramData> reloadedData;
@@ -794,7 +799,7 @@ int main() {
                 
                 // Handle autoscale behavior based on AGENTS.md requirements:
                 // "when the application loads a file for display for the first time after launch or work directory switch, axes zoom to fit all data."
-                if (appState.isFirstDataLoad || appState.autoRestoreScale) {
+                if (appState.isFirstDataLoad) {
                     appState.zoomRange = {0, 0};
                     appState.shouldAutoscale = true; // Trigger autoscale
                     
@@ -1112,85 +1117,6 @@ int main() {
                 // Settings menu
                 if (ImGui::BeginMenu("Settings"))
                 {
-                    ImGui::MenuItem("Align peaks", NULL, &appState.alignPeaks);
-                    if (ImGui::MenuItem("Autorestore scale", NULL, &appState.autoRestoreScale)) {
-                        // When enabling autorestore scale, trigger autoscale to fit all data
-                        if (appState.autoRestoreScale && appState.dataLoaded) {
-                            appState.shouldAutoscale = true;
-                        }
-                    }
-                    
-                    // Auto-fit Y-axis toggle
-                    if (ImGui::MenuItem("Auto-fit Y-axis", NULL, &appState.autoFitYAxis)) {
-                        // When toggling auto-fit, recalculate limits if enabling auto-fit
-                        if (appState.autoFitYAxis && appState.dataLoaded) {
-                            auto ref_min_max = std::minmax_element(appState.loadedData[0].referenceDetector.begin(), appState.loadedData[0].referenceDetector.end());
-                            auto prim_min_max = std::minmax_element(appState.loadedData[0].primaryDetector.begin(), appState.loadedData[0].primaryDetector.end());
-                            appState.ref_y_min = *ref_min_max.first;
-                            appState.ref_y_max = *ref_min_max.second;
-                            appState.prim_y_min = *prim_min_max.first;
-                            appState.prim_y_max = *prim_min_max.second;
-                        }
-                    }
-                    
-                    // Downsampling toggle
-                    if (ImGui::MenuItem("Enable downsampling", NULL, &appState.enableDownsampling)) {
-                        if (appState.dataLoaded) {
-                            // Reload all selected files with new downsampling setting while preserving selection
-                            std::vector<InterferogramData> reloadedData;
-                            for (const auto& filePath : appState.selectedFiles) {
-                                try {
-                                    InterferogramData data = CSVAdapter::loadFromCSV(filePath);
-                                    
-                                    // Apply downsampling if enabled and dataset is large
-                                    if (appState.enableDownsampling && data.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
-                                        size_t localDownsampleFactor = data.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
-                                        
-                                        // Downsample both reference and primary detectors
-                                        std::vector<double> downsampledRef, downsampledPrim;
-                                        for (size_t j = 0; j < data.referenceDetector.size(); j += localDownsampleFactor) {
-                                            downsampledRef.push_back(data.referenceDetector[j]);
-                                            downsampledPrim.push_back(data.primaryDetector[j]);
-                                        }
-                                        data.referenceDetector = downsampledRef;
-                                        data.primaryDetector = downsampledPrim;
-                                    }
-                                    
-                                    reloadedData.push_back(data);
-                                } catch (const std::exception& e) {
-                                    std::cerr << "Error reloading file: " << e.what() << std::endl;
-                                }
-                            }
-                            
-                            if (!reloadedData.empty()) {
-                                appState.loadedData = reloadedData;
-                                // Also update raw data cache - need to reload raw data
-                                // IMPORTANT: We need to reload the ORIGINAL raw data, not the processed data
-                                appState.rawDataCache.clear();
-                                for (const auto& file : appState.selectedFiles) {
-                                    try {
-                                        // Load the original raw data from file
-                                        InterferogramData rawData = CSVAdapter::loadFromCSV(file);
-                                        appState.rawDataCache.push_back(rawData);
-                                    } catch (const std::exception& e) {
-                                        std::cerr << "Error reloading raw data for spectrum: " << e.what() << std::endl;
-                                        // If we can't reload raw data, use processed data as fallback
-                                        // This ensures spectrum can still be computed
-                                        appState.rawDataCache.push_back(reloadedData[&file - &appState.selectedFiles[0]]);
-                                    }
-                                }
-                                // Force X-axis to show all data when downsampling is toggled
-                                appState.zoomRange = {0, 0};
-                                // Set flag to force autofit on next render
-                                appState.shouldAutoscale = true;
-                                appState.forceXAutofit = true; // Set global flag to force X-axis autofit
-                                // Note: We don't change autoRestoreScale setting, so other behaviors are preserved
-                                std::cout << "Reloaded " << appState.loadedData.size() << " datasets with " 
-                                          << (appState.enableDownsampling ? "enabled" : "disabled") << " downsampling" << std::endl;
-                            }
-                        }
-                    }
-                    
                     // Display FPS toggle
                     ImGui::MenuItem("Display fps", NULL, &appState.showFPS);
                     
@@ -1473,9 +1399,9 @@ int main() {
         ImGui::PopTextWrapPos(); // Disable text wrapping
         ImGui::End();
         
-        // Graphing panel (main) - now using ImPlot
+        // Interferogram panel (main)
         bool isMainWindowFocused = false;
-        ImGui::Begin("Graphing Panel");
+        ImGui::Begin("Interferogram View");
         isMainWindowFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
         
         // Handle ESC key to reset zoom (only when main window is focused)
@@ -1495,60 +1421,13 @@ int main() {
             size_t ref_end =  appState.loadedData[0].referenceDetector.size();
             size_t prim_start =  0;
             size_t prim_end =  appState.loadedData[0].primaryDetector.size();
-            // Apply peak alignment if enabled
-            std::vector<InterferogramData> alignedData = appState.loadedData;
-            if (appState.alignPeaks && appState.loadedData.size() > 1) {
-                // Find the peak position in the first dataset's primary detector (reference)
-                size_t referencePeakPos = 0;
-                float referencePeakValue = appState.loadedData[0].primaryDetector[0];
-                for (size_t i = 1; i < appState.loadedData[0].primaryDetector.size(); i++) {
-                    if (appState.loadedData[0].primaryDetector[i] > referencePeakValue) {
-                        referencePeakValue = appState.loadedData[0].primaryDetector[i];
-                        referencePeakPos = i;
-                    }
-                }
-                
-                // Align all other datasets to this peak position
-                for (size_t datasetIdx = 1; datasetIdx < appState.loadedData.size(); datasetIdx++) {
-                    // Find peak in current dataset's primary detector
-                    size_t currentPeakPos = 0;
-                    float currentPeakValue = appState.loadedData[datasetIdx].primaryDetector[0];
-                    for (size_t i = 1; i < appState.loadedData[datasetIdx].primaryDetector.size(); i++) {
-                        if (appState.loadedData[datasetIdx].primaryDetector[i] > currentPeakValue) {
-                            currentPeakValue = appState.loadedData[datasetIdx].primaryDetector[i];
-                            currentPeakPos = i;
-                        }
-                    }
-                    
-                    // Calculate shift needed to align peaks
-                    int shift = referencePeakPos - currentPeakPos;
-                    
-                    // Apply shift to both reference and primary detectors
-                    std::vector<double> shiftedRef(appState.loadedData[datasetIdx].referenceDetector.size(), 0.0);
-                    std::vector<double> shiftedPrim(appState.loadedData[datasetIdx].primaryDetector.size(), 0.0);
-                    
-                    if (shift > 0) {
-                        // Shift right - pad beginning with zeros
-                        for (size_t i = 0; i < appState.loadedData[datasetIdx].referenceDetector.size() - shift; i++) {
-                            shiftedRef[i + shift] = appState.loadedData[datasetIdx].referenceDetector[i];
-                            shiftedPrim[i + shift] = appState.loadedData[datasetIdx].primaryDetector[i];
-                        }
-                    } else if (shift < 0) {
-                        // Shift left - pad end with zeros
-                        shift = -shift; // Make positive
-                        for (size_t i = 0; i < appState.loadedData[datasetIdx].referenceDetector.size() - shift; i++) {
-                            shiftedRef[i] = appState.loadedData[datasetIdx].referenceDetector[i + shift];
-                            shiftedPrim[i] = appState.loadedData[datasetIdx].primaryDetector[i + shift];
-                        }
-                    } else {
-                        // No shift needed
-                        shiftedRef = appState.loadedData[datasetIdx].referenceDetector;
-                        shiftedPrim = appState.loadedData[datasetIdx].primaryDetector;
-                    }
-                    
-                    // Update aligned data
-                    alignedData[datasetIdx].referenceDetector = shiftedRef;
-                    alignedData[datasetIdx].primaryDetector = shiftedPrim;
+            // Compute peak positions for X-axis alignment
+            std::vector<size_t> peakPositions;
+            if (appState.alignPeaks) {
+                for (size_t i = 0; i < appState.loadedData.size(); i++) {
+                    auto peakIt = std::max_element(appState.loadedData[i].primaryDetector.begin(),
+                                                   appState.loadedData[i].primaryDetector.end());
+                    peakPositions.push_back(static_cast<size_t>(std::distance(appState.loadedData[i].primaryDetector.begin(), peakIt)));
                 }
             }
             
@@ -1670,21 +1549,75 @@ int main() {
                     if (appState.autoFitYAxis) {
                         y_flags |= ImPlotAxisFlags_AutoFit;
                     }
-                    ImPlot::SetupAxes("Sample", "Voltage [V]", ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks, y_flags);
+                    const char* refXLabel = (appState.xAxisBase == 1) ? "OPD [\xC2\xB5m]" : "Sample";
+                    ImPlot::SetupAxes(refXLabel, "Voltage [V]", ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks, y_flags);
                     // Conditionally optimize grid rendering for large datasets
                     if (appState.dataLoaded && appState.loadedData[0].referenceDetector.size() > 50000) {
                         ImPlot::PushStyleColor(ImPlotCol_AxisGrid, ImVec4(0.3f, 0.3f, 0.3f, 0.5f));
                         // Optimize by reducing grid line rendering overhead for large datasets
                     }
 
+                    // Ensure Hilbert X cache is populated for OPD mode
+                    if (appState.xAxisBase == 1 && appState.dataLoaded) {
+                        if (appState.hilbertCacheLaserWavelength != appState.spectrum.refLaserTextbox) {
+                            appState.hilbertXCache.clear();
+                            appState.hilbertCacheLaserWavelength = appState.spectrum.refLaserTextbox;
+                        }
+                        for (size_t i = 0; i < appState.loadedData.size(); i++) {
+                            const std::string& fileId = appState.selectedFilenames[i];
+                            if (appState.hilbertXCache.find(fileId) == appState.hilbertXCache.end()) {
+                                std::vector<double> hilbX;
+                                const auto& refDet = appState.loadedData[i].referenceDetector;
+                                SpectralToolbox::xAxisFromHilbert(refDet, appState.hilbertCacheLaserWavelength, hilbX);
+                                appState.hilbertXCache[fileId] = hilbX;
+                            }
+                        }
+                    }
+
                     if (appState.shouldAutoscale || appState.forceXAutofit) {
                         // Set initial view to show all data when new data is loaded or when downsampling is toggled
-                        if (!appState.autoFitYAxis) {
-                            // Manual Y-axis: set both X and Y limits
-                            ImPlot::SetupAxesLimits(0, appState.loadedData[0].referenceDetector.size(), appState.ref_y_min, appState.ref_y_max, ImPlotCond_Always);
+                        if (appState.xAxisBase == 1 && appState.dataLoaded) {
+                            double xMin = std::numeric_limits<double>::max();
+                            double xMax = std::numeric_limits<double>::lowest();
+                            for (size_t i = 0; i < appState.loadedData.size(); i++) {
+                                const auto& hx = appState.hilbertXCache[appState.selectedFilenames[i]];
+                                if (!hx.empty()) {
+                                    double off = (appState.alignPeaks && i < peakPositions.size()) ? hx[peakPositions[i]] : 0.0;
+                                    xMin = std::min(xMin, hx.front() - off);
+                                    xMax = std::max(xMax, hx.back() - off);
+                                }
+                            }
+                            if (xMin < xMax) {
+                                if (!appState.autoFitYAxis) {
+                                    ImPlot::SetupAxesLimits(xMin, xMax, appState.ref_y_min, appState.ref_y_max, ImPlotCond_Always);
+                                } else {
+                                    ImPlot::SetupAxisLimits(ImAxis_X1, xMin, xMax, ImPlotCond_Always);
+                                }
+                            }
                         } else {
-                            // Auto-fit both axes: set X-axis to full range, let Y-axis auto-fit
-                            ImPlot::SetupAxisLimits(ImAxis_X1, 0, appState.loadedData[0].referenceDetector.size(), ImPlotCond_Always);
+                            if (appState.alignPeaks && !peakPositions.empty()) {
+                                double xMin = std::numeric_limits<double>::max();
+                                double xMax = std::numeric_limits<double>::lowest();
+                                for (size_t i = 0; i < appState.loadedData.size(); i++) {
+                                    double N = static_cast<double>(appState.loadedData[i].referenceDetector.size());
+                                    double off = static_cast<double>(peakPositions[i]);
+                                    xMin = std::min(xMin, -off);
+                                    xMax = std::max(xMax, N - 1.0 - off);
+                                }
+                                if (xMin < xMax) {
+                                    if (!appState.autoFitYAxis) {
+                                        ImPlot::SetupAxesLimits(xMin, xMax, appState.ref_y_min, appState.ref_y_max, ImPlotCond_Always);
+                                    } else {
+                                        ImPlot::SetupAxisLimits(ImAxis_X1, xMin, xMax, ImPlotCond_Always);
+                                    }
+                                }
+                            } else {
+                                if (!appState.autoFitYAxis) {
+                                    ImPlot::SetupAxesLimits(0, appState.loadedData[0].referenceDetector.size(), appState.ref_y_min, appState.ref_y_max, ImPlotCond_Always);
+                                } else {
+                                    ImPlot::SetupAxisLimits(ImAxis_X1, 0, appState.loadedData[0].referenceDetector.size(), ImPlotCond_Always);
+                                }
+                            }
                         }
                         // Reset the force flag after use
                         if (appState.forceXAutofit) {
@@ -1700,8 +1633,25 @@ int main() {
                         double xMin = appState.last_x_min;
                         double xMax = appState.last_x_max;
                         if (xMin >= xMax && appState.dataLoaded) {
-                            xMin = 0.0;
-                            xMax = static_cast<double>(appState.loadedData[0].referenceDetector.size());
+                            if (appState.xAxisBase == 1) {
+                                const auto& hx = appState.hilbertXCache[appState.selectedFilenames[0]];
+                                if (!hx.empty()) {
+                                    double off = (appState.alignPeaks && !peakPositions.empty()) ? hx[peakPositions[0]] : 0.0;
+                                    xMin = hx.front() - off;
+                                    xMax = hx.back() - off;
+                                } else {
+                                    xMin = 0.0;
+                                    xMax = static_cast<double>(appState.loadedData[0].referenceDetector.size());
+                                }
+                            } else if (appState.alignPeaks && !peakPositions.empty()) {
+                                double N = static_cast<double>(appState.loadedData[0].referenceDetector.size());
+                                double off = static_cast<double>(peakPositions[0]);
+                                xMin = -off;
+                                xMax = N - 1.0 - off;
+                            } else {
+                                xMin = 0.0;
+                                xMax = static_cast<double>(appState.loadedData[0].referenceDetector.size());
+                            }
                         }
                         float yMin = appState.last_ref_y_min;
                         float yMax = appState.last_ref_y_max;
@@ -1717,12 +1667,33 @@ int main() {
                         size_t data_count = ref_end - ref_start;
                         if (data_count > 0 && ref_start < appState.loadedData[0].referenceDetector.size()) {
                             for (size_t i = 0; i < appState.loadedData.size(); i++) {
-                                const auto& dataToPlot = appState.alignPeaks ? alignedData[i] : appState.loadedData[i];
-                                if (ref_start < dataToPlot.referenceDetector.size()) {
-                                    size_t actual_count = std::min(data_count, dataToPlot.referenceDetector.size() - ref_start);
-                                    ImPlot::PlotLine("", 
-                                                   &dataToPlot.referenceDetector[ref_start], 
-                                                   actual_count, 1.0, 0.0, plotSpecs[i]);
+                                const auto& refData = appState.loadedData[i].referenceDetector;
+                                if (ref_start < refData.size()) {
+                                    size_t actual_count = std::min(data_count, refData.size() - ref_start);
+                                    if (appState.xAxisBase == 1) {
+                                        const auto& hilbX = appState.hilbertXCache[appState.selectedFilenames[i]];
+                                        if (!hilbX.empty()) {
+                                            if (appState.alignPeaks && !peakPositions.empty()) {
+                                                std::vector<double> shiftedX(actual_count);
+                                                double peakHilbX = hilbX[peakPositions[i]];
+                                                for (size_t j = 0; j < actual_count; j++)
+                                                    shiftedX[j] = hilbX[j] - peakHilbX;
+                                                ImPlot::PlotLine("", shiftedX.data(), &refData[ref_start], static_cast<int>(actual_count), plotSpecs[i]);
+                                            } else {
+                                                ImPlot::PlotLine("", hilbX.data(), &refData[ref_start], static_cast<int>(actual_count), plotSpecs[i]);
+                                            }
+                                        }
+                                    } else if (appState.alignPeaks && !peakPositions.empty()) {
+                                        std::vector<double> shiftedX(actual_count);
+                                        int peak = static_cast<int>(peakPositions[i]);
+                                        for (size_t j = 0; j < actual_count; j++)
+                                            shiftedX[j] = static_cast<double>(static_cast<int>(ref_start + j) - peak);
+                                        ImPlot::PlotLine("", shiftedX.data(), &refData[ref_start], static_cast<int>(actual_count), plotSpecs[i]);
+                                    } else {
+                                        ImPlot::PlotLine("", 
+                                                       &refData[ref_start], 
+                                                       actual_count, 1.0, 0.0, plotSpecs[i]);
+                                    }
                                 }
                             }
                         } else {
@@ -1800,7 +1771,8 @@ int main() {
                     }
 
 
-                    ImPlot::SetupAxes("Sample", "Voltage [V]", ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks, y_flags);
+                    const char* primXLabel = (appState.xAxisBase == 1) ? "OPD [\xC2\xB5m]" : "Sample";
+                    ImPlot::SetupAxes(primXLabel, "Voltage [V]", ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks, y_flags);
 
                     // Conditionally optimize grid rendering for large datasets
                     if (appState.dataLoaded && appState.loadedData[0].primaryDetector.size() > 50000) {
@@ -1823,12 +1795,48 @@ int main() {
 
                     if (appState.shouldAutoscale || appState.forceXAutofit) {
                         // Set initial view to show all data when new data is loaded or when downsampling is toggled
-                        if (!appState.autoFitYAxis) {
-                            // Manual Y-axis: set both X and Y limits
-                            ImPlot::SetupAxesLimits(0, appState.loadedData[0].primaryDetector.size(), appState.prim_y_min, appState.prim_y_max, ImPlotCond_Always);
+                        if (appState.xAxisBase == 1 && appState.dataLoaded) {
+                            double xMin = std::numeric_limits<double>::max();
+                            double xMax = std::numeric_limits<double>::lowest();
+                            for (size_t i = 0; i < appState.loadedData.size(); i++) {
+                                const auto& hx = appState.hilbertXCache[appState.selectedFilenames[i]];
+                                if (!hx.empty()) {
+                                    double off = (appState.alignPeaks && i < peakPositions.size()) ? hx[peakPositions[i]] : 0.0;
+                                    xMin = std::min(xMin, hx.front() - off);
+                                    xMax = std::max(xMax, hx.back() - off);
+                                }
+                            }
+                            if (xMin < xMax) {
+                                if (!appState.autoFitYAxis) {
+                                    ImPlot::SetupAxesLimits(xMin, xMax, appState.prim_y_min, appState.prim_y_max, ImPlotCond_Always);
+                                } else {
+                                    ImPlot::SetupAxisLimits(ImAxis_X1, xMin, xMax, ImPlotCond_Always);
+                                }
+                            }
                         } else {
-                            // Auto-fit both axes: set X-axis to full range, let Y-axis auto-fit
-                            ImPlot::SetupAxisLimits(ImAxis_X1, 0, appState.loadedData[0].primaryDetector.size(), ImPlotCond_Always);
+                            if (appState.alignPeaks && !peakPositions.empty()) {
+                                double xMin = std::numeric_limits<double>::max();
+                                double xMax = std::numeric_limits<double>::lowest();
+                                for (size_t i = 0; i < appState.loadedData.size(); i++) {
+                                    double N = static_cast<double>(appState.loadedData[i].primaryDetector.size());
+                                    double off = static_cast<double>(peakPositions[i]);
+                                    xMin = std::min(xMin, -off);
+                                    xMax = std::max(xMax, N - 1.0 - off);
+                                }
+                                if (xMin < xMax) {
+                                    if (!appState.autoFitYAxis) {
+                                        ImPlot::SetupAxesLimits(xMin, xMax, appState.prim_y_min, appState.prim_y_max, ImPlotCond_Always);
+                                    } else {
+                                        ImPlot::SetupAxisLimits(ImAxis_X1, xMin, xMax, ImPlotCond_Always);
+                                    }
+                                }
+                            } else {
+                                if (!appState.autoFitYAxis) {
+                                    ImPlot::SetupAxesLimits(0, appState.loadedData[0].primaryDetector.size(), appState.prim_y_min, appState.prim_y_max, ImPlotCond_Always);
+                                } else {
+                                    ImPlot::SetupAxisLimits(ImAxis_X1, 0, appState.loadedData[0].primaryDetector.size(), ImPlotCond_Always);
+                                }
+                            }
                         }
                     }
                     // Apply X-range selection if finalized and flag is set
@@ -1840,8 +1848,25 @@ int main() {
                         double xMin = appState.last_x_min;
                         double xMax = appState.last_x_max;
                         if (xMin >= xMax && appState.dataLoaded) {
-                            xMin = 0.0;
-                            xMax = static_cast<double>(appState.loadedData[0].primaryDetector.size());
+                            if (appState.xAxisBase == 1) {
+                                const auto& hx = appState.hilbertXCache[appState.selectedFilenames[0]];
+                                if (!hx.empty()) {
+                                    double off = (appState.alignPeaks && !peakPositions.empty()) ? hx[peakPositions[0]] : 0.0;
+                                    xMin = hx.front() - off;
+                                    xMax = hx.back() - off;
+                                } else {
+                                    xMin = 0.0;
+                                    xMax = static_cast<double>(appState.loadedData[0].primaryDetector.size());
+                                }
+                            } else if (appState.alignPeaks && !peakPositions.empty()) {
+                                double N = static_cast<double>(appState.loadedData[0].primaryDetector.size());
+                                double off = static_cast<double>(peakPositions[0]);
+                                xMin = -off;
+                                xMax = N - 1.0 - off;
+                            } else {
+                                xMin = 0.0;
+                                xMax = static_cast<double>(appState.loadedData[0].primaryDetector.size());
+                            }
                         }
                         float yMin = appState.last_prim_y_min;
                         float yMax = appState.last_prim_y_max;
@@ -1858,36 +1883,76 @@ int main() {
                         size_t data_count = ref_end - ref_start;
                         if (data_count > 0 && ref_start < appState.loadedData[0].primaryDetector.size()) {
                             for (size_t i = 0; i < appState.loadedData.size(); i++) {
-                                const auto& dataToPlot = appState.alignPeaks ? alignedData[i] : appState.loadedData[i];
-                                if (ref_start < dataToPlot.primaryDetector.size()) {
-                                    size_t actual_count = std::min(data_count, dataToPlot.primaryDetector.size() - ref_start);
-                                    ImPlot::PlotLine("", 
-                                                   &dataToPlot.primaryDetector[ref_start], 
-                                                    actual_count, 1.0, 0.0, plotSpecs[i]);
+                                const auto& primData = appState.loadedData[i].primaryDetector;
+                                if (ref_start < primData.size()) {
+                                    size_t actual_count = std::min(data_count, primData.size() - ref_start);
+                                    if (appState.xAxisBase == 1) {
+                                        const auto& hilbX = appState.hilbertXCache[appState.selectedFilenames[i]];
+                                        if (!hilbX.empty()) {
+                                            if (appState.alignPeaks && !peakPositions.empty()) {
+                                                std::vector<double> shiftedX(actual_count);
+                                                double peakHilbX = hilbX[peakPositions[i]];
+                                                for (size_t j = 0; j < actual_count; j++)
+                                                    shiftedX[j] = hilbX[j] - peakHilbX;
+                                                ImPlot::PlotLine("", shiftedX.data(), &primData[ref_start], static_cast<int>(actual_count), plotSpecs[i]);
+                                            } else {
+                                                ImPlot::PlotLine("", hilbX.data(), &primData[ref_start], static_cast<int>(actual_count), plotSpecs[i]);
+                                            }
+                                        }
+                                    } else if (appState.alignPeaks && !peakPositions.empty()) {
+                                        std::vector<double> shiftedX(actual_count);
+                                        int peak = static_cast<int>(peakPositions[i]);
+                                        for (size_t j = 0; j < actual_count; j++)
+                                            shiftedX[j] = static_cast<double>(static_cast<int>(ref_start + j) - peak);
+                                        ImPlot::PlotLine("", shiftedX.data(), &primData[ref_start], static_cast<int>(actual_count), plotSpecs[i]);
+                                    } else {
+                                        ImPlot::PlotLine("", 
+                                                       &primData[ref_start], 
+                                                         actual_count, 1.0, 0.0, plotSpecs[i]);
+                                    }
                                 }
                             }
                         }
                         
                         // Draw apodization window overlay (spectrum view is always available)
                         if (appState.dataLoaded) {
-                            const auto& primData = (appState.alignPeaks && !alignedData.empty())
-                                ? alignedData[0].primaryDetector
-                                : appState.loadedData[0].primaryDetector;
-                            if (!primData.empty()) {
+                            const auto& primDataOverlay = appState.loadedData[0].primaryDetector;
+                            if (!primDataOverlay.empty()) {
                                 auto w = static_cast<ApodizationWindow>(appState.spectrum.apodizationSelector);
                                 auto window = Apodization::createWindow(
-                                    w, primData.size(),
-                                    std::max_element(primData.begin(), primData.end()) - primData.begin(),
+                                    w, primDataOverlay.size(),
+                                    std::max_element(primDataOverlay.begin(), primDataOverlay.end()) - primDataOverlay.begin(),
                                     appState.spectrum.apodizationParams);
-                                double scale = *std::max_element(primData.begin(), primData.end());
+                                double scale = *std::max_element(primDataOverlay.begin(), primDataOverlay.end());
                                 if (scale > 0.0) {
                                     for (auto& v : window) v *= scale;
                                 }
                                 ImPlotSpec windowSpec;
                                 windowSpec.LineColor = ImVec4(0.0f, 1.0f, 1.0f, 0.5f);
                                 windowSpec.LineWeight = 2.0f;
-                                ImPlot::PlotLine("##ApodWindow", window.data(), static_cast<int>(window.size()),
-                                                 1.0, 0.0, windowSpec);
+                                if (appState.xAxisBase == 1 && !appState.selectedFilenames.empty()) {
+                                    const auto& hilbX = appState.hilbertXCache[appState.selectedFilenames[0]];
+                                    if (!hilbX.empty()) {
+                                        if (appState.alignPeaks && !peakPositions.empty()) {
+                                            std::vector<double> shiftedHilbX(hilbX.size());
+                                            double peakHilbX = hilbX[peakPositions[0]];
+                                            for (size_t j = 0; j < hilbX.size(); j++)
+                                                shiftedHilbX[j] = hilbX[j] - peakHilbX;
+                                            ImPlot::PlotLine("##ApodWindow", shiftedHilbX.data(), window.data(), static_cast<int>(window.size()), windowSpec);
+                                        } else {
+                                            ImPlot::PlotLine("##ApodWindow", hilbX.data(), window.data(), static_cast<int>(window.size()), windowSpec);
+                                        }
+                                    }
+                                } else if (appState.alignPeaks && !peakPositions.empty()) {
+                                    std::vector<double> shiftedX(window.size());
+                                    int peak = static_cast<int>(peakPositions[0]);
+                                    for (size_t j = 0; j < window.size(); j++)
+                                        shiftedX[j] = static_cast<double>(static_cast<int>(j) - peak);
+                                    ImPlot::PlotLine("##ApodWindow", shiftedX.data(), window.data(), static_cast<int>(window.size()), windowSpec);
+                                } else {
+                                    ImPlot::PlotLine("##ApodWindow", window.data(), static_cast<int>(window.size()),
+                                                     1.0, 0.0, windowSpec);
+                                }
                             }
                         }
                     }
@@ -1987,7 +2052,7 @@ int main() {
 
             // Shared button style colors for X-unit and Y-scale toggle buttons
             const ImVec4 btnColors[2] = {
-                ImVec4(0.0f, 0.0f, 0.0f, 0.0f), // unselected: transparent
+                ImVec4(0.22f, 0.22f, 0.22f, 0.7f), // unselected: visible gray
                 ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive) // selected: highlight
             };
 
@@ -2274,6 +2339,224 @@ int main() {
         }
         ImGui::End();
         
+        // Interferogram Config panel (docked)
+        ImGui::Begin("Interferogram");
+        if (appState.dataLoaded) {
+            const ImVec4 cfgBtnColors[2] = {
+                ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
+                ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
+            };
+
+            // Row 1: X axis base (sample / OPD)
+            ImGui::Text("X axis base");
+            ImGui::SameLine();
+            const bool xSample = (appState.xAxisBase == 0);
+            const bool xOPD = (appState.xAxisBase == 1);
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[xSample ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  xSample ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+            if (ImGui::Button("sample##XBaseSample")) {
+                if (!xSample) {
+                    appState.xAxisBase = 0;
+                    appState.shouldAutoscale = true;
+                    appState.needsRedraw = true;
+                }
+            }
+            ImGui::PopStyleColor(3);
+            ImGui::SameLine(0.0f, 0.0f);
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[xOPD ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  xOPD ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+            if (ImGui::Button("OPD##XBaseOPD")) {
+                if (!xOPD) {
+                    appState.xAxisBase = 1;
+                    appState.shouldAutoscale = true;
+                    appState.needsRedraw = true;
+                }
+            }
+            ImGui::PopStyleColor(3);
+
+            // Row 2: Align peaks (off / on)
+            ImGui::Text("Align peaks");
+            ImGui::SameLine();
+            const bool alignOff = !appState.alignPeaks;
+            const bool alignOn  =  appState.alignPeaks;
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[alignOff ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  alignOff ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+            if (ImGui::Button("off##AlignOff")) {
+                if (appState.alignPeaks) {
+                    appState.alignPeaks = false;
+                    appState.shouldAutoscale = true;
+                    appState.needsRedraw = true;
+                }
+            }
+            ImGui::PopStyleColor(3);
+            ImGui::SameLine(0.0f, 0.0f);
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[alignOn ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  alignOn ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+            if (ImGui::Button("on##AlignOn")) {
+                if (!appState.alignPeaks) {
+                    appState.alignPeaks = true;
+                    appState.shouldAutoscale = true;
+                    appState.needsRedraw = true;
+                }
+            }
+            ImGui::PopStyleColor(3);
+
+            // Row 3: Auto-fit Y (off / on)
+            ImGui::Text("Auto-fit Y");
+            ImGui::SameLine();
+            const bool afyOff = !appState.autoFitYAxis;
+            const bool afyOn  =  appState.autoFitYAxis;
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[afyOff ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  afyOff ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+            if (ImGui::Button("off##AfyOff")) {
+                if (appState.autoFitYAxis) {
+                    appState.autoFitYAxis = false;
+                    appState.needsRedraw = true;
+                }
+            }
+            ImGui::PopStyleColor(3);
+            ImGui::SameLine(0.0f, 0.0f);
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[afyOn ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  afyOn ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+            if (ImGui::Button("on##AfyOn")) {
+                if (!appState.autoFitYAxis) {
+                    appState.autoFitYAxis = true;
+                    if (appState.dataLoaded) {
+                        auto ref_min_max = std::minmax_element(appState.loadedData[0].referenceDetector.begin(), appState.loadedData[0].referenceDetector.end());
+                        auto prim_min_max = std::minmax_element(appState.loadedData[0].primaryDetector.begin(), appState.loadedData[0].primaryDetector.end());
+                        appState.ref_y_min = *ref_min_max.first;
+                        appState.ref_y_max = *ref_min_max.second;
+                        appState.prim_y_min = *prim_min_max.first;
+                        appState.prim_y_max = *prim_min_max.second;
+                    }
+                    appState.needsRedraw = true;
+                }
+            }
+            ImGui::PopStyleColor(3);
+
+            // Row 5: Downsample (off / on)
+            ImGui::Text("Downsample");
+            ImGui::SameLine();
+            const bool dsOff = !appState.enableDownsampling;
+            const bool dsOn  =  appState.enableDownsampling;
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[dsOff ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  dsOff ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+            if (ImGui::Button("off##DsOff")) {
+                if (appState.enableDownsampling) {
+                    appState.enableDownsampling = false;
+                    appState.hilbertXCache.clear();
+                    if (appState.dataLoaded) {
+                        // Reload all selected files with new downsampling setting
+                        std::vector<InterferogramData> reloadedData;
+                        for (const auto& filePath : appState.selectedFiles) {
+                            try {
+                                InterferogramData data = CSVAdapter::loadFromCSV(filePath);
+                                if (appState.enableDownsampling && data.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
+                                    size_t localDownsampleFactor = data.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
+                                    std::vector<double> downsampledRef, downsampledPrim;
+                                    for (size_t j = 0; j < data.referenceDetector.size(); j += localDownsampleFactor) {
+                                        downsampledRef.push_back(data.referenceDetector[j]);
+                                        downsampledPrim.push_back(data.primaryDetector[j]);
+                                    }
+                                    data.referenceDetector = downsampledRef;
+                                    data.primaryDetector = downsampledPrim;
+                                }
+                                reloadedData.push_back(data);
+                            } catch (const std::exception& e) {
+                                std::cerr << "Error reloading file: " << e.what() << std::endl;
+                            }
+                        }
+                        if (!reloadedData.empty()) {
+                            appState.loadedData = reloadedData;
+                            appState.rawDataCache.clear();
+                            for (const auto& file : appState.selectedFiles) {
+                                try {
+                                    InterferogramData rawData = CSVAdapter::loadFromCSV(file);
+                                    appState.rawDataCache.push_back(rawData);
+                                } catch (const std::exception& e) {
+                                    std::cerr << "Error reloading raw data: " << e.what() << std::endl;
+                                    appState.rawDataCache.push_back(reloadedData[&file - &appState.selectedFiles[0]]);
+                                }
+                            }
+                            appState.zoomRange = {0, 0};
+                            appState.shouldAutoscale = true;
+                            appState.forceXAutofit = true;
+                        }
+                    }
+                    appState.needsRedraw = true;
+                }
+            }
+            ImGui::PopStyleColor(3);
+            ImGui::SameLine(0.0f, 0.0f);
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[dsOn ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  dsOn ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+            if (ImGui::Button("on##DsOn")) {
+                if (!appState.enableDownsampling) {
+                    appState.enableDownsampling = true;
+                    appState.hilbertXCache.clear();
+                    if (appState.dataLoaded) {
+                        // Reload all selected files with new downsampling setting
+                        std::vector<InterferogramData> reloadedData;
+                        for (const auto& filePath : appState.selectedFiles) {
+                            try {
+                                InterferogramData data = CSVAdapter::loadFromCSV(filePath);
+                                if (appState.enableDownsampling && data.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
+                                    size_t localDownsampleFactor = data.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
+                                    std::vector<double> downsampledRef, downsampledPrim;
+                                    for (size_t j = 0; j < data.referenceDetector.size(); j += localDownsampleFactor) {
+                                        downsampledRef.push_back(data.referenceDetector[j]);
+                                        downsampledPrim.push_back(data.primaryDetector[j]);
+                                    }
+                                    data.referenceDetector = downsampledRef;
+                                    data.primaryDetector = downsampledPrim;
+                                }
+                                reloadedData.push_back(data);
+                            } catch (const std::exception& e) {
+                                std::cerr << "Error reloading file: " << e.what() << std::endl;
+                            }
+                        }
+                        if (!reloadedData.empty()) {
+                            appState.loadedData = reloadedData;
+                            appState.rawDataCache.clear();
+                            for (const auto& file : appState.selectedFiles) {
+                                try {
+                                    InterferogramData rawData = CSVAdapter::loadFromCSV(file);
+                                    appState.rawDataCache.push_back(rawData);
+                                } catch (const std::exception& e) {
+                                    std::cerr << "Error reloading raw data: " << e.what() << std::endl;
+                                    appState.rawDataCache.push_back(reloadedData[&file - &appState.selectedFiles[0]]);
+                                }
+                            }
+                            appState.zoomRange = {0, 0};
+                            appState.shouldAutoscale = true;
+                            appState.forceXAutofit = true;
+                        }
+                    }
+                    appState.needsRedraw = true;
+                }
+            }
+            ImGui::PopStyleColor(3);
+        } else {
+            ImGui::Text("No data loaded.");
+        }
+        ImGui::End();
+
         // Metadata panel (right)
         ImGui::Begin("Metadata");
         ImGui::PushTextWrapPos(); // Enable text wrapping
@@ -2362,7 +2645,9 @@ int main() {
     
     // Save configuration before exiting
     config.alignPeaks = appState.alignPeaks;
-    config.autoRestoreScale = appState.autoRestoreScale;
+    config.autoFitYAxis = appState.autoFitYAxis;
+    config.enableDownsampling = appState.enableDownsampling;
+    config.xAxisBase = appState.xAxisBase;
     config.lastWorkingDirectory = appState.currentDirectory;
     config.uiSize = appState.currentUiSize;
 

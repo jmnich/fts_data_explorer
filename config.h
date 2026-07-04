@@ -14,8 +14,9 @@ struct AppConfig {
     size_t maxRecentDatasets = 10;
     bool autoFitYAxis = true;
     bool alignPeaks = false;
-    bool autoRestoreScale = true;
     bool showFPS = false; // FPS counter display setting
+    bool enableDownsampling = true;
+    int xAxisBase = 0;
     std::string lastWorkingDirectory;
     std::string uiSize = "normal"; // tiny, small, normal, large, huge
     
@@ -85,7 +86,9 @@ struct AppConfig {
             configFile << "max_recent_datasets=" << maxRecentDatasets << "\n";
 
             configFile << "align_peaks=" << (alignPeaks ? "true" : "false") << "\n";
-            configFile << "auto_restore_scale=" << (autoRestoreScale ? "true" : "false") << "\n";
+            configFile << "auto_fit_y_axis=" << (autoFitYAxis ? "true" : "false") << "\n";
+            configFile << "enable_downsampling=" << (enableDownsampling ? "true" : "false") << "\n";
+            configFile << "x_axis_base=" << xAxisBase << "\n";
             configFile << "show_fps=" << (showFPS ? "true" : "false") << "\n";
             configFile << "last_working_directory=" << lastWorkingDirectory << "\n";
             configFile << "ui_size=" << uiSize << "\n";
@@ -166,8 +169,12 @@ struct AppConfig {
 
                         } else if (key == "align_peaks") {
                             alignPeaks = (value == "true");
-                        } else if (key == "auto_restore_scale") {
-                            autoRestoreScale = (value == "true");
+                        } else if (key == "auto_fit_y_axis") {
+                            autoFitYAxis = (value == "true");
+                        } else if (key == "enable_downsampling") {
+                            enableDownsampling = (value == "true");
+                        } else if (key == "x_axis_base") {
+                            xAxisBase = std::stoi(value);
                         } else if (key == "show_fps") {
                             showFPS = (value == "true");
                         } else if (key == "last_working_directory") {
