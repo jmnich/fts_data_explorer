@@ -3,7 +3,7 @@
 #include <algorithm>
 
 std::vector<const char*> Apodization::getWindowNames() {
-    return { "Rectangular", "Gauss", "Triangular" };
+    return { "Rectangular", "Gauss", "Triangular", "Norton-Beer" };
 }
 
 std::vector<double> Apodization::createWindow(ApodizationWindow w,
@@ -56,6 +56,37 @@ std::vector<double> Apodization::createWindow(ApodizationWindow w,
                     window[i] = (nLast - di) * invRight;
                 }
                 window[i] = std::clamp(window[i], 0.0, 1.0);
+            }
+            break;
+        }
+        case ApodizationWindow::NortonBeer: {
+            // Quantize FWHM parameter to nearest 0.1 (1.0, 1.1, ..., 2.0)
+            int coeffIndex = static_cast<int>((p.nortonBeerFwhm - 1.0f) * 10.0f + 0.5f);
+            coeffIndex = std::clamp(coeffIndex, 0, 10);
+            const auto& coeffs = NORTON_BEER_COEFFS[coeffIndex];
+            
+            const size_t n_half = n / 2;
+            
+            for (size_t i = 0; i < n; ++i) {
+                double normv;
+                if (n % 2 == 0) {
+                    // Even N: range is [-n_half, n_half-1], add 0.5, divide by (n_half-0.5)
+                    double pos = static_cast<double>(i) - n_half + 0.5;
+                    normv = 1.0 - std::pow((pos + 0.5) / (n_half - 0.5), 2);
+                } else {
+                    // Odd N: range is [-n_half, n_half], divide by n_half
+                    double pos = static_cast<double>(i) - n_half;
+                    normv = 1.0 - std::pow(pos / n_half, 2);
+                }
+                
+                // Polynomial evaluation: sum(coeffs[k] * normv^k) for k=0..8
+                double window_val = 0.0;
+                double normv_pow = 1.0; // normv^0
+                for (int k = 0; k < 9; ++k) {
+                    window_val += coeffs[k] * normv_pow;
+                    normv_pow *= normv;
+                }
+                window[i] = window_val;
             }
             break;
         }

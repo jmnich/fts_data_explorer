@@ -522,6 +522,7 @@ int main() {
     appState.spectrum.apodizationSelector = config.apodizationSelector;
     appState.spectrum.apodizationParams.gaussSigma = config.apodGaussSigma;
     appState.spectrum.apodizationParams.rectWidth  = config.apodRectWidth;
+    appState.spectrum.apodizationParams.nortonBeerFwhm = config.apodNortonBeerFwhm;
     
     // Set the appState pointer in the spectrum object for raw data access
     appState.spectrum.appState = &appState;
@@ -2225,6 +2226,14 @@ int main() {
                 if (ImGui::IsItemHovered()) {
                     ImGui::SetTooltip("Rectangular window width fraction (0.05-1.0).\n1.0 = full signal, 0.05 = 5%% of signal.");
                 }
+            } else if (appState.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::NortonBeer)) {
+                if (ImGui::SliderFloat("FWHM##NortonBeerFwhm", &appState.spectrum.apodizationParams.nortonBeerFwhm,
+                                       1.0f, 2.0f, "%.1f")) {
+                    invalidateSpectrumCaches();
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Norton-Beer FWHM parameter (1.0-2.0 step 0.1).\nControls the relative full-width at half maximum.");
+                }
             }
             
         } else {
@@ -2338,6 +2347,7 @@ int main() {
     config.apodizationSelector  = appState.spectrum.apodizationSelector;
     config.apodGaussSigma       = appState.spectrum.apodizationParams.gaussSigma;
     config.apodRectWidth        = appState.spectrum.apodizationParams.rectWidth;
+    config.apodNortonBeerFwhm  = appState.spectrum.apodizationParams.nortonBeerFwhm;
     
     // Save config to file
     if (!config.saveToFile(configFilePath)) {

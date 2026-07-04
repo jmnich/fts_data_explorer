@@ -39,6 +39,7 @@ struct AppConfig {
     int apodizationSelector = 0;
     float apodGaussSigma = 1.0f;
     float apodRectWidth = 1.0f;
+    float apodNortonBeerFwhm = 1.5f; // Norton-Beer FWHM parameter (1.0-2.0)
     
     // Add a dataset to recent list (maintains max size, deduplicates)
     void addRecentDataset(const std::string& datasetPath) {
@@ -112,6 +113,7 @@ struct AppConfig {
             configFile << "apod_selector=" << apodizationSelector << "\n";
             configFile << "apod_gauss_sigma=" << apodGaussSigma << "\n";
             configFile << "apod_rect_width=" << apodRectWidth << "\n";
+            configFile << "apod_norton_beer_fwhm=" << apodNortonBeerFwhm << "\n";
             
             configFile.flush();
             configFile.close();
@@ -215,6 +217,8 @@ struct AppConfig {
                             apodGaussSigma = std::stof(value);
                         } else if (key == "apod_rect_width") {
                             apodRectWidth = std::stof(value);
+                        } else if (key == "apod_norton_beer_fwhm") {
+                            apodNortonBeerFwhm = std::stof(value);
                         }
                     }
                 }

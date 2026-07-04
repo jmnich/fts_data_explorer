@@ -159,6 +159,8 @@ bool Spectrum::isSpectrumDirty(const std::string& fileId, const std::vector<doub
         activeParam = static_cast<double>(apodizationParams.gaussSigma);
     else if (apodizationSelector == static_cast<int>(ApodizationWindow::Rectangular))
         activeParam = static_cast<double>(apodizationParams.rectWidth);
+    else if (apodizationSelector == static_cast<int>(ApodizationWindow::NortonBeer))
+        activeParam = static_cast<double>(apodizationParams.nortonBeerFwhm);
 
     if (lp[0] != static_cast<double>(Kpadding)               ||
         lp[1] != static_cast<double>(xUnitSelector)          ||
