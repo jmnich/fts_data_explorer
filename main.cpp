@@ -530,6 +530,7 @@ int main() {
     appState.spectrum.apodizationParams.rectWidth  = config.apodRectWidth;
     appState.spectrum.apodizationParams.nortonBeerFwhm = config.apodNortonBeerFwhm;
     appState.spectrum.apodizationParams.dolphChebyshevAt = config.apodDolphChebyshevAt;
+    appState.spectrum.apodizationParams.rectAsymMode = config.apodRectAsymMode;
     appState.spectrum.detectorSensitivity = config.spectrumDetectorSensitivity;
     
     // Set the appState pointer in the spectrum object for raw data access
@@ -2387,6 +2388,34 @@ int main() {
                     ImGui::SetTooltip("Gauss sigma fraction (1.0-3.0).\n1.0 = narrow, 3.0 = wide.");
                 }
             } else if (appState.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Rectangular)) {
+                ImGui::Text("Mode");
+                ImGui::SameLine();
+                const bool rectSym  = !appState.spectrum.apodizationParams.rectAsymMode;
+                const bool rectAsym =  appState.spectrum.apodizationParams.rectAsymMode;
+                const ImVec4 rectBtnClr[2] = {
+                    ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
+                    ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
+                };
+                ImGui::PushStyleColor(ImGuiCol_Button,        rectBtnClr[rectSym ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  rectSym ? rectBtnClr[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   rectBtnClr[1]);
+                if (ImGui::Button("Sym##RectMode")) {
+                    appState.spectrum.apodizationParams.rectAsymMode = false;
+                    invalidateSpectrumCaches();
+                }
+                ImGui::PopStyleColor(3);
+                ImGui::SameLine(0.0f, 0.0f);
+                ImGui::PushStyleColor(ImGuiCol_Button,        rectBtnClr[rectAsym ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  rectAsym ? rectBtnClr[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   rectBtnClr[1]);
+                if (ImGui::Button("Asym##RectMode")) {
+                    appState.spectrum.apodizationParams.rectAsymMode = true;
+                    invalidateSpectrumCaches();
+                }
+                ImGui::PopStyleColor(3);
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Sym: uses the longer side's distance on both sides (shorter side saturates).\nAsym: each side extends proportionally to its own distance from peak.");
+                }
                 if (ImGui::SliderFloat("Width##RectWidth", &appState.spectrum.apodizationParams.rectWidth,
                                        0.05f, 1.0f, "%.2f")) {
                     invalidateSpectrumCaches();
@@ -3122,6 +3151,7 @@ int main() {
     config.apodRectWidth        = appState.spectrum.apodizationParams.rectWidth;
     config.apodNortonBeerFwhm  = appState.spectrum.apodizationParams.nortonBeerFwhm;
     config.apodDolphChebyshevAt = appState.spectrum.apodizationParams.dolphChebyshevAt;
+    config.apodRectAsymMode     = appState.spectrum.apodizationParams.rectAsymMode;
     config.spectrumDetectorSensitivity = appState.spectrum.detectorSensitivity;
     
     // Save average window settings

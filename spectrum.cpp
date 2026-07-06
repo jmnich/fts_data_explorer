@@ -147,11 +147,13 @@ bool Spectrum::isSpectrumDirty(const std::string& fileId, const std::vector<doub
     else if (apodizationSelector == static_cast<int>(ApodizationWindow::DolphChebyshev))
         activeParam = static_cast<double>(apodizationParams.dolphChebyshevAt);
 
-    if (lp[0] != static_cast<double>(Kpadding)               ||
+    if (lp.size() < 6 ||
+        lp[0] != static_cast<double>(Kpadding)               ||
         lp[1] != static_cast<double>(xUnitSelector)          ||
         lp[2] != static_cast<double>(refLaserTextbox)        ||
         lp[3] != static_cast<double>(apodizationSelector)    ||
-        lp[4] != activeParam) {
+        lp[4] != activeParam                                  ||
+        lp[5] != (apodizationParams.rectAsymMode ? 1.0 : 0.0)) {
         return true;
     }
 
@@ -560,7 +562,8 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                                                      static_cast<double>(xUnitSelector),
                                                      static_cast<double>(refLaserTextbox),
                                                      static_cast<double>(apodizationSelector),
-                                                     activeParam };
+                                                     activeParam,
+                                                     apodizationParams.rectAsymMode ? 1.0 : 0.0 };
                 }
             }
 

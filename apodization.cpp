@@ -128,10 +128,21 @@ std::vector<double> Apodization::createWindow(ApodizationWindow w,
 
     switch (w) {
         case ApodizationWindow::Rectangular: {
-            const double halfWidth = static_cast<double>(n) * p.rectWidth * 0.5;
-            for (std::size_t i = 0; i < n; ++i) {
-                const double d = std::abs(static_cast<double>(i) - pIdx);
-                window[i] = (d <= halfWidth) ? 1.0 : 0.0;
+            if (p.rectAsymMode) {
+                // Asymmetric: each side extends proportionally to its own distance from peak
+                const double halfLeft  = pIdx * p.rectWidth;
+                const double halfRight = (nLast - pIdx) * p.rectWidth;
+                for (std::size_t i = 0; i < n; ++i) {
+                    const double di = static_cast<double>(i);
+                    window[i] = (di >= pIdx - halfLeft && di <= pIdx + halfRight) ? 1.0 : 0.0;
+                }
+            } else {
+                // Symmetric: both sides use the longer side's distance; shorter side saturates
+                const double halfWidth = std::max(pIdx, nLast - pIdx) * p.rectWidth;
+                for (std::size_t i = 0; i < n; ++i) {
+                    const double d = std::abs(static_cast<double>(i) - pIdx);
+                    window[i] = (d <= halfWidth) ? 1.0 : 0.0;
+                }
             }
             break;
         }

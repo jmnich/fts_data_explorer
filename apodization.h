@@ -12,6 +12,7 @@ struct ApodizationParams {
     float rectWidth  = 1.0f;
     float nortonBeerFwhm = 1.5f; // FWHM parameter for Norton-Beer window (1.0-2.0)
     float dolphChebyshevAt = 60.0f; // Attenuation in dB for Dolph-Chebyshev (50-160)
+    bool  rectAsymMode = true; // Rectangular window: true=asymmetric (per-side), false=symmetric (use longer side)
 };
 
 // Precalculated Norton-Beer coefficients for FWHM values 1.0 to 2.0 (step 0.1)

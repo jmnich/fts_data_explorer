@@ -84,7 +84,7 @@ public:
 
     // Per-file last-seen spectrum computation parameters (for cache invalidation)
     // Stored as {K, xUnit, refLaser, apodizationSelector, activeParam}
-    std::map<std::string, std::array<double, 5>> lastSpectrumParams;
+    std::map<std::string, std::array<double, 6>> lastSpectrumParams;
     
     Spectrum();
     
