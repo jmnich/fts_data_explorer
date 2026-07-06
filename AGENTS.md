@@ -157,6 +157,7 @@ See file listing under **# Application structure** above for all key files and t
 - Build directory: `build/`
 - Main targets: `fts_data_explorer`
 - Dependencies: ImGui, ImPlot, GLFW, OpenGL, FFTW3
+- Build project by calling `build_script.sh`
 
 # Coding style
 - Use consistent naming conventions (camelCase for variables/functions, PascalCase for classes)
