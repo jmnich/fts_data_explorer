@@ -5,6 +5,33 @@ project(fts_data_explorer)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# GLIBC compat wrappers — these --wrap flags redirect calls to new GLIBC symbol
+# versions to our wrappers in glibc_compat.cpp that use GLIBC_2.2.5 compatible versions
+set(GLIBCOMPAT_WRAP
+    -Wl,--wrap,__libc_start_main
+    -Wl,--wrap,sqrtf
+    -Wl,--wrap,acosf
+    -Wl,--wrap,atan2f
+    -Wl,--wrap,fmodf
+    -Wl,--wrap,exp
+    -Wl,--wrap,log
+    -Wl,--wrap,log2
+    -Wl,--wrap,pow
+    -Wl,--wrap,logf
+    -Wl,--wrap,powf
+    -Wl,--wrap,pthread_key_create
+    -Wl,--wrap,pthread_key_delete
+    -Wl,--wrap,pthread_getspecific
+    -Wl,--wrap,pthread_setspecific
+    -Wl,--wrap,pthread_once
+    -Wl,--wrap,dlopen
+    -Wl,--wrap,dlsym
+    -Wl,--wrap,dlclose
+    # Safety net for C23 functions from dependencies
+    -Wl,--wrap,__isoc23_sscanf
+    -Wl,--wrap,__isoc23_strtoul
+)
+
 # Download and include Dear ImGui
 include(FetchContent)
 FetchContent_Declare(
@@ -47,10 +74,16 @@ list(APPEND EXTRA_SOURCES
     ${implot_SOURCE_DIR}/implot_items.cpp
 )
 
+# Configure FFTW to build static libraries
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build FFTW as static library")
+set(BUILD_TESTS OFF CACHE BOOL "Disable FFTW tests")
+set(ENABLE_THREADS ON CACHE BOOL "Enable pthread support in FFTW")
+
 # Add FFTW subdirectory - build it as part of our project
 add_subdirectory(fftw-3.3.10)
 
 # Download and include GLFW
+set(GLFW_USE_STATIC_LIBS ON CACHE BOOL "Use static GLFW libraries")
 FetchContent_Declare(
     glfw
     GIT_REPOSITORY https://github.com/glfw/glfw.git
@@ -60,6 +93,7 @@ FetchContent_MakeAvailable(glfw)
 
 # Find required packages
 find_package(OpenGL REQUIRED)
+find_package(X11 REQUIRED)
 
 
 
@@ -85,8 +119,27 @@ add_executable(fts_data_explorer
     spectral_toolbox.cpp
     apodization.cpp
     export.cpp
+    glibc_compat.cpp
     adapters/csv_adapter.cpp
     ${EXTRA_SOURCES}
+)
+
+# Statically link C++ runtime and apply --wrap flags (target-specific only)
+target_link_options(fts_data_explorer PRIVATE
+    -static-libgcc
+    -static-libstdc++
+    ${GLIBCOMPAT_WRAP}
+)
+
+# Avoid __isoc23_* functions (GLIBC_2.38) and fortified functions
+# that use newer GLIBC symbol versions. Target-specific only.
+# Also force C11 for C sources since GCC/glibc 2.43 defaults to C23.
+target_compile_options(fts_data_explorer PRIVATE
+    -U_GNU_SOURCE
+    -D_DEFAULT_SOURCE
+    -D_FORTIFY_SOURCE=0
+    -U_FORTIFY_SOURCE
+    $<$<COMPILE_LANGUAGE:C>:-std=gnu11>
 )
 
 
@@ -98,9 +151,18 @@ target_link_libraries(fts_data_explorer
     ${OPENGL_LIBRARIES}
     glfw
     GL
-    m
     fftw3  # Use the FFTW target that was built
+    X11
+    m
 )
+
+# Link pthread and dl explicitly for compatibility with older glibc
+target_link_libraries(fts_data_explorer
+    pthread
+    dl
+)
+
+
 
 # Add compile definitions for imgui
 target_compile_definitions(fts_data_explorer PRIVATE
