@@ -107,6 +107,12 @@ cmake -S "$PROJECT_DIR" -B "$BUILD_DIR" \
     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 
+# -- Generate asset headers -------------------------------------------------
+info "Generating asset headers..."
+mkdir -p "${BUILD_DIR}/generated"
+(cd "${PROJECT_DIR}" && xxd -i assets/interferogram_curve.png) > \
+    "${BUILD_DIR}/generated/interferogram_curve.h"
+
 # -- Build -------------------------------------------------------------------
 info "Building with ${JOBS} parallel job(s) ..."
 cmake --build "$BUILD_DIR" -j "$JOBS"

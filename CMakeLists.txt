@@ -107,6 +107,7 @@ include_directories(
     ${implot_SOURCE_DIR}
     ${tinyfiledialogs_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/fftw-3.3.10/api  # FFTW headers
+    ${CMAKE_BINARY_DIR}/generated        # xxd-generated asset headers
 )
 
 # Add executable
@@ -121,6 +122,8 @@ add_executable(fts_data_explorer
     export.cpp
     glibc_compat.cpp
     adapters/csv_adapter.cpp
+    file_browser.cpp
+    welcome.cpp
     ${EXTRA_SOURCES}
 )
 

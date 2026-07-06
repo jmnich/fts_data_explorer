@@ -23,6 +23,8 @@
 #include "spectral_toolbox.h"
 #include "adapters/csv_adapter.h"
 #include "tinyfiledialogs.h"
+#include "file_browser.h"
+#include "welcome.h"
 
 // Include imgui and other dependencies
 #include "imgui.h"
@@ -101,41 +103,6 @@ static bool naturalSortCompare(const std::string& a, const std::string& b) {
 }
 
 
-
-// Simple file browser
-class FileBrowser {
-public:
-    static std::vector<std::string> getCSVFilesInDirectory(const std::string& directoryPath) {
-        std::vector<std::string> csvFiles;
-        
-        // Return empty vector if directory path is empty
-        if (directoryPath.empty()) {
-            return csvFiles;
-        }
-        
-        // Check if directory exists
-        if (!std::filesystem::exists(directoryPath) || !std::filesystem::is_directory(directoryPath)) {
-            return csvFiles;
-        }
-        
-        for (const auto& entry : std::filesystem::directory_iterator(directoryPath)) {
-            if (entry.is_regular_file() && entry.path().extension() == ".csv") {
-                csvFiles.push_back(entry.path().string());
-            }
-        }
-        
-        return csvFiles;
-    }
-    
-    // Cross-platform directory selection dialog using tinyfiledialogs
-    static std::string showDirectorySelectionDialog() {
-        const char* folder = tinyfd_selectFolderDialog("Select Dataset Directory", "");
-        if (!folder) {
-            return "";
-        }
-        return std::string(folder);
-    }
-};
 
 /**
  * Initialize GLFW, ImGui, and application state
@@ -433,12 +400,6 @@ int main() {
     // UI size settings
     appState.currentUiSize = config.uiSize;
 
-    // Helper to persist a dataset path to the recent datasets list
-    auto addToRecentDatasets = [&](const std::string& parentDir) {
-        config.addRecentDataset(parentDir);
-        config.saveToFile(configFilePath);
-    };
-    
     // Initialize application
     GLFWwindow* window = nullptr;
     if (!initializeApplication(config, window)) {
@@ -452,6 +413,9 @@ int main() {
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     
     ImGui::StyleColorsDark();
+
+    // Load welcome screen background texture
+    initWelcomeBackground();
     
     // Customize colors to use black background
     ImGuiStyle& style = ImGui::GetStyle();
@@ -878,7 +842,7 @@ int main() {
                             parentDir.substr(raw_data_pos + 1) == "raw_data") {
                             parentDir = parentDir.substr(0, raw_data_pos);
                         }
-                        addToRecentDatasets(parentDir);
+                        addToRecentDatasets(config, configFilePath, parentDir);
                     }
                 }
                 
@@ -901,192 +865,7 @@ int main() {
         
         // Show welcome screen if no data is loaded and we haven't initialized yet
         if (appState.showWelcomeScreen && !appState.welcomeScreenInitialized) {
-            // Safety check to prevent multiple welcome screen instances
-            static bool welcomeScreenActive = false;
-            if (welcomeScreenActive) {
-                std::cerr << "Warning: Attempted to show welcome screen while already active!" << std::endl;
-                appState.showWelcomeScreen = false; // Prevent re-entry by disabling welcome screen
-            }
-            welcomeScreenActive = true;
-            // Center the welcome screen
-            ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-            ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-            ImGui::SetNextWindowSize(ImVec2(1200, 800));
-            
-            // Create a modal popup that blocks all interaction
-            ImGui::OpenPopup("Welcome to FTS Data Explorer");
-            appState.needsRedraw = true;
-            
-            if (ImGui::BeginPopupModal("Welcome to FTS Data Explorer", NULL, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove)) {
-                // Set up welcome screen with minimal styling to avoid style stack issues
-                ImVec4 darkBackground(0.1f, 0.1f, 0.1f, 1.0f); // Same as main window clear color
-                ImGui::PushStyleColor(ImGuiCol_PopupBg, darkBackground);
-                
-                // Welcome message
-                // ImGui::TextColored(ImVec4(0.6f, 0.5f, 0.1f, 1.0f), "Welcome to FTS Data Explorer");
-                // ImGui::Text("A tool for exploring Fourier spectrometer data");
-                // ImGui::Spacing();
-                // ImGui::Separator();
-                ImGui::Spacing();
-                
-                // Recent datasets section
-                ImGui::Text("Recent Datasets:");
-                ImGui::Spacing();
-                
-                // Always use a fixed-height child region so the layout stays consistent
-                // regardless of whether recent datasets exist
-                if (ImGui::BeginChild("RecentDatasetsChild", ImVec2(0, 500), true)) {
-                    if (config.recentDatasets.empty()) {
-                        // Center the placeholder vertically in the child region
-                        float childHeight = ImGui::GetContentRegionAvail().y;
-                        float textHeight = ImGui::GetTextLineHeightWithSpacing() * 3;
-                        float offsetY = (childHeight - textHeight) * 0.5f;
-                        if (offsetY > 0) ImGui::SetCursorPosY(ImGui::GetCursorPosY() + offsetY);
-                        
-                        ImGui::Text("No recent datasets found.");
-                        ImGui::Text("Use the button below to select a dataset directory.");
-                    } else {
-                        for (const auto& datasetPath : config.recentDatasets) {
-                            // Extract the parent directory name for display (skip "raw_data" if present)
-                            std::string displayName = datasetPath;
-                            size_t last_slash = displayName.find_last_of("/\\");
-                            if (last_slash != std::string::npos) {
-                                displayName = displayName.substr(last_slash + 1);
-                                // If this is "raw_data", get the parent directory name
-                                if (displayName == "raw_data" && last_slash > 0) {
-                                    size_t parent_slash = datasetPath.substr(0, last_slash).find_last_of("/\\");
-                                    if (parent_slash != std::string::npos) {
-                                        displayName = datasetPath.substr(parent_slash + 1, last_slash - parent_slash - 1);
-                                    }
-                                }
-                            }
-                            
-                            // Create a button for each recent dataset
-                            if (ImGui::Button(displayName.c_str(), ImVec2(-FLT_MIN, 0))) {
-                                if (std::filesystem::exists(datasetPath) && std::filesystem::is_directory(datasetPath)) {
-                                    // Check if there's a raw_data subdirectory
-                                    std::string rawDataPath = datasetPath + "/raw_data";
-                                    if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {
-                                        appState.currentDirectory = rawDataPath; // Use the raw_data subdirectory
-                                    } else {
-                                        appState.currentDirectory = datasetPath; // Fallback to the dataset directory itself
-                                    }
-                                    
-                                    // Update current dataset name
-                                    appState.currentDatasetName = datasetPath.substr(datasetPath.find_last_of("/\\") + 1);
-                                    
-                                    appState.csvFiles = FileBrowser::getCSVFilesInDirectory(appState.currentDirectory);
-                                    appState.clearAverageSpectrum();
-            appState.clearSnrSpectrum();
-                                    appState.dataLoaded = false;
-                                    appState.filesChanged = true;
-                                    appState.currentSortedFileIndex = 0;
-                                    appState.showWelcomeScreen = false;
-                                    appState.welcomeScreenInitialized = true;
-                                    appState.isFirstDataLoad = true;
-                                    appState.needsRedraw = true;
-                                    addToRecentDatasets(datasetPath);
-                                    std::cout << "Opened recent dataset: " << datasetPath << std::endl;
-                                    ImGui::CloseCurrentPopup(); // Close the modal
-                                } else {
-                                    std::cerr << "Recent dataset path no longer exists: " << datasetPath << std::endl;
-                                }
-                            }
-                            
-                            // Add tooltip with full path
-                            if (ImGui::IsItemHovered()) {
-                                ImGui::SetTooltip("%s", datasetPath.c_str());
-                            }
-                        }
-                    }
-                    ImGui::EndChild();
-                }
-                
-                ImGui::Spacing();
-                ImGui::Separator();
-                ImGui::Spacing();
-                
-                // UI Size selection dropdown
-                ImGui::Text("UI Size:");
-                if (ImGui::BeginCombo("##UISizeCombo", appState.currentUiSize.c_str())) {
-                    if (ImGui::Selectable("tiny", appState.currentUiSize == "tiny")) {
-                        appState.currentUiSize = "tiny";
-                        appState.uiSizeChanged = true;
-                    }
-                    if (ImGui::Selectable("small", appState.currentUiSize == "small")) {
-                        appState.currentUiSize = "small";
-                        appState.uiSizeChanged = true;
-                    }
-                    if (ImGui::Selectable("normal", appState.currentUiSize == "normal")) {
-                        appState.currentUiSize = "normal";
-                        appState.uiSizeChanged = true;
-                    }
-                    if (ImGui::Selectable("large", appState.currentUiSize == "large")) {
-                        appState.currentUiSize = "large";
-                        appState.uiSizeChanged = true;
-                    }
-                    if (ImGui::Selectable("huge", appState.currentUiSize == "huge")) {
-                        appState.currentUiSize = "huge";
-                        appState.uiSizeChanged = true;
-                    }
-                    ImGui::EndCombo();
-                }
-                ImGui::Spacing();
-                
-                // Directory selection button with dark green background
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.1f, 0.3f, 0.1f, 0.8f)); // Dark green
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.15f, 0.35f, 0.15f, 0.9f)); // Lighter green on hover
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.05f, 0.25f, 0.05f, 1.0f)); // Even darker when active
-                
-                // Calculate available space for the button, but clamp to a reasonable max height
-                float buttonHeight = ImGui::GetContentRegionAvail().y - ImGui::GetStyle().ItemSpacing.y * 2;
-                if (buttonHeight > 60.0f) buttonHeight = 60.0f;
-                bool buttonClicked = ImGui::Button("Select Dataset Directory", ImVec2(-FLT_MIN, buttonHeight));
-                ImGui::PopStyleColor(3); // Always pop styles after button
-                
-                if (buttonClicked) {
-                    const char* folder = tinyfd_selectFolderDialog("Select Dataset Directory", "");
-                    if (folder) {
-                        std::string selectedDirectory(folder);
-                        // Check if the selected directory has a raw_data subdirectory
-                        std::string rawDataPath = selectedDirectory + "/raw_data";
-                        if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {
-                            appState.currentDirectory = rawDataPath;
-                            // Update dataset name from parent directory
-                            appState.currentDatasetName = selectedDirectory.substr(selectedDirectory.find_last_of("/\\") + 1);
-                        } else {
-                            appState.currentDirectory = selectedDirectory;
-                            // Update dataset name from selected directory
-                            appState.currentDatasetName = selectedDirectory.substr(selectedDirectory.find_last_of("/\\") + 1);
-                        }
-                        appState.csvFiles = FileBrowser::getCSVFilesInDirectory(appState.currentDirectory);
-                        appState.clearAverageSpectrum();
-            appState.clearSnrSpectrum();
-                        appState.dataLoaded = false;
-                        appState.filesChanged = true;
-                        appState.currentSortedFileIndex = 0;
-                        appState.showWelcomeScreen = false;
-                        appState.welcomeScreenInitialized = true;
-                        appState.needsRedraw = true;
-                        addToRecentDatasets(selectedDirectory);
-                        std::cout << "Working directory set to: " << appState.currentDirectory << std::endl;
-                        ImGui::CloseCurrentPopup(); // Close the modal
-                    }
-                }
-                // Clean up welcome screen styles
-                ImGui::PopStyleColor(); // PopupBg only (removed other styles to simplify)
-
-                ImGui::EndPopup();
-                
-                // If welcome screen is closed manually, initialize the app
-                if (!appState.showWelcomeScreen) {
-                    appState.welcomeScreenInitialized = true;
-                }
-                welcomeScreenActive = false; // Reset the safety flag when welcome screen closes
-            } else {
-                // Popup wasn't opened, no styles to clean up (they're pushed inside BeginPopupModal)
-                welcomeScreenActive = false; // Reset the safety flag if popup wasn't opened
-            }
+            renderWelcomeScreen(appState, config, configFilePath);
         }
         
         // Only render main docking interface if welcome screen is not active
@@ -1125,7 +904,7 @@ int main() {
                             appState.dataLoaded = false;
                             appState.isFirstDataLoad = true;
                             appState.needsRedraw = true;
-                            addToRecentDatasets(selectedDirectory);
+                            addToRecentDatasets(config, configFilePath, selectedDirectory);
                             std::cout << "Working directory set to: " << appState.currentDirectory << std::endl;
                         }
                     }
@@ -3127,6 +2906,7 @@ int main() {
     }
     
     // Cleanup
+    destroyWelcomeBackground();
     cleanupApplication(window);
     
     // Save configuration before exiting
