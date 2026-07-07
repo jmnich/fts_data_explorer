@@ -19,6 +19,7 @@ ExportPanel::ExportPanel()
         ARTIFACT_CORR_IFG,
         ARTIFACT_UNCORR_IFG,
         ARTIFACT_AVG_SPECT,
+        ARTIFACT_SNR_SPECT,
         ARTIFACT_SPECTRA
     };
     artifactChecked.assign(artifactLabels.size(), 0);
@@ -32,6 +33,8 @@ bool ExportPanel::isArtifactAvailable(const char* label) const
         return appState->dataLoaded && !appState->selectedFiles.empty();
     if (lbl == ARTIFACT_AVG_SPECT)
         return appState->averageSpectrum.averageAvailable;
+    if (lbl == ARTIFACT_SNR_SPECT)
+        return appState->snrSpectrum.snrAvailable;
     return false;
 }
 
@@ -125,7 +128,8 @@ void ExportPanel::performExport(const std::string& dir)
     if (artifactChecked[0]) writeCorrectedIFGCsv(dir);
     if (artifactChecked[1]) writeUncorrectedIFGCsv(dir);
     if (artifactChecked[2]) writeAvgSpectrumCsv(dir);
-    if (artifactChecked[3]) writeSpectraCsv(dir);
+    if (artifactChecked[3]) writeSnrSpectrumCsv(dir);
+    if (artifactChecked[4]) writeSpectraCsv(dir);
 }
 
 // ---------------------------------------------------------------------------
@@ -220,6 +224,29 @@ void ExportPanel::writeAvgSpectrumCsv(const std::string& dir)
     size_t n = std::min(avg.cachedAverageX.size(), avg.cachedAverageY.size());
     for (size_t j = 0; j < n; j++) {
         ofs << avg.cachedAverageX[j] << "," << avg.cachedAverageY[j] << "\n";
+    }
+    ofs.close();
+}
+
+void ExportPanel::writeSnrSpectrumCsv(const std::string& dir)
+{
+    const auto& snr = appState->snrSpectrum;
+    if (!snr.snrAvailable || snr.cachedSnrX.empty() || snr.cachedSnrY.empty())
+        return;
+
+    std::string dsName = sanitizeFilename(appState->currentDatasetName);
+    std::string path = dir + "/" + dsName + "_snr_spectrum.csv";
+    std::ofstream ofs(path);
+    if (!ofs.is_open()) return;
+
+    const char* xLabel = "Wavenumber [cm-1]";
+    if (snr.xUnitSelector == 1) xLabel = "Wavelength [um]";
+    else if (snr.xUnitSelector == 2) xLabel = "Frequency [THz]";
+
+    ofs << xLabel << ",SNR\n";
+    size_t n = std::min(snr.cachedSnrX.size(), snr.cachedSnrY.size());
+    for (size_t j = 0; j < n; j++) {
+        ofs << snr.cachedSnrX[j] << "," << snr.cachedSnrY[j] << "\n";
     }
     ofs.close();
 }

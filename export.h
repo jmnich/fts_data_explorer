@@ -12,6 +12,7 @@ public:
     static constexpr const char* ARTIFACT_CORR_IFG   = "Corrected interferograms from selected files";
     static constexpr const char* ARTIFACT_UNCORR_IFG = "Uncorrected interferograms from selected files";
     static constexpr const char* ARTIFACT_AVG_SPECT  = "Average spectrum";
+    static constexpr const char* ARTIFACT_SNR_SPECT  = "SNR spectrum";
     static constexpr const char* ARTIFACT_SPECTRA    = "Spectra from selected files";
 
     std::vector<std::string> artifactLabels;
@@ -28,5 +29,6 @@ private:
     void writeCorrectedIFGCsv(const std::string& dir);
     void writeUncorrectedIFGCsv(const std::string& dir);
     void writeAvgSpectrumCsv(const std::string& dir);
+    void writeSnrSpectrumCsv(const std::string& dir);
     void writeSpectraCsv(const std::string& dir);
 };
