@@ -146,9 +146,12 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
     }
 
     float totalHeight = ImGui::GetContentRegionAvail().y;
-    float surfaceHeight = totalHeight * 0.50f;
-    float plot2dHeight  = totalHeight * 0.35f;
-    float sliderHeight  = totalHeight * 0.15f;
+    float sliderHeight  = 30.0f;
+    float spacing       = ImGui::GetStyle().ItemSpacing.y * 2.0f;
+    float plot2dHeight  = (totalHeight - sliderHeight - spacing) / 2.5f;
+    float surfaceHeight = plot2dHeight * 1.5f;
+    if (surfaceHeight < 60.0f) surfaceHeight = 60.0f;
+    if (plot2dHeight  < 40.0f) plot2dHeight  = 40.0f;
 
     // ---- 3D Surface ----
     if (surfaceHeight > 60.0f) {
@@ -544,7 +547,8 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
         std::snprintf(fmtBuf, sizeof(fmtBuf), "%%.3f %s", unitStr);
 
         float curWl = sliderDisplayWl[selectedSliceIndex];
-        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 10.0f);
+        float availWidth = ImGui::GetContentRegionAvail().x;
+        ImGui::SetNextItemWidth(availWidth * 0.65f);
         if (ImGui::SliderFloat("##AllanSliceSlider", &curWl, wlMin, wlMax, fmtBuf)) {
             float bestDist = std::abs(curWl - sliderDisplayWl[0]);
             int bestIdx = 0;
@@ -559,13 +563,25 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
                 pendingNextXMax = -1.0;
             }
         }
-
-        if (selectedSliceIndex >= 0 && selectedSliceIndex < M) {
-            double wlUm = cachedSurfaceWavelengths[selectedSliceIndex];
-            double displayWlVal = convertFromUmToDisplay(wlUm, xUnitSelector);
-            ImGui::SameLine();
-            ImGui::Text("Slice @ %.4f %s", displayWlVal, unitStr);
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(availWidth * 0.25f);
+        float inputWl = curWl;
+        if (ImGui::InputFloat("##AllanSliceInput", &inputWl, 0.0f, 0.0f, fmtBuf,
+                              ImGuiInputTextFlags_EnterReturnsTrue)) {
+            float bestDist = std::abs(inputWl - sliderDisplayWl[0]);
+            int bestIdx = 0;
+            for (int i = 1; i < M; ++i) {
+                float dist = std::abs(inputWl - sliderDisplayWl[i]);
+                if (dist < bestDist) { bestDist = dist; bestIdx = i; }
+            }
+            if (bestIdx != selectedSliceIndex) {
+                selectedSliceIndex = bestIdx;
+                shouldAutoscale = true;
+                pendingNextXMin = 0.0;
+                pendingNextXMax = -1.0;
+            }
         }
+
     }
 }
 
