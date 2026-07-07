@@ -14,6 +14,8 @@ public:
     static constexpr const char* ARTIFACT_AVG_SPECT  = "Average spectrum";
     static constexpr const char* ARTIFACT_SNR_SPECT  = "SNR spectrum";
     static constexpr const char* ARTIFACT_SPECTRA    = "Spectra from selected files";
+    static constexpr const char* ARTIFACT_ALLAN_3D   = "Allan-Werle 3D";
+    static constexpr const char* ARTIFACT_ALLAN_SLICE = "Allan-Werle slice";
 
     std::vector<std::string> artifactLabels;
     std::vector<int>         artifactChecked; // 0=false, 1=true
@@ -31,4 +33,6 @@ private:
     void writeAvgSpectrumCsv(const std::string& dir);
     void writeSnrSpectrumCsv(const std::string& dir);
     void writeSpectraCsv(const std::string& dir);
+    void writeAllan3DCsv(const std::string& dir);
+    void writeAllanSliceCsv(const std::string& dir);
 };

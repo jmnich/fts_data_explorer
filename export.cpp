@@ -2,6 +2,7 @@
 #include "app_state.h"
 #include "spectrum.h"
 #include "average_spectrum.h"
+#include "allan_variance.h"
 #include "spectral_toolbox.h"
 #include "adapters/csv_adapter.h"
 
@@ -20,7 +21,9 @@ ExportPanel::ExportPanel()
         ARTIFACT_UNCORR_IFG,
         ARTIFACT_AVG_SPECT,
         ARTIFACT_SNR_SPECT,
-        ARTIFACT_SPECTRA
+        ARTIFACT_SPECTRA,
+        ARTIFACT_ALLAN_3D,
+        ARTIFACT_ALLAN_SLICE
     };
     artifactChecked.assign(artifactLabels.size(), 0);
 }
@@ -35,6 +38,8 @@ bool ExportPanel::isArtifactAvailable(const char* label) const
         return appState->averageSpectrum.averageAvailable;
     if (lbl == ARTIFACT_SNR_SPECT)
         return appState->snrSpectrum.snrAvailable;
+    if (lbl == ARTIFACT_ALLAN_3D || lbl == ARTIFACT_ALLAN_SLICE)
+        return appState->allanVariance.allanAvailable;
     return false;
 }
 
@@ -130,6 +135,8 @@ void ExportPanel::performExport(const std::string& dir)
     if (artifactChecked[2]) writeAvgSpectrumCsv(dir);
     if (artifactChecked[3]) writeSnrSpectrumCsv(dir);
     if (artifactChecked[4]) writeSpectraCsv(dir);
+    if (artifactChecked[5]) writeAllan3DCsv(dir);
+    if (artifactChecked[6]) writeAllanSliceCsv(dir);
 }
 
 // ---------------------------------------------------------------------------
@@ -163,10 +170,9 @@ void ExportPanel::writeCorrectedIFGCsv(const std::string& dir)
         for (size_t j = 0; j < n; j++) {
             ofs << hilbX[j] << "," << raw.primaryDetector[j] << "\n";
         }
-        ofs.close();
+    ofs.close();
     }
 }
-
 void ExportPanel::writeUncorrectedIFGCsv(const std::string& dir)
 {
     std::string dsName = sanitizeFilename(appState->currentDatasetName);
@@ -318,6 +324,78 @@ void ExportPanel::writeSpectraCsv(const std::string& dir)
             ofs << "," << val;
         }
         ofs << "\n";
+    }
+    ofs.close();
+}
+
+void ExportPanel::writeAllan3DCsv(const std::string& dir)
+{
+    const auto& al = appState->allanVariance;
+    if (!al.allanAvailable || al.cachedSurfaceWavelengths.empty() ||
+        al.cachedSurfaceTaus.empty() || al.cachedSurfaceAllanVar.empty())
+        return;
+
+    std::string dsName = sanitizeFilename(appState->currentDatasetName);
+    std::string path = dir + "/" + dsName + "_allan_3d.csv";
+    std::ofstream ofs(path);
+    if (!ofs.is_open()) return;
+
+    const char* wlLabel = "Wavenumber [cm-1]";
+    if (al.xUnitSelector == 1) wlLabel = "Wavelength [um]";
+    else if (al.xUnitSelector == 2) wlLabel = "Frequency [THz]";
+
+    ofs << wlLabel << ",Tau [measurements],Allan Variance\n";
+
+    int M = al.numSurfaceWavelengths;
+    int N = al.numSurfaceTaus;
+
+    auto convertWl = [&](double um) -> double {
+        using ST = SpectralToolbox;
+        if (al.xUnitSelector == 0) return ST::convertUmToCm(um);
+        if (al.xUnitSelector == 2) return ST::convertUmToTHz(um);
+        return um;
+    };
+
+    for (int i = 0; i < M; ++i) {
+        double wl = convertWl(al.cachedSurfaceWavelengths[i]);
+        for (int j = 0; j < N; ++j) {
+            ofs << wl << "," << al.cachedSurfaceTaus[j] << "," << al.cachedSurfaceAllanVar[i * N + j] << "\n";
+        }
+    }
+    ofs.close();
+}
+
+void ExportPanel::writeAllanSliceCsv(const std::string& dir)
+{
+    const auto& al = appState->allanVariance;
+    if (!al.allanAvailable || al.cachedSurfaceWavelengths.empty() ||
+        al.cachedSurfaceTaus.empty() || al.cachedSurfaceAllanVar.empty())
+        return;
+
+    int idx = al.selectedSliceIndex;
+    if (idx < 0 || idx >= al.numSurfaceWavelengths) return;
+
+    double wlUm = al.cachedSurfaceWavelengths[idx];
+    double wlDisplay = wlUm;
+    const char* wlUnit = "um";
+    using ST = SpectralToolbox;
+    if (al.xUnitSelector == 0) { wlDisplay = ST::convertUmToCm(wlUm); wlUnit = "cm-1"; }
+    else if (al.xUnitSelector == 2) { wlDisplay = ST::convertUmToTHz(wlUm); wlUnit = "THz"; }
+
+    char wlStr[64];
+    std::snprintf(wlStr, sizeof(wlStr), "%.4f_%s", wlDisplay, wlUnit);
+
+    std::string dsName = sanitizeFilename(appState->currentDatasetName);
+    std::string path = dir + "/" + dsName + "_allan_slice_" + wlStr + ".csv";
+    std::ofstream ofs(path);
+    if (!ofs.is_open()) return;
+
+    ofs << "Tau [measurements],Allan Variance\n";
+
+    int N = al.numSurfaceTaus;
+    int M = al.numSurfaceWavelengths;
+    for (int j = 0; j < N; ++j) {
+        ofs << al.cachedSurfaceTaus[j] << "," << al.cachedSurfaceAllanVar[idx * N + j] << "\n";
     }
     ofs.close();
 }

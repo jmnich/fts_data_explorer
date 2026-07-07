@@ -5,19 +5,22 @@ It presents a tree view of information available in the dataset and then allows 
 # Toolchain
 - C++17
 - imgui for GUI, docking branch
+- ImPlot for 2D plotting (master branch)
+- ImPlot3D for 3D surface plotting (main branch)
 - glfw, opengl3, glfw3
 - CMake 3.10+ build system
 - FFTW3 for FFT-based spectrum computation
 
 # Functionality and GUI description
-- Main window consists of 7 docked panels:
+- Main window consists of 9 docked panels:
     - primary, large Interferogram View panel, which shows selected primary and reference interferograms on 2 vertically stacked plots with shared x axis. These graphs support zoom with mouse.
     - Interferogram panel (docked), containing toggle buttons for X axis base (sample/OPD), Max at zero, Auto-fit Y, and Downsample settings.
     - metadata panel, docked to the right of the Interferogram View panel, showing all available metadata
-    - files panel, docked to the left, showing tree view with files in the selected directory. Each file row has a checkbox for including that file in Average/SNR computations.
+    - files panel, docked to the left, showing tree view with files in the selected directory. Each file row has a checkbox for including that file in Average/SNR/Allan computations.
     - spectrum controls panel (docked) with spectrum display and FFT processing settings
     - Average config panel (docked) + Average View panel with mean-spectrum computation and plot
     - SNR config panel (docked) + SNR View panel with SNR-spectrum computation and plot
+    - Allan config panel (docked) + Allan View panel with Allan-Werle variance 3D surface and 2D slice plots
 - OPD X-axis: When X axis base is set to "OPD" in the Interferogram panel, the interferogram plots use Hilbert-transform-derived optical path difference (in µm) on the x-axis instead of sample indices. Hilbert X values are cached per-file and automatically recomputed when the reference laser wavelength changes in the Spectrum panel.
 - Main window contains a ribbon menu, which is hidden in the welcome screen. The structure of the menu is as follows:
     - File
@@ -99,6 +102,37 @@ It presents a tree view of information available in the dataset and then allows 
     - **State persistence:** `[SNRWindow]` config section (yAxisMode, xUnitSelector, yScaleSelector, forcedYMin/Max).
     - **Files:** `snr_spectrum.h` / `snr_spectrum.cpp` — `SnrSpectrum` class.
 
+- Allan-Werle Variance functionality (3D surface + 2D slice)
+    - **Reference implementation:** `test28_allan.py` — Python script demonstrating the Overlapping Allan-Werle Variance (OAWAR) algorithm on wavelength-resolved spectral intensity time series.
+    - **File selection:** Shares the same checkboxes as Average and SNR (`filesSelectedForAveraging`).
+    - **Allan panel controls:**
+        - X unit selector (cm⁻¹/µm/THz) — determines units for wavelength display and the surface X axis. Stored in µm internally; changing units only affects display, not recalculation.
+        - X range min/max: float textboxes in the selected X unit. The Allan-Werle surface is computed only for spectral bins whose wavelength (in µm) falls within this range. Values are stored in µm internally and converted for display.
+        - Spectral decimation factor: integer (1–50, default 5). Controls how many spectral bins to skip. Decimation=5 means every 5th spectral point is used for the surface wavelength axis.
+        - "Calculate Allan" button: on-demand multi-frame computation with progress bar. Must be re-clicked after changing parameters.
+        - Cursor On/Off toggle (synchronized with Spectrum panel).
+    - **Allan computation pipeline:**
+        1. For each checked file, calls `SpectralToolbox::processSpectrum()` with Spectrum panel's apodization/refLaser/K parameters and Spectrum panel's X unit.
+        2. All spectra are interpolated to a common X grid from the first file.
+        3. The common X grid is decimated by the spectral decimation factor.
+        4. Spectral bins within `[xRangeMin, xRangeMax]` (in µm) are selected.
+        5. For each selected wavelength bin, a time series of signal magnitudes is extracted across all files.
+        6. The Overlapping Allan-Werle Variance is computed for each wavelength's time series:
+           - For each cluster size k (1 to N/2), the signal is divided into adjacent pairs of blocks of length k.
+           - Allan variance(k) = mean((mean(block2) - mean(block1))²) / 2.
+           - Tau(k) = k (integration time in number of measurements).
+        7. Results form a 3D surface: X = wavelength, Y = tau, Z = Allan variance.
+    - **Allan View panel** — three vertically stacked regions:
+        - Top (~60%): ImPlot3D surface plot. X = wavelength in selected unit (linear), Y = tau (log10 scale), Z = Allan variance (log10 data, linear axis). Viridis colormap, surface opacity=0.85.
+        - Middle (~25%): ImPlot2D log-log slice plot showin Allan variance vs tau at the selected wavelength. Same interaction model as SNR/Average (shift+drag, arrow pan, ESC reset, scroll, tracking cursor). Line color: teal.
+        - Bottom (~15%): Slider + text input to select the wavelength slice. Slider uses `SliderFloat` with the actual wavelength value in the selected unit. Text input allows direct numeric entry (press Enter to snap).
+        - Top-right label: "Slice: X.XX µm | Allan, N files".
+        - Slice indicator in 3D: white intersection curve (LineWeight=4) tracing the surface contour at the selected wavelength, drawn with a black shadow halo (LineWeight=6, Z+0.2 offset) for visibility against the surface. Vertical white lines connect the curve's endpoints to a bottom guide line.
+    - **Data layout:** `cachedSurfaceAllanVar` is a flattened M×N array in wavelength-major order: `var[wl_idx * numTaus + tau_idx]`.
+    - **State persistence:** `[AllanWindow]` config section (xUnitSelector, wavelengthDecimation, sliceIndex, xRangeMin, xRangeMax).
+    - **Export artifacts:** "Allan-Werle 3D" (full M×N surface as CSV) and "Allan-Werle slice" (current slice as CSV, wavelength in filename).
+    - **Files:** `allan_variance.h` / `allan_variance.cpp` — `AllanVariance` class. OAWAR algorithm in `computeAllanVariance()`.
+
 # Application structure
 - the application uses 'adapter classes' which convert different data storage formats into a unified object carrying primary and reference interferograms as well as metadata. These unified data objects are then used to display the information in gui.
 - file organization: all source files live in the root directory:
@@ -107,6 +141,7 @@ It presents a tree view of information available in the dataset and then allows 
     - `spectrum.h` / `spectrum.cpp` — SpectrumView floating window (ImPlot rendering, caching, zoom/cursor)
     - `average_spectrum.h` / `average_spectrum.cpp` — AverageSpectrum class
     - `snr_spectrum.h` / `snr_spectrum.cpp` — SnrSpectrum class
+    - `allan_variance.h` / `allan_variance.cpp` — AllanVariance class with OAWAR algorithm
     - `spectral_toolbox.h` / `spectral_toolbox.cpp` — FFTW DSP pipeline (Hilbert correction, FFT, unit conversion)
     - `apodization.h` / `apodization.cpp` — Apodization window functions (Rectangular, Gauss, Triangular) with parametric controls; applied before zero-padding in the FFT pipeline
     - `config.h` — AppConfig with load/save to `~/.fts_data_explorer_config`
@@ -124,7 +159,8 @@ It presents a tree view of information available in the dataset and then allows 
   - `Spectrum spectrum`: Embedded Spectrum instance managing the spectrum view window state, caches, and UI controls
   - `AverageSpectrum averageSpectrum`: Average spectrum computation and display state
   - `SnrSpectrum snrSpectrum`: SNR spectrum computation and display state
-  - `filesSelectedForAveraging`: Per-file checkbox state (shared by Average and SNR panels), indexed identically to sortedFiles
+  - `AllanVariance allanVariance`: Allan-Werle variance computation and 3D/2D display state
+  - `filesSelectedForAveraging`: Per-file checkbox state (shared by Average, SNR, and Allan panels), indexed identically to sortedFiles
 - State persistence: Configuration settings are saved to and loaded from a config file for session restoration.
 
 ## Idle rendering optimization (`needsRedraw`)
@@ -152,11 +188,14 @@ The app uses a dirty-flag mechanism to avoid re-rendering the entire UI (includi
 # Key files and their purposes
 See file listing under **# Application structure** above for all key files and their purposes.
 
+# ImGui configuration
+- `imconfig_custom.h` sets `ImDrawIdx` to `unsigned int` (32-bit) via `IMGUI_USER_CONFIG`. Required by ImPlot3D for high-density surface meshes to avoid index truncation.
+
 # Build system
 - CMake-based build with dependencies automatically fetched
 - Build directory: `build/`
 - Main targets: `fts_data_explorer`
-- Dependencies: ImGui, ImPlot, GLFW, OpenGL, FFTW3
+- Dependencies: ImGui, ImPlot, ImPlot3D, GLFW, OpenGL, FFTW3
 - Build project by calling `build_script.sh`
 
 # Coding style
