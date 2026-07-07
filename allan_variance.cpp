@@ -137,8 +137,8 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
                                                    : "THz";
         double wl = convertFromUmToDisplay(cachedSurfaceWavelengths[selectedSliceIndex], xUnitSelector);
         char buf[128];
-        std::snprintf(buf, sizeof(buf), "Allan, %d files, \xCE\xBB=%.3f %s",
-                      fileCount, wl, unitStr);
+        std::snprintf(buf, sizeof(buf), "Slice: %.3f %s | Allan, %d files",
+                      wl, unitStr, fileCount);
         ImVec2 textSz = ImGui::CalcTextSize(buf);
         float availWidth = ImGui::GetContentRegionAvail().x;
         ImGui::SameLine(availWidth - textSz.x - ImGui::GetStyle().ItemSpacing.x);
@@ -152,7 +152,7 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
 
     // ---- 3D Surface ----
     if (surfaceHeight > 60.0f) {
-        ImPlot3DFlags plot3dFlags = ImPlot3DFlags_NoTitle;
+        ImPlot3DFlags plot3dFlags = ImPlot3DFlags_NoTitle | ImPlot3DFlags_NoLegend;
         if (ImPlot3D::BeginPlot("Allan3DSurface", ImVec2(-1, surfaceHeight), plot3dFlags)) {
             const int M = numSurfaceWavelengths;
             const int N = numSurfaceTaus;
@@ -163,36 +163,33 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
             std::vector<float> zs_f(total);
 
             std::vector<float> displayWl(M);
-            std::vector<float> displayTau(N);
             for (int i = 0; i < M; ++i)
                 displayWl[i] = (float)convertFromUmToDisplay(cachedSurfaceWavelengths[i], xUnitSelector);
-            for (int i = 0; i < N; ++i)
-                displayTau[i] = (float)cachedSurfaceTaus[i];
 
             float xMin = displayWl[0], xMax = displayWl[0];
-            float yMinF = displayTau[0], yMaxF = displayTau[0];
+            float yMinF = (float)std::max(cachedSurfaceTaus[0], 1.0);
+            float yMaxF = (float)std::max(cachedSurfaceTaus[0], 1.0);
             float zMinF = 0, zMaxF = 0;
             bool firstZ = true;
 
             for (int j = 0; j < M; ++j) {
-                float xv = displayWl[j];
-                if (xv < xMin) xMin = xv;
-                if (xv > xMax) xMax = xv;
+                if (displayWl[j] < xMin) xMin = displayWl[j];
+                if (displayWl[j] > xMax) xMax = displayWl[j];
             }
             for (int i = 0; i < N; ++i) {
-                float yv = displayTau[i];
+                float yv = (float)std::max(cachedSurfaceTaus[i], 1.0);
                 if (yv < yMinF) yMinF = yv;
                 if (yv > yMaxF) yMaxF = yv;
             }
 
             for (int i = 0; i < N; ++i) {
-                float yVal = displayTau[i];
+                float yVal = (float)std::max(cachedSurfaceTaus[i], 1.0);
                 for (int j = 0; j < M; ++j) {
                     int idx = i * M + j;
                     xs_f[idx] = displayWl[j];
                     ys_f[idx] = yVal;
                     double v = cachedSurfaceAllanVar[j * N + i];
-                    float z = (float)std::log10(std::max(v, 1e-300));
+                    float z = (float)std::log10(std::max(v, 1e-30));
                     zs_f[idx] = z;
                     if (firstZ) { zMinF = z; zMaxF = z; firstZ = false; }
                     else { if (z < zMinF) zMinF = z; if (z > zMaxF) zMaxF = z; }
@@ -200,19 +197,19 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
             }
 
             float xPad = (xMax - xMin) * 0.05f;
-            float yPad = (yMaxF - yMinF) * 0.10f;
-            float zPad = (zMaxF - zMinF) * 0.10f;
 
             const char* xLabel = (xUnitSelector == 0) ? "Wavenumber (cm-1)"
                                : (xUnitSelector == 1) ? "Wavelength (\xC2\xB5""m)"
                                                       : "Frequency (THz)";
             ImPlot3D::SetupAxis(ImAxis3D_X, xLabel);
-            ImPlot3D::SetupAxis(ImAxis3D_Y, "Tau (measurements)");
-            ImPlot3D::SetupAxis(ImAxis3D_Z, "lg(AV)");
+            ImPlot3D::SetupAxis(ImAxis3D_Y, "Tau");
+            ImPlot3D::SetupAxis(ImAxis3D_Z, "AV");
+
+            ImPlot3D::SetupAxisScale(ImAxis3D_Y, ImPlot3DScale_Log10);
 
             ImPlot3D::SetupAxisLimits(ImAxis3D_X, xMin - xPad, xMax + xPad, ImPlot3DCond_Always);
-            ImPlot3D::SetupAxisLimits(ImAxis3D_Y, yMinF - yPad, yMaxF + yPad, ImPlot3DCond_Always);
-            ImPlot3D::SetupAxisLimits(ImAxis3D_Z, zMinF - zPad, zMaxF + zPad, ImPlot3DCond_Always);
+            ImPlot3D::SetupAxisLimits(ImAxis3D_Y, yMinF * 0.9f, yMaxF * 1.1f, ImPlot3DCond_Always);
+            ImPlot3D::SetupAxisLimits(ImAxis3D_Z, zMinF - 1.0f, zMaxF + 1.0f, ImPlot3DCond_Always);
 
             {
                 float xRange = xMax - xMin;
@@ -222,45 +219,67 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
                 for (int i = 0; i < xTicks; ++i)
                     xt[i] = (double)(xMin + xRange * i / (xTicks - 1));
                 ImPlot3D::SetupAxisTicks(ImAxis3D_X, xt.data(), xTicks);
-
-                float yRange = yMaxF - yMinF;
-                if (yRange <= 0) yRange = 1.0f;
-                int yTicks = 5;
-                std::vector<double> yt(yTicks);
-                for (int i = 0; i < yTicks; ++i)
-                    yt[i] = (double)(yMinF + yRange * i / (yTicks - 1));
-                ImPlot3D::SetupAxisTicks(ImAxis3D_Y, yt.data(), yTicks);
-
-                float zRange = zMaxF - zMinF;
-                if (zRange <= 0) zRange = 1.0f;
-                int zTicks = 5;
-                std::vector<double> zt(zTicks);
-                for (int i = 0; i < zTicks; ++i)
-                    zt[i] = (double)(zMinF + zRange * i / (zTicks - 1));
-                ImPlot3D::SetupAxisTicks(ImAxis3D_Z, zt.data(), zTicks);
             }
 
             ImPlot3D::PushColormap(ImPlot3DColormap_Viridis);
+            ImPlot3DSpec surfSpec;
+            surfSpec.FillAlpha = 0.85f;
             ImPlot3D::PlotSurface("AllanSurf", xs_f.data(), ys_f.data(), zs_f.data(),
-                                  M, N);
+                                  M, N, 0.0, 0.0, surfSpec);
             ImPlot3D::PopColormap();
 
             if (selectedSliceIndex >= 0 && selectedSliceIndex < M) {
                 float px = displayWl[selectedSliceIndex];
-                float quadXs[4] = { px, px, px, px };
-                float quadYs[4] = { yMinF, yMaxF, yMaxF, yMinF };
-                float quadZs[4] = { zMinF, zMinF, zMaxF, zMaxF };
-                ImPlot3DSpec planeSpec;
-                planeSpec.FillColor = ImVec4(1.0f, 0.9f, 0.3f, 0.25f);
-                ImPlot3D::PlotQuad("##AllanSlicePlaneFill", quadXs, quadYs, quadZs, 4, planeSpec);
 
-                float lineXs[5] = { px, px, px, px, px };
-                float lineYs[5] = { yMinF, yMaxF, yMaxF, yMinF, yMinF };
-                float lineZs[5] = { zMinF, zMinF, zMaxF, zMaxF, zMinF };
-                ImPlot3DSpec lineSpec;
-                lineSpec.LineColor = ImVec4(1.0f, 0.9f, 0.3f, 0.9f);
-                lineSpec.LineWeight = 2.5f;
-                ImPlot3D::PlotLine("##AllanSlicePlaneLine", lineXs, lineYs, lineZs, 5, lineSpec);
+                std::vector<float> curveXs(N);
+                std::vector<float> curveYs(N);
+                std::vector<float> curveZs(N);
+                float curveYmin, curveYmax;
+                for (int i = 0; i < N; ++i) {
+                    curveXs[i] = px;
+                    curveYs[i] = (float)std::max(cachedSurfaceTaus[i], 1.0);
+                    double v = cachedSurfaceAllanVar[selectedSliceIndex * N + i];
+                    curveZs[i] = (float)std::log10(std::max(v, 1e-30));
+                    if (i == 0) { curveYmin = curveYmax = curveYs[i]; }
+                    else {
+                        if (curveYs[i] < curveYmin) curveYmin = curveYs[i];
+                        if (curveYs[i] > curveYmax) curveYmax = curveYs[i];
+                    }
+                }
+                ImPlot3DSpec lineWhite;
+                lineWhite.LineColor = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+                lineWhite.LineWeight = 4.0f;
+
+                std::vector<float> curveZsFront(N);
+                for (int i = 0; i < N; ++i)
+                    curveZsFront[i] = curveZs[i] + 0.2f;
+
+                ImPlot3DSpec lineShadow;
+                lineShadow.LineColor = ImVec4(0.0f, 0.0f, 0.0f, 0.8f);
+                lineShadow.LineWeight = 6.0f;
+                ImPlot3D::PlotLine("##AllanSliceCurveShadow", curveXs.data(), curveYs.data(), curveZsFront.data(), N, lineShadow);
+
+                ImPlot3D::PlotLine("##AllanSliceCurve", curveXs.data(), curveYs.data(), curveZs.data(), N, lineWhite);
+
+                float bottomX[2] = { px, px };
+                float bottomY[2] = { curveYmin, curveYmax };
+                float bottomZ[2] = { zMinF, zMinF };
+                ImPlot3D::PlotLine("##AllanBottomLine", bottomX, bottomY, bottomZ, 2, lineWhite);
+
+                float vLeftX[2]  = { px, px };
+                float vLeftY[2]  = { curveYmin, curveYmin };
+                float vLeftZ[2]  = { zMinF, curveZs[0] };
+                float vLeftZFront[2] = { zMinF, curveZsFront[0] };
+                ImPlot3D::PlotLine("##AllanVLeftShadow", vLeftX, vLeftY, vLeftZFront, 2, lineShadow);
+                ImPlot3D::PlotLine("##AllanVLeft", vLeftX, vLeftY, vLeftZ, 2, lineWhite);
+
+                int lastTau = N - 1;
+                float vRightX[2] = { px, px };
+                float vRightY[2] = { curveYmax, curveYmax };
+                float vRightZ[2] = { zMinF, curveZs[lastTau] };
+                float vRightZFront[2] = { zMinF, curveZsFront[lastTau] };
+                ImPlot3D::PlotLine("##AllanVRightShadow", vRightX, vRightY, vRightZFront, 2, lineShadow);
+                ImPlot3D::PlotLine("##AllanVRight", vRightX, vRightY, vRightZ, 2, lineWhite);
             }
 
             ImPlot3D::EndPlot();
@@ -545,7 +564,7 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
             double wlUm = cachedSurfaceWavelengths[selectedSliceIndex];
             double displayWlVal = convertFromUmToDisplay(wlUm, xUnitSelector);
             ImGui::SameLine();
-            ImGui::Text(" \xCE\xBB = %.4f %s", displayWlVal, unitStr);
+            ImGui::Text("Slice @ %.4f %s", displayWlVal, unitStr);
         }
     }
 }
