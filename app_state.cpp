@@ -117,6 +117,7 @@ void AppState::reset() {
     spectrum.resetSpectrumWindow();
     averageSpectrum.reset();
     snrSpectrum.reset();
+    allanVariance.reset();
     filesSelectedForAveraging.clear();
 }
 
@@ -126,6 +127,10 @@ void AppState::clearAverageSpectrum() {
 
 void AppState::clearSnrSpectrum() {
     snrSpectrum.reset();
+}
+
+void AppState::clearAllanVariance() {
+    allanVariance.reset();
 }
 
 // Global application state instance

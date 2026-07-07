@@ -20,6 +20,7 @@
 #include "spectrum.h"
 #include "average_spectrum.h"
 #include "snr_spectrum.h"
+#include "allan_variance.h"
 #include "spectral_toolbox.h"
 #include "adapters/csv_adapter.h"
 #include "tinyfiledialogs.h"
@@ -505,6 +506,7 @@ int main() {
     appState.spectrum.appState = &appState;
     appState.averageSpectrum.appState = &appState;
     appState.snrSpectrum.appState = &appState;
+    appState.allanVariance.appState = &appState;
     appState.exportPanel.appState = &appState;
     
     // Load average window settings from config
@@ -526,7 +528,10 @@ int main() {
     appState.snrSpectrum.prevYScaleSelector  = config.snrYScaleSelector;
     appState.snrSpectrum.forcedYMin          = config.snrForcedYMin;
     appState.snrSpectrum.forcedYMax          = config.snrForcedYMax;
-    
+
+    appState.allanVariance.targetWavelength  = config.allanTargetWavelength;
+    appState.allanVariance.xUnitSelector     = config.allanXUnitSelector;
+
     // No initialization needed for simple file dialog
     
     // Main loop
@@ -543,6 +548,12 @@ int main() {
         if (appState.snrSpectrum.calcInProgress) {
             appState.needsRedraw = true;
             appState.snrSpectrum.tickCalculation();
+        }
+
+        // Tick Allan variance calculation (multi-frame, one file per frame)
+        if (appState.allanVariance.calcInProgress) {
+            appState.needsRedraw = true;
+            appState.allanVariance.tickCalculation();
         }
 
         // FPS overlay: force periodic redraw when idle so the counter stays live
@@ -722,6 +733,7 @@ int main() {
             appState.rawDataCache.clear();
             appState.clearAverageSpectrum();
             appState.clearSnrSpectrum();
+            appState.clearAllanVariance();
             appState.needsRedraw = true;
         }
 
@@ -905,6 +917,7 @@ int main() {
                             appState.csvFiles = FileBrowser::getCSVFilesInDirectory(appState.currentDirectory);
                             appState.clearAverageSpectrum();
             appState.clearSnrSpectrum();
+            appState.clearAllanVariance();
                             appState.dataLoaded = false;
                             appState.isFirstDataLoad = true;
                             appState.needsRedraw = true;
@@ -939,6 +952,7 @@ int main() {
                                         appState.csvFiles = FileBrowser::getCSVFilesInDirectory(appState.currentDirectory);
                                         appState.clearAverageSpectrum();
             appState.clearSnrSpectrum();
+            appState.clearAllanVariance();
                                         appState.dataLoaded = false;
                                         appState.filesChanged = true;
                                         appState.currentSortedFileIndex = 0;
@@ -1072,12 +1086,14 @@ int main() {
                     ImGui::DockBuilderDockWindow("Metadata",           dock_left_bottom_top);
                     ImGui::DockBuilderDockWindow("Export",             dock_left_bottom_top);
                     ImGui::DockBuilderDockWindow("SNR",                dock_left_bottom_top);
+                    ImGui::DockBuilderDockWindow("Allan",               dock_left_bottom_top);
                     ImGui::DockBuilderDockWindow("Spectrum",           dock_left_bottom_bottom);
                     ImGui::DockBuilderDockWindow("Interferogram",      dock_left_bottom_bottom);
                     ImGui::DockBuilderDockWindow("Average",            dock_left_bottom_bottom);
                     ImGui::DockBuilderDockWindow("Interferogram View", dock_center);
                     ImGui::DockBuilderDockWindow("SNR View",           dock_right_top);
                     ImGui::DockBuilderDockWindow("Average View",       dock_right_top);
+                    ImGui::DockBuilderDockWindow("Allan View",         dock_right_top);
                     ImGui::DockBuilderDockWindow("Spectrum View",      dock_right_bottom);
                     
                     ImGui::DockBuilderFinish(dockspace_id);
@@ -2640,6 +2656,105 @@ int main() {
         }
         ImGui::End();
 
+        // Allan config panel
+        ImGui::Begin("Allan");
+        if (appState.dataLoaded) {
+            if (!appState.allanVariance.calcInProgress) {
+                int selCount = 0;
+                for (size_t i = 0; i < appState.filesSelectedForAveraging.size(); i++)
+                    if (appState.filesSelectedForAveraging[i]) selCount++;
+                ImGui::Text("Selected: %d files", selCount);
+
+                ImGui::Text("Wavelength");
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(100.0f);
+                ImGui::InputDouble("##AllanWavelength", &appState.allanVariance.targetWavelength, 0.0, 0.0, "%.6g");
+                if (ImGui::IsItemDeactivatedAfterEdit()) appState.needsRedraw = true;
+
+                const ImVec4 btnColors[2] = {
+                    ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
+                    ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
+                };
+
+                ImGui::SameLine();
+                const bool allanCmSel  = (appState.allanVariance.xUnitSelector == 0);
+                const bool allanUmSel  = (appState.allanVariance.xUnitSelector == 1);
+                const bool allanThzSel = (appState.allanVariance.xUnitSelector == 2);
+
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[allanCmSel ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allanCmSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("cm-1##AllanXUnitCm")) { appState.allanVariance.xUnitSelector = 0; appState.needsRedraw = true; }
+                ImGui::PopStyleColor(3);
+                ImGui::SameLine();
+
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[allanUmSel ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allanUmSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("\xC2\xB5""m##AllanXUnitUm")) { appState.allanVariance.xUnitSelector = 1; appState.needsRedraw = true; }
+                ImGui::PopStyleColor(3);
+                ImGui::SameLine();
+
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[allanThzSel ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allanThzSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("THz##AllanXUnitTHz")) { appState.allanVariance.xUnitSelector = 2; appState.needsRedraw = true; }
+                ImGui::PopStyleColor(3);
+
+                if (ImGui::Button("Calculate Allan")) {
+                    appState.allanVariance.startCalculation();
+                    appState.needsRedraw = true;
+                }
+            } else {
+                ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.2f, 0.6f, 0.5f, 1.0f));
+                char pctBuf[48];
+                float pct = appState.allanVariance.progressTotal > 0
+                    ? (float)appState.allanVariance.progressCurrent /
+                      (float)appState.allanVariance.progressTotal
+                    : 0.0f;
+                std::snprintf(pctBuf, sizeof(pctBuf), "Calculating Allan (%.0f%%)", pct * 100.0f);
+                ImGui::ProgressBar(pct,
+                    ImVec2(ImGui::GetContentRegionAvail().x, 0), pctBuf);
+                ImGui::PopStyleColor();
+            }
+
+            ImGui::Separator();
+
+            const ImVec4 cursorBtnColors[2] = {
+                ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
+                ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
+            };
+
+            ImGui::Text("Cursor");
+            ImGui::SameLine();
+            const bool cursorOn = appState.spectrum.showTrackingCursor;
+            ImGui::PushStyleColor(ImGuiCol_Button,        cursorBtnColors[cursorOn ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cursorOn ? cursorBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cursorBtnColors[1]);
+            if (ImGui::Button("On##AllanCursorOn")) {
+                if (!cursorOn) {
+                    appState.spectrum.showTrackingCursor = true;
+                    appState.needsRedraw = true;
+                }
+            }
+            ImGui::PopStyleColor(3);
+            ImGui::SameLine(0.0f, 0.0f);
+            ImGui::PushStyleColor(ImGuiCol_Button,        cursorBtnColors[!cursorOn ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  !cursorOn ? cursorBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cursorBtnColors[1]);
+            if (ImGui::Button("Off##AllanCursorOff")) {
+                if (cursorOn) {
+                    appState.spectrum.showTrackingCursor = false;
+                    appState.needsRedraw = true;
+                }
+            }
+            ImGui::PopStyleColor(3);
+
+        } else {
+            ImGui::Text("No data loaded.");
+        }
+        ImGui::End();
+
         // Interferogram Config panel (docked)
         ImGui::Begin("Interferogram");
         if (appState.dataLoaded) {
@@ -2924,6 +3039,11 @@ int main() {
         appState.snrSpectrum.renderSnrContents(appState.spectrum.showTrackingCursor);
         ImGui::End();
 
+        // Allan View panel (docked)
+        ImGui::Begin("Allan View");
+        appState.allanVariance.renderAllanContents(appState.spectrum.showTrackingCursor);
+        ImGui::End();
+
         // Close the docking condition
         }
         
@@ -3002,7 +3122,11 @@ int main() {
     config.snrYScaleSelector      = appState.snrSpectrum.yScaleSelector;
     config.snrForcedYMin          = appState.snrSpectrum.forcedYMin;
     config.snrForcedYMax          = appState.snrSpectrum.forcedYMax;
-    
+
+    // Save Allan window settings
+    config.allanTargetWavelength   = appState.allanVariance.targetWavelength;
+    config.allanXUnitSelector      = appState.allanVariance.xUnitSelector;
+
     // Save config to file
     if (!config.saveToFile(configFilePath)) {
         std::cerr << "Failed to save configuration to " << configFilePath << std::endl;

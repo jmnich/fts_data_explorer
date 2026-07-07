@@ -55,6 +55,10 @@ struct AppConfig {
     int snrYScaleSelector = 0;
     double snrForcedYMin = 0.0;
     double snrForcedYMax = 1.0;
+
+    // Allan window state
+    double allanTargetWavelength = 2.0;
+    int allanXUnitSelector = 1;
     
     // Add a dataset to recent list (maintains max size, deduplicates)
     void addRecentDataset(const std::string& datasetPath) {
@@ -148,6 +152,11 @@ struct AppConfig {
             configFile << "y_scale_selector=" << snrYScaleSelector << "\n";
             configFile << "forced_y_min=" << snrForcedYMin << "\n";
             configFile << "forced_y_max=" << snrForcedYMax << "\n";
+
+            // Write Allan window settings
+            configFile << "\n[AllanWindow]\n";
+            configFile << "target_wavelength=" << allanTargetWavelength << "\n";
+            configFile << "x_unit_selector=" << allanXUnitSelector << "\n";
             
             configFile.flush();
             configFile.close();
@@ -279,6 +288,12 @@ struct AppConfig {
                             snrForcedYMin = std::stod(value);
                         } else if (key == "forced_y_max") {
                             snrForcedYMax = std::stod(value);
+                        }
+                    } else if (currentSection == "AllanWindow") {
+                        if (key == "target_wavelength") {
+                            allanTargetWavelength = std::stod(value);
+                        } else if (key == "x_unit_selector") {
+                            allanXUnitSelector = std::stoi(value);
                         }
                     }
                 }
