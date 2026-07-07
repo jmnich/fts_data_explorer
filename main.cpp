@@ -33,6 +33,7 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 #include "implot.h"
+#include "implot3d.h"
 #include <GLFW/glfw3.h>
 
 // Simple file dialog implementation (replaces NFD)
@@ -193,6 +194,7 @@ bool initializeApplication(AppConfig& config, GLFWwindow*& window) {
 
     // Initialize ImPlot context
     ImPlot::CreateContext();
+    ImPlot3D::CreateContext();
     
     // Optimize for large datasets - disable anti-aliasing (will be conditionally applied)
     // ImGuiStyle& style = ImGui::GetStyle();
@@ -368,6 +370,8 @@ void handleUIScaling(ImGuiIO& io, float& uiScale, const std::string& currentUiSi
 void cleanupApplication(GLFWwindow* window) {
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
+    ImPlot3D::DestroyContext();
+    ImPlot::DestroyContext();
     ImGui::DestroyContext();
     
     glfwDestroyWindow(window);
@@ -529,8 +533,11 @@ int main() {
     appState.snrSpectrum.forcedYMin          = config.snrForcedYMin;
     appState.snrSpectrum.forcedYMax          = config.snrForcedYMax;
 
-    appState.allanVariance.targetWavelength  = config.allanTargetWavelength;
-    appState.allanVariance.xUnitSelector     = config.allanXUnitSelector;
+    appState.allanVariance.xUnitSelector        = config.allanXUnitSelector;
+    appState.allanVariance.wavelengthDecimation  = config.allanWavelengthDecimation;
+    appState.allanVariance.selectedSliceIndex    = config.allanSliceIndex;
+    appState.allanVariance.xRangeMin             = config.allanXRangeMin;
+    appState.allanVariance.xRangeMax             = config.allanXRangeMax;
 
     // No initialization needed for simple file dialog
     
@@ -2665,17 +2672,68 @@ int main() {
                     if (appState.filesSelectedForAveraging[i]) selCount++;
                 ImGui::Text("Selected: %d files", selCount);
 
-                ImGui::Text("Wavelength");
+                // X range min/max (stored in um, displayed in selected unit)
+                {
+                    double displayMin = appState.allanVariance.xRangeMin;
+                    double displayMax = appState.allanVariance.xRangeMax;
+                    if (appState.allanVariance.xUnitSelector == 0) {
+                        displayMin = SpectralToolbox::convertUmToCm(appState.allanVariance.xRangeMin);
+                        displayMax = SpectralToolbox::convertUmToCm(appState.allanVariance.xRangeMax);
+                    } else if (appState.allanVariance.xUnitSelector == 2) {
+                        displayMin = SpectralToolbox::convertUmToTHz(appState.allanVariance.xRangeMin);
+                        displayMax = SpectralToolbox::convertUmToTHz(appState.allanVariance.xRangeMax);
+                    }
+                    const char* unitStr = (appState.allanVariance.xUnitSelector == 0) ? "cm-1"
+                                        : (appState.allanVariance.xUnitSelector == 1) ? "\xC2\xB5""m"
+                                                                                       : "THz";
+                    ImGui::Text("X range (%s)", unitStr);
+                    ImGui::SameLine();
+                    ImGui::Text("min:");
+                    ImGui::SameLine();
+                    ImGui::SetNextItemWidth(90.0f);
+                    if (ImGui::InputDouble("##AllanXRangeMin", &displayMin, 0.0, 0.0, "%.6g")) {
+                        if (appState.allanVariance.xUnitSelector == 0)
+                            appState.allanVariance.xRangeMin = SpectralToolbox::convertCmToUm(displayMin);
+                        else if (appState.allanVariance.xUnitSelector == 2)
+                            appState.allanVariance.xRangeMin = SpectralToolbox::convertTHzToUm(displayMin);
+                        else
+                            appState.allanVariance.xRangeMin = displayMin;
+                        appState.needsRedraw = true;
+                    }
+                    ImGui::SameLine();
+                    ImGui::Text("max:");
+                    ImGui::SameLine();
+                    ImGui::SetNextItemWidth(90.0f);
+                    if (ImGui::InputDouble("##AllanXRangeMax", &displayMax, 0.0, 0.0, "%.6g")) {
+                        if (appState.allanVariance.xUnitSelector == 0)
+                            appState.allanVariance.xRangeMax = SpectralToolbox::convertCmToUm(displayMax);
+                        else if (appState.allanVariance.xUnitSelector == 2)
+                            appState.allanVariance.xRangeMax = SpectralToolbox::convertTHzToUm(displayMax);
+                        else
+                            appState.allanVariance.xRangeMax = displayMax;
+                        appState.needsRedraw = true;
+                    }
+                    if (appState.allanVariance.xRangeMin >= appState.allanVariance.xRangeMax) {
+                        ImGui::SameLine();
+                        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "(min<max!)");
+                    }
+                }
+
+                ImGui::Text("Decimation");
                 ImGui::SameLine();
-                ImGui::SetNextItemWidth(100.0f);
-                ImGui::InputDouble("##AllanWavelength", &appState.allanVariance.targetWavelength, 0.0, 0.0, "%.6g");
-                if (ImGui::IsItemDeactivatedAfterEdit()) appState.needsRedraw = true;
+                ImGui::SetNextItemWidth(80.0f);
+                if (ImGui::InputInt("##AllanDecimation", &appState.allanVariance.wavelengthDecimation, 1, 1)) {
+                    if (appState.allanVariance.wavelengthDecimation < 1)
+                        appState.allanVariance.wavelengthDecimation = 1;
+                    appState.needsRedraw = true;
+                }
 
                 const ImVec4 btnColors[2] = {
                     ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
                     ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
                 };
 
+                ImGui::Text("X unit");
                 ImGui::SameLine();
                 const bool allanCmSel  = (appState.allanVariance.xUnitSelector == 0);
                 const bool allanUmSel  = (appState.allanVariance.xUnitSelector == 1);
@@ -3124,8 +3182,11 @@ int main() {
     config.snrForcedYMax          = appState.snrSpectrum.forcedYMax;
 
     // Save Allan window settings
-    config.allanTargetWavelength   = appState.allanVariance.targetWavelength;
-    config.allanXUnitSelector      = appState.allanVariance.xUnitSelector;
+    config.allanXUnitSelector        = appState.allanVariance.xUnitSelector;
+    config.allanWavelengthDecimation = appState.allanVariance.wavelengthDecimation;
+    config.allanSliceIndex           = appState.allanVariance.selectedSliceIndex;
+    config.allanXRangeMin            = appState.allanVariance.xRangeMin;
+    config.allanXRangeMax            = appState.allanVariance.xRangeMax;
 
     // Save config to file
     if (!config.saveToFile(configFilePath)) {

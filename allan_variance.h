@@ -13,10 +13,15 @@ class AllanVariance {
 public:
     AppState* appState;
 
-    std::vector<double> cachedTauX;
-    std::vector<double> cachedAllanVarY;
+    std::vector<double> cachedSurfaceWavelengths;
+    std::vector<double> cachedSurfaceTaus;
+    std::vector<double> cachedSurfaceAllanVar;
+    int numSurfaceWavelengths;
+    int numSurfaceTaus;
     int fileCount;
     bool allanAvailable;
+
+    int selectedSliceIndex;
 
     bool calcInProgress;
     int progressTotal;
@@ -43,9 +48,11 @@ public:
     double pendingNextXMax;
 
     int xUnitSelector;
-    double targetWavelength;
+    int wavelengthDecimation;
+    double xRangeMin;
+    double xRangeMax;
 
-    std::vector<double> calcSignalTimeSeries;
+    std::vector<std::vector<double>> calcAllSpectra;
     std::vector<double> calcCommonX;
     size_t calcNumBins;
 

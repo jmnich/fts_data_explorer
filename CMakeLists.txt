@@ -49,6 +49,14 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(implot)
 
+# Download and include ImPlot3D for 3D plotting
+FetchContent_Declare(
+    implot3d
+    GIT_REPOSITORY https://github.com/brenocq/implot3d.git
+    GIT_TAG main
+)
+FetchContent_MakeAvailable(implot3d)
+
 # Download tinyfiledialogs for cross-platform directory selection
 FetchContent_Declare(
     tinyfiledialogs
@@ -72,6 +80,8 @@ list(APPEND EXTRA_SOURCES
     ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
     ${implot_SOURCE_DIR}/implot.cpp
     ${implot_SOURCE_DIR}/implot_items.cpp
+    ${implot3d_SOURCE_DIR}/implot3d.cpp
+    ${implot3d_SOURCE_DIR}/implot3d_items.cpp
 )
 
 # Configure FFTW to build static libraries
@@ -105,6 +115,7 @@ include_directories(
     ${imgui_SOURCE_DIR}
     ${imgui_SOURCE_DIR}/backends
     ${implot_SOURCE_DIR}
+    ${implot3d_SOURCE_DIR}
     ${tinyfiledialogs_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/fftw-3.3.10/api  # FFTW headers
     ${CMAKE_BINARY_DIR}/generated        # xxd-generated asset headers
@@ -171,6 +182,7 @@ target_link_libraries(fts_data_explorer
 # Add compile definitions for imgui
 target_compile_definitions(fts_data_explorer PRIVATE
     IMGUI_IMPL_OPENGL_LOADER_GLAD=0
+    IMGUI_USER_CONFIG="imconfig_custom.h"
 )
 
 # Install targets (optional)

@@ -57,8 +57,11 @@ struct AppConfig {
     double snrForcedYMax = 1.0;
 
     // Allan window state
-    double allanTargetWavelength = 2.0;
     int allanXUnitSelector = 1;
+    int allanWavelengthDecimation = 5;
+    int allanSliceIndex = 0;
+    double allanXRangeMin = 1.0;
+    double allanXRangeMax = 30.0;
     
     // Add a dataset to recent list (maintains max size, deduplicates)
     void addRecentDataset(const std::string& datasetPath) {
@@ -155,8 +158,11 @@ struct AppConfig {
 
             // Write Allan window settings
             configFile << "\n[AllanWindow]\n";
-            configFile << "target_wavelength=" << allanTargetWavelength << "\n";
             configFile << "x_unit_selector=" << allanXUnitSelector << "\n";
+            configFile << "wavelength_decimation=" << allanWavelengthDecimation << "\n";
+            configFile << "slice_index=" << allanSliceIndex << "\n";
+            configFile << "x_range_min=" << allanXRangeMin << "\n";
+            configFile << "x_range_max=" << allanXRangeMax << "\n";
             
             configFile.flush();
             configFile.close();
@@ -290,10 +296,18 @@ struct AppConfig {
                             snrForcedYMax = std::stod(value);
                         }
                     } else if (currentSection == "AllanWindow") {
-                        if (key == "target_wavelength") {
-                            allanTargetWavelength = std::stod(value);
-                        } else if (key == "x_unit_selector") {
+                        if (key == "x_unit_selector") {
                             allanXUnitSelector = std::stoi(value);
+                        } else if (key == "wavelength_decimation") {
+                            allanWavelengthDecimation = std::stoi(value);
+                        } else if (key == "slice_index") {
+                            allanSliceIndex = std::stoi(value);
+                        } else if (key == "x_range_min") {
+                            allanXRangeMin = std::stod(value);
+                        } else if (key == "x_range_max") {
+                            allanXRangeMax = std::stod(value);
+                        } else if (key == "target_wavelength") {
+                            // legacy field — ignore
                         }
                     }
                 }

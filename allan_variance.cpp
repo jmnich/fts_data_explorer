@@ -2,6 +2,7 @@
 #include "spectral_toolbox.h"
 #include "adapters/csv_adapter.h"
 #include "app_state.h"
+#include "implot3d.h"
 #include <cmath>
 #include <algorithm>
 #include <cstdio>
@@ -28,9 +29,26 @@ static void SetupAxisTicksLimited(ImAxis axis, double min, double max, int maxTi
         ImPlot::SetupAxisTicks(axis, ticks.data(), ticks.size(), nullptr);
 }
 
+static double convertToUm(double value, int unit) {
+    using ST = SpectralToolbox::SpectrumXUnit;
+    if (unit == 0) return SpectralToolbox::convertCmToUm(value);
+    if (unit == 2) return SpectralToolbox::convertTHzToUm(value);
+    return value;
+}
+
+static double convertFromUmToDisplay(double um, int unit) {
+    using ST = SpectralToolbox::SpectrumXUnit;
+    if (unit == 0) return SpectralToolbox::convertUmToCm(um);
+    if (unit == 2) return SpectralToolbox::convertUmToTHz(um);
+    return um;
+}
+
 AllanVariance::AllanVariance()
-    : fileCount(0),
+    : numSurfaceWavelengths(0),
+      numSurfaceTaus(0),
+      fileCount(0),
       allanAvailable(false),
+      selectedSliceIndex(0),
       calcInProgress(false),
       progressTotal(0),
       progressCurrent(0),
@@ -53,19 +71,25 @@ AllanVariance::AllanVariance()
       pendingNextXMin(0.0),
       pendingNextXMax(-1.0),
       xUnitSelector(1),
-      targetWavelength(2.0),
+      wavelengthDecimation(5),
+      xRangeMin(1.0),
+      xRangeMax(30.0),
       calcNumBins(0)
 {}
 
 void AllanVariance::reset() {
-    cachedTauX.clear();
-    cachedAllanVarY.clear();
+    cachedSurfaceWavelengths.clear();
+    cachedSurfaceTaus.clear();
+    cachedSurfaceAllanVar.clear();
+    numSurfaceWavelengths = 0;
+    numSurfaceTaus = 0;
     fileCount = 0;
     allanAvailable = false;
+    selectedSliceIndex = 0;
     calcInProgress = false;
     progressTotal = 0;
     progressCurrent = 0;
-    calcSignalTimeSeries.clear();
+    calcAllSpectra.clear();
     calcCommonX.clear();
     calcNumBins = 0;
 
@@ -87,9 +111,17 @@ void AllanVariance::reset() {
     pendingNextXMin = 0.0;
     pendingNextXMax = -1.0;
 }
+static std::vector<double> getSliceData(const std::vector<double>& surfaceZ,
+                                         int sliceIdx, int numWavelengths, int numTaus) {
+    std::vector<double> slice(numTaus);
+    for (int j = 0; j < numTaus; ++j)
+        slice[j] = surfaceZ[sliceIdx * numTaus + j];
+    return slice;
+}
 
 void AllanVariance::renderAllanContents(bool showTrackingCursor) {
-    if (!allanAvailable || cachedTauX.empty() || cachedAllanVarY.empty()) {
+    if (!allanAvailable || cachedSurfaceWavelengths.empty() ||
+        cachedSurfaceTaus.empty() || cachedSurfaceAllanVar.empty()) {
         ImVec2 avail = ImGui::GetContentRegionAvail();
         ImVec2 textSize = ImGui::CalcTextSize("No Allan variance available");
         ImGui::SetCursorPos(ImVec2(
@@ -103,241 +135,418 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
         const char* unitStr = (xUnitSelector == 0) ? "cm-1"
                            : (xUnitSelector == 1) ? "\xC2\xB5""m"
                                                    : "THz";
+        double wl = convertFromUmToDisplay(cachedSurfaceWavelengths[selectedSliceIndex], xUnitSelector);
         char buf[128];
-        std::snprintf(buf, sizeof(buf), "Allan, %d files, \xCE\xBB=%.3f %s", fileCount, targetWavelength, unitStr);
+        std::snprintf(buf, sizeof(buf), "Allan, %d files, \xCE\xBB=%.3f %s",
+                      fileCount, wl, unitStr);
         ImVec2 textSz = ImGui::CalcTextSize(buf);
         float availWidth = ImGui::GetContentRegionAvail().x;
         ImGui::SameLine(availWidth - textSz.x - ImGui::GetStyle().ItemSpacing.x);
         ImGui::Text("%s", buf);
     }
 
-    bool isFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
-    if (isFocused && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-        shouldAutoscale = true;
-        pendingNextXMin = 0.0;
-        pendingNextXMax = -1.0;
-        manualXMin = 0.0;
-        manualXMax = 0.0;
-    }
-    if (!isFocused) {
-        leftArrowPressedLastFrame = false;
-        rightArrowPressedLastFrame = false;
-        leftArrowHandleFlag = false;
-        rightArrowHandleFlag = false;
+    float totalHeight = ImGui::GetContentRegionAvail().y;
+    float surfaceHeight = totalHeight * 0.50f;
+    float plot2dHeight  = totalHeight * 0.35f;
+    float sliderHeight  = totalHeight * 0.15f;
+
+    // ---- 3D Surface ----
+    if (surfaceHeight > 60.0f) {
+        ImPlot3DFlags plot3dFlags = ImPlot3DFlags_NoTitle;
+        if (ImPlot3D::BeginPlot("Allan3DSurface", ImVec2(-1, surfaceHeight), plot3dFlags)) {
+            const int M = numSurfaceWavelengths;
+            const int N = numSurfaceTaus;
+            const int total = M * N;
+
+            std::vector<float> xs_f(total);
+            std::vector<float> ys_f(total);
+            std::vector<float> zs_f(total);
+
+            std::vector<float> displayWl(M);
+            std::vector<float> displayTau(N);
+            for (int i = 0; i < M; ++i)
+                displayWl[i] = (float)convertFromUmToDisplay(cachedSurfaceWavelengths[i], xUnitSelector);
+            for (int i = 0; i < N; ++i)
+                displayTau[i] = (float)cachedSurfaceTaus[i];
+
+            float xMin = displayWl[0], xMax = displayWl[0];
+            float yMinF = displayTau[0], yMaxF = displayTau[0];
+            float zMinF = 0, zMaxF = 0;
+            bool firstZ = true;
+
+            for (int j = 0; j < M; ++j) {
+                float xv = displayWl[j];
+                if (xv < xMin) xMin = xv;
+                if (xv > xMax) xMax = xv;
+            }
+            for (int i = 0; i < N; ++i) {
+                float yv = displayTau[i];
+                if (yv < yMinF) yMinF = yv;
+                if (yv > yMaxF) yMaxF = yv;
+            }
+
+            for (int i = 0; i < N; ++i) {
+                float yVal = displayTau[i];
+                for (int j = 0; j < M; ++j) {
+                    int idx = i * M + j;
+                    xs_f[idx] = displayWl[j];
+                    ys_f[idx] = yVal;
+                    double v = cachedSurfaceAllanVar[j * N + i];
+                    float z = (float)std::log10(std::max(v, 1e-300));
+                    zs_f[idx] = z;
+                    if (firstZ) { zMinF = z; zMaxF = z; firstZ = false; }
+                    else { if (z < zMinF) zMinF = z; if (z > zMaxF) zMaxF = z; }
+                }
+            }
+
+            float xPad = (xMax - xMin) * 0.05f;
+            float yPad = (yMaxF - yMinF) * 0.10f;
+            float zPad = (zMaxF - zMinF) * 0.10f;
+
+            const char* xLabel = (xUnitSelector == 0) ? "Wavenumber (cm-1)"
+                               : (xUnitSelector == 1) ? "Wavelength (\xC2\xB5""m)"
+                                                      : "Frequency (THz)";
+            ImPlot3D::SetupAxis(ImAxis3D_X, xLabel);
+            ImPlot3D::SetupAxis(ImAxis3D_Y, "Tau (measurements)");
+            ImPlot3D::SetupAxis(ImAxis3D_Z, "lg(AV)");
+
+            ImPlot3D::SetupAxisLimits(ImAxis3D_X, xMin - xPad, xMax + xPad, ImPlot3DCond_Always);
+            ImPlot3D::SetupAxisLimits(ImAxis3D_Y, yMinF - yPad, yMaxF + yPad, ImPlot3DCond_Always);
+            ImPlot3D::SetupAxisLimits(ImAxis3D_Z, zMinF - zPad, zMaxF + zPad, ImPlot3DCond_Always);
+
+            {
+                float xRange = xMax - xMin;
+                if (xRange <= 0) xRange = 1.0f;
+                int xTicks = 5;
+                std::vector<double> xt(xTicks);
+                for (int i = 0; i < xTicks; ++i)
+                    xt[i] = (double)(xMin + xRange * i / (xTicks - 1));
+                ImPlot3D::SetupAxisTicks(ImAxis3D_X, xt.data(), xTicks);
+
+                float yRange = yMaxF - yMinF;
+                if (yRange <= 0) yRange = 1.0f;
+                int yTicks = 5;
+                std::vector<double> yt(yTicks);
+                for (int i = 0; i < yTicks; ++i)
+                    yt[i] = (double)(yMinF + yRange * i / (yTicks - 1));
+                ImPlot3D::SetupAxisTicks(ImAxis3D_Y, yt.data(), yTicks);
+
+                float zRange = zMaxF - zMinF;
+                if (zRange <= 0) zRange = 1.0f;
+                int zTicks = 5;
+                std::vector<double> zt(zTicks);
+                for (int i = 0; i < zTicks; ++i)
+                    zt[i] = (double)(zMinF + zRange * i / (zTicks - 1));
+                ImPlot3D::SetupAxisTicks(ImAxis3D_Z, zt.data(), zTicks);
+            }
+
+            ImPlot3D::PushColormap(ImPlot3DColormap_Viridis);
+            ImPlot3D::PlotSurface("AllanSurf", xs_f.data(), ys_f.data(), zs_f.data(),
+                                  M, N);
+            ImPlot3D::PopColormap();
+
+            if (selectedSliceIndex >= 0 && selectedSliceIndex < M) {
+                float px = displayWl[selectedSliceIndex];
+                float quadXs[4] = { px, px, px, px };
+                float quadYs[4] = { yMinF, yMaxF, yMaxF, yMinF };
+                float quadZs[4] = { zMinF, zMinF, zMaxF, zMaxF };
+                ImPlot3DSpec planeSpec;
+                planeSpec.FillColor = ImVec4(1.0f, 0.9f, 0.3f, 0.25f);
+                ImPlot3D::PlotQuad("##AllanSlicePlaneFill", quadXs, quadYs, quadZs, 4, planeSpec);
+
+                float lineXs[5] = { px, px, px, px, px };
+                float lineYs[5] = { yMinF, yMaxF, yMaxF, yMinF, yMinF };
+                float lineZs[5] = { zMinF, zMinF, zMaxF, zMaxF, zMinF };
+                ImPlot3DSpec lineSpec;
+                lineSpec.LineColor = ImVec4(1.0f, 0.9f, 0.3f, 0.9f);
+                lineSpec.LineWeight = 2.5f;
+                ImPlot3D::PlotLine("##AllanSlicePlaneLine", lineXs, lineYs, lineZs, 5, lineSpec);
+            }
+
+            ImPlot3D::EndPlot();
+        }
     }
 
-    if (isFocused) {
-        if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) && !leftArrowPressedLastFrame) {
-            leftArrowPressedLastFrame = true;
-            leftArrowHandleFlag = true;
-        } else if (ImGui::IsKeyReleased(ImGuiKey_LeftArrow)) {
-            leftArrowPressedLastFrame = false;
-            leftArrowHandleFlag = false;
+    // ---- 2D slice ----
+    std::vector<double> sliceY = getSliceData(cachedSurfaceAllanVar,
+                                               selectedSliceIndex,
+                                               numSurfaceWavelengths,
+                                               numSurfaceTaus);
+
+    if (plot2dHeight > 40.0f) {
+        bool isFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
+        if (isFocused && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            shouldAutoscale = true;
+            pendingNextXMin = 0.0;
+            pendingNextXMax = -1.0;
+            manualXMin = 0.0;
+            manualXMax = 0.0;
         }
-        if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) && !rightArrowPressedLastFrame) {
-            rightArrowPressedLastFrame = true;
-            rightArrowHandleFlag = true;
-        } else if (ImGui::IsKeyReleased(ImGuiKey_RightArrow)) {
+        if (!isFocused) {
+            leftArrowPressedLastFrame = false;
             rightArrowPressedLastFrame = false;
+            leftArrowHandleFlag = false;
             rightArrowHandleFlag = false;
         }
-    }
 
-    if (!shouldAutoscale && pendingNextXMin >= pendingNextXMax) {
-        double range = manualXMax - manualXMin;
-        if (range > 0.0 && manualXMin < manualXMax) {
-            if (leftArrowHandleFlag) {
-                double panAmount = range * 0.1;
-                double newMin = manualXMin - panAmount;
-                double newMax = manualXMax - panAmount;
-                ImPlot::SetNextAxisLimits(ImAxis_X1, newMin, newMax, ImPlotCond_Always);
+        if (isFocused) {
+            if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) && !leftArrowPressedLastFrame) {
+                leftArrowPressedLastFrame = true;
+                leftArrowHandleFlag = true;
+            } else if (ImGui::IsKeyReleased(ImGuiKey_LeftArrow)) {
+                leftArrowPressedLastFrame = false;
+                leftArrowHandleFlag = false;
             }
-            if (rightArrowHandleFlag) {
-                double panAmount = range * 0.1;
-                double newMin = manualXMin + panAmount;
-                double newMax = manualXMax + panAmount;
-                ImPlot::SetNextAxisLimits(ImAxis_X1, newMin, newMax, ImPlotCond_Always);
+            if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) && !rightArrowPressedLastFrame) {
+                rightArrowPressedLastFrame = true;
+                rightArrowHandleFlag = true;
+            } else if (ImGui::IsKeyReleased(ImGuiKey_RightArrow)) {
+                rightArrowPressedLastFrame = false;
+                rightArrowHandleFlag = false;
             }
         }
-    }
 
-    if (pendingNextXMin < pendingNextXMax) {
-        ImPlot::SetNextAxisLimits(ImAxis_X1, pendingNextXMin, pendingNextXMax, ImPlotCond_Always);
-        manualXMin = pendingNextXMin;
-        manualXMax = pendingNextXMax;
-        shouldAutoscale = false;
-        pendingNextXMin = 0.0;
-        pendingNextXMax = -1.0;
-    }
+        if (!shouldAutoscale && pendingNextXMin >= pendingNextXMax) {
+            double range = manualXMax - manualXMin;
+            if (range > 0.0 && manualXMin < manualXMax) {
+                if (leftArrowHandleFlag) {
+                    double panAmount = range * 0.1;
+                    double newMin = manualXMin - panAmount;
+                    double newMax = manualXMax - panAmount;
+                    ImPlot::SetNextAxisLimits(ImAxis_X1, newMin, newMax, ImPlotCond_Always);
+                }
+                if (rightArrowHandleFlag) {
+                    double panAmount = range * 0.1;
+                    double newMin = manualXMin + panAmount;
+                    double newMax = manualXMax + panAmount;
+                    ImPlot::SetNextAxisLimits(ImAxis_X1, newMin, newMax, ImPlotCond_Always);
+                }
+            }
+        }
 
-    ImPlotFlags plot_flags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend;
-    if (ImPlot::BeginPlot("AllanViewPlot", ImVec2(-1, -1), plot_flags)) {
-
-        ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
-        ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Log10);
-
-        ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoTickMarks;
-        ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
-
-        ImPlot::SetupAxes("Integration Time (measurements)", "Allan Variance", x_flags, y_flags);
-
-        if (shouldAutoscale && !cachedTauX.empty()) {
-            double xMin = std::min(cachedTauX.front(), cachedTauX.back());
-            double xMax = std::max(cachedTauX.front(), cachedTauX.back());
-
-            auto mmY = std::minmax_element(cachedAllanVarY.begin(), cachedAllanVarY.end());
-            double yMin = *mmY.first;
-            double yMax = *mmY.second;
-
-            if (xMin < xMax)
-                ImPlot::SetupAxisLimits(ImAxis_X1, xMin, xMax, ImPlotCond_Always);
-            if (yMin <= 0.0) yMin = (yMax > 0.0 ? yMax * 1e-12 : 1e-12);
-            ImPlot::SetupAxisLimits(ImAxis_Y1, yMin, yMax, ImPlotCond_Always);
+        if (pendingNextXMin < pendingNextXMax) {
+            ImPlot::SetNextAxisLimits(ImAxis_X1, pendingNextXMin, pendingNextXMax, ImPlotCond_Always);
+            manualXMin = pendingNextXMin;
+            manualXMax = pendingNextXMax;
             shouldAutoscale = false;
+            pendingNextXMin = 0.0;
+            pendingNextXMax = -1.0;
         }
 
-        if (!firstLoadCompleted && !cachedTauX.empty()) {
-            if (manualXMin == 0.0 && manualXMax == 0.0)
+        ImPlotFlags plot_flags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend;
+        if (ImPlot::BeginPlot("AllanViewPlot", ImVec2(-1, plot2dHeight), plot_flags)) {
+
+            ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
+            ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Log10);
+
+            ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoTickMarks;
+            ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
+
+            ImPlot::SetupAxes("Integration Time (measurements)", "Allan Variance", x_flags, y_flags);
+
+            if (shouldAutoscale && !cachedSurfaceTaus.empty()) {
+                double xMin = std::min(cachedSurfaceTaus.front(), cachedSurfaceTaus.back());
+                double xMax = std::max(cachedSurfaceTaus.front(), cachedSurfaceTaus.back());
+
+                auto mmY = std::minmax_element(sliceY.begin(), sliceY.end());
+                double yMin = *mmY.first;
+                double yMax = *mmY.second;
+
+                if (xMin < xMax)
+                    ImPlot::SetupAxisLimits(ImAxis_X1, xMin, xMax, ImPlotCond_Always);
+                if (yMin <= 0.0) yMin = (yMax > 0.0 ? yMax * 1e-12 : 1e-12);
+                ImPlot::SetupAxisLimits(ImAxis_Y1, yMin, yMax, ImPlotCond_Always);
+                shouldAutoscale = false;
+            }
+
+            if (!firstLoadCompleted && !cachedSurfaceTaus.empty()) {
+                if (manualXMin == 0.0 && manualXMax == 0.0)
+                    shouldAutoscale = true;
+                firstLoadCompleted = true;
+            }
+
+            {
+                double xMin = manualXMin;
+                double xMax = manualXMax;
+                double yMin = savedYMin;
+                double yMax = savedYMax;
+                if (yMin >= yMax) {
+                    auto mmY = std::minmax_element(sliceY.begin(), sliceY.end());
+                    yMin = *mmY.first;
+                    yMax = *mmY.second;
+                }
+                if (xMin >= xMax) {
+                    xMin = std::min(cachedSurfaceTaus.front(), cachedSurfaceTaus.back());
+                    xMax = std::max(cachedSurfaceTaus.front(), cachedSurfaceTaus.back());
+                }
+                if (xMin < xMax) SetupAxisTicksLimited(ImAxis_X1, xMin, xMax);
+                if (yMin < yMax) SetupAxisTicksLimited(ImAxis_Y1, yMin, yMax);
+            }
+
+            {
+                bool shift = ImGui::GetIO().KeyShift;
+                bool overPlot = ImPlot::IsPlotHovered();
+                if (isFocused && overPlot && shift && !isSelectingXRange) {
+                    isSelectingXRange = true;
+                    selectionStartX = 0.0;
+                    selectionEndX = 0.0;
+                } else if (!shift && isSelectingXRange) {
+                    isSelectingXRange = false;
+                    if (selectionStartX != selectionEndX) {
+                        double sX = selectionStartX;
+                        double eX = selectionEndX;
+                        if (sX > eX) std::swap(sX, eX);
+                        pendingNextXMin = sX;
+                        pendingNextXMax = eX;
+                        manualXMin = sX;
+                        manualXMax = eX;
+                        shouldAutoscale = false;
+                    }
+                }
+            }
+
+            {
+                ImPlotSpec spec;
+                spec.LineColor = ImVec4(0.2f, 0.6f, 0.5f, 1.0f);
+                spec.LineWeight = 2.0f;
+                ImPlot::PlotLine("Allan", cachedSurfaceTaus.data(), sliceY.data(),
+                                 (int)sliceY.size(), spec);
+            }
+
+            if (isSelectingXRange) {
+                ImPlotPoint mousePos = ImPlot::GetPlotMousePos();
+                double x_min_plot = ImPlot::GetPlotLimits().X.Min;
+                double x_max_plot = ImPlot::GetPlotLimits().X.Max;
+                double y_min_plot = ImPlot::GetPlotLimits().Y.Min;
+                double y_max_plot = ImPlot::GetPlotLimits().Y.Max;
+                if (selectionStartX == 0.0 && selectionEndX == 0.0)
+                    selectionStartX = mousePos.x;
+                double constrainedMouseX = std::clamp(mousePos.x, x_min_plot, x_max_plot);
+                selectionEndX = constrainedMouseX;
+                double selection_left = std::min(selectionStartX, selectionEndX);
+                double selection_right = std::max(selectionStartX, selectionEndX);
+                selection_left = std::clamp(selection_left, x_min_plot, x_max_plot);
+                selection_right = std::clamp(selection_right, x_min_plot, x_max_plot);
+                double shade_x[2] = {selection_left, selection_right};
+                double shade_y1[2] = {y_min_plot, y_min_plot};
+                double shade_y2[2] = {y_max_plot, y_max_plot};
+                ImPlotSpec fillSpec;
+                fillSpec.FillColor = ImVec4(0.5f, 0.0f, 0.5f, 0.3f);
+                ImPlot::PlotShaded("##AllanSelectionFill", shade_x, shade_y1, shade_y2, 2, fillSpec);
+                double start_x[2] = {selectionStartX, selectionStartX};
+                double start_y[2] = {y_min_plot, y_max_plot};
+                double end_x[2] = {selectionEndX, selectionEndX};
+                double end_y[2] = {y_min_plot, y_max_plot};
+                ImPlot::PlotLine("##AllanSelectionStart", start_x, start_y, 2);
+                ImPlot::PlotLine("##AllanSelectionEnd", end_x, end_y, 2);
+            }
+
+            if (showTrackingCursor && ImPlot::IsPlotHovered()) {
+                ImPlotPoint mousePos = ImPlot::GetPlotMousePos();
+                double signalY = mousePos.y;
+                if (!cachedSurfaceTaus.empty() && !sliceY.empty()) {
+                    const auto& taus = cachedSurfaceTaus;
+                    const auto& vars = sliceY;
+                    size_t idx = 0;
+                    if (taus.front() < taus.back()) {
+                        auto it = std::lower_bound(taus.begin(), taus.end(), mousePos.x);
+                        if (it == taus.begin()) idx = 0;
+                        else if (it == taus.end()) idx = taus.size() - 1;
+                        else {
+                            size_t hi = it - taus.begin();
+                            size_t lo = hi - 1;
+                            idx = (mousePos.x - taus[lo] <= taus[hi] - mousePos.x) ? lo : hi;
+                        }
+                    } else {
+                        auto it = std::lower_bound(taus.begin(), taus.end(), mousePos.x,
+                                                    std::greater<double>());
+                        if (it == taus.begin()) idx = 0;
+                        else if (it == taus.end()) idx = taus.size() - 1;
+                        else {
+                            size_t hi = it - taus.begin();
+                            size_t lo = hi - 1;
+                            idx = (std::abs(mousePos.x - taus[lo]) <=
+                                   std::abs(taus[hi] - mousePos.x)) ? lo : hi;
+                        }
+                    }
+                    signalY = vars[idx];
+                }
+
+                double yAxisMin = ImPlot::GetPlotLimits().Y.Min;
+                double lineX[2] = { mousePos.x, mousePos.x };
+                double lineY[2] = { yAxisMin, signalY };
+                ImPlot::PlotLine("##AllanCursorLine", lineX, lineY, 2);
+
+                ImPlotSpec cursorSpec;
+                cursorSpec.Marker = ImPlotMarker_Circle;
+                cursorSpec.MarkerSize = 4.0f;
+                cursorSpec.MarkerFillColor = ImVec4(1, 1, 1, 1);
+                ImPlot::PlotScatter("##AllanCursorPoint", &mousePos.x, &signalY, 1, cursorSpec);
+
+                char txt[256];
+                std::snprintf(txt, sizeof(txt), "tau: %.4e\nvar: %.4e",
+                              mousePos.x, signalY);
+                ImPlot::Annotation(mousePos.x, signalY, ImVec4(1, 1, 1, 1),
+                                   ImVec2(10, -10), true, "%s", txt);
+            }
+
+            {
+                const ImPlotRect lim = ImPlot::GetPlotLimits();
+                if (lim.X.Min < lim.X.Max && pendingNextXMin >= pendingNextXMax) {
+                    manualXMin = lim.X.Min;
+                    manualXMax = lim.X.Max;
+                }
+                savedYMin = lim.Y.Min;
+                savedYMax = lim.Y.Max;
+            }
+
+            ImPlot::EndPlot();
+        }
+    }
+
+    // ---- Slider ----
+    if (sliderHeight > 20.0f && numSurfaceWavelengths > 0) {
+        const int M = numSurfaceWavelengths;
+        std::vector<float> sliderDisplayWl(M);
+        float wlMin, wlMax;
+        for (int i = 0; i < M; ++i) {
+            sliderDisplayWl[i] = (float)convertFromUmToDisplay(cachedSurfaceWavelengths[i], xUnitSelector);
+            if (i == 0) { wlMin = wlMax = sliderDisplayWl[i]; }
+            else {
+                if (sliderDisplayWl[i] < wlMin) wlMin = sliderDisplayWl[i];
+                if (sliderDisplayWl[i] > wlMax) wlMax = sliderDisplayWl[i];
+            }
+        }
+
+        const char* unitStr = (xUnitSelector == 0) ? "cm-1"
+                           : (xUnitSelector == 1) ? "\xC2\xB5""m"
+                                                   : "THz";
+        char fmtBuf[32];
+        std::snprintf(fmtBuf, sizeof(fmtBuf), "%%.3f %s", unitStr);
+
+        float curWl = sliderDisplayWl[selectedSliceIndex];
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 10.0f);
+        if (ImGui::SliderFloat("##AllanSliceSlider", &curWl, wlMin, wlMax, fmtBuf)) {
+            float bestDist = std::abs(curWl - sliderDisplayWl[0]);
+            int bestIdx = 0;
+            for (int i = 1; i < M; ++i) {
+                float dist = std::abs(curWl - sliderDisplayWl[i]);
+                if (dist < bestDist) { bestDist = dist; bestIdx = i; }
+            }
+            if (bestIdx != selectedSliceIndex) {
+                selectedSliceIndex = bestIdx;
                 shouldAutoscale = true;
-            firstLoadCompleted = true;
-        }
-
-        {
-            double xMin = manualXMin;
-            double xMax = manualXMax;
-            double yMin = savedYMin;
-            double yMax = savedYMax;
-            if (yMin >= yMax) {
-                auto mmY = std::minmax_element(cachedAllanVarY.begin(), cachedAllanVarY.end());
-                yMin = *mmY.first;
-                yMax = *mmY.second;
-            }
-            if (xMin >= xMax) {
-                xMin = std::min(cachedTauX.front(), cachedTauX.back());
-                xMax = std::max(cachedTauX.front(), cachedTauX.back());
-            }
-            if (xMin < xMax) SetupAxisTicksLimited(ImAxis_X1, xMin, xMax);
-            if (yMin < yMax) SetupAxisTicksLimited(ImAxis_Y1, yMin, yMax);
-        }
-
-        {
-            bool shift = ImGui::GetIO().KeyShift;
-            bool overPlot = ImPlot::IsPlotHovered();
-            if (isFocused && overPlot && shift && !isSelectingXRange) {
-                isSelectingXRange = true;
-                selectionStartX = 0.0;
-                selectionEndX = 0.0;
-            } else if (!shift && isSelectingXRange) {
-                isSelectingXRange = false;
-                if (selectionStartX != selectionEndX) {
-                    double sX = selectionStartX;
-                    double eX = selectionEndX;
-                    if (sX > eX) std::swap(sX, eX);
-                    pendingNextXMin = sX;
-                    pendingNextXMax = eX;
-                    manualXMin = sX;
-                    manualXMax = eX;
-                    shouldAutoscale = false;
-                }
+                pendingNextXMin = 0.0;
+                pendingNextXMax = -1.0;
             }
         }
 
-        {
-            ImPlotSpec spec;
-            spec.LineColor = ImVec4(0.2f, 0.6f, 0.5f, 1.0f);
-            spec.LineWeight = 2.0f;
-            ImPlot::PlotLine("Allan", cachedTauX.data(), cachedAllanVarY.data(),
-                             cachedTauX.size(), spec);
+        if (selectedSliceIndex >= 0 && selectedSliceIndex < M) {
+            double wlUm = cachedSurfaceWavelengths[selectedSliceIndex];
+            double displayWlVal = convertFromUmToDisplay(wlUm, xUnitSelector);
+            ImGui::SameLine();
+            ImGui::Text(" \xCE\xBB = %.4f %s", displayWlVal, unitStr);
         }
-
-        if (isSelectingXRange) {
-            ImPlotPoint mousePos = ImPlot::GetPlotMousePos();
-            double x_min_plot = ImPlot::GetPlotLimits().X.Min;
-            double x_max_plot = ImPlot::GetPlotLimits().X.Max;
-            double y_min_plot = ImPlot::GetPlotLimits().Y.Min;
-            double y_max_plot = ImPlot::GetPlotLimits().Y.Max;
-            if (selectionStartX == 0.0 && selectionEndX == 0.0)
-                selectionStartX = mousePos.x;
-            double constrainedMouseX = std::clamp(mousePos.x, x_min_plot, x_max_plot);
-            selectionEndX = constrainedMouseX;
-            double selection_left = std::min(selectionStartX, selectionEndX);
-            double selection_right = std::max(selectionStartX, selectionEndX);
-            selection_left = std::clamp(selection_left, x_min_plot, x_max_plot);
-            selection_right = std::clamp(selection_right, x_min_plot, x_max_plot);
-            double shade_x[2] = {selection_left, selection_right};
-            double shade_y1[2] = {y_min_plot, y_min_plot};
-            double shade_y2[2] = {y_max_plot, y_max_plot};
-            ImPlotSpec fillSpec;
-            fillSpec.FillColor = ImVec4(0.5f, 0.0f, 0.5f, 0.3f);
-            ImPlot::PlotShaded("##AllanSelectionFill", shade_x, shade_y1, shade_y2, 2, fillSpec);
-            double start_x[2] = {selectionStartX, selectionStartX};
-            double start_y[2] = {y_min_plot, y_max_plot};
-            double end_x[2] = {selectionEndX, selectionEndX};
-            double end_y[2] = {y_min_plot, y_max_plot};
-            ImPlot::PlotLine("##AllanSelectionStart", start_x, start_y, 2);
-            ImPlot::PlotLine("##AllanSelectionEnd", end_x, end_y, 2);
-        }
-
-        if (showTrackingCursor && ImPlot::IsPlotHovered()) {
-            ImPlotPoint mousePos = ImPlot::GetPlotMousePos();
-            double signalY = mousePos.y;
-            if (!cachedTauX.empty() && !cachedAllanVarY.empty()) {
-                const auto& taus = cachedTauX;
-                const auto& vars = cachedAllanVarY;
-                size_t idx = 0;
-                if (taus.front() < taus.back()) {
-                    auto it = std::lower_bound(taus.begin(), taus.end(), mousePos.x);
-                    if (it == taus.begin()) idx = 0;
-                    else if (it == taus.end()) idx = taus.size() - 1;
-                    else {
-                        size_t hi = it - taus.begin();
-                        size_t lo = hi - 1;
-                        idx = (mousePos.x - taus[lo] <= taus[hi] - mousePos.x) ? lo : hi;
-                    }
-                } else {
-                    auto it = std::lower_bound(taus.begin(), taus.end(), mousePos.x,
-                                                std::greater<double>());
-                    if (it == taus.begin()) idx = 0;
-                    else if (it == taus.end()) idx = taus.size() - 1;
-                    else {
-                        size_t hi = it - taus.begin();
-                        size_t lo = hi - 1;
-                        idx = (std::abs(mousePos.x - taus[lo]) <=
-                               std::abs(taus[hi] - mousePos.x)) ? lo : hi;
-                    }
-                }
-                signalY = vars[idx];
-            }
-
-            double yAxisMin = ImPlot::GetPlotLimits().Y.Min;
-            double lineX[2] = { mousePos.x, mousePos.x };
-            double lineY[2] = { yAxisMin, signalY };
-            ImPlot::PlotLine("##AllanCursorLine", lineX, lineY, 2);
-
-            ImPlotSpec cursorSpec;
-            cursorSpec.Marker = ImPlotMarker_Circle;
-            cursorSpec.MarkerSize = 4.0f;
-            cursorSpec.MarkerFillColor = ImVec4(1, 1, 1, 1);
-            ImPlot::PlotScatter("##AllanCursorPoint", &mousePos.x, &signalY, 1, cursorSpec);
-
-            char txt[256];
-            std::snprintf(txt, sizeof(txt), "tau: %.4e\nvar: %.4e",
-                          mousePos.x, signalY);
-            ImPlot::Annotation(mousePos.x, signalY, ImVec4(1, 1, 1, 1),
-                               ImVec2(10, -10), true, "%s", txt);
-        }
-
-        {
-            const ImPlotRect lim = ImPlot::GetPlotLimits();
-            if (lim.X.Min < lim.X.Max && pendingNextXMin >= pendingNextXMax) {
-                manualXMin = lim.X.Min;
-                manualXMax = lim.X.Max;
-            }
-            savedYMin = lim.Y.Min;
-            savedYMax = lim.Y.Max;
-        }
-
-        ImPlot::EndPlot();
     }
 }
 
@@ -377,12 +586,15 @@ void AllanVariance::computeAllanVariance(const std::vector<double>& signal,
 void AllanVariance::startCalculation() {
     calcCommonX.clear();
     calcNumBins = 0;
-    calcSignalTimeSeries.clear();
+    calcAllSpectra.clear();
     calcInProgress = true;
     progressCurrent = 0;
     progressTotal = 0;
-    cachedTauX.clear();
-    cachedAllanVarY.clear();
+    cachedSurfaceWavelengths.clear();
+    cachedSurfaceTaus.clear();
+    cachedSurfaceAllanVar.clear();
+    numSurfaceWavelengths = 0;
+    numSurfaceTaus = 0;
     allanAvailable = false;
     fileCount = 0;
 }
@@ -402,14 +614,72 @@ bool AllanVariance::tickCalculation() {
     }
 
     if (idx >= appState->sortedFiles.size() || idx >= appState->filesSelectedForAveraging.size()) {
-        if (calcSignalTimeSeries.size() >= 2) {
-            fileCount = (int)calcSignalTimeSeries.size();
-            computeAllanVariance(calcSignalTimeSeries, cachedTauX, cachedAllanVarY);
-            allanAvailable = !cachedTauX.empty();
-        } else {
+        int numFiles = (int)calcAllSpectra.size();
+        if (numFiles < 2 || calcNumBins == 0 || calcCommonX.empty()) {
             allanAvailable = false;
             fileCount = 0;
+            calcInProgress = false;
+            return true;
         }
+
+        int dec = wavelengthDecimation;
+        if (dec < 1) dec = 1;
+
+        cachedSurfaceWavelengths.clear();
+        std::vector<size_t> validBinIndices;
+        for (size_t i = 0; i < calcNumBins; i += dec) {
+            double um = calcCommonX[i];
+            if (appState->spectrum.xUnitSelector == 0)
+                um = SpectralToolbox::convertCmToUm(calcCommonX[i]);
+            else if (appState->spectrum.xUnitSelector == 2)
+                um = SpectralToolbox::convertTHzToUm(calcCommonX[i]);
+            if (um >= xRangeMin && um <= xRangeMax) {
+                cachedSurfaceWavelengths.push_back(um);
+                validBinIndices.push_back(i);
+            }
+        }
+        int M = (int)cachedSurfaceWavelengths.size();
+        if (M == 0) {
+            allanAvailable = false;
+            fileCount = 0;
+            calcInProgress = false;
+            return true;
+        }
+
+        cachedSurfaceAllanVar.clear();
+        bool firstWavelength = true;
+        for (int wi = 0; wi < M; ++wi) {
+            size_t binIdx = validBinIndices[wi];
+            if (binIdx >= calcNumBins) binIdx = calcNumBins - 1;
+
+            std::vector<double> signal(numFiles);
+            for (int f = 0; f < numFiles; ++f) {
+                signal[f] = (binIdx < calcAllSpectra[f].size()) ? calcAllSpectra[f][binIdx] : 0.0;
+            }
+
+            std::vector<double> tau, avar;
+            computeAllanVariance(signal, tau, avar);
+
+            if (firstWavelength) {
+                cachedSurfaceTaus = tau;
+                firstWavelength = false;
+            }
+
+            if (avar.size() == cachedSurfaceTaus.size()) {
+                cachedSurfaceAllanVar.insert(cachedSurfaceAllanVar.end(), avar.begin(), avar.end());
+            } else {
+                cachedSurfaceAllanVar.insert(cachedSurfaceAllanVar.end(), cachedSurfaceTaus.size(), 0.0);
+            }
+        }
+
+        numSurfaceWavelengths = M;
+        numSurfaceTaus = (int)cachedSurfaceTaus.size();
+        fileCount = numFiles;
+        allanAvailable = (numSurfaceWavelengths > 0 && numSurfaceTaus > 0);
+
+        if (selectedSliceIndex >= numSurfaceWavelengths)
+            selectedSliceIndex = (numSurfaceWavelengths > 0) ? numSurfaceWavelengths - 1 : 0;
+
         calcInProgress = false;
         return true;
     }
@@ -428,39 +698,45 @@ bool AllanVariance::tickCalculation() {
         return false;
     }
 
-    if (calcSignalTimeSeries.empty()) {
+    if (calcAllSpectra.empty()) {
         calcCommonX = ps.spectrumX;
         calcNumBins = calcCommonX.size();
     }
 
-    double targetWavelengthUm = targetWavelength;
-    if (xUnitSelector == 0) {
-        targetWavelengthUm = SpectralToolbox::convertCmToUm(targetWavelength);
-    } else if (xUnitSelector == 2) {
-        targetWavelengthUm = SpectralToolbox::convertTHzToUm(targetWavelength);
-    }
-
-    double signalVal = 0.0;
-    if (calcNumBins > 0 && !calcCommonX.empty()) {
-        size_t nearestIdx = 0;
-        double minDist = std::numeric_limits<double>::max();
-        for (size_t j = 0; j < calcNumBins; ++j) {
-            double xUm = calcCommonX[j];
-            if (appState->spectrum.xUnitSelector == 0)
-                xUm = SpectralToolbox::convertCmToUm(calcCommonX[j]);
-            else if (appState->spectrum.xUnitSelector == 2)
-                xUm = SpectralToolbox::convertTHzToUm(calcCommonX[j]);
-            double dist = std::abs(xUm - targetWavelengthUm);
-            if (dist < minDist) {
-                minDist = dist;
-                nearestIdx = j;
+    std::vector<double> toAdd;
+    if (ps.spectrumX.size() == calcNumBins &&
+        std::equal(calcCommonX.begin(), calcCommonX.end(), ps.spectrumX.begin())) {
+        toAdd = ps.spectrumY;
+    } else {
+        toAdd.reserve(calcNumBins);
+        for (size_t j = 0; j < calcNumBins; j++) {
+            double targetX = calcCommonX[j];
+            const auto& sx = ps.spectrumX;
+            if (sx.front() < sx.back()) {
+                auto it = std::lower_bound(sx.begin(), sx.end(), targetX);
+                if (it == sx.begin()) toAdd.push_back(ps.spectrumY[0]);
+                else if (it == sx.end()) toAdd.push_back(ps.spectrumY.back());
+                else {
+                    size_t hi = it - sx.begin();
+                    size_t lo = hi - 1;
+                    double frac = (targetX - sx[lo]) / (sx[hi] - sx[lo]);
+                    toAdd.push_back(ps.spectrumY[lo] * (1.0 - frac) + ps.spectrumY[hi] * frac);
+                }
+            } else {
+                auto it = std::lower_bound(sx.begin(), sx.end(), targetX, std::greater<double>());
+                if (it == sx.begin()) toAdd.push_back(ps.spectrumY[0]);
+                else if (it == sx.end()) toAdd.push_back(ps.spectrumY.back());
+                else {
+                    size_t hi = it - sx.begin();
+                    size_t lo = hi - 1;
+                    double frac = (targetX - sx[lo]) / (sx[hi] - sx[lo]);
+                    toAdd.push_back(ps.spectrumY[lo] * (1.0 - frac) + ps.spectrumY[hi] * frac);
+                }
             }
         }
-        if (nearestIdx < ps.spectrumY.size())
-            signalVal = ps.spectrumY[nearestIdx];
     }
 
-    calcSignalTimeSeries.push_back(signalVal);
+    calcAllSpectra.push_back(toAdd);
 
     progressCurrent = static_cast<int>(idx) + 1;
     return false;
