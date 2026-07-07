@@ -53,6 +53,7 @@ AppState::AppState()
       isFirstDataLoad(true),
       showWelcomeScreen(true),
       welcomeScreenInitialized(false),
+      defaultLayoutApplied(false),
       spectrum(),
       xAxisBase(0)
 {
@@ -112,6 +113,7 @@ void AppState::reset() {
     sortedFiles.clear();
     showWelcomeScreen = true;
     welcomeScreenInitialized = false;
+    defaultLayoutApplied = false;
     spectrum.resetSpectrumWindow();
     averageSpectrum.reset();
     snrSpectrum.reset();

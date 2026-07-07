@@ -28,6 +28,7 @@
 
 // Include imgui and other dependencies
 #include "imgui.h"
+#include "imgui_internal.h" // DockBuilder API
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 #include "implot.h"
@@ -411,6 +412,9 @@ int main() {
     
     // Enable docking
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    
+    // Use explicit imgui.ini path for first-launch layout detection
+    io.IniFilename = "imgui.ini";
     
     ImGui::StyleColorsDark();
 
@@ -1029,6 +1033,57 @@ int main() {
             
             // Create docking space
             ImGuiID dockspace_id = ImGui::GetID("MainDockSpace_v2");
+            
+            // Apply default layout only on first launch (no saved imgui.ini)
+            if (!appState.defaultLayoutApplied) {
+                appState.defaultLayoutApplied = true;
+                
+                const char* iniPath = io.IniFilename ? io.IniFilename : "imgui.ini";
+                bool iniExists = std::filesystem::exists(iniPath) && std::filesystem::file_size(iniPath) > 0;
+                
+                if (!iniExists) {
+                    ImGui::DockBuilderRemoveNode(dockspace_id);
+                    ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
+                    ImGui::DockBuilderSetNodeSize(dockspace_id,
+                        ImVec2(viewport->Size.x, viewport->Size.y - ImGui::GetFrameHeight()));
+                    
+                    // Split dockspace: left (16%) / right (84%)
+                    ImGuiID dock_left, dock_right;
+                    ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Left, 0.16f, &dock_left, &dock_right);
+                    
+                    // Split left: Files (40%) / bottom (60%)
+                    ImGuiID dock_left_top, dock_left_bottom;
+                    ImGui::DockBuilderSplitNode(dock_left, ImGuiDir_Up, 0.40f, &dock_left_top, &dock_left_bottom);
+                    
+                    // Split left-bottom: Metadata/Export/SNR (50%) / Spectrum/Interferogram/Average (50%)
+                    ImGuiID dock_left_bottom_top, dock_left_bottom_bottom;
+                    ImGui::DockBuilderSplitNode(dock_left_bottom, ImGuiDir_Up, 0.50f, &dock_left_bottom_top, &dock_left_bottom_bottom);
+                    
+                    // Split right: Interferogram View (48%) / right panel (52%)
+                    ImGuiID dock_center, dock_right_panel;
+                    ImGui::DockBuilderSplitNode(dock_right, ImGuiDir_Left, 0.48f, &dock_center, &dock_right_panel);
+                    
+                    // Split right panel: view tabs (50%) / Spectrum View (50%)
+                    ImGuiID dock_right_top, dock_right_bottom;
+                    ImGui::DockBuilderSplitNode(dock_right_panel, ImGuiDir_Up, 0.50f, &dock_right_top, &dock_right_bottom);
+                    
+                    // Dock all windows to their zones
+                    ImGui::DockBuilderDockWindow("Files",              dock_left_top);
+                    ImGui::DockBuilderDockWindow("Metadata",           dock_left_bottom_top);
+                    ImGui::DockBuilderDockWindow("Export",             dock_left_bottom_top);
+                    ImGui::DockBuilderDockWindow("SNR",                dock_left_bottom_top);
+                    ImGui::DockBuilderDockWindow("Spectrum",           dock_left_bottom_bottom);
+                    ImGui::DockBuilderDockWindow("Interferogram",      dock_left_bottom_bottom);
+                    ImGui::DockBuilderDockWindow("Average",            dock_left_bottom_bottom);
+                    ImGui::DockBuilderDockWindow("Interferogram View", dock_center);
+                    ImGui::DockBuilderDockWindow("SNR View",           dock_right_top);
+                    ImGui::DockBuilderDockWindow("Average View",       dock_right_top);
+                    ImGui::DockBuilderDockWindow("Spectrum View",      dock_right_bottom);
+                    
+                    ImGui::DockBuilderFinish(dockspace_id);
+                }
+            }
+            
             ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             
             if (appState.showWelcomeScreen && !appState.welcomeScreenInitialized) {

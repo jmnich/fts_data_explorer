@@ -101,6 +101,9 @@ struct AppState {
     // Welcome screen state
     bool showWelcomeScreen;
     bool welcomeScreenInitialized;
+
+    // Docking layout: tracks whether we've applied the default layout (first-launch only)
+    bool defaultLayoutApplied;
     
     // Spectrum window state
     Spectrum spectrum;
