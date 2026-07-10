@@ -21,7 +21,6 @@ public:
     bool referenceAvailable;
     int referenceSource;
     std::string refDescription;
-    std::string refShortName;
 
     std::map<std::string, std::vector<double>> cachedTransX;
     std::map<std::string, std::vector<double>> cachedTransY;
@@ -46,8 +45,6 @@ public:
 
     int xUnitSelector;
     int prevXUnitSelector;
-    int yScaleSelector;
-    int prevYScaleSelector;
     int yAxisMode;
     int prevYAxisMode;
     double forcedYMin;

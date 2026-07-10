@@ -544,9 +544,7 @@ int main() {
     appState.stability.yAxisMode           = config.stabilityYAxisMode;
     appState.stability.prevYAxisMode       = config.stabilityYAxisMode;
     appState.stability.xUnitSelector       = config.stabilityXUnitSelector;
-    appState.stability.yScaleSelector      = config.stabilityYScaleSelector;
     appState.stability.prevXUnitSelector   = config.stabilityXUnitSelector;
-    appState.stability.prevYScaleSelector  = config.stabilityYScaleSelector;
     appState.stability.forcedYMin          = config.stabilityForcedYMin;
     appState.stability.forcedYMax          = config.stabilityForcedYMax;
 
@@ -2960,42 +2958,6 @@ int main() {
                 ImGui::PopStyleColor(3);
             }
 
-            ImGui::Separator();
-
-            // Y scale: lin / log
-            {
-                int& sel = appState.stability.yScaleSelector;
-                const ImVec4 cfgBtnColors[2] = {
-                    ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
-                    ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
-                };
-                ImGui::Text("Y scale");
-                ImGui::SameLine();
-                ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[sel == 0 ? 1 : 0]);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  sel == 0 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
-                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
-                if (ImGui::Button("lin##StabYScaleLin")) {
-                    sel = 0;
-                    appState.needsRedraw = true;
-                }
-                ImGui::PopStyleVar();
-                ImGui::PopStyleColor(3);
-                ImGui::SameLine(0.0f, 0.0f);
-                ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[sel == 1 ? 1 : 0]);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  sel == 1 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
-                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
-                if (ImGui::Button("log##StabYScaleLog")) {
-                    sel = 1;
-                    appState.needsRedraw = true;
-                }
-                ImGui::PopStyleVar();
-                ImGui::PopStyleColor(3);
-            }
-
-            ImGui::Separator();
-
             // X unit: cm-1 / µm / THz
             {
                 int& sel = appState.stability.xUnitSelector;
@@ -3511,7 +3473,6 @@ int main() {
     // Save stability window settings
     config.stabilityYAxisMode      = appState.stability.yAxisMode;
     config.stabilityXUnitSelector  = appState.stability.xUnitSelector;
-    config.stabilityYScaleSelector = appState.stability.yScaleSelector;
     config.stabilityForcedYMin     = appState.stability.forcedYMin;
     config.stabilityForcedYMax     = appState.stability.forcedYMax;
 

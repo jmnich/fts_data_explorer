@@ -56,8 +56,6 @@ StabilitySpectrum::StabilitySpectrum()
       rightArrowHandleFlag(false),
       xUnitSelector(0),
       prevXUnitSelector(0),
-      yScaleSelector(0),
-      prevYScaleSelector(0),
       yAxisMode(0),
       prevYAxisMode(0),
       forcedYMin(0.0),
@@ -79,7 +77,6 @@ void StabilitySpectrum::reset() {
     referenceAvailable = false;
     referenceSource = 0;
     refDescription.clear();
-    refShortName.clear();
     cachedTransX.clear();
     cachedTransY.clear();
     transmittanceAvailable = false;
@@ -131,7 +128,6 @@ void StabilitySpectrum::setReferenceFromCurrentSpectrum() {
         size_t ls = shortName.find_last_of("/\\");
         if (ls != std::string::npos) shortName = shortName.substr(ls + 1);
         refDescription = std::string("From file: ") + shortName;
-    refShortName = shortName;
     }
 
     fprintf(stderr, "[stability] setReferenceFromCurrentSpectrum: refX.size=%zu refY.size=%zu refXUnit=%d spectrumXUnit=%d\n",
@@ -200,10 +196,6 @@ void StabilitySpectrum::setReferenceFromCSV(const std::string& path) {
     referenceSource = 1;
 
     refDescription = std::string("From CSV: ") + path;
-    {
-        size_t ls = path.find_last_of("/\\");
-        refShortName = (ls != std::string::npos) ? path.substr(ls + 1) : path;
-    }
 
     cachedTransX.clear();
     cachedTransY.clear();
@@ -242,7 +234,6 @@ void StabilitySpectrum::setReferenceFromAverage() {
         std::snprintf(buf, sizeof(buf), "Average spectrum (%d files)", avg.averageCount);
         refDescription = buf;
     }
-    refShortName = "Average";
 
     cachedTransX.clear();
     cachedTransY.clear();
@@ -452,16 +443,9 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
     }
 
     // Top-right label
-    if (!cachedTransY.empty()) {
-        const std::string& firstPath = lastKnownSelection[0];
-        std::string firstName = firstPath;
-        size_t ls = firstName.find_last_of("/\\");
-        if (ls != std::string::npos)
-            firstName = firstName.substr(ls + 1);
-
+    {
         char buf[256];
-        std::snprintf(buf, sizeof(buf), "T(%%) = S / S_ref  |  %s / %s",
-                      firstName.c_str(), refShortName.c_str());
+        std::snprintf(buf, sizeof(buf), "T(%%) = S / S_ref");
         ImVec2 textSz = ImGui::CalcTextSize(buf);
         float availWidth = ImGui::GetContentRegionAvail().x;
         ImGui::SameLine(availWidth - textSz.x - ImGui::GetStyle().ItemSpacing.x);
@@ -545,12 +529,6 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
         prevXUnitSelector = xUnitSelector;
     }
 
-    if (yScaleSelector != prevYScaleSelector) {
-        if (yAxisMode != 2)
-            ImPlot::SetNextAxisToFit(ImAxis_Y1);
-        prevYScaleSelector = yScaleSelector;
-    }
-
     if (yAxisMode != prevYAxisMode) {
         if (yAxisMode == 0 || yAxisMode == 1)
             ImPlot::SetNextAxisToFit(ImAxis_Y1);
@@ -602,16 +580,9 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
         const char* yLabel = "T(%)";
         ImPlot::SetupAxes(xLabel, yLabel, x_flags, y_flags);
 
-        if (yScaleSelector == 1)
-            ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Log10);
-
         const bool effectiveForceY = (yAxisMode == 2) && (forcedYMin < forcedYMax);
         if (effectiveForceY) {
-            double yMin = forcedYMin;
-            double yMax = forcedYMax;
-            if (yScaleSelector == 1 && yMin <= 0.0)
-                yMin = (yMax > 0.0 ? yMax * 1e-6 : 1e-6);
-            ImPlot::SetupAxisLimits(ImAxis_Y1, yMin, yMax, ImPlotCond_Always);
+            ImPlot::SetupAxisLimits(ImAxis_Y1, forcedYMin, forcedYMax, ImPlotCond_Always);
         }
 
         if (shouldAutoscale) {
@@ -647,10 +618,7 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
                 ImPlot::SetupAxisLimits(ImAxis_X1, globalXMin, globalXMax, ImPlotCond_Always);
             }
             if (!effectiveForceY && haveRange) {
-                double yMin = globalYMin;
-                if (yScaleSelector == 1 && yMin <= 0.0)
-                    yMin = (globalYMax > 0.0 ? globalYMax * 1e-6 : 1e-6);
-                ImPlot::SetupAxisLimits(ImAxis_Y1, yMin, globalYMax, ImPlotCond_Always);
+                ImPlot::SetupAxisLimits(ImAxis_Y1, globalYMin, globalYMax, ImPlotCond_Always);
             }
             shouldAutoscale = false;
         }
