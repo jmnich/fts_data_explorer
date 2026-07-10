@@ -71,3 +71,6 @@ cmake-*/
 
 # macOS
 .DS_Store
+
+# temporary stuff
+temporary/
