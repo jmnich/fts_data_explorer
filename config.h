@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <iostream>
+#include <cstring>
 
 // Configuration structure for app settings
 struct AppConfig {
@@ -68,6 +69,12 @@ struct AppConfig {
     int stabilityXUnitSelector = 0;
     double stabilityForcedYMin = 0.0;
     double stabilityForcedYMax = 1.0;
+    char stabilityEnergyRatioNumA[32] = "";
+    char stabilityEnergyRatioDenA[32] = "";
+    char stabilityEnergyRatioNumB[32] = "";
+    char stabilityEnergyRatioDenB[32] = "";
+    char stabilityEnergyRatioNumC[32] = "";
+    char stabilityEnergyRatioDenC[32] = "";
     
     // Add a dataset to recent list (maintains max size, deduplicates)
     void addRecentDataset(const std::string& datasetPath) {
@@ -176,6 +183,12 @@ struct AppConfig {
             configFile << "x_unit_selector=" << stabilityXUnitSelector << "\n";
             configFile << "forced_y_min=" << stabilityForcedYMin << "\n";
             configFile << "forced_y_max=" << stabilityForcedYMax << "\n";
+            configFile << "energy_ratio_num_a=" << stabilityEnergyRatioNumA << "\n";
+            configFile << "energy_ratio_den_a=" << stabilityEnergyRatioDenA << "\n";
+            configFile << "energy_ratio_num_b=" << stabilityEnergyRatioNumB << "\n";
+            configFile << "energy_ratio_den_b=" << stabilityEnergyRatioDenB << "\n";
+            configFile << "energy_ratio_num_c=" << stabilityEnergyRatioNumC << "\n";
+            configFile << "energy_ratio_den_c=" << stabilityEnergyRatioDenC << "\n";
             
             configFile.flush();
             configFile.close();
@@ -331,6 +344,18 @@ struct AppConfig {
                             stabilityForcedYMin = std::stod(value);
                         } else if (key == "forced_y_max") {
                             stabilityForcedYMax = std::stod(value);
+                        } else if (key == "energy_ratio_num_a") {
+                            strncpy(stabilityEnergyRatioNumA, value.c_str(), 31);
+                        } else if (key == "energy_ratio_den_a") {
+                            strncpy(stabilityEnergyRatioDenA, value.c_str(), 31);
+                        } else if (key == "energy_ratio_num_b") {
+                            strncpy(stabilityEnergyRatioNumB, value.c_str(), 31);
+                        } else if (key == "energy_ratio_den_b") {
+                            strncpy(stabilityEnergyRatioDenB, value.c_str(), 31);
+                        } else if (key == "energy_ratio_num_c") {
+                            strncpy(stabilityEnergyRatioNumC, value.c_str(), 31);
+                        } else if (key == "energy_ratio_den_c") {
+                            strncpy(stabilityEnergyRatioDenC, value.c_str(), 31);
                         }
                     }
                 }

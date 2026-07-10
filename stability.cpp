@@ -68,6 +68,12 @@ StabilitySpectrum::StabilitySpectrum()
       needsRecompute(false)
 {
     csvPathBuffer[0] = '\0';
+    energyRatioNumA[0] = '\0';
+    energyRatioDenA[0] = '\0';
+    energyRatioNumB[0] = '\0';
+    energyRatioDenB[0] = '\0';
+    energyRatioNumC[0] = '\0';
+    energyRatioDenC[0] = '\0';
 }
 
 void StabilitySpectrum::reset() {
@@ -104,6 +110,12 @@ void StabilitySpectrum::reset() {
     convertedXMax = 0.0;
     needsRecompute = false;
     csvPathBuffer[0] = '\0';
+    energyRatioNumA[0] = '\0';
+    energyRatioDenA[0] = '\0';
+    energyRatioNumB[0] = '\0';
+    energyRatioDenB[0] = '\0';
+    energyRatioNumC[0] = '\0';
+    energyRatioDenC[0] = '\0';
 }
 
 void StabilitySpectrum::setReferenceFromCurrentSpectrum() {
@@ -364,6 +376,96 @@ bool StabilitySpectrum::computeTransmittanceForFile(const std::string& fileId) {
     return true;
 }
 
+static bool parseEnergyWavenumber(const char* str, bool& isMax, double& wavenumber) {
+    if (!str || str[0] == '\0') return false;
+    std::string s(str);
+    while (!s.empty() && (s.back() == ' ' || s.back() == '\t')) s.pop_back();
+    while (!s.empty() && (s.front() == ' ' || s.front() == '\t')) s = s.substr(1);
+    if (s.empty()) return false;
+    if (s == "max" || s == "MAX" || s == "Max") {
+        isMax = true;
+        return true;
+    }
+    try {
+        wavenumber = std::stod(s);
+        isMax = false;
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+static double getEnergyAtWavenumber(const std::vector<double>& freqs,
+                                     const std::vector<double>& spec,
+                                     bool isMax, double wavenumberCm1,
+                                     int spectrumXUnit) {
+    if (freqs.empty() || spec.empty()) return 0.0;
+
+    if (isMax) {
+        auto it = std::max_element(spec.begin(), spec.end());
+        return (it != spec.end()) ? *it : 0.0;
+    }
+
+    using ST = SpectralToolbox::SpectrumXUnit;
+    double targetX = SpectralToolbox::convertXValue(wavenumberCm1, ST::CmInv,
+                                                     static_cast<ST>(spectrumXUnit));
+
+    bool ascending = freqs.front() < freqs.back();
+    if (ascending) {
+        auto it = std::lower_bound(freqs.begin(), freqs.end(), targetX);
+        if (it == freqs.begin()) return spec[0];
+        if (it == freqs.end()) return spec.back();
+        size_t hi = it - freqs.begin();
+        size_t lo = hi - 1;
+        double frac = (targetX - freqs[lo]) / (freqs[hi] - freqs[lo]);
+        return spec[lo] * (1.0 - frac) + spec[hi] * frac;
+    } else {
+        auto it = std::lower_bound(freqs.begin(), freqs.end(), targetX, std::greater<double>());
+        if (it == freqs.begin()) return spec[0];
+        if (it == freqs.end()) return spec.back();
+        size_t hi = it - freqs.begin();
+        size_t lo = hi - 1;
+        double frac = (targetX - freqs[lo]) / (freqs[hi] - freqs[lo]);
+        return spec[lo] * (1.0 - frac) + spec[hi] * frac;
+    }
+}
+
+struct EnergyRatios { double a, b, c; bool validA, validB, validC; };
+
+static EnergyRatios computeEnergyRatios(const std::string& fileId,
+                                        const char* numA, const char* denA,
+                                        const char* numB, const char* denB,
+                                        const char* numC, const char* denC,
+                                        int spectrumXUnit,
+                                        const std::map<std::string, std::vector<double>>& cachedFreqs,
+                                        const std::map<std::string, std::vector<double>>& cachedSpecs) {
+    EnergyRatios r = {0, 0, 0, false, false, false};
+
+    auto freqIt = cachedFreqs.find(fileId);
+    auto specIt = cachedSpecs.find(fileId);
+    if (freqIt == cachedFreqs.end() || specIt == cachedSpecs.end())
+        return r;
+    const auto& freqs = freqIt->second;
+    const auto& spec = specIt->second;
+
+    auto computePair = [&](const char* numStr, const char* denStr, double& outRatio) -> bool {
+        bool numMax, denMax;
+        double numWn, denWn;
+        if (!parseEnergyWavenumber(numStr, numMax, numWn)) return false;
+        if (!parseEnergyWavenumber(denStr, denMax, denWn)) return false;
+        double eNum = getEnergyAtWavenumber(freqs, spec, numMax, numWn, spectrumXUnit);
+        double eDen = getEnergyAtWavenumber(freqs, spec, denMax, denWn, spectrumXUnit);
+        if (eDen <= 1e-15) return false;
+        outRatio = eNum / eDen;
+        return true;
+    };
+
+    r.validA = computePair(numA, denA, r.a);
+    r.validB = computePair(numB, denB, r.b);
+    r.validC = computePair(numC, denC, r.c);
+    return r;
+}
+
 static ImVec4 getStabilityLineColor(size_t index) {
     switch (index % 5) {
         case 0: return ImVec4(0.6f, 0.5f, 0.1f, 1.0f);   // Dark yellow
@@ -543,6 +645,21 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
         if (kv.second.size() > maxDataSize)
             maxDataSize = kv.second.size();
     bool largeData = maxDataSize > 50000;
+
+    bool hasRatioConfig = (energyRatioNumA[0] != '\0' || energyRatioDenA[0] != '\0' ||
+                           energyRatioNumB[0] != '\0' || energyRatioDenB[0] != '\0' ||
+                           energyRatioNumC[0] != '\0' || energyRatioDenC[0] != '\0');
+    bool showTable = hasRatioConfig && !lastKnownSelection.empty();
+    float tableWidth = 280.0f;
+    float plotW = -1.0f;
+    if (showTable) {
+        float availW = ImGui::GetContentRegionAvail().x;
+        plotW = availW - tableWidth - ImGui::GetStyle().ItemSpacing.x;
+        if (plotW < 100.0f) { showTable = false; plotW = -1.0f; }
+    }
+
+    if (showTable)
+        ImGui::BeginChild("##StabPlotArea", ImVec2(plotW, 0), false, ImGuiWindowFlags_NoScrollbar);
 
     ImPlotFlags plot_flags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend;
     if (largeData)
@@ -846,5 +963,64 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
         }
 
         ImPlot::EndPlot();
+    }
+    if (showTable) {
+        ImGui::EndChild();
+        ImGui::SameLine();
+        ImGui::BeginChild("##StabTableArea", ImVec2(0, 0), false);
+
+        ImGui::Text("Energy Ratios");
+        ImGui::Separator();
+
+        if (ImGui::BeginTable("##StabRatios", 4,
+                ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit)) {
+            ImGui::TableSetupColumn("File", ImGuiTableColumnFlags_WidthFixed, 90);
+            ImGui::TableSetupColumn("A", ImGuiTableColumnFlags_WidthFixed, 60);
+            ImGui::TableSetupColumn("B", ImGuiTableColumnFlags_WidthFixed, 60);
+            ImGui::TableSetupColumn("C", ImGuiTableColumnFlags_WidthFixed, 60);
+            ImGui::TableHeadersRow();
+
+            for (size_t i = 0; i < lastKnownSelection.size(); i++) {
+                const std::string& filePath = lastKnownSelection[i];
+                std::string fileName = filePath;
+                size_t ls = fileName.find_last_of("/\\");
+                if (ls != std::string::npos)
+                    fileName = fileName.substr(ls + 1);
+
+                EnergyRatios er = computeEnergyRatios(
+                    filePath,
+                    energyRatioNumA, energyRatioDenA,
+                    energyRatioNumB, energyRatioDenB,
+                    energyRatioNumC, energyRatioDenC,
+                    appState->spectrum.xUnitSelector,
+                    appState->spectrum.cachedFrequencies,
+                    appState->spectrum.cachedSpectra);
+
+                ImGui::TableNextRow();
+
+                ImVec4 color = getStabilityLineColor(i);
+                ImU32 rowBg = ImGui::ColorConvertFloat4ToU32(
+                    ImVec4(color.x * 0.25f, color.y * 0.25f, color.z * 0.25f, 0.6f));
+                ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, rowBg);
+
+                ImGui::TableSetColumnIndex(0);
+                ImDrawList* dl = ImGui::GetWindowDrawList();
+                ImVec2 cp = ImGui::GetCursorScreenPos();
+                dl->AddRectFilled(cp, ImVec2(cp.x + 12, cp.y + 12),
+                                  ImGui::ColorConvertFloat4ToU32(color));
+                ImGui::Dummy(ImVec2(12, 12));
+                ImGui::SameLine();
+                ImGui::Text("%s", fileName.c_str());
+
+                ImGui::TableSetColumnIndex(1);
+                if (er.validA) ImGui::Text("%.4f", er.a); else ImGui::Text("--");
+                ImGui::TableSetColumnIndex(2);
+                if (er.validB) ImGui::Text("%.4f", er.b); else ImGui::Text("--");
+                ImGui::TableSetColumnIndex(3);
+                if (er.validC) ImGui::Text("%.4f", er.c); else ImGui::Text("--");
+            }
+            ImGui::EndTable();
+        }
+        ImGui::EndChild();
     }
 }

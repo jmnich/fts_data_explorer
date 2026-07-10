@@ -547,6 +547,12 @@ int main() {
     appState.stability.prevXUnitSelector   = config.stabilityXUnitSelector;
     appState.stability.forcedYMin          = config.stabilityForcedYMin;
     appState.stability.forcedYMax          = config.stabilityForcedYMax;
+    strncpy(appState.stability.energyRatioNumA, config.stabilityEnergyRatioNumA, 31);
+    strncpy(appState.stability.energyRatioDenA, config.stabilityEnergyRatioDenA, 31);
+    strncpy(appState.stability.energyRatioNumB, config.stabilityEnergyRatioNumB, 31);
+    strncpy(appState.stability.energyRatioDenB, config.stabilityEnergyRatioDenB, 31);
+    strncpy(appState.stability.energyRatioNumC, config.stabilityEnergyRatioNumC, 31);
+    strncpy(appState.stability.energyRatioDenC, config.stabilityEnergyRatioDenC, 31);
 
     // No initialization needed for simple file dialog
     
@@ -3023,6 +3029,48 @@ int main() {
 
             ImGui::Separator();
 
+            // Energy Ratios
+            {
+                auto ratioInput = [](const char* label, char* buf, size_t bufSize) {
+                    ImGui::SetNextItemWidth(70);
+                    ImGui::InputText(label, buf, bufSize);
+                };
+
+                ImGui::Text("Energy Ratios (cm-1)");
+                ImGui::Text("A: "); ImGui::SameLine();
+                ratioInput("##StabRatioNumA", appState.stability.energyRatioNumA,
+                           sizeof(appState.stability.energyRatioNumA));
+                ImGui::SameLine(); ImGui::Text("/"); ImGui::SameLine();
+                ratioInput("##StabRatioDenA", appState.stability.energyRatioDenA,
+                           sizeof(appState.stability.energyRatioDenA));
+
+                ImGui::Text("B: "); ImGui::SameLine();
+                ratioInput("##StabRatioNumB", appState.stability.energyRatioNumB,
+                           sizeof(appState.stability.energyRatioNumB));
+                ImGui::SameLine(); ImGui::Text("/"); ImGui::SameLine();
+                ratioInput("##StabRatioDenB", appState.stability.energyRatioDenB,
+                           sizeof(appState.stability.energyRatioDenB));
+
+                ImGui::Text("C: "); ImGui::SameLine();
+                ratioInput("##StabRatioNumC", appState.stability.energyRatioNumC,
+                           sizeof(appState.stability.energyRatioNumC));
+                ImGui::SameLine(); ImGui::Text("/"); ImGui::SameLine();
+                ratioInput("##StabRatioDenC", appState.stability.energyRatioDenC,
+                           sizeof(appState.stability.energyRatioDenC));
+
+                if (ImGui::Button("ASTM E1421##StabAstmE1421")) {
+                    strncpy(appState.stability.energyRatioNumA, "4000", 31);
+                    strncpy(appState.stability.energyRatioDenA, "2000", 31);
+                    strncpy(appState.stability.energyRatioNumB, "2000", 31);
+                    strncpy(appState.stability.energyRatioDenB, "1000", 31);
+                    strncpy(appState.stability.energyRatioNumC, "150", 31);
+                    strncpy(appState.stability.energyRatioDenC, "max", 31);
+                    appState.needsRedraw = true;
+                }
+            }
+
+            ImGui::Separator();
+
             // Y Axis mode: all / tight / force
             {
                 int& mode = appState.stability.yAxisMode;
@@ -3475,6 +3523,12 @@ int main() {
     config.stabilityXUnitSelector  = appState.stability.xUnitSelector;
     config.stabilityForcedYMin     = appState.stability.forcedYMin;
     config.stabilityForcedYMax     = appState.stability.forcedYMax;
+    strncpy(config.stabilityEnergyRatioNumA, appState.stability.energyRatioNumA, 31);
+    strncpy(config.stabilityEnergyRatioDenA, appState.stability.energyRatioDenA, 31);
+    strncpy(config.stabilityEnergyRatioNumB, appState.stability.energyRatioNumB, 31);
+    strncpy(config.stabilityEnergyRatioDenB, appState.stability.energyRatioDenB, 31);
+    strncpy(config.stabilityEnergyRatioNumC, appState.stability.energyRatioNumC, 31);
+    strncpy(config.stabilityEnergyRatioDenC, appState.stability.energyRatioDenC, 31);
 
     // Save config to file
     if (!config.saveToFile(configFilePath)) {

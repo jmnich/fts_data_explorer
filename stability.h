@@ -63,6 +63,13 @@ public:
 
     char csvPathBuffer[1024];
 
+    char energyRatioNumA[32];
+    char energyRatioDenA[32];
+    char energyRatioNumB[32];
+    char energyRatioDenB[32];
+    char energyRatioNumC[32];
+    char energyRatioDenC[32];
+
     StabilitySpectrum();
     void reset();
 
