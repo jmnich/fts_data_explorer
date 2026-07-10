@@ -2831,23 +2831,48 @@ int main() {
         if (appState.dataLoaded) {
             ImGui::Text("Reference source:");
             ImGui::SameLine();
-            if (ImGui::RadioButton("Current file", appState.stability.referenceSource == 0)) {
-                appState.stability.referenceSource = 0;
-                appState.needsRedraw = true;
+            {
+                int& refSrc = appState.stability.referenceSource;
+                bool avgAvail = appState.averageSpectrum.averageAvailable;
+                const ImVec4 cfgBtnColors[2] = {
+                    ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
+                    ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
+                };
+                ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[refSrc == 0 ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  refSrc == 0 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
+                if (ImGui::Button("File##StabRefSrcFile")) {
+                    refSrc = 0;
+                    appState.needsRedraw = true;
+                }
+                ImGui::PopStyleVar();
+                ImGui::PopStyleColor(3);
+                ImGui::SameLine(0.0f, 0.0f);
+                ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[refSrc == 1 ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  refSrc == 1 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
+                if (ImGui::Button("CSV##StabRefSrcCSV")) {
+                    refSrc = 1;
+                    appState.needsRedraw = true;
+                }
+                ImGui::PopStyleVar();
+                ImGui::PopStyleColor(3);
+                ImGui::SameLine(0.0f, 0.0f);
+                if (!avgAvail) ImGui::BeginDisabled();
+                ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[refSrc == 2 ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  refSrc == 2 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
+                if (ImGui::Button("Avg##StabRefSrcAvg")) {
+                    refSrc = 2;
+                    appState.needsRedraw = true;
+                }
+                ImGui::PopStyleVar();
+                ImGui::PopStyleColor(3);
+                if (!avgAvail) ImGui::EndDisabled();
             }
-            ImGui::SameLine();
-            if (ImGui::RadioButton("CSV file", appState.stability.referenceSource == 1)) {
-                appState.stability.referenceSource = 1;
-                appState.needsRedraw = true;
-            }
-            ImGui::SameLine();
-            bool avgAvail = appState.averageSpectrum.averageAvailable;
-            if (!avgAvail) ImGui::BeginDisabled();
-            if (ImGui::RadioButton("Average", appState.stability.referenceSource == 2)) {
-                appState.stability.referenceSource = 2;
-                appState.needsRedraw = true;
-            }
-            if (!avgAvail) ImGui::EndDisabled();
 
             ImGui::Separator();
 
@@ -2877,12 +2902,12 @@ int main() {
                     }
                 }
             } else if (appState.stability.referenceSource == 2) {
-                if (!avgAvail) ImGui::BeginDisabled();
+                if (!appState.averageSpectrum.averageAvailable) ImGui::BeginDisabled();
                 if (ImGui::Button("Use average##StabUseAvg")) {
                     appState.stability.setReferenceFromAverage();
                     appState.needsRedraw = true;
                 }
-                if (!avgAvail) ImGui::EndDisabled();
+                if (!appState.averageSpectrum.averageAvailable) ImGui::EndDisabled();
             }
 
             if (appState.stability.referenceAvailable) {
@@ -2895,27 +2920,6 @@ int main() {
                     appState.stability.refX.size(), unitName);
             } else {
                 ImGui::TextColored(ImVec4(0.7f, 0.5f, 0.1f, 1.0f), "No reference");
-            }
-
-            ImGui::Separator();
-
-            int selCount = 0;
-            for (size_t i = 0; i < appState.filesSelectedForAveraging.size(); i++)
-                if (appState.filesSelectedForAveraging[i]) selCount++;
-            ImGui::Text("Selected: %d files", selCount);
-
-            ImGui::Text("Select");
-            ImGui::SameLine();
-            if (ImGui::Button("All##StabAll")) {
-                for (size_t i = 0; i < appState.filesSelectedForAveraging.size(); i++)
-                    appState.filesSelectedForAveraging[i] = true;
-                appState.needsRedraw = true;
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("None##StabNone")) {
-                for (size_t i = 0; i < appState.filesSelectedForAveraging.size(); i++)
-                    appState.filesSelectedForAveraging[i] = false;
-                appState.needsRedraw = true;
             }
 
             ImGui::Separator();
@@ -3027,6 +3031,32 @@ int main() {
                     appState.needsRedraw = true;
                 }
                 ImGui::PopStyleColor(3);
+            }
+
+            if (ImGui::Button("Match X to Spectrum View##StabMatchX")) {
+                int newXUnit = appState.spectrum.xUnitSelector;
+                double specMin = appState.spectrum.manualXMin;
+                double specMax = appState.spectrum.manualXMax;
+
+                if (specMin < specMax) {
+                    auto specU = static_cast<SpectralToolbox::SpectrumXUnit>(appState.spectrum.xUnitSelector);
+                    auto stabU = static_cast<SpectralToolbox::SpectrumXUnit>(newXUnit);
+                    double newMin = SpectralToolbox::convertXValue(specMin, specU, stabU);
+                    double newMax = SpectralToolbox::convertXValue(specMax, specU, stabU);
+                    if (newMin > newMax) std::swap(newMin, newMax);
+                    appState.stability.manualXMin = newMin;
+                    appState.stability.manualXMax = newMax;
+                    appState.stability.pendingNextXMin = newMin;
+                    appState.stability.pendingNextXMax = newMax;
+                    appState.stability.shouldAutoscale = false;
+                } else {
+                    appState.stability.shouldAutoscale = true;
+                }
+
+                appState.stability.xUnitSelector = newXUnit;
+                appState.stability.prevXUnitSelector = newXUnit;
+                appState.stability.needsRecompute = true;
+                appState.needsRedraw = true;
             }
 
             ImGui::Separator();
