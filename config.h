@@ -62,6 +62,13 @@ struct AppConfig {
     int allanSliceIndex = 0;
     double allanXRangeMin = 1.0;
     double allanXRangeMax = 30.0;
+
+    // Stability window state
+    int stabilityYAxisMode = 0;
+    int stabilityXUnitSelector = 0;
+    int stabilityYScaleSelector = 0;
+    double stabilityForcedYMin = 0.0;
+    double stabilityForcedYMax = 1.0;
     
     // Add a dataset to recent list (maintains max size, deduplicates)
     void addRecentDataset(const std::string& datasetPath) {
@@ -163,6 +170,14 @@ struct AppConfig {
             configFile << "slice_index=" << allanSliceIndex << "\n";
             configFile << "x_range_min=" << allanXRangeMin << "\n";
             configFile << "x_range_max=" << allanXRangeMax << "\n";
+
+            // Write stability window settings
+            configFile << "\n[StabilityWindow]\n";
+            configFile << "y_axis_mode=" << stabilityYAxisMode << "\n";
+            configFile << "x_unit_selector=" << stabilityXUnitSelector << "\n";
+            configFile << "y_scale_selector=" << stabilityYScaleSelector << "\n";
+            configFile << "forced_y_min=" << stabilityForcedYMin << "\n";
+            configFile << "forced_y_max=" << stabilityForcedYMax << "\n";
             
             configFile.flush();
             configFile.close();
@@ -308,6 +323,18 @@ struct AppConfig {
                             allanXRangeMax = std::stod(value);
                         } else if (key == "target_wavelength") {
                             // legacy field — ignore
+                        }
+                    } else if (currentSection == "StabilityWindow") {
+                        if (key == "y_axis_mode") {
+                            stabilityYAxisMode = std::stoi(value);
+                        } else if (key == "x_unit_selector") {
+                            stabilityXUnitSelector = std::stoi(value);
+                        } else if (key == "y_scale_selector") {
+                            stabilityYScaleSelector = std::stoi(value);
+                        } else if (key == "forced_y_min") {
+                            stabilityForcedYMin = std::stod(value);
+                        } else if (key == "forced_y_max") {
+                            stabilityForcedYMax = std::stod(value);
                         }
                     }
                 }

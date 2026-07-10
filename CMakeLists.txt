@@ -129,6 +129,7 @@ add_executable(fts_data_explorer
     average_spectrum.cpp
     snr_spectrum.cpp
     allan_variance.cpp
+    stability.cpp
     spectral_toolbox.cpp
     apodization.cpp
     export.cpp

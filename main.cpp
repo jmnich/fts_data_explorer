@@ -511,6 +511,7 @@ int main() {
     appState.averageSpectrum.appState = &appState;
     appState.snrSpectrum.appState = &appState;
     appState.allanVariance.appState = &appState;
+    appState.stability.appState = &appState;
     appState.exportPanel.appState = &appState;
     
     // Load average window settings from config
@@ -538,6 +539,16 @@ int main() {
     appState.allanVariance.selectedSliceIndex    = config.allanSliceIndex;
     appState.allanVariance.xRangeMin             = config.allanXRangeMin;
     appState.allanVariance.xRangeMax             = config.allanXRangeMax;
+
+    // Load stability window settings from config
+    appState.stability.yAxisMode           = config.stabilityYAxisMode;
+    appState.stability.prevYAxisMode       = config.stabilityYAxisMode;
+    appState.stability.xUnitSelector       = config.stabilityXUnitSelector;
+    appState.stability.yScaleSelector      = config.stabilityYScaleSelector;
+    appState.stability.prevXUnitSelector   = config.stabilityXUnitSelector;
+    appState.stability.prevYScaleSelector  = config.stabilityYScaleSelector;
+    appState.stability.forcedYMin          = config.stabilityForcedYMin;
+    appState.stability.forcedYMax          = config.stabilityForcedYMax;
 
     // No initialization needed for simple file dialog
     
@@ -1092,16 +1103,18 @@ int main() {
                     ImGui::DockBuilderDockWindow("Files",              dock_left_top);
                     ImGui::DockBuilderDockWindow("Metadata",           dock_left_bottom_top);
                     ImGui::DockBuilderDockWindow("Export",             dock_left_bottom_top);
-                    ImGui::DockBuilderDockWindow("SNR",                dock_left_bottom_top);
-                    ImGui::DockBuilderDockWindow("Allan",               dock_left_bottom_top);
+        ImGui::DockBuilderDockWindow("SNR",                dock_left_bottom_top);
+        ImGui::DockBuilderDockWindow("Stability",          dock_left_bottom_top);
+        ImGui::DockBuilderDockWindow("Allan",              dock_left_bottom_top);
                     ImGui::DockBuilderDockWindow("Spectrum",           dock_left_bottom_bottom);
                     ImGui::DockBuilderDockWindow("Interferogram",      dock_left_bottom_bottom);
                     ImGui::DockBuilderDockWindow("Average",            dock_left_bottom_bottom);
                     ImGui::DockBuilderDockWindow("Interferogram View", dock_center);
                     ImGui::DockBuilderDockWindow("SNR View",           dock_right_top);
                     ImGui::DockBuilderDockWindow("Average View",       dock_right_top);
-                    ImGui::DockBuilderDockWindow("Allan View",         dock_right_top);
-                    ImGui::DockBuilderDockWindow("Spectrum View",      dock_right_bottom);
+        ImGui::DockBuilderDockWindow("Allan View",         dock_right_top);
+        ImGui::DockBuilderDockWindow("Stability View",     dock_right_top);
+        ImGui::DockBuilderDockWindow("Spectrum View",      dock_right_bottom);
                     
                     ImGui::DockBuilderFinish(dockspace_id);
                 }
@@ -2813,6 +2826,274 @@ int main() {
         }
         ImGui::End();
 
+        // Stability config panel (docked)
+        ImGui::Begin("Stability");
+        if (appState.dataLoaded) {
+            ImGui::Text("Reference source:");
+            ImGui::SameLine();
+            if (ImGui::RadioButton("Current file", appState.stability.referenceSource == 0)) {
+                appState.stability.referenceSource = 0;
+                appState.needsRedraw = true;
+            }
+            ImGui::SameLine();
+            if (ImGui::RadioButton("CSV file", appState.stability.referenceSource == 1)) {
+                appState.stability.referenceSource = 1;
+                appState.needsRedraw = true;
+            }
+            ImGui::SameLine();
+            bool avgAvail = appState.averageSpectrum.averageAvailable;
+            if (!avgAvail) ImGui::BeginDisabled();
+            if (ImGui::RadioButton("Average", appState.stability.referenceSource == 2)) {
+                appState.stability.referenceSource = 2;
+                appState.needsRedraw = true;
+            }
+            if (!avgAvail) ImGui::EndDisabled();
+
+            ImGui::Separator();
+
+            if (appState.stability.referenceSource == 0) {
+                if (ImGui::Button("Set as reference##StabSetRef")) {
+                    appState.stability.setReferenceFromCurrentSpectrum();
+                    appState.needsRedraw = true;
+                }
+            } else if (appState.stability.referenceSource == 1) {
+                ImGui::InputText("Path##StabCsvPath", appState.stability.csvPathBuffer,
+                                 sizeof(appState.stability.csvPathBuffer));
+                ImGui::SameLine();
+                if (ImGui::Button("Browse...##StabBrowse")) {
+                    const char* filter = "*.csv";
+                    const char* path = tinyfd_openFileDialog("Select Reference CSV", "", 1, &filter, "CSV Files", 0);
+                    if (path) {
+                        strncpy(appState.stability.csvPathBuffer, path,
+                                     sizeof(appState.stability.csvPathBuffer) - 1);
+                        appState.stability.csvPathBuffer[sizeof(appState.stability.csvPathBuffer) - 1] = '\0';
+                        appState.needsRedraw = true;
+                    }
+                }
+                if (appState.stability.csvPathBuffer[0] != '\0') {
+                    if (ImGui::Button("Load##StabLoadCsv")) {
+                        appState.stability.setReferenceFromCSV(appState.stability.csvPathBuffer);
+                        appState.needsRedraw = true;
+                    }
+                }
+            } else if (appState.stability.referenceSource == 2) {
+                if (!avgAvail) ImGui::BeginDisabled();
+                if (ImGui::Button("Use average##StabUseAvg")) {
+                    appState.stability.setReferenceFromAverage();
+                    appState.needsRedraw = true;
+                }
+                if (!avgAvail) ImGui::EndDisabled();
+            }
+
+            if (appState.stability.referenceAvailable) {
+                ImGui::TextColored(ImVec4(0.2f, 0.8f, 0.2f, 1.0f), "Reference loaded");
+                ImGui::TextWrapped("%s", appState.stability.refDescription.c_str());
+                const char* unitName = (appState.stability.refXUnit == 0) ? "cm-1"
+                                     : (appState.stability.refXUnit == 1) ? "um"
+                                     : "THz";
+                ImGui::TextDisabled("%zu points, unit: %s",
+                    appState.stability.refX.size(), unitName);
+            } else {
+                ImGui::TextColored(ImVec4(0.7f, 0.5f, 0.1f, 1.0f), "No reference");
+            }
+
+            ImGui::Separator();
+
+            int selCount = 0;
+            for (size_t i = 0; i < appState.filesSelectedForAveraging.size(); i++)
+                if (appState.filesSelectedForAveraging[i]) selCount++;
+            ImGui::Text("Selected: %d files", selCount);
+
+            ImGui::Text("Select");
+            ImGui::SameLine();
+            if (ImGui::Button("All##StabAll")) {
+                for (size_t i = 0; i < appState.filesSelectedForAveraging.size(); i++)
+                    appState.filesSelectedForAveraging[i] = true;
+                appState.needsRedraw = true;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("None##StabNone")) {
+                for (size_t i = 0; i < appState.filesSelectedForAveraging.size(); i++)
+                    appState.filesSelectedForAveraging[i] = false;
+                appState.needsRedraw = true;
+            }
+
+            ImGui::Separator();
+
+            // Cursor On/Off
+            {
+                ImGui::Text("Cursor");
+                ImGui::SameLine();
+                const bool cursorOn = appState.spectrum.showTrackingCursor;
+                ImVec4 cursorBtnColors[2] = {
+                    ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
+                    ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
+                };
+                ImGui::PushStyleColor(ImGuiCol_Button,        cursorBtnColors[cursorOn ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cursorOn ? cursorBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cursorBtnColors[1]);
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
+                if (ImGui::Button("On##StabCursorOn")) {
+                    if (!cursorOn) {
+                        appState.spectrum.showTrackingCursor = true;
+                        appState.needsRedraw = true;
+                    }
+                }
+                ImGui::PopStyleVar();
+                ImGui::PopStyleColor(3);
+                ImGui::SameLine(0.0f, 0.0f);
+                ImGui::PushStyleColor(ImGuiCol_Button,        cursorBtnColors[!cursorOn ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  !cursorOn ? cursorBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cursorBtnColors[1]);
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
+                if (ImGui::Button("Off##StabCursorOff")) {
+                    if (cursorOn) {
+                        appState.spectrum.showTrackingCursor = false;
+                        appState.needsRedraw = true;
+                    }
+                }
+                ImGui::PopStyleVar();
+                ImGui::PopStyleColor(3);
+            }
+
+            ImGui::Separator();
+
+            // Y scale: lin / log
+            {
+                int& sel = appState.stability.yScaleSelector;
+                const ImVec4 cfgBtnColors[2] = {
+                    ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
+                    ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
+                };
+                ImGui::Text("Y scale");
+                ImGui::SameLine();
+                ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[sel == 0 ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  sel == 0 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
+                if (ImGui::Button("lin##StabYScaleLin")) {
+                    sel = 0;
+                    appState.needsRedraw = true;
+                }
+                ImGui::PopStyleVar();
+                ImGui::PopStyleColor(3);
+                ImGui::SameLine(0.0f, 0.0f);
+                ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[sel == 1 ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  sel == 1 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
+                if (ImGui::Button("log##StabYScaleLog")) {
+                    sel = 1;
+                    appState.needsRedraw = true;
+                }
+                ImGui::PopStyleVar();
+                ImGui::PopStyleColor(3);
+            }
+
+            ImGui::Separator();
+
+            // X unit: cm-1 / µm / THz
+            {
+                int& sel = appState.stability.xUnitSelector;
+                const ImVec4 cfgBtnColors[2] = {
+                    ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
+                    ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
+                };
+                ImGui::Text("X unit");
+                ImGui::SameLine();
+                ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[sel == 0 ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  sel == 0 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+                if (ImGui::Button("cm-1##StabXUnitCm")) {
+                    sel = 0;
+                    appState.needsRedraw = true;
+                }
+                ImGui::PopStyleColor(3);
+                ImGui::SameLine(0.0f, 0.0f);
+                ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[sel == 1 ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  sel == 1 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+                if (ImGui::Button("\xC2\xB5" "m##StabXUnitUm")) {
+                    sel = 1;
+                    appState.needsRedraw = true;
+                }
+                ImGui::PopStyleColor(3);
+                ImGui::SameLine(0.0f, 0.0f);
+                ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[sel == 2 ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  sel == 2 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+                if (ImGui::Button("THz##StabXUnitTHz")) {
+                    sel = 2;
+                    appState.needsRedraw = true;
+                }
+                ImGui::PopStyleColor(3);
+            }
+
+            ImGui::Separator();
+
+            // Y Axis mode: all / tight / force
+            {
+                int& mode = appState.stability.yAxisMode;
+                const ImVec4 cfgBtnColors[2] = {
+                    ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
+                    ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
+                };
+                ImGui::Text("Y Axis");
+                ImGui::SameLine();
+                ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[mode == 0 ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  mode == 0 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+                if (ImGui::Button("all##StabYAxisAll")) {
+                    mode = 0;
+                    appState.needsRedraw = true;
+                }
+                ImGui::PopStyleColor(3);
+                ImGui::SameLine(0.0f, 0.0f);
+                ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[mode == 1 ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  mode == 1 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+                if (ImGui::Button("tight##StabYAxisTight")) {
+                    mode = 1;
+                    appState.needsRedraw = true;
+                }
+                ImGui::PopStyleColor(3);
+                ImGui::SameLine(0.0f, 0.0f);
+                ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[mode == 2 ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  mode == 2 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+                if (ImGui::Button("force##StabYAxisForce")) {
+                    mode = 2;
+                    appState.needsRedraw = true;
+                }
+                ImGui::PopStyleColor(3);
+            }
+
+            if (appState.stability.yAxisMode == 2) {
+                ImGui::Text("Force Y");
+                double vMin = appState.stability.forcedYMin;
+                double vMax = appState.stability.forcedYMax;
+                ImGui::SetNextItemWidth(100);
+                if (ImGui::InputDouble("Min##StabForceYMin", &vMin, 0.0, 0.0, "%.4f")) {
+                    if (vMax > vMin) {
+                        appState.stability.forcedYMin = vMin;
+                        appState.needsRedraw = true;
+                    }
+                }
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(100);
+                if (ImGui::InputDouble("Max##StabForceYMax", &vMax, 0.0, 0.0, "%.4f")) {
+                    if (vMax > vMin) {
+                        appState.stability.forcedYMax = vMax;
+                        appState.needsRedraw = true;
+                    }
+                }
+            }
+
+        } else {
+            ImGui::Text("No data loaded.");
+        }
+        ImGui::End();
+
         // Interferogram Config panel (docked)
         ImGui::Begin("Interferogram");
         if (appState.dataLoaded) {
@@ -3102,6 +3383,26 @@ int main() {
         appState.allanVariance.renderAllanContents(appState.spectrum.showTrackingCursor);
         ImGui::End();
 
+        // Stability View panel (docked)
+        ImGui::Begin("Stability View");
+        if (appState.dataLoaded && !appState.selectedFilenames.empty()) {
+            std::string currentFileId = appState.selectedFilenames[0];
+            std::string displayName = currentFileId;
+            size_t lastSlash = displayName.find_last_of("/\\");
+            if (lastSlash != std::string::npos)
+                displayName = displayName.substr(lastSlash + 1);
+
+            if (appState.stability.referenceAvailable
+                && (appState.stability.currentFileId != currentFileId
+                    || appState.stability.needsRecompute)) {
+                appState.stability.computeTransmittance(currentFileId, displayName);
+            }
+            appState.stability.renderStabilityContents(appState.spectrum.showTrackingCursor);
+        } else {
+            ImGui::Text("No data loaded.");
+        }
+        ImGui::End();
+
         // Close the docking condition
         }
         
@@ -3187,6 +3488,13 @@ int main() {
     config.allanSliceIndex           = appState.allanVariance.selectedSliceIndex;
     config.allanXRangeMin            = appState.allanVariance.xRangeMin;
     config.allanXRangeMax            = appState.allanVariance.xRangeMax;
+
+    // Save stability window settings
+    config.stabilityYAxisMode      = appState.stability.yAxisMode;
+    config.stabilityXUnitSelector  = appState.stability.xUnitSelector;
+    config.stabilityYScaleSelector = appState.stability.yScaleSelector;
+    config.stabilityForcedYMin     = appState.stability.forcedYMin;
+    config.stabilityForcedYMax     = appState.stability.forcedYMax;
 
     // Save config to file
     if (!config.saveToFile(configFilePath)) {

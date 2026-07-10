@@ -9,6 +9,7 @@
 #include "average_spectrum.h"
 #include "snr_spectrum.h"
 #include "allan_variance.h"
+#include "stability.h"
 #include "export.h"
 #include "adapters/csv_adapter.h"
 
@@ -118,6 +119,9 @@ struct AppState {
     // Allan variance state
     AllanVariance allanVariance;
 
+    // Stability spectrum state
+    StabilitySpectrum stability;
+
     // Export panel state
     ExportPanel exportPanel;
 
@@ -145,6 +149,9 @@ struct AppState {
 
     // Clear Allan variance data (call when dataset changes)
     void clearAllanVariance();
+
+    // Clear Stability spectrum data (call when dataset changes)
+    void clearStabilitySpectrum();
 };
 
 // Global application state instance
