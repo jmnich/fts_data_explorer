@@ -339,7 +339,8 @@ void StabilitySpectrum::computeTransmittance(const std::string& fileId, const st
         }
 
         newX.push_back(targetX);
-        newY.push_back(interpY - refY[i]);
+        double refVal = refY[i];
+        newY.push_back((refVal > 1e-15) ? (interpY / refVal) * 100.0 : 0.0);
     }
 
     cachedTransX = std::move(newX);
@@ -385,9 +386,9 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
         if (!referenceAvailable)
             msg = "No reference spectrum loaded";
         else if (!transmittanceAvailable)
-            msg = "No difference spectrum available";
+            msg = "No transmission spectrum available";
         else
-            msg = "No difference spectrum available";
+            msg = "No transmission spectrum available";
         ImVec2 textSize = ImGui::CalcTextSize(msg);
         ImGui::SetCursorPos(ImVec2(
             (avail.x - textSize.x) * 0.5f,
@@ -398,7 +399,7 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
 
     {
         char buf[128];
-        std::snprintf(buf, sizeof(buf), "diff = E - E_ref  |  %s", currentFileName.c_str());
+        std::snprintf(buf, sizeof(buf), "T = E / E_ref [%%]  |  %s", currentFileName.c_str());
         ImVec2 textSz = ImGui::CalcTextSize(buf);
         float availWidth = ImGui::GetContentRegionAvail().x;
         ImGui::SameLine(availWidth - textSz.x - ImGui::GetStyle().ItemSpacing.x);
@@ -513,7 +514,7 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
         const char* xLabel = (xUnitSelector == 0) ? "Wavenumber (cm-1)"
                            : (xUnitSelector == 1) ? "Wavelength (\xC2\xB5" "m)"
                            : "Frequency (THz)";
-        const char* yLabel = "Difference [V]";
+        const char* yLabel = "Transmission [%]";
         ImPlot::SetupAxes(xLabel, yLabel, x_flags, y_flags);
 
         if (yScaleSelector == 1)
@@ -616,16 +617,16 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
             spec.LineColor = ImVec4(0.2f, 0.7f, 0.3f, 1.0f);
             spec.LineWeight = 2.0f;
             if (largeData) spec.LineWeight = 1.0f;
-            ImPlot::PlotLine("Difference", cachedTransX.data(), cachedTransY.data(),
+            ImPlot::PlotLine("Transmission", cachedTransX.data(), cachedTransY.data(),
                              cachedTransY.size(), spec);
         }
 
         {
-            double yZero = 0.0;
+            double yGuideline = 100.0;
             double xMinR = ImPlot::GetPlotLimits().X.Min;
             double xMaxR = ImPlot::GetPlotLimits().X.Max;
             double guideX[2] = {xMinR, xMaxR};
-            double guideY[2] = {yZero, yZero};
+            double guideY[2] = {yGuideline, yGuideline};
             ImPlotSpec guideSpec;
             guideSpec.LineColor = ImVec4(0.5f, 0.5f, 0.5f, 0.5f);
             guideSpec.LineWeight = 1.0f;
@@ -711,7 +712,7 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
             double thz = (unit == ST::THz) ? mousePos.x :
                            SpectralToolbox::convertXValue(mousePos.x, unit, ST::THz);
             char txt[512];
-            std::snprintf(txt, sizeof(txt), "%.2f cm-1\n%.4f um\n%.4f THz\ndiff: %.6f",
+            std::snprintf(txt, sizeof(txt), "%.2f cm-1\n%.4f um\n%.4f THz\nT: %.2f %%",
                           cm1, um, thz, signalY);
             ImPlot::Annotation(mousePos.x, signalY, ImVec4(1, 1, 1, 1),
                                ImVec2(10, -10), true, "%s", txt);
