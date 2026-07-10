@@ -79,11 +79,11 @@ void StabilitySpectrum::reset() {
     referenceAvailable = false;
     referenceSource = 0;
     refDescription.clear();
+    refShortName.clear();
     cachedTransX.clear();
     cachedTransY.clear();
     transmittanceAvailable = false;
-    currentFileId.clear();
-    currentFileName.clear();
+    lastKnownSelection.clear();
 
     isSelectingXRange = false;
     selectionStartX = 0.0;
@@ -131,6 +131,7 @@ void StabilitySpectrum::setReferenceFromCurrentSpectrum() {
         size_t ls = shortName.find_last_of("/\\");
         if (ls != std::string::npos) shortName = shortName.substr(ls + 1);
         refDescription = std::string("From file: ") + shortName;
+    refShortName = shortName;
     }
 
     fprintf(stderr, "[stability] setReferenceFromCurrentSpectrum: refX.size=%zu refY.size=%zu refXUnit=%d spectrumXUnit=%d\n",
@@ -199,6 +200,10 @@ void StabilitySpectrum::setReferenceFromCSV(const std::string& path) {
     referenceSource = 1;
 
     refDescription = std::string("From CSV: ") + path;
+    {
+        size_t ls = path.find_last_of("/\\");
+        refShortName = (ls != std::string::npos) ? path.substr(ls + 1) : path;
+    }
 
     cachedTransX.clear();
     cachedTransY.clear();
@@ -237,6 +242,7 @@ void StabilitySpectrum::setReferenceFromAverage() {
         std::snprintf(buf, sizeof(buf), "Average spectrum (%d files)", avg.averageCount);
         refDescription = buf;
     }
+    refShortName = "Average";
 
     cachedTransX.clear();
     cachedTransY.clear();
@@ -246,23 +252,20 @@ void StabilitySpectrum::setReferenceFromAverage() {
     needsRecompute = true;
 }
 
-void StabilitySpectrum::computeTransmittance(const std::string& fileId, const std::string& displayName) {
+bool StabilitySpectrum::computeTransmittanceForFile(const std::string& fileId) {
     using Clock = std::chrono::high_resolution_clock;
     auto t0 = Clock::now();
 
-    if (!referenceAvailable || refX.empty() || refY.empty()) {
-        transmittanceAvailable = false;
-        return;
-    }
+    if (!referenceAvailable || refX.empty() || refY.empty())
+        return false;
 
     auto freqIt = appState->spectrum.cachedFrequencies.find(fileId);
     auto specIt = appState->spectrum.cachedSpectra.find(fileId);
     if (freqIt == appState->spectrum.cachedFrequencies.end() ||
         specIt == appState->spectrum.cachedSpectra.end() ||
         freqIt->second.empty() || specIt->second.empty()) {
-        fprintf(stderr, "[stability] computeTransmittance: file spectrum not in cache, fileId=%s\n", fileId.c_str());
-        transmittanceAvailable = false;
-        return;
+        fprintf(stderr, "[stability] computeTransmittanceForFile: file spectrum not in cache, fileId=%s\n", fileId.c_str());
+        return false;
     }
 
     const auto& curFreq = freqIt->second;
@@ -272,11 +275,6 @@ void StabilitySpectrum::computeTransmittance(const std::string& fileId, const st
     auto displayUnit = static_cast<ST>(xUnitSelector);
     auto specU = static_cast<ST>(appState->spectrum.xUnitSelector);
     auto refU = static_cast<ST>(refXUnit);
-
-    fprintf(stderr, "[stability] computeTransmittance: refX=%zu refY=%zu curFreq=%zu curSpec=%zu  "
-            "refXUnit=%d specXUnit=%d displayUnit=%d\n",
-            refX.size(), refY.size(), curFreq.size(), curSpec.size(),
-            refXUnit, appState->spectrum.xUnitSelector, xUnitSelector);
 
     std::vector<double> convertedRefX(refX.size());
     for (size_t i = 0; i < refX.size(); i++)
@@ -292,9 +290,6 @@ void StabilitySpectrum::computeTransmittance(const std::string& fileId, const st
     double refXmax = std::max(convertedRefX.front(), convertedRefX.back());
     double overlapMin = std::max(curXmin, refXmin);
     double overlapMax = std::min(curXmax, refXmax);
-
-    fprintf(stderr, "[stability] computeTransmittance: curRange=[%.4f, %.4f] refRange=[%.4f, %.4f] overlap=[%.4f, %.4f]\n",
-            curXmin, curXmax, refXmin, refXmax, overlapMin, overlapMax);
 
     bool curAscending = convertedCurFreq.front() < convertedCurFreq.back();
 
@@ -343,52 +338,66 @@ void StabilitySpectrum::computeTransmittance(const std::string& fileId, const st
         newY.push_back((refVal > 1e-15) ? (interpY / refVal) * 100.0 : 0.0);
     }
 
-    cachedTransX = std::move(newX);
-    cachedTransY = std::move(newY);
+    if (newX.empty() || newY.empty())
+        return false;
+
+    size_t origSize = newX.size();
+    if (appState && appState->enableDownsampling &&
+        newX.size() > appState->maxPointsBeforeDownsampling) {
+        size_t factor = newX.size() / appState->maxPointsBeforeDownsampling + 1;
+        std::vector<double> dsX, dsY;
+        dsX.reserve(newX.size() / factor + 1);
+        dsY.reserve(newY.size() / factor + 1);
+        for (size_t i = 0; i < newX.size(); i += factor) {
+            dsX.push_back(newX[i]);
+            dsY.push_back(newY[i]);
+        }
+        newX = std::move(dsX);
+        newY = std::move(dsY);
+    }
 
     auto t1 = Clock::now();
     double elapsed = std::chrono::duration<double>(t1 - t0).count();
 
-    size_t origSize = cachedTransX.size();
-    if (appState && appState->enableDownsampling &&
-        cachedTransX.size() > appState->maxPointsBeforeDownsampling) {
-        size_t factor = cachedTransX.size() / appState->maxPointsBeforeDownsampling + 1;
-        std::vector<double> dsX, dsY;
-        dsX.reserve(cachedTransX.size() / factor + 1);
-        dsY.reserve(cachedTransY.size() / factor + 1);
-        for (size_t i = 0; i < cachedTransX.size(); i += factor) {
-            dsX.push_back(cachedTransX[i]);
-            dsY.push_back(cachedTransY[i]);
-        }
-        cachedTransX = std::move(dsX);
-        cachedTransY = std::move(dsY);
-    }
-
-    fprintf(stderr, "[stability] computeTransmittance: done in %.3fs  orig=%zu  final=%zu  ",
-            elapsed, origSize, cachedTransX.size());
-    if (!cachedTransY.empty()) {
-        auto mm = std::minmax_element(cachedTransY.begin(), cachedTransY.end());
+    fprintf(stderr, "[stability] computeTransmittanceForFile: done in %.3fs  orig=%zu  final=%zu  ",
+            elapsed, origSize, newX.size());
+    if (!newY.empty()) {
+        auto mm = std::minmax_element(newY.begin(), newY.end());
         fprintf(stderr, "Yrange=[%.6f, %.6f]", *mm.first, *mm.second);
     }
     fprintf(stderr, "\n");
 
-    currentFileId = fileId;
-    currentFileName = displayName;
+    cachedTransX[fileId] = std::move(newX);
+    cachedTransY[fileId] = std::move(newY);
     transmittanceAvailable = true;
-    needsRecompute = false;
+    return true;
+}
+
+static ImVec4 getStabilityLineColor(size_t index) {
+    switch (index % 5) {
+        case 0: return ImVec4(0.6f, 0.5f, 0.1f, 1.0f);   // Dark yellow
+        case 1: return ImVec4(0.75f, 0.05f, 0.05f, 1.0f); // Red
+        case 2: return ImVec4(0.15f, 0.45f, 0.28f, 1.0f); // Green
+        case 3: return ImVec4(0.07f, 0.29f, 0.59f, 1.0f); // Blue
+        case 4: return ImVec4(0.5f, 0.5f, 0.5f, 1.0f);    // Grey
+    }
+    return ImVec4(0.5f, 0.5f, 0.5f, 1.0f);
 }
 
 void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
-    if (!referenceAvailable || !transmittanceAvailable ||
-        cachedTransX.empty() || cachedTransY.empty()) {
+    // Detect file selection changes
+    {
+        std::vector<std::string> currentSelection(appState->selectedFilenames.begin(),
+                                                   appState->selectedFilenames.end());
+        if (currentSelection != lastKnownSelection) {
+            needsRecompute = true;
+            lastKnownSelection = currentSelection;
+        }
+    }
+
+    if (!referenceAvailable) {
         ImVec2 avail = ImGui::GetContentRegionAvail();
-        const char* msg;
-        if (!referenceAvailable)
-            msg = "No reference spectrum loaded";
-        else if (!transmittanceAvailable)
-            msg = "No transmission spectrum available";
-        else
-            msg = "No transmission spectrum available";
+        const char* msg = "No reference spectrum loaded";
         ImVec2 textSize = ImGui::CalcTextSize(msg);
         ImGui::SetCursorPos(ImVec2(
             (avail.x - textSize.x) * 0.5f,
@@ -397,9 +406,62 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
         return;
     }
 
+    if (appState->selectedFilenames.empty()) {
+        ImVec2 avail = ImGui::GetContentRegionAvail();
+        const char* msg = "No data loaded.";
+        ImVec2 textSize = ImGui::CalcTextSize(msg);
+        ImGui::SetCursorPos(ImVec2(
+            (avail.x - textSize.x) * 0.5f,
+            (avail.y - textSize.y) * 0.5f));
+        ImGui::Text("%s", msg);
+        return;
+    }
+
+    // Build legend (spectrum-style colored squares + filenames)
     {
-        char buf[128];
-        std::snprintf(buf, sizeof(buf), "T = E / E_ref [%%]  |  %s", currentFileName.c_str());
+        for (size_t i = 0; i < lastKnownSelection.size(); i++) {
+            const std::string& filePath = lastKnownSelection[i];
+            std::string displayName = filePath;
+            size_t ls = displayName.find_last_of("/\\");
+            if (ls != std::string::npos)
+                displayName = displayName.substr(ls + 1);
+
+            ImVec4 color = getStabilityLineColor(i);
+
+            ImDrawList* draw_list = ImGui::GetWindowDrawList();
+            ImVec2 cursor_pos = ImGui::GetCursorScreenPos();
+            ImVec2 square_size(12, 12);
+            draw_list->AddRectFilled(cursor_pos,
+                ImVec2(cursor_pos.x + square_size.x, cursor_pos.y + square_size.y),
+                ImGui::ColorConvertFloat4ToU32(color));
+            draw_list->AddRect(cursor_pos,
+                ImVec2(cursor_pos.x + square_size.x, cursor_pos.y + square_size.y),
+                ImGui::ColorConvertFloat4ToU32(ImVec4(0.2f, 0.2f, 0.2f, 1.0f)));
+
+            ImGui::Dummy(square_size);
+            ImGui::SameLine();
+            ImGui::Text("%s", displayName.c_str());
+
+            if (i < lastKnownSelection.size() - 1) {
+                ImGui::SameLine();
+                ImGui::Text("  ");
+                ImGui::SameLine();
+            }
+        }
+        ImGui::Separator();
+    }
+
+    // Top-right label
+    if (!cachedTransY.empty()) {
+        const std::string& firstPath = lastKnownSelection[0];
+        std::string firstName = firstPath;
+        size_t ls = firstName.find_last_of("/\\");
+        if (ls != std::string::npos)
+            firstName = firstName.substr(ls + 1);
+
+        char buf[256];
+        std::snprintf(buf, sizeof(buf), "T(%%) = S / S_ref  |  %s / %s",
+                      firstName.c_str(), refShortName.c_str());
         ImVec2 textSz = ImGui::CalcTextSize(buf);
         float availWidth = ImGui::GetContentRegionAvail().x;
         ImGui::SameLine(availWidth - textSz.x - ImGui::GetStyle().ItemSpacing.x);
@@ -497,11 +559,34 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
         prevYAxisMode = yAxisMode;
     }
 
-    bool largeData = cachedTransX.size() > 50000;
+    // Compute max data size across all cached files for large-data flag
+    size_t maxDataSize = 0;
+    for (const auto& kv : cachedTransY)
+        if (kv.second.size() > maxDataSize)
+            maxDataSize = kv.second.size();
+    bool largeData = maxDataSize > 50000;
+
     ImPlotFlags plot_flags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend;
     if (largeData)
         plot_flags |= ImPlotFlags_NoInputs;
     if (ImPlot::BeginPlot("StabilityViewPlot", ImVec2(-1, -1), plot_flags)) {
+
+        // Lazy-compute: recompute all if stale, then fill missing per-file caches
+        if (needsRecompute) {
+            cachedTransX.clear();
+            cachedTransY.clear();
+            transmittanceAvailable = false;
+            needsRecompute = false;
+        }
+        for (const auto& fileId : lastKnownSelection) {
+            if (cachedTransX.find(fileId) == cachedTransX.end())
+                computeTransmittanceForFile(fileId);
+        }
+
+        if (!transmittanceAvailable || cachedTransY.empty()) {
+            ImPlot::EndPlot();
+            return;
+        }
 
         ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoTickMarks;
         ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
@@ -514,7 +599,7 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
         const char* xLabel = (xUnitSelector == 0) ? "Wavenumber (cm-1)"
                            : (xUnitSelector == 1) ? "Wavelength (\xC2\xB5" "m)"
                            : "Frequency (THz)";
-        const char* yLabel = "Transmission [%]";
+        const char* yLabel = "T(%)";
         ImPlot::SetupAxes(xLabel, yLabel, x_flags, y_flags);
 
         if (yScaleSelector == 1)
@@ -529,20 +614,43 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
             ImPlot::SetupAxisLimits(ImAxis_Y1, yMin, yMax, ImPlotCond_Always);
         }
 
-        if (shouldAutoscale && !cachedTransX.empty()) {
-            double xMin = std::min(cachedTransX.front(), cachedTransX.back());
-            double xMax = std::max(cachedTransX.front(), cachedTransX.back());
+        if (shouldAutoscale) {
+            double globalXMin = 0.0, globalXMax = 0.0;
+            double globalYMin = 0.0, globalYMax = 0.0;
+            bool haveRange = false;
 
-            auto mmY = std::minmax_element(cachedTransY.begin(), cachedTransY.end());
-            double yMin = *mmY.first;
-            double yMax = *mmY.second;
+            for (const auto& kv : cachedTransX) {
+                const auto& xv = kv.second;
+                if (xv.empty()) continue;
+                auto yit = cachedTransY.find(kv.first);
+                if (yit == cachedTransY.end() || yit->second.empty()) continue;
 
-            if (xMin < xMax)
-                ImPlot::SetupAxisLimits(ImAxis_X1, xMin, xMax, ImPlotCond_Always);
-            if (!effectiveForceY) {
+                double localXMin = std::min(xv.front(), xv.back());
+                double localXMax = std::max(xv.front(), xv.back());
+                auto mmY = std::minmax_element(yit->second.begin(), yit->second.end());
+                double localYMin = *mmY.first;
+                double localYMax = *mmY.second;
+
+                if (!haveRange) {
+                    globalXMin = localXMin; globalXMax = localXMax;
+                    globalYMin = localYMin; globalYMax = localYMax;
+                    haveRange = true;
+                } else {
+                    globalXMin = std::min(globalXMin, localXMin);
+                    globalXMax = std::max(globalXMax, localXMax);
+                    globalYMin = std::min(globalYMin, localYMin);
+                    globalYMax = std::max(globalYMax, localYMax);
+                }
+            }
+
+            if (haveRange && globalXMin < globalXMax) {
+                ImPlot::SetupAxisLimits(ImAxis_X1, globalXMin, globalXMax, ImPlotCond_Always);
+            }
+            if (!effectiveForceY && haveRange) {
+                double yMin = globalYMin;
                 if (yScaleSelector == 1 && yMin <= 0.0)
-                    yMin = (yMax > 0.0 ? yMax * 1e-6 : 1e-6);
-                ImPlot::SetupAxisLimits(ImAxis_Y1, yMin, yMax, ImPlotCond_Always);
+                    yMin = (globalYMax > 0.0 ? globalYMax * 1e-6 : 1e-6);
+                ImPlot::SetupAxisLimits(ImAxis_Y1, yMin, globalYMax, ImPlotCond_Always);
             }
             shouldAutoscale = false;
         }
@@ -555,9 +663,16 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
 
         if (xUnitSwitchedThisFrame) {
             xUnitSwitchedThisFrame = false;
-            double dataXMin = std::min(cachedTransX.front(), cachedTransX.back());
-            double dataXMax = std::max(cachedTransX.front(), cachedTransX.back());
-            if (dataXMin < dataXMax) {
+            double dataXMin = 0.0, dataXMax = 0.0;
+            bool first = true;
+            for (const auto& kv : cachedTransX) {
+                if (kv.second.empty()) continue;
+                double lmin = std::min(kv.second.front(), kv.second.back());
+                double lmax = std::max(kv.second.front(), kv.second.back());
+                if (first) { dataXMin = lmin; dataXMax = lmax; first = false; }
+                else { dataXMin = std::min(dataXMin, lmin); dataXMax = std::max(dataXMax, lmax); }
+            }
+            if (!first && dataXMin < dataXMax) {
                 double clampedMin = std::max(convertedXMin, dataXMin);
                 double clampedMax = std::min(convertedXMax, dataXMax);
                 if (clampedMin < clampedMax) {
@@ -572,24 +687,37 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
             }
         }
 
+        // Axis tick limiting (use global min/max across all files)
         {
             double xMin = manualXMin;
             double xMax = manualXMax;
             double yMin = savedYMin;
             double yMax = savedYMax;
+
             if (yMin >= yMax) {
-                auto mmY = std::minmax_element(cachedTransY.begin(), cachedTransY.end());
-                yMin = *mmY.first;
-                yMax = *mmY.second;
+                bool first = true;
+                for (const auto& kv : cachedTransY) {
+                    if (kv.second.empty()) continue;
+                    auto mmY = std::minmax_element(kv.second.begin(), kv.second.end());
+                    if (first) { yMin = *mmY.first; yMax = *mmY.second; first = false; }
+                    else { yMin = std::min(yMin, *mmY.first); yMax = std::max(yMax, *mmY.second); }
+                }
             }
             if (xMin >= xMax) {
-                xMin = std::min(cachedTransX.front(), cachedTransX.back());
-                xMax = std::max(cachedTransX.front(), cachedTransX.back());
+                bool first = true;
+                for (const auto& kv : cachedTransX) {
+                    if (kv.second.empty()) continue;
+                    double lmin = std::min(kv.second.front(), kv.second.back());
+                    double lmax = std::max(kv.second.front(), kv.second.back());
+                    if (first) { xMin = lmin; xMax = lmax; first = false; }
+                    else { xMin = std::min(xMin, lmin); xMax = std::max(xMax, lmax); }
+                }
             }
             if (xMin < xMax) SetupAxisTicksLimited(ImAxis_X1, xMin, xMax);
             if (yMin < yMax) SetupAxisTicksLimited(ImAxis_Y1, yMin, yMax);
         }
 
+        // X-range selection
         {
             bool shift = ImGui::GetIO().KeyShift;
             bool overPlot = ImPlot::IsPlotHovered();
@@ -612,15 +740,22 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
             }
         }
 
-        {
+        // Plot each file's transmission curve
+        for (size_t i = 0; i < lastKnownSelection.size(); i++) {
+            const std::string& fileId = lastKnownSelection[i];
+            auto xIt = cachedTransX.find(fileId);
+            auto yIt = cachedTransY.find(fileId);
+            if (xIt == cachedTransX.end() || yIt == cachedTransY.end()) continue;
+            if (xIt->second.empty() || yIt->second.empty()) continue;
+
             ImPlotSpec spec;
-            spec.LineColor = ImVec4(0.2f, 0.7f, 0.3f, 1.0f);
-            spec.LineWeight = 2.0f;
-            if (largeData) spec.LineWeight = 1.0f;
-            ImPlot::PlotLine("Transmission", cachedTransX.data(), cachedTransY.data(),
-                             cachedTransY.size(), spec);
+            spec.LineColor = getStabilityLineColor(i);
+            spec.LineWeight = largeData ? 1.0f : 2.0f;
+            ImPlot::PlotLine(fileId.c_str(), xIt->second.data(), yIt->second.data(),
+                             yIt->second.size(), spec);
         }
 
+        // 100% guideline
         {
             double yGuideline = 100.0;
             double xMinR = ImPlot::GetPlotLimits().X.Min;
@@ -630,9 +765,10 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
             ImPlotSpec guideSpec;
             guideSpec.LineColor = ImVec4(0.5f, 0.5f, 0.5f, 0.5f);
             guideSpec.LineWeight = 1.0f;
-            ImPlot::PlotLine("##ZeroLine", guideX, guideY, 2, guideSpec);
+            ImPlot::PlotLine("##HundredPctLine", guideX, guideY, 2, guideSpec);
         }
 
+        // X-range selection visualization
         if (isSelectingXRange) {
             ImPlotPoint mousePos = ImPlot::GetPlotMousePos();
             double x_min_plot = ImPlot::GetPlotLimits().X.Min;
@@ -661,12 +797,18 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
             ImPlot::PlotLine("##StabSelectionEnd", end_x, end_y, 2);
         }
 
-        if (showTrackingCursor && ImPlot::IsPlotHovered()) {
+        // Tracking cursor (uses first file only, like spectrum view)
+        if (showTrackingCursor && ImPlot::IsPlotHovered() && !lastKnownSelection.empty()) {
             ImPlotPoint mousePos = ImPlot::GetPlotMousePos();
             double signalY = mousePos.y;
-            if (!cachedTransX.empty() && !cachedTransY.empty()) {
-                const auto& freqs = cachedTransX;
-                const auto& specs = cachedTransY;
+
+            const std::string& firstId = lastKnownSelection[0];
+            auto xIt = cachedTransX.find(firstId);
+            auto yIt = cachedTransY.find(firstId);
+            if (xIt != cachedTransX.end() && yIt != cachedTransY.end() &&
+                !xIt->second.empty() && !yIt->second.empty()) {
+                const auto& freqs = xIt->second;
+                const auto& specs = yIt->second;
                 size_t idx = 0;
                 if (freqs.front() < freqs.back()) {
                     auto it = std::lower_bound(freqs.begin(), freqs.end(), mousePos.x);

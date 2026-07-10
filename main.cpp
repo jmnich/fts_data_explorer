@@ -3416,17 +3416,6 @@ int main() {
         // Stability View panel (docked)
         ImGui::Begin("Stability View");
         if (appState.dataLoaded && !appState.selectedFilenames.empty()) {
-            std::string currentFileId = appState.selectedFilenames[0];
-            std::string displayName = currentFileId;
-            size_t lastSlash = displayName.find_last_of("/\\");
-            if (lastSlash != std::string::npos)
-                displayName = displayName.substr(lastSlash + 1);
-
-            if (appState.stability.referenceAvailable
-                && (appState.stability.currentFileId != currentFileId
-                    || appState.stability.needsRecompute)) {
-                appState.stability.computeTransmittance(currentFileId, displayName);
-            }
             appState.stability.renderStabilityContents(appState.spectrum.showTrackingCursor);
         } else {
             ImGui::Text("No data loaded.");

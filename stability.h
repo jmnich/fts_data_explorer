@@ -1,7 +1,9 @@
 #pragma once
 
 #include <vector>
+#include <map>
 #include <string>
+#include <set>
 #include "imgui.h"
 #include "implot.h"
 #include "apodization.h"
@@ -19,12 +21,11 @@ public:
     bool referenceAvailable;
     int referenceSource;
     std::string refDescription;
+    std::string refShortName;
 
-    std::vector<double> cachedTransX;
-    std::vector<double> cachedTransY;
+    std::map<std::string, std::vector<double>> cachedTransX;
+    std::map<std::string, std::vector<double>> cachedTransY;
     bool transmittanceAvailable;
-    std::string currentFileId;
-    std::string currentFileName;
 
     bool isSelectingXRange;
     double selectionStartX;
@@ -61,6 +62,8 @@ public:
 
     bool needsRecompute;
 
+    std::vector<std::string> lastKnownSelection;
+
     char csvPathBuffer[1024];
 
     StabilitySpectrum();
@@ -70,7 +73,8 @@ public:
     void setReferenceFromCSV(const std::string& path);
     void setReferenceFromAverage();
 
-    void computeTransmittance(const std::string& fileId, const std::string& displayName);
-
     void renderStabilityContents(bool showTrackingCursor);
+
+private:
+    bool computeTransmittanceForFile(const std::string& fileId);
 };
