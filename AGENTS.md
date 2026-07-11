@@ -16,11 +16,12 @@ It presents a tree view of information available in the dataset and then allows 
     - primary, large Interferogram View panel, which shows selected primary and reference interferograms on 2 vertically stacked plots with shared x axis. These graphs support zoom with mouse.
     - Interferogram panel (docked), containing toggle buttons for X axis base (sample/OPD), Max at zero, Auto-fit Y, and Downsample settings.
     - metadata panel, docked to the right of the Interferogram View panel, showing all available metadata
-    - files panel, docked to the left, showing tree view with files in the selected directory. Each file row has a checkbox for including that file in Average/SNR/Allan computations.
+    - files panel, docked to the left, showing tree view with files in the selected directory. Each file row has a checkbox for including that file in Average/SNR/Allan/100% T computations.
     - spectrum controls panel (docked) with spectrum display and FFT processing settings
     - Average config panel (docked) + Average View panel with mean-spectrum computation and plot
     - SNR config panel (docked) + SNR View panel with SNR-spectrum computation and plot
     - Allan config panel (docked) + Allan View panel with Allan-Werle variance 3D surface and 2D slice plots
+    - 100% T config panel (docked) + 100% T View panel with transmittance, energy ratios, and std dev plots
 - OPD X-axis: When X axis base is set to "OPD" in the Interferogram panel, the interferogram plots use Hilbert-transform-derived optical path difference (in µm) on the x-axis instead of sample indices. Hilbert X values are cached per-file and automatically recomputed when the reference laser wavelength changes in the Spectrum panel.
 - Main window contains a ribbon menu, which is hidden in the welcome screen. The structure of the menu is as follows:
     - File
@@ -133,6 +134,33 @@ It presents a tree view of information available in the dataset and then allows 
     - **Export artifacts:** "Allan-Werle 3D" (full M×N surface as CSV) and "Allan-Werle slice" (current slice as CSV, wavelength in filename).
     - **Files:** `allan_variance.h` / `allan_variance.cpp` — `AllanVariance` class. OAWAR algorithm in `computeAllanVariance()`.
 
+- 100% T functionality (transmission spectroscopy)
+    - **Purpose:** Compute and visualize transmittance T% = (sample / reference) × 100 for assessing spectrometer stability.
+    - **Panels:** "100% T" config panel (docked left) + "100% T View" plot panel (docked right).
+    - **File selection:** Plot lines for files selected in main view (up to 5 via `lastKnownSelection`). Std dev calculation uses files checked for averaging (`filesSelectedForAveraging`).
+    - **100% T config panel controls:**
+        - Reference source: File / CSV / Average (toggle buttons). Avg disabled until average is calculated.
+          - File: "Set as reference" copies the first selected file's spectrum.
+          - CSV: Browse + Load a 2-column CSV; X unit auto-detected from header.
+          - Avg: "Use average" copies the computed average spectrum.
+        - Reference status display: green text when loaded, showing description, point count, unit.
+        - Cursor On/Off toggle (synchronized with Spectrum panel).
+        - X unit selector: cm⁻¹ / µm / THz. Changing units invalidates transmittance and std dev caches.
+        - "Match X to Spectrum View": copies Spectrum panel's X unit + zoom range.
+        - Energy Ratios: 3 ratio pairs (A, B, C) with numerator/denominator inputs (wavenumber in cm⁻¹ or "max"). "ASTM E1421" preset button.
+        - Y Axis mode: all / tight / force.
+        - Std Deviation: "Calculate std" button with progress bar. On-demand multi-frame computation.
+    - **100% T View panel layout** (vertical stack, no scrolling):
+        - Legend (colored squares + filenames) + plot title "100% transmission line".
+        - Transmittance plot: T(%) curves for selected files (color-coded, ≤5). Grey dashed 100% guideline. Shift+drag, arrow pan, ESC, scroll, cursor.
+        - Energy Ratios table: "Energy Ratios" column header + A/B/C columns with ratio definitions displayed (e.g. "A 4000/2000" with smaller font). When std dev calculated: 3 extra rows — Average, Spread, Std Dev — with dark accent background, displayed in 1.5E-1 engineering notation.
+        - Std dev plot titled "100% transmission line standard deviation". Y axis always "tight" (AutoFit + RangeFit). X axis locked to transmittance plot's range. Placeholder text when not calculated.
+    - **Transmittance computation:** Per-file: fetches spectrum from cache → converts to display X unit → divides by reference point-by-point → T% = (interpY / refY[i]) × 100. Cached in `cachedTransX`/`cachedTransY`. Flag `needsRecompute` triggers recompute on reference or X unit change.
+    - **Std dev calculation:** One file per frame via `tickStdCalculation()`. For each checked file: load interferogram → `processSpectrum()` → `computeTransmittanceFromVectors()` → accumulate sum + sum-of-squares. Final: σ = √(ΣY²/N − (ΣY/N)²). Cached in `cachedStdX`/`cachedStdY`. Ratio stats (Average/Spread/Std Dev) computed from collected per-file ratios.
+    - **Export artifacts** (3, via Export panel): "100% T transmission line" (filename includes source file name), "100% T lines for all files" (all checked files, common X + per-file columns), "100% T standard deviation".
+    - **State persistence:** `[T100Window]` config section (yAxisMode, xUnitSelector, forcedYMin/Max, energy ratio definitions).
+    - **Files:** `t100.h` / `t100.cpp` — `T100Spectrum` class.
+
 # Application structure
 - the application uses 'adapter classes' which convert different data storage formats into a unified object carrying primary and reference interferograms as well as metadata. These unified data objects are then used to display the information in gui.
 - file organization: all source files live in the root directory:
@@ -142,6 +170,7 @@ It presents a tree view of information available in the dataset and then allows 
     - `average_spectrum.h` / `average_spectrum.cpp` — AverageSpectrum class
     - `snr_spectrum.h` / `snr_spectrum.cpp` — SnrSpectrum class
     - `allan_variance.h` / `allan_variance.cpp` — AllanVariance class with OAWAR algorithm
+    - `t100.h` / `t100.cpp` — T100Spectrum class (100% transmission spectroscopy)
     - `spectral_toolbox.h` / `spectral_toolbox.cpp` — FFTW DSP pipeline (Hilbert correction, FFT, unit conversion)
     - `apodization.h` / `apodization.cpp` — Apodization window functions (Rectangular, Gauss, Triangular) with parametric controls; applied before zero-padding in the FFT pipeline
     - `config.h` — AppConfig with load/save to `~/.fts_data_explorer_config`
@@ -160,7 +189,8 @@ It presents a tree view of information available in the dataset and then allows 
   - `AverageSpectrum averageSpectrum`: Average spectrum computation and display state
   - `SnrSpectrum snrSpectrum`: SNR spectrum computation and display state
   - `AllanVariance allanVariance`: Allan-Werle variance computation and 3D/2D display state
-  - `filesSelectedForAveraging`: Per-file checkbox state (shared by Average, SNR, and Allan panels), indexed identically to sortedFiles
+  - `T100Spectrum t100`: 100% transmission spectroscopy state, caches, and std dev calculation
+  - `filesSelectedForAveraging`: Per-file checkbox state (shared by Average, SNR, Allan, and 100% T panels), indexed identically to sortedFiles
 - State persistence: Configuration settings are saved to and loaded from a config file for session restoration.
 
 ## Idle rendering optimization (`needsRedraw`)
