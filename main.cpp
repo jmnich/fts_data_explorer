@@ -578,6 +578,12 @@ int main() {
             appState.allanVariance.tickCalculation();
         }
 
+        // Tick stability standard deviation calculation (multi-frame, one file per frame)
+        if (appState.stability.calcStdInProgress) {
+            appState.needsRedraw = true;
+            appState.stability.tickStdCalculation();
+        }
+
         // FPS overlay: force periodic redraw when idle so the counter stays live
         static double lastForceRedrawTime = 0.0;
         if (!appState.needsRedraw && appState.showFPS) {
@@ -3127,6 +3133,25 @@ int main() {
                         appState.needsRedraw = true;
                     }
                 }
+            }
+
+            ImGui::Separator();
+
+            ImGui::Text("Std Deviation");
+            if (!appState.stability.calcStdInProgress) {
+                if (ImGui::Button("Calculate std##StabCalcStd")) {
+                    if (appState.stability.referenceAvailable) {
+                        appState.stability.startStdCalculation();
+                        appState.needsRedraw = true;
+                    }
+                }
+            } else {
+                float pct = appState.stability.stdProgressTotal > 0
+                    ? (float)appState.stability.stdProgressCurrent / (float)appState.stability.stdProgressTotal
+                    : 0.0f;
+                ImGui::ProgressBar(pct, ImVec2(-1, 0), "");
+                ImGui::Text("Processing %d/%d", appState.stability.stdProgressCurrent,
+                            appState.stability.stdProgressTotal);
             }
 
         } else {

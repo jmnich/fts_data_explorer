@@ -65,7 +65,18 @@ StabilitySpectrum::StabilitySpectrum()
       xUnitSwitchedThisFrame(false),
       convertedXMin(0.0),
       convertedXMax(0.0),
-      needsRecompute(false)
+      needsRecompute(false),
+      stddevAvailable(false),
+      calcStdInProgress(false),
+      stdProgressTotal(0),
+      stdProgressCurrent(0),
+      calcStdBins(0),
+      calcStdValidFiles(0),
+      calcStdFirstFile(true),
+      ratioStatsAvailable(false),
+      ratioAvgA(0.0), ratioAvgB(0.0), ratioAvgC(0.0),
+      ratioSpreadA(0.0), ratioSpreadB(0.0), ratioSpreadC(0.0),
+      ratioStdDevA(0.0), ratioStdDevB(0.0), ratioStdDevC(0.0)
 {
     csvPathBuffer[0] = '\0';
     energyRatioNumA[0] = '\0';
@@ -116,6 +127,23 @@ void StabilitySpectrum::reset() {
     energyRatioDenB[0] = '\0';
     energyRatioNumC[0] = '\0';
     energyRatioDenC[0] = '\0';
+
+    stddevAvailable = false;
+    calcStdInProgress = false;
+    stdProgressTotal = 0;
+    stdProgressCurrent = 0;
+    cachedStdX.clear();
+    cachedStdY.clear();
+    calcStdCommonX.clear();
+    calcStdSum.clear();
+    calcStdSum2.clear();
+    calcStdBins = 0;
+    calcStdValidFiles = 0;
+    calcStdFirstFile = true;
+    ratioStatsAvailable = false;
+    ratioAvgA = ratioAvgB = ratioAvgC = 0.0;
+    ratioSpreadA = ratioSpreadB = ratioSpreadC = 0.0;
+    ratioStdDevA = ratioStdDevB = ratioStdDevC = 0.0;
 }
 
 void StabilitySpectrum::setReferenceFromCurrentSpectrum() {
@@ -151,6 +179,7 @@ void StabilitySpectrum::setReferenceFromCurrentSpectrum() {
     shouldAutoscale = true;
     firstLoadCompleted = false;
     needsRecompute = true;
+    clearStdDev();
 }
 
 static int detectXUnitFromHeader(const std::string& header) {
@@ -215,6 +244,7 @@ void StabilitySpectrum::setReferenceFromCSV(const std::string& path) {
     shouldAutoscale = true;
     firstLoadCompleted = false;
     needsRecompute = true;
+    clearStdDev();
 }
 
 void StabilitySpectrum::setReferenceFromAverage() {
@@ -253,6 +283,7 @@ void StabilitySpectrum::setReferenceFromAverage() {
     shouldAutoscale = true;
     firstLoadCompleted = false;
     needsRecompute = true;
+    clearStdDev();
 }
 
 bool StabilitySpectrum::computeTransmittanceForFile(const std::string& fileId) {
@@ -376,6 +407,271 @@ bool StabilitySpectrum::computeTransmittanceForFile(const std::string& fileId) {
     return true;
 }
 
+bool StabilitySpectrum::computeTransmittanceFromVectors(
+        const std::vector<double>& specX,
+        const std::vector<double>& specY,
+        int specXUnit,
+        std::vector<double>& outX,
+        std::vector<double>& outY) {
+    if (!referenceAvailable || refX.empty() || refY.empty())
+        return false;
+    if (specX.empty() || specY.empty())
+        return false;
+
+    using ST = SpectralToolbox::SpectrumXUnit;
+    auto displayUnit = static_cast<ST>(xUnitSelector);
+    auto specU = static_cast<ST>(specXUnit);
+    auto refU = static_cast<ST>(refXUnit);
+
+    std::vector<double> convertedRefX(refX.size());
+    for (size_t i = 0; i < refX.size(); i++)
+        convertedRefX[i] = SpectralToolbox::convertXValue(refX[i], refU, displayUnit);
+
+    std::vector<double> convertedCurFreq(specX.size());
+    for (size_t i = 0; i < specX.size(); i++)
+        convertedCurFreq[i] = SpectralToolbox::convertXValue(specX[i], specU, displayUnit);
+
+    double curXmin = std::min(convertedCurFreq.front(), convertedCurFreq.back());
+    double curXmax = std::max(convertedCurFreq.front(), convertedCurFreq.back());
+    double refXmin = std::min(convertedRefX.front(), convertedRefX.back());
+    double refXmax = std::max(convertedRefX.front(), convertedRefX.back());
+    double overlapMin = std::max(curXmin, refXmin);
+    double overlapMax = std::min(curXmax, refXmax);
+
+    bool curAscending = convertedCurFreq.front() < convertedCurFreq.back();
+
+    std::vector<double> newX, newY;
+    newX.reserve(refX.size());
+    newY.reserve(refX.size());
+
+    for (size_t i = 0; i < refX.size(); i++) {
+        double targetX = convertedRefX[i];
+        if (targetX < overlapMin || targetX > overlapMax)
+            continue;
+
+        double interpY;
+
+        if (curAscending) {
+            auto it = std::lower_bound(convertedCurFreq.begin(), convertedCurFreq.end(), targetX);
+            if (it == convertedCurFreq.begin()) {
+                interpY = specY[0];
+            } else if (it == convertedCurFreq.end()) {
+                interpY = specY.back();
+            } else {
+                size_t hi = it - convertedCurFreq.begin();
+                size_t lo = hi - 1;
+                double frac = (targetX - convertedCurFreq[lo]) /
+                              (convertedCurFreq[hi] - convertedCurFreq[lo]);
+                interpY = specY[lo] * (1.0 - frac) + specY[hi] * frac;
+            }
+        } else {
+            auto it = std::lower_bound(convertedCurFreq.begin(), convertedCurFreq.end(),
+                                       targetX, std::greater<double>());
+            if (it == convertedCurFreq.begin()) {
+                interpY = specY[0];
+            } else if (it == convertedCurFreq.end()) {
+                interpY = specY.back();
+            } else {
+                size_t hi = it - convertedCurFreq.begin();
+                size_t lo = hi - 1;
+                double frac = (targetX - convertedCurFreq[lo]) /
+                              (convertedCurFreq[hi] - convertedCurFreq[lo]);
+                interpY = specY[lo] * (1.0 - frac) + specY[hi] * frac;
+            }
+        }
+
+        newX.push_back(targetX);
+        double refVal = refY[i];
+        newY.push_back((refVal > 1e-15) ? (interpY / refVal) * 100.0 : 0.0);
+    }
+
+    if (newX.empty() || newY.empty())
+        return false;
+
+    outX = std::move(newX);
+    outY = std::move(newY);
+    return true;
+}
+
+struct EnergyRatios { double a, b, c; bool validA, validB, validC; };
+
+static EnergyRatios computeEnergyRatiosDirect(const char* numA, const char* denA,
+                                               const char* numB, const char* denB,
+                                               const char* numC, const char* denC,
+                                               int spectrumXUnit,
+                                               const std::vector<double>& freqs,
+                                               const std::vector<double>& spec);
+
+void StabilitySpectrum::clearStdDev() {
+    stddevAvailable = false;
+    calcStdInProgress = false;
+    stdProgressTotal = 0;
+    stdProgressCurrent = 0;
+    cachedStdX.clear();
+    cachedStdY.clear();
+    calcStdCommonX.clear();
+    calcStdSum.clear();
+    calcStdSum2.clear();
+    calcStdBins = 0;
+    calcStdValidFiles = 0;
+    calcStdFirstFile = true;
+    ratioStatsAvailable = false;
+    ratioAvgA = ratioAvgB = ratioAvgC = 0.0;
+    ratioSpreadA = ratioSpreadB = ratioSpreadC = 0.0;
+    ratioStdDevA = ratioStdDevB = ratioStdDevC = 0.0;
+}
+
+void StabilitySpectrum::startStdCalculation() {
+    calcStdCommonX.clear();
+    calcStdSum.clear();
+    calcStdSum2.clear();
+    calcStdBins = 0;
+    calcStdValidFiles = 0;
+    calcStdFirstFile = true;
+    calcStdInProgress = true;
+    stdProgressCurrent = 0;
+    stdProgressTotal = 0;
+    cachedStdX.clear();
+    cachedStdY.clear();
+    stddevAvailable = false;
+    calcRatioA.clear();
+    calcRatioB.clear();
+    calcRatioC.clear();
+    ratioStatsAvailable = false;
+}
+
+bool StabilitySpectrum::tickStdCalculation() {
+    if (!calcStdInProgress) return false;
+
+    stdProgressTotal = 0;
+    for (size_t i = 0; i < appState->sortedFiles.size() && i < appState->filesSelectedForAveraging.size(); i++) {
+        if (appState->filesSelectedForAveraging[i]) stdProgressTotal++;
+    }
+
+    size_t idx = static_cast<size_t>(stdProgressCurrent);
+    while (idx < appState->sortedFiles.size() && idx < appState->filesSelectedForAveraging.size()
+           && !appState->filesSelectedForAveraging[idx]) {
+        idx++;
+    }
+
+    if (idx >= appState->sortedFiles.size() || idx >= appState->filesSelectedForAveraging.size()) {
+        if (calcStdValidFiles >= 2) {
+            cachedStdX = calcStdCommonX;
+            cachedStdY.resize(calcStdBins);
+            for (size_t j = 0; j < calcStdBins; j++) {
+                double mean = calcStdSum[j] / calcStdValidFiles;
+                double meanSq = calcStdSum2[j] / calcStdValidFiles;
+                double variance = meanSq - mean * mean;
+                cachedStdY[j] = (variance > 0.0) ? std::sqrt(variance) : 0.0;
+            }
+            stddevAvailable = true;
+        }
+        if (!calcRatioA.empty() || !calcRatioB.empty() || !calcRatioC.empty()) {
+            auto computeStats = [](const std::vector<double>& v,
+                                    double& avg, double& spread, double& stddev) {
+                if (v.empty()) { avg = spread = stddev = 0.0; return; }
+                double sum = 0.0, sumSq = 0.0;
+                double vmin = v[0], vmax = v[0];
+                for (double x : v) {
+                    sum += x; sumSq += x * x;
+                    if (x < vmin) vmin = x;
+                    if (x > vmax) vmax = x;
+                }
+                avg = sum / v.size();
+                double var = sumSq / v.size() - avg * avg;
+                stddev = (var > 0.0) ? std::sqrt(var) : 0.0;
+                spread = vmax - vmin;
+            };
+            computeStats(calcRatioA, ratioAvgA, ratioSpreadA, ratioStdDevA);
+            computeStats(calcRatioB, ratioAvgB, ratioSpreadB, ratioStdDevB);
+            computeStats(calcRatioC, ratioAvgC, ratioSpreadC, ratioStdDevC);
+            ratioStatsAvailable = true;
+        }
+        calcStdInProgress = false;
+        return true;
+    }
+
+    auto raw = CSVAdapter::loadFromCSV(appState->sortedFiles[idx]);
+    auto ps = SpectralToolbox::processSpectrum(
+        raw.primaryDetector, raw.referenceDetector,
+        appState->spectrum.refLaserTextbox,
+        appState->spectrum.Kpadding,
+        static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector),
+        static_cast<ApodizationWindow>(appState->spectrum.apodizationSelector),
+        appState->spectrum.apodizationParams);
+
+    bool collectRatios = (energyRatioNumA[0] != '\0' || energyRatioDenA[0] != '\0' ||
+                          energyRatioNumB[0] != '\0' || energyRatioDenB[0] != '\0' ||
+                          energyRatioNumC[0] != '\0' || energyRatioDenC[0] != '\0');
+    if (collectRatios) {
+        EnergyRatios er = computeEnergyRatiosDirect(
+            energyRatioNumA, energyRatioDenA,
+            energyRatioNumB, energyRatioDenB,
+            energyRatioNumC, energyRatioDenC,
+            xUnitSelector, ps.spectrumX, ps.spectrumY);
+        if (er.validA) calcRatioA.push_back(er.a);
+        if (er.validB) calcRatioB.push_back(er.b);
+        if (er.validC) calcRatioC.push_back(er.c);
+    }
+
+    std::vector<double> transX, transY;
+    if (!computeTransmittanceFromVectors(ps.spectrumX, ps.spectrumY,
+            xUnitSelector, transX, transY)) {
+        stdProgressCurrent = static_cast<int>(idx) + 1;
+        return false;
+    }
+
+    if (calcStdFirstFile) {
+        calcStdCommonX = transX;
+        calcStdBins = calcStdCommonX.size();
+        calcStdFirstFile = false;
+        calcStdSum.assign(calcStdBins, 0.0);
+        calcStdSum2.assign(calcStdBins, 0.0);
+    }
+
+    if (transX.size() == calcStdBins &&
+        std::equal(calcStdCommonX.begin(), calcStdCommonX.end(), transX.begin())) {
+        for (size_t j = 0; j < calcStdBins; j++) {
+            calcStdSum[j] += transY[j];
+            calcStdSum2[j] += transY[j] * transY[j];
+        }
+        calcStdValidFiles++;
+    } else {
+        for (size_t j = 0; j < calcStdBins; j++) {
+            double targetX = calcStdCommonX[j];
+            const auto& sx = transX;
+            double interpY;
+            if (sx.front() < sx.back()) {
+                auto it = std::lower_bound(sx.begin(), sx.end(), targetX);
+                if (it == sx.begin()) interpY = transY[0];
+                else if (it == sx.end()) interpY = transY.back();
+                else {
+                    size_t hi = it - sx.begin();
+                    size_t lo = hi - 1;
+                    double frac = (targetX - sx[lo]) / (sx[hi] - sx[lo]);
+                    interpY = transY[lo] * (1.0 - frac) + transY[hi] * frac;
+                }
+            } else {
+                auto it = std::lower_bound(sx.begin(), sx.end(), targetX, std::greater<double>());
+                if (it == sx.begin()) interpY = transY[0];
+                else if (it == sx.end()) interpY = transY.back();
+                else {
+                    size_t hi = it - sx.begin();
+                    size_t lo = hi - 1;
+                    double frac = (targetX - sx[lo]) / (sx[hi] - sx[lo]);
+                    interpY = transY[lo] * (1.0 - frac) + transY[hi] * frac;
+                }
+            }
+            calcStdSum[j] += interpY;
+            calcStdSum2[j] += interpY * interpY;
+        }
+        calcStdValidFiles++;
+    }
+
+    stdProgressCurrent = static_cast<int>(idx) + 1;
+    return false;
+}
+
 static bool parseEnergyWavenumber(const char* str, bool& isMax, double& wavenumber) {
     if (!str || str[0] == '\0') return false;
     std::string s(str);
@@ -430,8 +726,6 @@ static double getEnergyAtWavenumber(const std::vector<double>& freqs,
     }
 }
 
-struct EnergyRatios { double a, b, c; bool validA, validB, validC; };
-
 static EnergyRatios computeEnergyRatios(const std::string& fileId,
                                         const char* numA, const char* denA,
                                         const char* numB, const char* denB,
@@ -466,6 +760,33 @@ static EnergyRatios computeEnergyRatios(const std::string& fileId,
     return r;
 }
 
+static EnergyRatios computeEnergyRatiosDirect(const char* numA, const char* denA,
+                                               const char* numB, const char* denB,
+                                               const char* numC, const char* denC,
+                                               int spectrumXUnit,
+                                               const std::vector<double>& freqs,
+                                               const std::vector<double>& spec) {
+    EnergyRatios r = {0, 0, 0, false, false, false};
+    if (freqs.empty() || spec.empty()) return r;
+
+    auto computePair = [&](const char* numStr, const char* denStr, double& outRatio) -> bool {
+        bool numMax, denMax;
+        double numWn, denWn;
+        if (!parseEnergyWavenumber(numStr, numMax, numWn)) return false;
+        if (!parseEnergyWavenumber(denStr, denMax, denWn)) return false;
+        double eNum = getEnergyAtWavenumber(freqs, spec, numMax, numWn, spectrumXUnit);
+        double eDen = getEnergyAtWavenumber(freqs, spec, denMax, denWn, spectrumXUnit);
+        if (eDen <= 1e-15) return false;
+        outRatio = eNum / eDen;
+        return true;
+    };
+
+    r.validA = computePair(numA, denA, r.a);
+    r.validB = computePair(numB, denB, r.b);
+    r.validC = computePair(numC, denC, r.c);
+    return r;
+}
+
 static ImVec4 getStabilityLineColor(size_t index) {
     switch (index % 5) {
         case 0: return ImVec4(0.6f, 0.5f, 0.1f, 1.0f);   // Dark yellow
@@ -475,6 +796,19 @@ static ImVec4 getStabilityLineColor(size_t index) {
         case 4: return ImVec4(0.5f, 0.5f, 0.5f, 1.0f);    // Grey
     }
     return ImVec4(0.5f, 0.5f, 0.5f, 1.0f);
+}
+
+static void formatEnergyRatio(char* buf, size_t bufSize, double val) {
+    double abs = std::abs(val);
+    if (abs < 1e-15) {
+        std::snprintf(buf, bufSize, "0.0E0");
+        return;
+    }
+    int exp = static_cast<int>(std::floor(std::log10(abs)));
+    double mant = val / std::pow(10.0, exp);
+    mant = std::round(mant * 10.0) / 10.0;
+    if (std::abs(mant) >= 10.0) { mant /= 10.0; exp++; }
+    std::snprintf(buf, bufSize, "%.1fE%d", mant, exp);
 }
 
 void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
@@ -650,16 +984,31 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
                            energyRatioNumB[0] != '\0' || energyRatioDenB[0] != '\0' ||
                            energyRatioNumC[0] != '\0' || energyRatioDenC[0] != '\0');
     bool showTable = hasRatioConfig && !lastKnownSelection.empty();
-    float tableWidth = 280.0f;
-    float plotW = -1.0f;
+
+    float tableReserve = 0.0f;
     if (showTable) {
-        float availW = ImGui::GetContentRegionAvail().x;
-        plotW = availW - tableWidth - ImGui::GetStyle().ItemSpacing.x;
-        if (plotW < 100.0f) { showTable = false; plotW = -1.0f; }
+        int totalTableRows = 2 + static_cast<int>(lastKnownSelection.size()) + 1;
+        if (stddevAvailable && ratioStatsAvailable) totalTableRows += 3;
+        tableReserve += ImGui::GetTextLineHeightWithSpacing() * totalTableRows;
+        tableReserve += ImGui::GetStyle().CellPadding.y * 4;
+        tableReserve += ImGui::GetStyle().ItemSpacing.y * 2;
     }
 
-    if (showTable)
-        ImGui::BeginChild("##StabPlotArea", ImVec2(plotW, 0), false, ImGuiWindowFlags_NoScrollbar);
+    float remaining = ImGui::GetContentRegionAvail().y - tableReserve;
+    float plotHeight, stdPlotHeight;
+
+    if (stddevAvailable) {
+        float spacing = ImGui::GetStyle().ItemSpacing.y * 2;
+        plotHeight = (remaining - spacing) * 0.5f;
+        stdPlotHeight = plotHeight;
+    } else {
+        plotHeight = remaining - ImGui::CalcTextSize("Std dev not calculated").y - 40.0f;
+        stdPlotHeight = 0.0f;
+    }
+
+    if (plotHeight < 100.0f) plotHeight = 100.0f;
+
+    ImGui::BeginChild("##StabPlotArea", ImVec2(0, plotHeight), false, ImGuiWindowFlags_NoScrollbar);
 
     ImPlotFlags plot_flags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend;
     if (largeData)
@@ -964,20 +1313,18 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
 
         ImPlot::EndPlot();
     }
-    if (showTable) {
-        ImGui::EndChild();
-        ImGui::SameLine();
-        ImGui::BeginChild("##StabTableArea", ImVec2(0, 0), false);
+    ImGui::EndChild(); // ##StabPlotArea
 
+    if (showTable) {
         ImGui::Text("Energy Ratios");
         ImGui::Separator();
 
         if (ImGui::BeginTable("##StabRatios", 4,
-                ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit)) {
-            ImGui::TableSetupColumn("File", ImGuiTableColumnFlags_WidthFixed, 90);
-            ImGui::TableSetupColumn("A", ImGuiTableColumnFlags_WidthFixed, 60);
-            ImGui::TableSetupColumn("B", ImGuiTableColumnFlags_WidthFixed, 60);
-            ImGui::TableSetupColumn("C", ImGuiTableColumnFlags_WidthFixed, 60);
+                ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchSame)) {
+            ImGui::TableSetupColumn("File");
+            ImGui::TableSetupColumn("A");
+            ImGui::TableSetupColumn("B");
+            ImGui::TableSetupColumn("C");
             ImGui::TableHeadersRow();
 
             for (size_t i = 0; i < lastKnownSelection.size(); i++) {
@@ -1013,14 +1360,76 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
                 ImGui::Text("%s", fileName.c_str());
 
                 ImGui::TableSetColumnIndex(1);
-                if (er.validA) ImGui::Text("%.4f", er.a); else ImGui::Text("--");
+                if (er.validA) { char buf[32]; formatEnergyRatio(buf, sizeof(buf), er.a); ImGui::Text("%s", buf); } else ImGui::Text("--");
                 ImGui::TableSetColumnIndex(2);
-                if (er.validB) ImGui::Text("%.4f", er.b); else ImGui::Text("--");
+                if (er.validB) { char buf[32]; formatEnergyRatio(buf, sizeof(buf), er.b); ImGui::Text("%s", buf); } else ImGui::Text("--");
                 ImGui::TableSetColumnIndex(3);
-                if (er.validC) ImGui::Text("%.4f", er.c); else ImGui::Text("--");
+                if (er.validC) { char buf[32]; formatEnergyRatio(buf, sizeof(buf), er.c); ImGui::Text("%s", buf); } else ImGui::Text("--");
             }
+
+            if (stddevAvailable && ratioStatsAvailable) {
+                ImU32 statsBg = ImGui::ColorConvertFloat4ToU32(ImVec4(0.10f, 0.11f, 0.15f, 0.7f));
+
+                auto drawStatsRow = [&](const char* label,
+                                          double a, double b, double c,
+                                          bool va, bool vb, bool vc) {
+                    ImGui::TableNextRow();
+                    ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, statsBg);
+                    ImGui::TableSetColumnIndex(0);
+                    ImGui::Text("%s", label);
+                    ImGui::TableSetColumnIndex(1);
+                    if (va) { char buf[32]; formatEnergyRatio(buf, sizeof(buf), a); ImGui::Text("%s", buf); } else ImGui::Text("--");
+                    ImGui::TableSetColumnIndex(2);
+                    if (vb) { char buf[32]; formatEnergyRatio(buf, sizeof(buf), b); ImGui::Text("%s", buf); } else ImGui::Text("--");
+                    ImGui::TableSetColumnIndex(3);
+                    if (vc) { char buf[32]; formatEnergyRatio(buf, sizeof(buf), c); ImGui::Text("%s", buf); } else ImGui::Text("--");
+                };
+
+                bool va = !calcRatioA.empty(), vb = !calcRatioB.empty(), vc = !calcRatioC.empty();
+                drawStatsRow("Average",  ratioAvgA,  ratioAvgB,  ratioAvgC,  va, vb, vc);
+                drawStatsRow("Spread",   ratioSpreadA, ratioSpreadB, ratioSpreadC, va, vb, vc);
+                drawStatsRow("Std Dev",  ratioStdDevA, ratioStdDevB, ratioStdDevC, va, vb, vc);
+            }
+
             ImGui::EndTable();
         }
+    }
+
+    ImGui::Spacing();
+
+    if (stddevAvailable && !cachedStdX.empty() && !cachedStdY.empty()) {
+        const char* xLabel = (xUnitSelector == 0) ? "Wavenumber (cm-1)"
+                            : (xUnitSelector == 1) ? "Wavelength (\xC2\xB5" "m)"
+                            : "Frequency (THz)";
+        if (ImPlot::BeginPlot("##StabilityStdDevPlot", ImVec2(-1, stdPlotHeight),
+                              ImPlotFlags_NoTitle | ImPlotFlags_NoLegend)) {
+            ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoTickMarks;
+            ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks | ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_RangeFit;
+
+            ImPlot::SetupAxes(xLabel, "Std Dev T(%)", x_flags, y_flags);
+
+            if (manualXMin < manualXMax)
+                ImPlot::SetupAxisLimits(ImAxis_X1, manualXMin, manualXMax, ImPlotCond_Always);
+
+            ImPlotSpec stdSpec;
+            stdSpec.LineColor = ImVec4(0.1f, 0.6f, 0.7f, 1.0f);
+            stdSpec.LineWeight = 2.0f;
+            ImPlot::PlotLine("##StabStdDevLine", cachedStdX.data(), cachedStdY.data(),
+                             cachedStdY.size(), stdSpec);
+
+            ImPlot::EndPlot();
+        }
+    } else {
+        float phHeight = ImGui::CalcTextSize("Std dev not calculated").y + 40.0f;
+        ImGui::BeginChild("##StdDevPlaceholder", ImVec2(0, phHeight), false,
+                          ImGuiWindowFlags_NoScrollbar);
+        const char* msg = "Std dev not calculated";
+        ImVec2 textSize = ImGui::CalcTextSize(msg);
+        ImVec2 avail = ImGui::GetContentRegionAvail();
+        ImGui::SetCursorPos(ImVec2(
+            (avail.x - textSize.x) * 0.5f,
+            (avail.y - textSize.y) * 0.5f));
+        ImGui::Text("%s", msg);
         ImGui::EndChild();
     }
 }
