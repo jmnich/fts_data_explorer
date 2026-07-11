@@ -107,32 +107,26 @@ It presents a tree view of information available in the dataset and then allows 
     - **Reference implementation:** `test28_allan.py` — Python script demonstrating the Overlapping Allan-Werle Variance (OAWAR) algorithm on wavelength-resolved spectral intensity time series.
     - **File selection:** Shares the same checkboxes as Average and SNR (`filesSelectedForAveraging`).
     - **Allan panel controls:**
-        - X unit selector (cm⁻¹/µm/THz) — determines units for wavelength display and the surface X axis. Stored in µm internally; changing units only affects display, not recalculation.
+        - X unit selector (cm⁻¹/µm/THz) — determines units for the computation grid and display (changing units triggers recalculation).
         - X range min/max: float textboxes in the selected X unit. The Allan-Werle surface is computed only for spectral bins whose wavelength (in µm) falls within this range. Values are stored in µm internally and converted for display.
         - Spectral decimation factor: integer (1–50, default 5). Controls how many spectral bins to skip. Decimation=5 means every 5th spectral point is used for the surface wavelength axis.
         - "Calculate Allan" button: on-demand multi-frame computation with progress bar. Must be re-clicked after changing parameters.
         - Cursor On/Off toggle (synchronized with Spectrum panel).
-    - **Allan computation pipeline:**
-        1. For each checked file, calls `SpectralToolbox::processSpectrum()` with Spectrum panel's apodization/refLaser/K parameters and Spectrum panel's X unit.
-        2. All spectra are interpolated to a common X grid from the first file.
-        3. The common X grid is decimated by the spectral decimation factor.
-        4. Spectral bins within `[xRangeMin, xRangeMax]` (in µm) are selected.
-        5. For each selected wavelength bin, a time series of signal magnitudes is extracted across all files.
-        6. The Overlapping Allan-Werle Variance is computed for each wavelength's time series:
-           - For each cluster size k (1 to N/2), the signal is divided into adjacent pairs of blocks of length k.
-           - Allan variance(k) = mean((mean(block2) - mean(block1))²) / 2.
-           - Tau(k) = k (integration time in number of measurements).
-        7. Results form a 3D surface: X = wavelength, Y = tau, Z = Allan variance.
+    - **Allan computation pipeline (100% T curves):**
+        1. **Phase 0 - Average spectrum**: For each checked file, calls `SpectralToolbox::processSpectrum()` with **Spectrum panel's** apodization/refLaser/K parameters but outputs in **Allan panel's X unit** (`xUnitSelector`). Accumulates mean spectrum on a common X grid (one file per frame via `tickCalculation()`).
+        2. **Phase 1 - 100% T curves**: For each data file, computes transmittance T% = (file_spectrum / average_spectrum) × 100. The average spectrum from Phase 0 serves as the reference. Instant, single-frame.
+        3. **Phase 2 - Allan variance on 100% T**: Applies spectral decimation (`wavelengthDecimation`) and X range filter (`xRangeMin`/`xRangeMax` in µm) to the common X grid. For each wavelength bin, extracts the time series of 100% T values across files and computes Overlapping Allan-Werle Variance.
+        4. Results form a 3D surface: X = wavelength, Y = tau, Z = Allan variance of 100% T.
     - **Allan View panel** — three vertically stacked regions:
         - Top (~60%): ImPlot3D surface plot. X = wavelength in selected unit (linear), Y = tau (log10 scale), Z = Allan variance (log10 data, linear axis). Viridis colormap, surface opacity=0.85.
-        - Middle (~25%): ImPlot2D log-log slice plot showin Allan variance vs tau at the selected wavelength. Same interaction model as SNR/Average (shift+drag, arrow pan, ESC reset, scroll, tracking cursor). Line color: teal.
+        - Middle (~25%): ImPlot2D log-log slice plot showing Allan variance vs tau at the selected wavelength. Same interaction model as SNR/Average (shift+drag, arrow pan, ESC reset, scroll, tracking cursor). Line color: teal.
         - Bottom (~15%): Slider + text input to select the wavelength slice. Slider uses `SliderFloat` with the actual wavelength value in the selected unit. Text input allows direct numeric entry (press Enter to snap).
         - Top-right label: "Slice: X.XX µm | Allan, N files".
         - Slice indicator in 3D: white intersection curve (LineWeight=4) tracing the surface contour at the selected wavelength, drawn with a black shadow halo (LineWeight=6, Z+0.2 offset) for visibility against the surface. Vertical white lines connect the curve's endpoints to a bottom guide line.
     - **Data layout:** `cachedSurfaceAllanVar` is a flattened M×N array in wavelength-major order: `var[wl_idx * numTaus + tau_idx]`.
     - **State persistence:** `[AllanWindow]` config section (xUnitSelector, wavelengthDecimation, sliceIndex, xRangeMin, xRangeMax).
     - **Export artifacts:** "Allan-Werle 3D" (full M×N surface as CSV) and "Allan-Werle slice" (current slice as CSV, wavelength in filename).
-    - **Files:** `allan_variance.h` / `allan_variance.cpp` — `AllanVariance` class. OAWAR algorithm in `computeAllanVariance()`.
+    - **Files:** `allan_variance.h` / `allan_variance.cpp` — `AllanVariance` class. OAWAR algorithm in `computeAllanVariance()`. Calculation state encapsulated in private `CalculationState` struct with three-phase tick-based execution.
 
 - 100% T functionality (transmission spectroscopy)
     - **Purpose:** Compute and visualize transmittance T% = (sample / reference) × 100 for assessing spectrometer stability.
