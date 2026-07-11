@@ -878,16 +878,6 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
         ImGui::Separator();
     }
 
-    // Top-right label
-    {
-        char buf[256];
-        std::snprintf(buf, sizeof(buf), "T(%%) = S / S_ref");
-        ImVec2 textSz = ImGui::CalcTextSize(buf);
-        float availWidth = ImGui::GetContentRegionAvail().x;
-        ImGui::SameLine(availWidth - textSz.x - ImGui::GetStyle().ItemSpacing.x);
-        ImGui::Text("%s", buf);
-    }
-
     bool isFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
     if (isFocused && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
         shouldAutoscale = true;
