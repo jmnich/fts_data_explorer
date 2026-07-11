@@ -1011,10 +1011,10 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
 
     ImGui::BeginChild("##T100PlotArea", ImVec2(0, plotHeight), false, ImGuiWindowFlags_NoScrollbar);
 
-    ImPlotFlags plot_flags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend;
+    ImPlotFlags plot_flags = ImPlotFlags_NoLegend;
     if (largeData)
         plot_flags |= ImPlotFlags_NoInputs;
-    if (ImPlot::BeginPlot("T100ViewPlot", ImVec2(-1, -1), plot_flags)) {
+    if (ImPlot::BeginPlot("100% transmission line", ImVec2(-1, -1), plot_flags)) {
 
         // Lazy-compute: recompute all if stale, then fill missing per-file caches
         if (needsRecompute) {
@@ -1434,8 +1434,8 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
         const char* xLabel = (xUnitSelector == 0) ? "Wavenumber (cm-1)"
                             : (xUnitSelector == 1) ? "Wavelength (\xC2\xB5" "m)"
                             : "Frequency (THz)";
-        if (ImPlot::BeginPlot("##T100StdDevPlot", ImVec2(-1, stdPlotHeight),
-                              ImPlotFlags_NoTitle | ImPlotFlags_NoLegend)) {
+        if (ImPlot::BeginPlot("100% transmission line standard deviation", ImVec2(-1, stdPlotHeight),
+                              ImPlotFlags_NoLegend)) {
             ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoTickMarks;
             ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks | ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_RangeFit;
 

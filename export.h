@@ -16,6 +16,9 @@ public:
     static constexpr const char* ARTIFACT_SPECTRA    = "Spectra from selected files";
     static constexpr const char* ARTIFACT_ALLAN_3D   = "Allan-Werle 3D";
     static constexpr const char* ARTIFACT_ALLAN_SLICE = "Allan-Werle slice";
+    static constexpr const char* ARTIFACT_T100_TRANS    = "100% T transmission line";
+    static constexpr const char* ARTIFACT_T100_ALL_TRANS = "100% T lines for all files";
+    static constexpr const char* ARTIFACT_T100_STDDEV    = "100% T standard deviation";
 
     std::vector<std::string> artifactLabels;
     std::vector<int>         artifactChecked; // 0=false, 1=true
@@ -35,4 +38,7 @@ private:
     void writeSpectraCsv(const std::string& dir);
     void writeAllan3DCsv(const std::string& dir);
     void writeAllanSliceCsv(const std::string& dir);
+    void writeT100TransCsv(const std::string& dir);
+    void writeT100AllTransCsv(const std::string& dir);
+    void writeT100StdDevCsv(const std::string& dir);
 };

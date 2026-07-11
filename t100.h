@@ -95,13 +95,14 @@ public:
     bool tickStdCalculation();
     void clearStdDev();
 
-private:
-    bool computeTransmittanceForFile(const std::string& fileId);
     bool computeTransmittanceFromVectors(const std::vector<double>& specX,
                                           const std::vector<double>& specY,
                                           int specXUnit,
                                           std::vector<double>& outX,
                                           std::vector<double>& outY);
+
+private:
+    bool computeTransmittanceForFile(const std::string& fileId);
 
     std::vector<double> calcStdCommonX;
     std::vector<double> calcStdSum;

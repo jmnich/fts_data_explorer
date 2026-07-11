@@ -3,6 +3,7 @@
 #include "spectrum.h"
 #include "average_spectrum.h"
 #include "allan_variance.h"
+#include "t100.h"
 #include "spectral_toolbox.h"
 #include "adapters/csv_adapter.h"
 
@@ -23,7 +24,10 @@ ExportPanel::ExportPanel()
         ARTIFACT_SNR_SPECT,
         ARTIFACT_SPECTRA,
         ARTIFACT_ALLAN_3D,
-        ARTIFACT_ALLAN_SLICE
+        ARTIFACT_ALLAN_SLICE,
+        ARTIFACT_T100_TRANS,
+        ARTIFACT_T100_ALL_TRANS,
+        ARTIFACT_T100_STDDEV
     };
     artifactChecked.assign(artifactLabels.size(), 0);
 }
@@ -40,6 +44,10 @@ bool ExportPanel::isArtifactAvailable(const char* label) const
         return appState->snrSpectrum.snrAvailable;
     if (lbl == ARTIFACT_ALLAN_3D || lbl == ARTIFACT_ALLAN_SLICE)
         return appState->allanVariance.allanAvailable;
+    if (lbl == ARTIFACT_T100_TRANS || lbl == ARTIFACT_T100_ALL_TRANS)
+        return appState->t100.transmittanceAvailable;
+    if (lbl == ARTIFACT_T100_STDDEV)
+        return appState->t100.stddevAvailable;
     return false;
 }
 
@@ -137,6 +145,9 @@ void ExportPanel::performExport(const std::string& dir)
     if (artifactChecked[4]) writeSpectraCsv(dir);
     if (artifactChecked[5]) writeAllan3DCsv(dir);
     if (artifactChecked[6]) writeAllanSliceCsv(dir);
+    if (artifactChecked[7]) writeT100TransCsv(dir);
+    if (artifactChecked[8]) writeT100AllTransCsv(dir);
+    if (artifactChecked[9]) writeT100StdDevCsv(dir);
 }
 
 // ---------------------------------------------------------------------------
@@ -397,5 +408,136 @@ void ExportPanel::writeAllanSliceCsv(const std::string& dir)
     for (int j = 0; j < N; ++j) {
         ofs << al.cachedSurfaceTaus[j] << "," << al.cachedSurfaceAllanVar[idx * N + j] << "\n";
     }
+    ofs.close();
+}
+
+void ExportPanel::writeT100TransCsv(const std::string& dir)
+{
+    const auto& t100 = appState->t100;
+    if (!t100.transmittanceAvailable || t100.lastKnownSelection.empty())
+        return;
+    const std::string& fileId = t100.lastKnownSelection[0];
+    auto xIt = t100.cachedTransX.find(fileId);
+    auto yIt = t100.cachedTransY.find(fileId);
+    if (xIt == t100.cachedTransX.end() || yIt == t100.cachedTransY.end())
+        return;
+    const auto& xv = xIt->second;
+    const auto& yv = yIt->second;
+    if (xv.empty() || yv.empty()) return;
+
+    std::string srcName = fileId;
+    size_t ls = srcName.find_last_of("/\\");
+    if (ls != std::string::npos) srcName = srcName.substr(ls + 1);
+    size_t dot = srcName.rfind('.');
+    if (dot != std::string::npos) srcName = srcName.substr(0, dot);
+
+    std::string dsName = sanitizeFilename(appState->currentDatasetName);
+    std::string path = dir + "/" + dsName + "_t100_transmission_" + srcName + ".csv";
+    std::ofstream ofs(path);
+    if (!ofs.is_open()) return;
+
+    const char* xLabel = "Wavenumber [cm-1]";
+    if (t100.xUnitSelector == 1) xLabel = "Wavelength [um]";
+    else if (t100.xUnitSelector == 2) xLabel = "Frequency [THz]";
+
+    ofs << xLabel << ",T(%)\n";
+    size_t n = std::min(xv.size(), yv.size());
+    for (size_t j = 0; j < n; j++)
+        ofs << xv[j] << "," << yv[j] << "\n";
+    ofs.close();
+}
+
+void ExportPanel::writeT100AllTransCsv(const std::string& dir)
+{
+    const auto& t100 = appState->t100;
+    if (!t100.transmittanceAvailable || !t100.referenceAvailable)
+        return;
+
+    std::vector<std::string> checkedFiles;
+    for (size_t i = 0; i < appState->sortedFiles.size() && i < appState->filesSelectedForAveraging.size(); i++) {
+        if (appState->filesSelectedForAveraging[i])
+            checkedFiles.push_back(appState->sortedFiles[i]);
+    }
+    if (checkedFiles.empty()) return;
+
+    std::vector<std::vector<double>> allTransX(checkedFiles.size());
+    std::vector<std::vector<double>> allTransY(checkedFiles.size());
+    bool anyValid = false;
+
+    for (size_t i = 0; i < checkedFiles.size(); i++) {
+        auto raw = CSVAdapter::loadFromCSV(checkedFiles[i]);
+        auto ps = SpectralToolbox::processSpectrum(
+            raw.primaryDetector, raw.referenceDetector,
+            appState->spectrum.refLaserTextbox,
+            appState->spectrum.Kpadding,
+            static_cast<SpectralToolbox::SpectrumXUnit>(t100.xUnitSelector),
+            static_cast<ApodizationWindow>(appState->spectrum.apodizationSelector),
+            appState->spectrum.apodizationParams);
+        if (ps.spectrumX.empty() || ps.spectrumY.empty()) continue;
+        std::vector<double> tx, ty;
+        if (appState->t100.computeTransmittanceFromVectors(
+                ps.spectrumX, ps.spectrumY, t100.xUnitSelector, tx, ty)) {
+            allTransX[i] = std::move(tx);
+            allTransY[i] = std::move(ty);
+            anyValid = true;
+        }
+    }
+    if (!anyValid) return;
+
+    std::string dsName = sanitizeFilename(appState->currentDatasetName);
+    std::string path = dir + "/" + dsName + "_t100_all_transmissions.csv";
+    std::ofstream ofs(path);
+    if (!ofs.is_open()) return;
+
+    const char* xLabel = "Wavenumber [cm-1]";
+    if (t100.xUnitSelector == 1) xLabel = "Wavelength [um]";
+    else if (t100.xUnitSelector == 2) xLabel = "Frequency [THz]";
+
+    ofs << xLabel;
+    for (size_t i = 0; i < checkedFiles.size(); i++) {
+        if (!allTransX[i].empty()) {
+            std::string fn = checkedFiles[i];
+            size_t ls = fn.find_last_of("/\\");
+            if (ls != std::string::npos) fn = fn.substr(ls + 1);
+            size_t dot = fn.rfind('.');
+            if (dot != std::string::npos) fn = fn.substr(0, dot);
+            ofs << ",T%_" << i << " [" << fn << "]";
+        }
+    }
+    ofs << "\n";
+
+    const auto& masterX = allTransX[0];
+    size_t nRows = masterX.size();
+    for (size_t r = 0; r < nRows; r++) {
+        ofs << masterX[r];
+        for (size_t i = 0; i < checkedFiles.size(); i++) {
+            if (allTransX[i].empty()) { ofs << ","; continue; }
+            if (r >= allTransY[i].size()) { ofs << ","; continue; }
+            ofs << "," << allTransY[i][r];
+        }
+        ofs << "\n";
+    }
+    ofs.close();
+}
+
+void ExportPanel::writeT100StdDevCsv(const std::string& dir)
+{
+    const auto& t100 = appState->t100;
+    if (!t100.stddevAvailable || t100.cachedStdX.empty() || t100.cachedStdY.empty())
+        return;
+
+    std::string dsName = sanitizeFilename(appState->currentDatasetName);
+    std::string path = dir + "/" + dsName + "_t100_stddev.csv";
+    std::ofstream ofs(path);
+    if (!ofs.is_open()) return;
+
+    const char* xLabel = "Wavenumber [cm-1]";
+    if (t100.xUnitSelector == 1) xLabel = "Wavelength [um]";
+    else if (t100.xUnitSelector == 2) xLabel = "Frequency [THz]";
+
+    ofs << xLabel << ",Standard Deviation T(%)\n";
+    size_t n = std::min(t100.cachedStdX.size(), t100.cachedStdY.size());
+    for (size_t j = 0; j < n; j++)
+        ofs << t100.cachedStdX[j] << "," << t100.cachedStdY[j] << "\n";
     ofs.close();
 }
