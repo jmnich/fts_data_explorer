@@ -962,6 +962,7 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
         pendingNextXMin = 0.0;
         pendingNextXMax = -1.0;
         needsRecompute = true;
+        clearStdDev();
         prevXUnitSelector = xUnitSelector;
     }
 
@@ -987,7 +988,7 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
 
     float tableReserve = 0.0f;
     if (showTable) {
-        int totalTableRows = 2 + static_cast<int>(lastKnownSelection.size()) + 1;
+        int totalTableRows = static_cast<int>(lastKnownSelection.size()) + 1;
         if (stddevAvailable && ratioStatsAvailable) totalTableRows += 3;
         tableReserve += ImGui::GetTextLineHeightWithSpacing() * totalTableRows;
         tableReserve += ImGui::GetStyle().CellPadding.y * 4;
@@ -1316,16 +1317,48 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
     ImGui::EndChild(); // ##StabPlotArea
 
     if (showTable) {
-        ImGui::Text("Energy Ratios");
-        ImGui::Separator();
-
         if (ImGui::BeginTable("##StabRatios", 4,
                 ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchSame)) {
-            ImGui::TableSetupColumn("File");
+            ImGui::TableSetupColumn("Energy Ratios");
             ImGui::TableSetupColumn("A");
             ImGui::TableSetupColumn("B");
             ImGui::TableSetupColumn("C");
-            ImGui::TableHeadersRow();
+
+            ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
+            {
+                ImGui::TableNextColumn();
+                ImGui::Text("Energy Ratios");
+            }
+            {
+                ImGui::TableNextColumn();
+                ImGui::Text("A");
+                if (energyRatioNumA[0] != '\0' && energyRatioDenA[0] != '\0') {
+                    ImGui::SameLine(0, 0);
+                    ImGui::SetWindowFontScale(2.0f / 3.0f);
+                    ImGui::Text("_%s/%s", energyRatioNumA, energyRatioDenA);
+                    ImGui::SetWindowFontScale(1.0f);
+                }
+            }
+            {
+                ImGui::TableNextColumn();
+                ImGui::Text("B");
+                if (energyRatioNumB[0] != '\0' && energyRatioDenB[0] != '\0') {
+                    ImGui::SameLine(0, 0);
+                    ImGui::SetWindowFontScale(2.0f / 3.0f);
+                    ImGui::Text("_%s/%s", energyRatioNumB, energyRatioDenB);
+                    ImGui::SetWindowFontScale(1.0f);
+                }
+            }
+            {
+                ImGui::TableNextColumn();
+                ImGui::Text("C");
+                if (energyRatioNumC[0] != '\0' && energyRatioDenC[0] != '\0') {
+                    ImGui::SameLine(0, 0);
+                    ImGui::SetWindowFontScale(2.0f / 3.0f);
+                    ImGui::Text("_%s/%s", energyRatioNumC, energyRatioDenC);
+                    ImGui::SetWindowFontScale(1.0f);
+                }
+            }
 
             for (size_t i = 0; i < lastKnownSelection.size(); i++) {
                 const std::string& filePath = lastKnownSelection[i];

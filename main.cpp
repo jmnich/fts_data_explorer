@@ -3030,6 +3030,7 @@ int main() {
                 appState.stability.xUnitSelector = newXUnit;
                 appState.stability.prevXUnitSelector = newXUnit;
                 appState.stability.needsRecompute = true;
+                appState.stability.clearStdDev();
                 appState.needsRedraw = true;
             }
 
