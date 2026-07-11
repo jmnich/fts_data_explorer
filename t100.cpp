@@ -1,4 +1,4 @@
-#include "stability.h"
+#include "t100.h"
 #include "spectral_toolbox.h"
 #include "adapters/csv_adapter.h"
 #include "app_state.h"
@@ -33,7 +33,7 @@ static void SetupAxisTicksLimited(ImAxis axis, double min, double max, int maxTi
         ImPlot::SetupAxisTicks(axis, ticks.data(), ticks.size(), nullptr);
 }
 
-StabilitySpectrum::StabilitySpectrum()
+T100Spectrum::T100Spectrum()
     : appState(nullptr),
       refXUnit(0),
       referenceAvailable(false),
@@ -87,7 +87,7 @@ StabilitySpectrum::StabilitySpectrum()
     energyRatioDenC[0] = '\0';
 }
 
-void StabilitySpectrum::reset() {
+void T100Spectrum::reset() {
     refX.clear();
     refY.clear();
     refXUnit = 0;
@@ -146,7 +146,7 @@ void StabilitySpectrum::reset() {
     ratioStdDevA = ratioStdDevB = ratioStdDevC = 0.0;
 }
 
-void StabilitySpectrum::setReferenceFromCurrentSpectrum() {
+void T100Spectrum::setReferenceFromCurrentSpectrum() {
     if (!appState || appState->selectedFilenames.empty()) return;
 
     const std::string& fileId = appState->selectedFilenames[0];
@@ -170,7 +170,7 @@ void StabilitySpectrum::setReferenceFromCurrentSpectrum() {
         refDescription = std::string("From file: ") + shortName;
     }
 
-    fprintf(stderr, "[stability] setReferenceFromCurrentSpectrum: refX.size=%zu refY.size=%zu refXUnit=%d spectrumXUnit=%d\n",
+    fprintf(stderr, "[t100] setReferenceFromCurrentSpectrum: refX.size=%zu refY.size=%zu refXUnit=%d spectrumXUnit=%d\n",
             refX.size(), refY.size(), refXUnit, appState->spectrum.xUnitSelector);
 
     cachedTransX.clear();
@@ -189,7 +189,7 @@ static int detectXUnitFromHeader(const std::string& header) {
     return 0;
 }
 
-void StabilitySpectrum::setReferenceFromCSV(const std::string& path) {
+void T100Spectrum::setReferenceFromCSV(const std::string& path) {
     std::ifstream ifs(path);
     if (!ifs.is_open()) return;
 
@@ -227,7 +227,7 @@ void StabilitySpectrum::setReferenceFromCSV(const std::string& path) {
             v = SpectralToolbox::convertXValue(v, csvU, specU);
     }
 
-    fprintf(stderr, "[stability] setReferenceFromCSV: path=%s rawX.size=%zu csvUnit=%d spectrumUnit=%d\n",
+    fprintf(stderr, "[t100] setReferenceFromCSV: path=%s rawX.size=%zu csvUnit=%d spectrumUnit=%d\n",
             path, rawX.size(), csvUnit, spectrumUnit);
 
     refX = std::move(rawX);
@@ -247,7 +247,7 @@ void StabilitySpectrum::setReferenceFromCSV(const std::string& path) {
     clearStdDev();
 }
 
-void StabilitySpectrum::setReferenceFromAverage() {
+void T100Spectrum::setReferenceFromAverage() {
     if (!appState || !appState->averageSpectrum.averageAvailable) return;
 
     const auto& avg = appState->averageSpectrum;
@@ -262,7 +262,7 @@ void StabilitySpectrum::setReferenceFromAverage() {
             v = SpectralToolbox::convertXValue(v, avgU, specU);
     }
 
-    fprintf(stderr, "[stability] setReferenceFromAverage: x.size=%zu avgXUnit=%d spectrumUnit=%d\n",
+    fprintf(stderr, "[t100] setReferenceFromAverage: x.size=%zu avgXUnit=%d spectrumUnit=%d\n",
             x.size(), avg.xUnitSelector, spectrumUnit);
 
     refX = std::move(x);
@@ -286,7 +286,7 @@ void StabilitySpectrum::setReferenceFromAverage() {
     clearStdDev();
 }
 
-bool StabilitySpectrum::computeTransmittanceForFile(const std::string& fileId) {
+bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
     using Clock = std::chrono::high_resolution_clock;
     auto t0 = Clock::now();
 
@@ -298,7 +298,7 @@ bool StabilitySpectrum::computeTransmittanceForFile(const std::string& fileId) {
     if (freqIt == appState->spectrum.cachedFrequencies.end() ||
         specIt == appState->spectrum.cachedSpectra.end() ||
         freqIt->second.empty() || specIt->second.empty()) {
-        fprintf(stderr, "[stability] computeTransmittanceForFile: file spectrum not in cache, fileId=%s\n", fileId.c_str());
+        fprintf(stderr, "[t100] computeTransmittanceForFile: file spectrum not in cache, fileId=%s\n", fileId.c_str());
         return false;
     }
 
@@ -393,7 +393,7 @@ bool StabilitySpectrum::computeTransmittanceForFile(const std::string& fileId) {
     auto t1 = Clock::now();
     double elapsed = std::chrono::duration<double>(t1 - t0).count();
 
-    fprintf(stderr, "[stability] computeTransmittanceForFile: done in %.3fs  orig=%zu  final=%zu  ",
+    fprintf(stderr, "[t100] computeTransmittanceForFile: done in %.3fs  orig=%zu  final=%zu  ",
             elapsed, origSize, newX.size());
     if (!newY.empty()) {
         auto mm = std::minmax_element(newY.begin(), newY.end());
@@ -407,7 +407,7 @@ bool StabilitySpectrum::computeTransmittanceForFile(const std::string& fileId) {
     return true;
 }
 
-bool StabilitySpectrum::computeTransmittanceFromVectors(
+bool T100Spectrum::computeTransmittanceFromVectors(
         const std::vector<double>& specX,
         const std::vector<double>& specY,
         int specXUnit,
@@ -502,7 +502,7 @@ static EnergyRatios computeEnergyRatiosDirect(const char* numA, const char* denA
                                                const std::vector<double>& freqs,
                                                const std::vector<double>& spec);
 
-void StabilitySpectrum::clearStdDev() {
+void T100Spectrum::clearStdDev() {
     stddevAvailable = false;
     calcStdInProgress = false;
     stdProgressTotal = 0;
@@ -521,7 +521,7 @@ void StabilitySpectrum::clearStdDev() {
     ratioStdDevA = ratioStdDevB = ratioStdDevC = 0.0;
 }
 
-void StabilitySpectrum::startStdCalculation() {
+void T100Spectrum::startStdCalculation() {
     calcStdCommonX.clear();
     calcStdSum.clear();
     calcStdSum2.clear();
@@ -540,7 +540,7 @@ void StabilitySpectrum::startStdCalculation() {
     ratioStatsAvailable = false;
 }
 
-bool StabilitySpectrum::tickStdCalculation() {
+bool T100Spectrum::tickStdCalculation() {
     if (!calcStdInProgress) return false;
 
     stdProgressTotal = 0;
@@ -787,7 +787,7 @@ static EnergyRatios computeEnergyRatiosDirect(const char* numA, const char* denA
     return r;
 }
 
-static ImVec4 getStabilityLineColor(size_t index) {
+static ImVec4 getT100LineColor(size_t index) {
     switch (index % 5) {
         case 0: return ImVec4(0.6f, 0.5f, 0.1f, 1.0f);   // Dark yellow
         case 1: return ImVec4(0.75f, 0.05f, 0.05f, 1.0f); // Red
@@ -811,7 +811,7 @@ static void formatEnergyRatio(char* buf, size_t bufSize, double val) {
     std::snprintf(buf, bufSize, "%.1fE%d", mant, exp);
 }
 
-void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
+void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
     // Detect file selection changes
     {
         std::vector<std::string> currentSelection(appState->selectedFilenames.begin(),
@@ -853,7 +853,7 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
             if (ls != std::string::npos)
                 displayName = displayName.substr(ls + 1);
 
-            ImVec4 color = getStabilityLineColor(i);
+            ImVec4 color = getT100LineColor(i);
 
             ImDrawList* draw_list = ImGui::GetWindowDrawList();
             ImVec2 cursor_pos = ImGui::GetCursorScreenPos();
@@ -1009,12 +1009,12 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
 
     if (plotHeight < 100.0f) plotHeight = 100.0f;
 
-    ImGui::BeginChild("##StabPlotArea", ImVec2(0, plotHeight), false, ImGuiWindowFlags_NoScrollbar);
+    ImGui::BeginChild("##T100PlotArea", ImVec2(0, plotHeight), false, ImGuiWindowFlags_NoScrollbar);
 
     ImPlotFlags plot_flags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend;
     if (largeData)
         plot_flags |= ImPlotFlags_NoInputs;
-    if (ImPlot::BeginPlot("StabilityViewPlot", ImVec2(-1, -1), plot_flags)) {
+    if (ImPlot::BeginPlot("T100ViewPlot", ImVec2(-1, -1), plot_flags)) {
 
         // Lazy-compute: recompute all if stale, then fill missing per-file caches
         if (needsRecompute) {
@@ -1184,7 +1184,7 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
             if (xIt->second.empty() || yIt->second.empty()) continue;
 
             ImPlotSpec spec;
-            spec.LineColor = getStabilityLineColor(i);
+            spec.LineColor = getT100LineColor(i);
             spec.LineWeight = largeData ? 1.0f : 2.0f;
             ImPlot::PlotLine(fileId.c_str(), xIt->second.data(), yIt->second.data(),
                              yIt->second.size(), spec);
@@ -1223,13 +1223,13 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
             double shade_y2[2] = {y_max_plot, y_max_plot};
             ImPlotSpec fillSpec;
             fillSpec.FillColor = ImVec4(0.5f, 0.0f, 0.5f, 0.3f);
-            ImPlot::PlotShaded("##StabSelectionFill", shade_x, shade_y1, shade_y2, 2, fillSpec);
+            ImPlot::PlotShaded("##T100SelectionFill", shade_x, shade_y1, shade_y2, 2, fillSpec);
             double start_x[2] = {selectionStartX, selectionStartX};
             double start_y[2] = {y_min_plot, y_max_plot};
             double end_x[2] = {selectionEndX, selectionEndX};
             double end_y[2] = {y_min_plot, y_max_plot};
-            ImPlot::PlotLine("##StabSelectionStart", start_x, start_y, 2);
-            ImPlot::PlotLine("##StabSelectionEnd", end_x, end_y, 2);
+            ImPlot::PlotLine("##T100SelectionStart", start_x, start_y, 2);
+            ImPlot::PlotLine("##T100SelectionEnd", end_x, end_y, 2);
         }
 
         // Tracking cursor (uses first file only, like spectrum view)
@@ -1272,13 +1272,13 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
             double yAxisMin = ImPlot::GetPlotLimits().Y.Min;
             double lineX[2] = { mousePos.x, mousePos.x };
             double lineY[2] = { yAxisMin, signalY };
-            ImPlot::PlotLine("##StabCursorLine", lineX, lineY, 2);
+            ImPlot::PlotLine("##T100CursorLine", lineX, lineY, 2);
 
             ImPlotSpec cursorSpec;
             cursorSpec.Marker = ImPlotMarker_Circle;
             cursorSpec.MarkerSize = 4.0f;
             cursorSpec.MarkerFillColor = ImVec4(1, 1, 1, 1);
-            ImPlot::PlotScatter("##StabCursorPoint", &mousePos.x, &signalY, 1, cursorSpec);
+            ImPlot::PlotScatter("##T100CursorPoint", &mousePos.x, &signalY, 1, cursorSpec);
 
             using ST = SpectralToolbox::SpectrumXUnit;
             auto unit = static_cast<ST>(xUnitSelector);
@@ -1314,10 +1314,10 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
 
         ImPlot::EndPlot();
     }
-    ImGui::EndChild(); // ##StabPlotArea
+    ImGui::EndChild(); // ##T100PlotArea
 
     if (showTable) {
-        if (ImGui::BeginTable("##StabRatios", 4,
+        if (ImGui::BeginTable("##T100Ratios", 4,
                 ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchSame)) {
             ImGui::TableSetupColumn("Energy Ratios");
             ImGui::TableSetupColumn("A");
@@ -1335,7 +1335,7 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
                 if (energyRatioNumA[0] != '\0' && energyRatioDenA[0] != '\0') {
                     ImGui::SameLine(0, 0);
                     ImGui::SetWindowFontScale(2.0f / 3.0f);
-                    ImGui::Text("_%s/%s", energyRatioNumA, energyRatioDenA);
+                    ImGui::Text("%s/%s", energyRatioNumA, energyRatioDenA);
                     ImGui::SetWindowFontScale(1.0f);
                 }
             }
@@ -1345,7 +1345,7 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
                 if (energyRatioNumB[0] != '\0' && energyRatioDenB[0] != '\0') {
                     ImGui::SameLine(0, 0);
                     ImGui::SetWindowFontScale(2.0f / 3.0f);
-                    ImGui::Text("_%s/%s", energyRatioNumB, energyRatioDenB);
+                    ImGui::Text("%s/%s", energyRatioNumB, energyRatioDenB);
                     ImGui::SetWindowFontScale(1.0f);
                 }
             }
@@ -1355,7 +1355,7 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
                 if (energyRatioNumC[0] != '\0' && energyRatioDenC[0] != '\0') {
                     ImGui::SameLine(0, 0);
                     ImGui::SetWindowFontScale(2.0f / 3.0f);
-                    ImGui::Text("_%s/%s", energyRatioNumC, energyRatioDenC);
+                    ImGui::Text("%s/%s", energyRatioNumC, energyRatioDenC);
                     ImGui::SetWindowFontScale(1.0f);
                 }
             }
@@ -1378,7 +1378,7 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
 
                 ImGui::TableNextRow();
 
-                ImVec4 color = getStabilityLineColor(i);
+                ImVec4 color = getT100LineColor(i);
                 ImU32 rowBg = ImGui::ColorConvertFloat4ToU32(
                     ImVec4(color.x * 0.25f, color.y * 0.25f, color.z * 0.25f, 0.6f));
                 ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, rowBg);
@@ -1434,7 +1434,7 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
         const char* xLabel = (xUnitSelector == 0) ? "Wavenumber (cm-1)"
                             : (xUnitSelector == 1) ? "Wavelength (\xC2\xB5" "m)"
                             : "Frequency (THz)";
-        if (ImPlot::BeginPlot("##StabilityStdDevPlot", ImVec2(-1, stdPlotHeight),
+        if (ImPlot::BeginPlot("##T100StdDevPlot", ImVec2(-1, stdPlotHeight),
                               ImPlotFlags_NoTitle | ImPlotFlags_NoLegend)) {
             ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoTickMarks;
             ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks | ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_RangeFit;
@@ -1447,7 +1447,7 @@ void StabilitySpectrum::renderStabilityContents(bool showTrackingCursor) {
             ImPlotSpec stdSpec;
             stdSpec.LineColor = ImVec4(0.1f, 0.6f, 0.7f, 1.0f);
             stdSpec.LineWeight = 2.0f;
-            ImPlot::PlotLine("##StabStdDevLine", cachedStdX.data(), cachedStdY.data(),
+            ImPlot::PlotLine("##T100StdDevLine", cachedStdX.data(), cachedStdY.data(),
                              cachedStdY.size(), stdSpec);
 
             ImPlot::EndPlot();

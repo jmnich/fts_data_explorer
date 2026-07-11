@@ -11,7 +11,7 @@
 struct InterferogramData;
 class AppState;
 
-class StabilitySpectrum {
+class T100Spectrum {
 public:
     AppState* appState;
 
@@ -82,14 +82,14 @@ public:
     double ratioSpreadA, ratioSpreadB, ratioSpreadC;
     double ratioStdDevA, ratioStdDevB, ratioStdDevC;
 
-    StabilitySpectrum();
+    T100Spectrum();
     void reset();
 
     void setReferenceFromCurrentSpectrum();
     void setReferenceFromCSV(const std::string& path);
     void setReferenceFromAverage();
 
-    void renderStabilityContents(bool showTrackingCursor);
+    void renderT100Contents(bool showTrackingCursor);
 
     void startStdCalculation();
     bool tickStdCalculation();

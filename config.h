@@ -64,17 +64,17 @@ struct AppConfig {
     double allanXRangeMin = 1.0;
     double allanXRangeMax = 30.0;
 
-    // Stability window state
-    int stabilityYAxisMode = 0;
-    int stabilityXUnitSelector = 0;
-    double stabilityForcedYMin = 0.0;
-    double stabilityForcedYMax = 1.0;
-    char stabilityEnergyRatioNumA[32] = "";
-    char stabilityEnergyRatioDenA[32] = "";
-    char stabilityEnergyRatioNumB[32] = "";
-    char stabilityEnergyRatioDenB[32] = "";
-    char stabilityEnergyRatioNumC[32] = "";
-    char stabilityEnergyRatioDenC[32] = "";
+    // T100 window state
+    int t100YAxisMode = 0;
+    int t100XUnitSelector = 0;
+    double t100ForcedYMin = 0.0;
+    double t100ForcedYMax = 1.0;
+    char t100EnergyRatioNumA[32] = "";
+    char t100EnergyRatioDenA[32] = "";
+    char t100EnergyRatioNumB[32] = "";
+    char t100EnergyRatioDenB[32] = "";
+    char t100EnergyRatioNumC[32] = "";
+    char t100EnergyRatioDenC[32] = "";
     
     // Add a dataset to recent list (maintains max size, deduplicates)
     void addRecentDataset(const std::string& datasetPath) {
@@ -177,18 +177,18 @@ struct AppConfig {
             configFile << "x_range_min=" << allanXRangeMin << "\n";
             configFile << "x_range_max=" << allanXRangeMax << "\n";
 
-            // Write stability window settings
-            configFile << "\n[StabilityWindow]\n";
-            configFile << "y_axis_mode=" << stabilityYAxisMode << "\n";
-            configFile << "x_unit_selector=" << stabilityXUnitSelector << "\n";
-            configFile << "forced_y_min=" << stabilityForcedYMin << "\n";
-            configFile << "forced_y_max=" << stabilityForcedYMax << "\n";
-            configFile << "energy_ratio_num_a=" << stabilityEnergyRatioNumA << "\n";
-            configFile << "energy_ratio_den_a=" << stabilityEnergyRatioDenA << "\n";
-            configFile << "energy_ratio_num_b=" << stabilityEnergyRatioNumB << "\n";
-            configFile << "energy_ratio_den_b=" << stabilityEnergyRatioDenB << "\n";
-            configFile << "energy_ratio_num_c=" << stabilityEnergyRatioNumC << "\n";
-            configFile << "energy_ratio_den_c=" << stabilityEnergyRatioDenC << "\n";
+            // Write T100 window settings
+            configFile << "\n[T100Window]\n";
+            configFile << "y_axis_mode=" << t100YAxisMode << "\n";
+            configFile << "x_unit_selector=" << t100XUnitSelector << "\n";
+            configFile << "forced_y_min=" << t100ForcedYMin << "\n";
+            configFile << "forced_y_max=" << t100ForcedYMax << "\n";
+            configFile << "energy_ratio_num_a=" << t100EnergyRatioNumA << "\n";
+            configFile << "energy_ratio_den_a=" << t100EnergyRatioDenA << "\n";
+            configFile << "energy_ratio_num_b=" << t100EnergyRatioNumB << "\n";
+            configFile << "energy_ratio_den_b=" << t100EnergyRatioDenB << "\n";
+            configFile << "energy_ratio_num_c=" << t100EnergyRatioNumC << "\n";
+            configFile << "energy_ratio_den_c=" << t100EnergyRatioDenC << "\n";
             
             configFile.flush();
             configFile.close();
@@ -335,27 +335,27 @@ struct AppConfig {
                         } else if (key == "target_wavelength") {
                             // legacy field — ignore
                         }
-                    } else if (currentSection == "StabilityWindow") {
+                    } else if (currentSection == "T100Window") {
                         if (key == "y_axis_mode") {
-                            stabilityYAxisMode = std::stoi(value);
+                            t100YAxisMode = std::stoi(value);
                         } else if (key == "x_unit_selector") {
-                            stabilityXUnitSelector = std::stoi(value);
+                            t100XUnitSelector = std::stoi(value);
                         } else if (key == "forced_y_min") {
-                            stabilityForcedYMin = std::stod(value);
+                            t100ForcedYMin = std::stod(value);
                         } else if (key == "forced_y_max") {
-                            stabilityForcedYMax = std::stod(value);
+                            t100ForcedYMax = std::stod(value);
                         } else if (key == "energy_ratio_num_a") {
-                            strncpy(stabilityEnergyRatioNumA, value.c_str(), 31);
+                            strncpy(t100EnergyRatioNumA, value.c_str(), 31);
                         } else if (key == "energy_ratio_den_a") {
-                            strncpy(stabilityEnergyRatioDenA, value.c_str(), 31);
+                            strncpy(t100EnergyRatioDenA, value.c_str(), 31);
                         } else if (key == "energy_ratio_num_b") {
-                            strncpy(stabilityEnergyRatioNumB, value.c_str(), 31);
+                            strncpy(t100EnergyRatioNumB, value.c_str(), 31);
                         } else if (key == "energy_ratio_den_b") {
-                            strncpy(stabilityEnergyRatioDenB, value.c_str(), 31);
+                            strncpy(t100EnergyRatioDenB, value.c_str(), 31);
                         } else if (key == "energy_ratio_num_c") {
-                            strncpy(stabilityEnergyRatioNumC, value.c_str(), 31);
+                            strncpy(t100EnergyRatioNumC, value.c_str(), 31);
                         } else if (key == "energy_ratio_den_c") {
-                            strncpy(stabilityEnergyRatioDenC, value.c_str(), 31);
+                            strncpy(t100EnergyRatioDenC, value.c_str(), 31);
                         }
                     }
                 }

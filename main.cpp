@@ -511,7 +511,7 @@ int main() {
     appState.averageSpectrum.appState = &appState;
     appState.snrSpectrum.appState = &appState;
     appState.allanVariance.appState = &appState;
-    appState.stability.appState = &appState;
+    appState.t100.appState = &appState;
     appState.exportPanel.appState = &appState;
     
     // Load average window settings from config
@@ -540,19 +540,19 @@ int main() {
     appState.allanVariance.xRangeMin             = config.allanXRangeMin;
     appState.allanVariance.xRangeMax             = config.allanXRangeMax;
 
-    // Load stability window settings from config
-    appState.stability.yAxisMode           = config.stabilityYAxisMode;
-    appState.stability.prevYAxisMode       = config.stabilityYAxisMode;
-    appState.stability.xUnitSelector       = config.stabilityXUnitSelector;
-    appState.stability.prevXUnitSelector   = config.stabilityXUnitSelector;
-    appState.stability.forcedYMin          = config.stabilityForcedYMin;
-    appState.stability.forcedYMax          = config.stabilityForcedYMax;
-    strncpy(appState.stability.energyRatioNumA, config.stabilityEnergyRatioNumA, 31);
-    strncpy(appState.stability.energyRatioDenA, config.stabilityEnergyRatioDenA, 31);
-    strncpy(appState.stability.energyRatioNumB, config.stabilityEnergyRatioNumB, 31);
-    strncpy(appState.stability.energyRatioDenB, config.stabilityEnergyRatioDenB, 31);
-    strncpy(appState.stability.energyRatioNumC, config.stabilityEnergyRatioNumC, 31);
-    strncpy(appState.stability.energyRatioDenC, config.stabilityEnergyRatioDenC, 31);
+    // Load 100% T window settings from config
+    appState.t100.yAxisMode           = config.t100YAxisMode;
+    appState.t100.prevYAxisMode       = config.t100YAxisMode;
+    appState.t100.xUnitSelector       = config.t100XUnitSelector;
+    appState.t100.prevXUnitSelector   = config.t100XUnitSelector;
+    appState.t100.forcedYMin          = config.t100ForcedYMin;
+    appState.t100.forcedYMax          = config.t100ForcedYMax;
+    strncpy(appState.t100.energyRatioNumA, config.t100EnergyRatioNumA, 31);
+    strncpy(appState.t100.energyRatioDenA, config.t100EnergyRatioDenA, 31);
+    strncpy(appState.t100.energyRatioNumB, config.t100EnergyRatioNumB, 31);
+    strncpy(appState.t100.energyRatioDenB, config.t100EnergyRatioDenB, 31);
+    strncpy(appState.t100.energyRatioNumC, config.t100EnergyRatioNumC, 31);
+    strncpy(appState.t100.energyRatioDenC, config.t100EnergyRatioDenC, 31);
 
     // No initialization needed for simple file dialog
     
@@ -578,10 +578,10 @@ int main() {
             appState.allanVariance.tickCalculation();
         }
 
-        // Tick stability standard deviation calculation (multi-frame, one file per frame)
-        if (appState.stability.calcStdInProgress) {
+        // Tick T100 standard deviation calculation (multi-frame, one file per frame)
+        if (appState.t100.calcStdInProgress) {
             appState.needsRedraw = true;
-            appState.stability.tickStdCalculation();
+            appState.t100.tickStdCalculation();
         }
 
         // FPS overlay: force periodic redraw when idle so the counter stays live
@@ -1114,7 +1114,7 @@ int main() {
                     ImGui::DockBuilderDockWindow("Metadata",           dock_left_bottom_top);
                     ImGui::DockBuilderDockWindow("Export",             dock_left_bottom_top);
         ImGui::DockBuilderDockWindow("SNR",                dock_left_bottom_top);
-        ImGui::DockBuilderDockWindow("Stability",          dock_left_bottom_top);
+        ImGui::DockBuilderDockWindow("100% T",          dock_left_bottom_top);
         ImGui::DockBuilderDockWindow("Allan",              dock_left_bottom_top);
                     ImGui::DockBuilderDockWindow("Spectrum",           dock_left_bottom_bottom);
                     ImGui::DockBuilderDockWindow("Interferogram",      dock_left_bottom_bottom);
@@ -1123,7 +1123,7 @@ int main() {
                     ImGui::DockBuilderDockWindow("SNR View",           dock_right_top);
                     ImGui::DockBuilderDockWindow("Average View",       dock_right_top);
         ImGui::DockBuilderDockWindow("Allan View",         dock_right_top);
-        ImGui::DockBuilderDockWindow("Stability View",     dock_right_top);
+        ImGui::DockBuilderDockWindow("100% T View",     dock_right_top);
         ImGui::DockBuilderDockWindow("Spectrum View",      dock_right_bottom);
                     
                     ImGui::DockBuilderFinish(dockspace_id);
@@ -2836,13 +2836,13 @@ int main() {
         }
         ImGui::End();
 
-        // Stability config panel (docked)
-        ImGui::Begin("Stability");
+        // 100% T config panel (docked)
+        ImGui::Begin("100% T");
         if (appState.dataLoaded) {
             ImGui::Text("Reference source:");
             ImGui::SameLine();
             {
-                int& refSrc = appState.stability.referenceSource;
+                int& refSrc = appState.t100.referenceSource;
                 bool avgAvail = appState.averageSpectrum.averageAvailable;
                 const ImVec4 cfgBtnColors[2] = {
                     ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
@@ -2852,7 +2852,7 @@ int main() {
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  refSrc == 0 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
                 ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
-                if (ImGui::Button("File##StabRefSrcFile")) {
+                if (ImGui::Button("File##T100RefSrcFile")) {
                     refSrc = 0;
                     appState.needsRedraw = true;
                 }
@@ -2863,7 +2863,7 @@ int main() {
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  refSrc == 1 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
                 ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
-                if (ImGui::Button("CSV##StabRefSrcCSV")) {
+                if (ImGui::Button("CSV##T100RefSrcCSV")) {
                     refSrc = 1;
                     appState.needsRedraw = true;
                 }
@@ -2875,7 +2875,7 @@ int main() {
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  refSrc == 2 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
                 ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
-                if (ImGui::Button("Avg##StabRefSrcAvg")) {
+                if (ImGui::Button("Avg##T100RefSrcAvg")) {
                     refSrc = 2;
                     appState.needsRedraw = true;
                 }
@@ -2886,48 +2886,48 @@ int main() {
 
             ImGui::Separator();
 
-            if (appState.stability.referenceSource == 0) {
-                if (ImGui::Button("Set as reference##StabSetRef")) {
-                    appState.stability.setReferenceFromCurrentSpectrum();
+            if (appState.t100.referenceSource == 0) {
+                if (ImGui::Button("Set as reference##T100SetRef")) {
+                    appState.t100.setReferenceFromCurrentSpectrum();
                     appState.needsRedraw = true;
                 }
-            } else if (appState.stability.referenceSource == 1) {
-                ImGui::InputText("Path##StabCsvPath", appState.stability.csvPathBuffer,
-                                 sizeof(appState.stability.csvPathBuffer));
+            } else if (appState.t100.referenceSource == 1) {
+                ImGui::InputText("Path##T100CsvPath", appState.t100.csvPathBuffer,
+                                 sizeof(appState.t100.csvPathBuffer));
                 ImGui::SameLine();
-                if (ImGui::Button("Browse...##StabBrowse")) {
+                if (ImGui::Button("Browse...##T100Browse")) {
                     const char* filter = "*.csv";
                     const char* path = tinyfd_openFileDialog("Select Reference CSV", "", 1, &filter, "CSV Files", 0);
                     if (path) {
-                        strncpy(appState.stability.csvPathBuffer, path,
-                                     sizeof(appState.stability.csvPathBuffer) - 1);
-                        appState.stability.csvPathBuffer[sizeof(appState.stability.csvPathBuffer) - 1] = '\0';
+                        strncpy(appState.t100.csvPathBuffer, path,
+                                     sizeof(appState.t100.csvPathBuffer) - 1);
+                        appState.t100.csvPathBuffer[sizeof(appState.t100.csvPathBuffer) - 1] = '\0';
                         appState.needsRedraw = true;
                     }
                 }
-                if (appState.stability.csvPathBuffer[0] != '\0') {
-                    if (ImGui::Button("Load##StabLoadCsv")) {
-                        appState.stability.setReferenceFromCSV(appState.stability.csvPathBuffer);
+                if (appState.t100.csvPathBuffer[0] != '\0') {
+                    if (ImGui::Button("Load##T100LoadCsv")) {
+                        appState.t100.setReferenceFromCSV(appState.t100.csvPathBuffer);
                         appState.needsRedraw = true;
                     }
                 }
-            } else if (appState.stability.referenceSource == 2) {
+            } else if (appState.t100.referenceSource == 2) {
                 if (!appState.averageSpectrum.averageAvailable) ImGui::BeginDisabled();
-                if (ImGui::Button("Use average##StabUseAvg")) {
-                    appState.stability.setReferenceFromAverage();
+                if (ImGui::Button("Use average##T100UseAvg")) {
+                    appState.t100.setReferenceFromAverage();
                     appState.needsRedraw = true;
                 }
                 if (!appState.averageSpectrum.averageAvailable) ImGui::EndDisabled();
             }
 
-            if (appState.stability.referenceAvailable) {
+            if (appState.t100.referenceAvailable) {
                 ImGui::TextColored(ImVec4(0.2f, 0.8f, 0.2f, 1.0f), "Reference loaded");
-                ImGui::TextWrapped("%s", appState.stability.refDescription.c_str());
-                const char* unitName = (appState.stability.refXUnit == 0) ? "cm-1"
-                                     : (appState.stability.refXUnit == 1) ? "um"
+                ImGui::TextWrapped("%s", appState.t100.refDescription.c_str());
+                const char* unitName = (appState.t100.refXUnit == 0) ? "cm-1"
+                                     : (appState.t100.refXUnit == 1) ? "um"
                                      : "THz";
                 ImGui::TextDisabled("%zu points, unit: %s",
-                    appState.stability.refX.size(), unitName);
+                    appState.t100.refX.size(), unitName);
             } else {
                 ImGui::TextColored(ImVec4(0.7f, 0.5f, 0.1f, 1.0f), "No reference");
             }
@@ -2947,7 +2947,7 @@ int main() {
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cursorOn ? cursorBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cursorBtnColors[1]);
                 ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
-                if (ImGui::Button("On##StabCursorOn")) {
+                if (ImGui::Button("On##T100CursorOn")) {
                     if (!cursorOn) {
                         appState.spectrum.showTrackingCursor = true;
                         appState.needsRedraw = true;
@@ -2960,7 +2960,7 @@ int main() {
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  !cursorOn ? cursorBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cursorBtnColors[1]);
                 ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
-                if (ImGui::Button("Off##StabCursorOff")) {
+                if (ImGui::Button("Off##T100CursorOff")) {
                     if (cursorOn) {
                         appState.spectrum.showTrackingCursor = false;
                         appState.needsRedraw = true;
@@ -2972,7 +2972,7 @@ int main() {
 
             // X unit: cm-1 / µm / THz
             {
-                int& sel = appState.stability.xUnitSelector;
+                int& sel = appState.t100.xUnitSelector;
                 const ImVec4 cfgBtnColors[2] = {
                     ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
                     ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
@@ -2982,7 +2982,7 @@ int main() {
                 ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[sel == 0 ? 1 : 0]);
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  sel == 0 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
-                if (ImGui::Button("cm-1##StabXUnitCm")) {
+                if (ImGui::Button("cm-1##T100XUnitCm")) {
                     sel = 0;
                     appState.needsRedraw = true;
                 }
@@ -2991,7 +2991,7 @@ int main() {
                 ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[sel == 1 ? 1 : 0]);
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  sel == 1 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
-                if (ImGui::Button("\xC2\xB5" "m##StabXUnitUm")) {
+                if (ImGui::Button("\xC2\xB5" "m##T100XUnitUm")) {
                     sel = 1;
                     appState.needsRedraw = true;
                 }
@@ -3000,14 +3000,14 @@ int main() {
                 ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[sel == 2 ? 1 : 0]);
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  sel == 2 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
-                if (ImGui::Button("THz##StabXUnitTHz")) {
+                if (ImGui::Button("THz##T100XUnitTHz")) {
                     sel = 2;
                     appState.needsRedraw = true;
                 }
                 ImGui::PopStyleColor(3);
             }
 
-            if (ImGui::Button("Match X to Spectrum View##StabMatchX")) {
+            if (ImGui::Button("Match X to Spectrum View##T100MatchX")) {
                 int newXUnit = appState.spectrum.xUnitSelector;
                 double specMin = appState.spectrum.manualXMin;
                 double specMax = appState.spectrum.manualXMax;
@@ -3018,19 +3018,19 @@ int main() {
                     double newMin = SpectralToolbox::convertXValue(specMin, specU, stabU);
                     double newMax = SpectralToolbox::convertXValue(specMax, specU, stabU);
                     if (newMin > newMax) std::swap(newMin, newMax);
-                    appState.stability.manualXMin = newMin;
-                    appState.stability.manualXMax = newMax;
-                    appState.stability.pendingNextXMin = newMin;
-                    appState.stability.pendingNextXMax = newMax;
-                    appState.stability.shouldAutoscale = false;
+                    appState.t100.manualXMin = newMin;
+                    appState.t100.manualXMax = newMax;
+                    appState.t100.pendingNextXMin = newMin;
+                    appState.t100.pendingNextXMax = newMax;
+                    appState.t100.shouldAutoscale = false;
                 } else {
-                    appState.stability.shouldAutoscale = true;
+                    appState.t100.shouldAutoscale = true;
                 }
 
-                appState.stability.xUnitSelector = newXUnit;
-                appState.stability.prevXUnitSelector = newXUnit;
-                appState.stability.needsRecompute = true;
-                appState.stability.clearStdDev();
+                appState.t100.xUnitSelector = newXUnit;
+                appState.t100.prevXUnitSelector = newXUnit;
+                appState.t100.needsRecompute = true;
+                appState.t100.clearStdDev();
                 appState.needsRedraw = true;
             }
 
@@ -3045,33 +3045,33 @@ int main() {
 
                 ImGui::Text("Energy Ratios (cm-1)");
                 ImGui::Text("A: "); ImGui::SameLine();
-                ratioInput("##StabRatioNumA", appState.stability.energyRatioNumA,
-                           sizeof(appState.stability.energyRatioNumA));
+                ratioInput("##T100RatioNumA", appState.t100.energyRatioNumA,
+                           sizeof(appState.t100.energyRatioNumA));
                 ImGui::SameLine(); ImGui::Text("/"); ImGui::SameLine();
-                ratioInput("##StabRatioDenA", appState.stability.energyRatioDenA,
-                           sizeof(appState.stability.energyRatioDenA));
+                ratioInput("##T100RatioDenA", appState.t100.energyRatioDenA,
+                           sizeof(appState.t100.energyRatioDenA));
 
                 ImGui::Text("B: "); ImGui::SameLine();
-                ratioInput("##StabRatioNumB", appState.stability.energyRatioNumB,
-                           sizeof(appState.stability.energyRatioNumB));
+                ratioInput("##T100RatioNumB", appState.t100.energyRatioNumB,
+                           sizeof(appState.t100.energyRatioNumB));
                 ImGui::SameLine(); ImGui::Text("/"); ImGui::SameLine();
-                ratioInput("##StabRatioDenB", appState.stability.energyRatioDenB,
-                           sizeof(appState.stability.energyRatioDenB));
+                ratioInput("##T100RatioDenB", appState.t100.energyRatioDenB,
+                           sizeof(appState.t100.energyRatioDenB));
 
                 ImGui::Text("C: "); ImGui::SameLine();
-                ratioInput("##StabRatioNumC", appState.stability.energyRatioNumC,
-                           sizeof(appState.stability.energyRatioNumC));
+                ratioInput("##T100RatioNumC", appState.t100.energyRatioNumC,
+                           sizeof(appState.t100.energyRatioNumC));
                 ImGui::SameLine(); ImGui::Text("/"); ImGui::SameLine();
-                ratioInput("##StabRatioDenC", appState.stability.energyRatioDenC,
-                           sizeof(appState.stability.energyRatioDenC));
+                ratioInput("##T100RatioDenC", appState.t100.energyRatioDenC,
+                           sizeof(appState.t100.energyRatioDenC));
 
-                if (ImGui::Button("ASTM E1421##StabAstmE1421")) {
-                    strncpy(appState.stability.energyRatioNumA, "4000", 31);
-                    strncpy(appState.stability.energyRatioDenA, "2000", 31);
-                    strncpy(appState.stability.energyRatioNumB, "2000", 31);
-                    strncpy(appState.stability.energyRatioDenB, "1000", 31);
-                    strncpy(appState.stability.energyRatioNumC, "150", 31);
-                    strncpy(appState.stability.energyRatioDenC, "max", 31);
+                if (ImGui::Button("ASTM E1421##T100AstmE1421")) {
+                    strncpy(appState.t100.energyRatioNumA, "4000", 31);
+                    strncpy(appState.t100.energyRatioDenA, "2000", 31);
+                    strncpy(appState.t100.energyRatioNumB, "2000", 31);
+                    strncpy(appState.t100.energyRatioDenB, "1000", 31);
+                    strncpy(appState.t100.energyRatioNumC, "150", 31);
+                    strncpy(appState.t100.energyRatioDenC, "max", 31);
                     appState.needsRedraw = true;
                 }
             }
@@ -3080,7 +3080,7 @@ int main() {
 
             // Y Axis mode: all / tight / force
             {
-                int& mode = appState.stability.yAxisMode;
+                int& mode = appState.t100.yAxisMode;
                 const ImVec4 cfgBtnColors[2] = {
                     ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
                     ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
@@ -3090,7 +3090,7 @@ int main() {
                 ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[mode == 0 ? 1 : 0]);
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  mode == 0 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
-                if (ImGui::Button("all##StabYAxisAll")) {
+                if (ImGui::Button("all##T100YAxisAll")) {
                     mode = 0;
                     appState.needsRedraw = true;
                 }
@@ -3099,7 +3099,7 @@ int main() {
                 ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[mode == 1 ? 1 : 0]);
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  mode == 1 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
-                if (ImGui::Button("tight##StabYAxisTight")) {
+                if (ImGui::Button("tight##T100YAxisTight")) {
                     mode = 1;
                     appState.needsRedraw = true;
                 }
@@ -3108,29 +3108,29 @@ int main() {
                 ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[mode == 2 ? 1 : 0]);
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  mode == 2 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
-                if (ImGui::Button("force##StabYAxisForce")) {
+                if (ImGui::Button("force##T100YAxisForce")) {
                     mode = 2;
                     appState.needsRedraw = true;
                 }
                 ImGui::PopStyleColor(3);
             }
 
-            if (appState.stability.yAxisMode == 2) {
+            if (appState.t100.yAxisMode == 2) {
                 ImGui::Text("Force Y");
-                double vMin = appState.stability.forcedYMin;
-                double vMax = appState.stability.forcedYMax;
+                double vMin = appState.t100.forcedYMin;
+                double vMax = appState.t100.forcedYMax;
                 ImGui::SetNextItemWidth(100);
-                if (ImGui::InputDouble("Min##StabForceYMin", &vMin, 0.0, 0.0, "%.4f")) {
+                if (ImGui::InputDouble("Min##T100ForceYMin", &vMin, 0.0, 0.0, "%.4f")) {
                     if (vMax > vMin) {
-                        appState.stability.forcedYMin = vMin;
+                        appState.t100.forcedYMin = vMin;
                         appState.needsRedraw = true;
                     }
                 }
                 ImGui::SameLine();
                 ImGui::SetNextItemWidth(100);
-                if (ImGui::InputDouble("Max##StabForceYMax", &vMax, 0.0, 0.0, "%.4f")) {
+                if (ImGui::InputDouble("Max##T100ForceYMax", &vMax, 0.0, 0.0, "%.4f")) {
                     if (vMax > vMin) {
-                        appState.stability.forcedYMax = vMax;
+                        appState.t100.forcedYMax = vMax;
                         appState.needsRedraw = true;
                     }
                 }
@@ -3139,20 +3139,20 @@ int main() {
             ImGui::Separator();
 
             ImGui::Text("Std Deviation");
-            if (!appState.stability.calcStdInProgress) {
-                if (ImGui::Button("Calculate std##StabCalcStd")) {
-                    if (appState.stability.referenceAvailable) {
-                        appState.stability.startStdCalculation();
+            if (!appState.t100.calcStdInProgress) {
+                if (ImGui::Button("Calculate std##T100CalcStd")) {
+                    if (appState.t100.referenceAvailable) {
+                        appState.t100.startStdCalculation();
                         appState.needsRedraw = true;
                     }
                 }
             } else {
-                float pct = appState.stability.stdProgressTotal > 0
-                    ? (float)appState.stability.stdProgressCurrent / (float)appState.stability.stdProgressTotal
+                float pct = appState.t100.stdProgressTotal > 0
+                    ? (float)appState.t100.stdProgressCurrent / (float)appState.t100.stdProgressTotal
                     : 0.0f;
                 ImGui::ProgressBar(pct, ImVec2(-1, 0), "");
-                ImGui::Text("Processing %d/%d", appState.stability.stdProgressCurrent,
-                            appState.stability.stdProgressTotal);
+                ImGui::Text("Processing %d/%d", appState.t100.stdProgressCurrent,
+                            appState.t100.stdProgressTotal);
             }
 
         } else {
@@ -3449,10 +3449,10 @@ int main() {
         appState.allanVariance.renderAllanContents(appState.spectrum.showTrackingCursor);
         ImGui::End();
 
-        // Stability View panel (docked)
-        ImGui::Begin("Stability View");
+        // 100% T View panel (docked)
+        ImGui::Begin("100% T View");
         if (appState.dataLoaded && !appState.selectedFilenames.empty()) {
-            appState.stability.renderStabilityContents(appState.spectrum.showTrackingCursor);
+            appState.t100.renderT100Contents(appState.spectrum.showTrackingCursor);
         } else {
             ImGui::Text("No data loaded.");
         }
@@ -3544,17 +3544,17 @@ int main() {
     config.allanXRangeMin            = appState.allanVariance.xRangeMin;
     config.allanXRangeMax            = appState.allanVariance.xRangeMax;
 
-    // Save stability window settings
-    config.stabilityYAxisMode      = appState.stability.yAxisMode;
-    config.stabilityXUnitSelector  = appState.stability.xUnitSelector;
-    config.stabilityForcedYMin     = appState.stability.forcedYMin;
-    config.stabilityForcedYMax     = appState.stability.forcedYMax;
-    strncpy(config.stabilityEnergyRatioNumA, appState.stability.energyRatioNumA, 31);
-    strncpy(config.stabilityEnergyRatioDenA, appState.stability.energyRatioDenA, 31);
-    strncpy(config.stabilityEnergyRatioNumB, appState.stability.energyRatioNumB, 31);
-    strncpy(config.stabilityEnergyRatioDenB, appState.stability.energyRatioDenB, 31);
-    strncpy(config.stabilityEnergyRatioNumC, appState.stability.energyRatioNumC, 31);
-    strncpy(config.stabilityEnergyRatioDenC, appState.stability.energyRatioDenC, 31);
+    // Save 100% T window settings
+    config.t100YAxisMode      = appState.t100.yAxisMode;
+    config.t100XUnitSelector  = appState.t100.xUnitSelector;
+    config.t100ForcedYMin     = appState.t100.forcedYMin;
+    config.t100ForcedYMax     = appState.t100.forcedYMax;
+    strncpy(config.t100EnergyRatioNumA, appState.t100.energyRatioNumA, 31);
+    strncpy(config.t100EnergyRatioDenA, appState.t100.energyRatioDenA, 31);
+    strncpy(config.t100EnergyRatioNumB, appState.t100.energyRatioNumB, 31);
+    strncpy(config.t100EnergyRatioDenB, appState.t100.energyRatioDenB, 31);
+    strncpy(config.t100EnergyRatioNumC, appState.t100.energyRatioNumC, 31);
+    strncpy(config.t100EnergyRatioDenC, appState.t100.energyRatioDenC, 31);
 
     // Save config to file
     if (!config.saveToFile(configFilePath)) {
