@@ -1242,10 +1242,41 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
         ImGui::Begin("Files");
         ImGui::PushTextWrapPos(); // Enable text wrapping
         ImGui::Text("Current Dataset: %s", appState.currentDatasetName.c_str());
-        
+        ImGui::Separator();
+        ImGui::Text("Select:");
+        ImGui::SameLine();
+        if (ImGui::Button("All##FilesAll")) {
+            for (size_t i = 0; i < appState.filesSelectedForAveraging.size(); i++)
+                appState.filesSelectedForAveraging[i] = true;
+            appState.needsRedraw = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("None##FilesNone")) {
+            for (size_t i = 0; i < appState.filesSelectedForAveraging.size(); i++)
+                appState.filesSelectedForAveraging[i] = false;
+            appState.needsRedraw = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("10")) {
+            for (size_t i = 0; i < appState.filesSelectedForAveraging.size(); i++)
+                appState.filesSelectedForAveraging[i] = (i < 10);
+            appState.needsRedraw = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("50%")) {
+            size_t half = appState.filesSelectedForAveraging.size() / 2;
+            for (size_t i = 0; i < appState.filesSelectedForAveraging.size(); i++)
+                appState.filesSelectedForAveraging[i] = (i < half);
+            appState.needsRedraw = true;
+        }
+        ImGui::Separator();
+
+        ImGui::BeginChild("##FileList", ImVec2(0, 0), ImGuiChildFlags_None,
+                          ImGuiWindowFlags_AlwaysVerticalScrollbar);
+
         // Use the pre-sorted files list
         size_t currentSortedIndex = appState.currentSortedFileIndex;
-        
+
         // Only calculate scroll position when using keyboard navigation
         if (appState.keyboardNavigation) {
             if (currentSortedIndex > 0 && ImGui::GetScrollY() + ImGui::GetWindowHeight() < (currentSortedIndex + 1) * ImGui::GetTextLineHeightWithSpacing()) {
@@ -1447,6 +1478,8 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                 ImGui::SetScrollHereY(0.5f); // Scroll to center the selected item
             }
         }
+        ImGui::EndChild();
+
         // Show selection limit popup if needed
         if (ImGui::BeginPopupModal("Selection Limit", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
             ImGui::Text("Maximum of %zu files can be selected at once.", appState.MAX_SELECTABLE_FILES);
@@ -2448,23 +2481,6 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
 
             ImGui::Separator();
 
-            // Select All / Select None
-            ImGui::Text("Select");
-            ImGui::SameLine();
-            if (ImGui::Button("All")) {
-                for (size_t i = 0; i < appState.filesSelectedForAveraging.size(); i++)
-                    appState.filesSelectedForAveraging[i] = true;
-                appState.needsRedraw = true;
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("None")) {
-                for (size_t i = 0; i < appState.filesSelectedForAveraging.size(); i++)
-                    appState.filesSelectedForAveraging[i] = false;
-                appState.needsRedraw = true;
-            }
-
-            ImGui::Separator();
-
             const ImVec4 btnColors[2] = {
                 ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
                 ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
@@ -2660,24 +2676,6 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                     ImVec2(ImGui::GetContentRegionAvail().x, 0), pctBuf);
                 ImGui::PopStyleColor();
             }
-
-            ImGui::Separator();
-
-            ImGui::Text("Select");
-            ImGui::SameLine();
-            if (ImGui::Button("All##SnrAll")) {
-                for (size_t i = 0; i < appState.filesSelectedForAveraging.size(); i++)
-                    appState.filesSelectedForAveraging[i] = true;
-                appState.needsRedraw = true;
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("None##SnrNone")) {
-                for (size_t i = 0; i < appState.filesSelectedForAveraging.size(); i++)
-                    appState.filesSelectedForAveraging[i] = false;
-                appState.needsRedraw = true;
-            }
-
-            ImGui::Separator();
 
             const ImVec4 btnColors[2] = {
                 ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
