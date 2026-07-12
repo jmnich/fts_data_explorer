@@ -539,6 +539,7 @@ int main() {
     appState.allanVariance.selectedSliceIndex    = config.allanSliceIndex;
     appState.allanVariance.xRangeMin             = config.allanXRangeMin;
     appState.allanVariance.xRangeMax             = config.allanXRangeMax;
+    appState.allanVariance.calcBaseSelector      = config.allanCalcBaseSelector;
 
     // Load 100% T window settings from config
     appState.t100.yAxisMode           = config.t100YAxisMode;
@@ -2758,6 +2759,22 @@ int main() {
                     ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
                 };
 
+                ImGui::Text("Calc base");
+                ImGui::SameLine();
+                const bool allanCalcBase100T = (appState.allanVariance.calcBaseSelector == 0);
+                const bool allanCalcBaseSpectrum = (appState.allanVariance.calcBaseSelector == 1);
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[allanCalcBase100T ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allanCalcBase100T ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("100% T##AllanCalcBase100T")) { appState.allanVariance.calcBaseSelector = 0; appState.needsRedraw = true; }
+                ImGui::PopStyleColor(3);
+                ImGui::SameLine();
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[allanCalcBaseSpectrum ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allanCalcBaseSpectrum ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("Spectrum##AllanCalcBaseSpectrum")) { appState.allanVariance.calcBaseSelector = 1; appState.needsRedraw = true; }
+                ImGui::PopStyleColor(3);
+
                 ImGui::Text("X unit");
                 ImGui::SameLine();
                 const bool allanCmSel  = (appState.allanVariance.xUnitSelector == 0);
@@ -3545,6 +3562,7 @@ int main() {
     config.allanSliceIndex           = appState.allanVariance.selectedSliceIndex;
     config.allanXRangeMin            = appState.allanVariance.xRangeMin;
     config.allanXRangeMax            = appState.allanVariance.xRangeMax;
+    config.allanCalcBaseSelector     = appState.allanVariance.calcBaseSelector;
 
     // Save 100% T window settings
     config.t100YAxisMode      = appState.t100.yAxisMode;

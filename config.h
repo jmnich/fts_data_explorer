@@ -63,6 +63,7 @@ struct AppConfig {
     int allanSliceIndex = 0;
     double allanXRangeMin = 1.0;
     double allanXRangeMax = 30.0;
+    int allanCalcBaseSelector = 0;
 
     // T100 window state
     int t100YAxisMode = 0;
@@ -176,6 +177,7 @@ struct AppConfig {
             configFile << "slice_index=" << allanSliceIndex << "\n";
             configFile << "x_range_min=" << allanXRangeMin << "\n";
             configFile << "x_range_max=" << allanXRangeMax << "\n";
+            configFile << "calc_base_selector=" << allanCalcBaseSelector << "\n";
 
             // Write T100 window settings
             configFile << "\n[T100Window]\n";
@@ -332,6 +334,8 @@ struct AppConfig {
                             allanXRangeMin = std::stod(value);
                         } else if (key == "x_range_max") {
                             allanXRangeMax = std::stod(value);
+                        } else if (key == "calc_base_selector") {
+                            allanCalcBaseSelector = std::stoi(value);
                         } else if (key == "target_wavelength") {
                             // legacy field — ignore
                         }

@@ -74,6 +74,7 @@ AllanVariance::AllanVariance()
       wavelengthDecimation(5),
       xRangeMin(1.0),
       xRangeMax(30.0),
+      calcBaseSelector(0),
       calcState()
 {}
 
@@ -109,6 +110,7 @@ void AllanVariance::reset() {
     pendingNextXMax = -1.0;
 
     calcState.reset();
+    calcBaseSelector = 0;
 }
 
 static std::vector<double> getSliceData(const std::vector<double>& surfaceZ,
@@ -285,6 +287,20 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
             }
 
             ImPlot3D::EndPlot();
+
+            // Overlay label in top-left of 3D plot area showing calc base mode
+            if (ImGui::GetItemRectSize().x > 0.0f && ImGui::GetItemRectSize().y > 0.0f) {
+                ImDrawList* drawList = ImGui::GetWindowDrawList();
+                ImVec2 plotMin = ImGui::GetItemRectMin();
+                ImVec2 plotMax = ImGui::GetItemRectMax();
+                const char* label = (calcBaseSelector == 0) ? "100% T" : "Spectrum";
+                ImVec2 textSize = ImGui::CalcTextSize(label);
+                ImVec2 textPos = ImVec2(plotMin.x + 8.0f, plotMin.y + 8.0f);
+                ImVec2 bgMin = ImVec2(textPos.x - 4.0f, textPos.y - 2.0f);
+                ImVec2 bgMax = ImVec2(textPos.x + textSize.x + 4.0f, textPos.y + textSize.y + 2.0f);
+                drawList->AddRectFilled(bgMin, bgMax, ImGui::GetColorU32(ImVec4(0.0f, 0.0f, 0.0f, 0.6f)));
+                drawList->AddText(textPos, ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, 0.9f)), label);
+            }
         }
     }
 
@@ -720,18 +736,25 @@ bool AllanVariance::tickPhase1_Transmittance() {
     calcState.transmittanceCurves.clear();
     calcState.transmittanceCurves.reserve(calcState.fileSpectraY.size() - 1);
 
-    // Skip index 0 (the average spectrum itself), only compute for actual data files
-    for (size_t fi = 1; fi < calcState.fileSpectraY.size(); ++fi) {
-        const auto& fileY = calcState.fileSpectraY[fi];
-        std::vector<double> tCurve;
-        tCurve.reserve(avgX.size());
+    if (calcBaseSelector == 0) {
+        // "100% T" mode: compute transmittance T% = (sample / average) * 100
+        for (size_t fi = 1; fi < calcState.fileSpectraY.size(); ++fi) {
+            const auto& fileY = calcState.fileSpectraY[fi];
+            std::vector<double> tCurve;
+            tCurve.reserve(avgX.size());
 
-        for (size_t i = 0; i < avgX.size(); i++) {
-            double ref = avgY[i];
-            double sample = fileY[i];
-            tCurve.push_back((ref > 1e-15) ? (sample / ref) * 100.0 : 0.0);
+            for (size_t i = 0; i < avgX.size(); i++) {
+                double ref = avgY[i];
+                double sample = fileY[i];
+                tCurve.push_back((ref > 1e-15) ? (sample / ref) * 100.0 : 0.0);
+            }
+            calcState.transmittanceCurves.push_back(std::move(tCurve));
         }
-        calcState.transmittanceCurves.push_back(std::move(tCurve));
+    } else {
+        // "Spectrum" mode: use raw spectral intensities directly (skip index 0 = average)
+        for (size_t fi = 1; fi < calcState.fileSpectraY.size(); ++fi) {
+            calcState.transmittanceCurves.push_back(calcState.fileSpectraY[fi]);
+        }
     }
 
     calcState.fileSpectraY.clear();

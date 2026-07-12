@@ -48,9 +48,10 @@ public:
     double pendingNextXMax;
 
     int xUnitSelector;
-    int wavelengthDecimation;
+int wavelengthDecimation;
     double xRangeMin;
     double xRangeMax;
+    int calcBaseSelector;  // 0 = "100% T", 1 = "Spectrum"
 
     AllanVariance();
     void reset();
