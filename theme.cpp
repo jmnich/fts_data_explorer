@@ -95,8 +95,11 @@ void ApplyTheme(ImGuiStyle& style, ImPlotStyle& plotStyle, AccentColor accent) {
 
     // Tabs (unfocused/dimmed tab bar)
     style.Colors[ImGuiCol_TabDimmed] = ImVec4(accentVeryMuted.x * 0.6f, accentVeryMuted.y * 0.6f, accentVeryMuted.z * 0.6f, 1.0f);
-    style.Colors[ImGuiCol_TabDimmedSelected] = accentVeryMuted;
+    style.Colors[ImGuiCol_TabDimmedSelected] = ImVec4(accentBase.x * 0.6f, accentBase.y * 0.6f, accentBase.z * 0.6f, 1.0f);
     style.Colors[ImGuiCol_TabDimmedSelectedOverline] = accentBase;
+
+    // Tab bar separator (between tabs and content) — thicker for clearer focus indication
+    style.TabBarBorderSize = 2.0f;
 
     // Resize grips
     style.Colors[ImGuiCol_ResizeGrip] = accentVeryMuted;
