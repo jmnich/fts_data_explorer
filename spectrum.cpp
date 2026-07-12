@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <vector>
 #include <limits>
+#include <chrono>
 #include "app_state.h"
 
 static void SetupAxisTicksLimited(ImAxis axis, double min, double max, int maxTicks = 12) {
@@ -169,6 +170,49 @@ bool Spectrum::isSpectrumDirty(const std::string& fileId, const std::vector<doub
     }
 
     return false;
+}
+
+void Spectrum::pollPendingSpectra() {
+    if (pendingSpectra_.empty()) return;
+
+    auto it = pendingSpectra_.begin();
+    while (it != pendingSpectra_.end()) {
+        if (!it->future.valid()) {
+            it = pendingSpectra_.erase(it);
+            continue;
+        }
+        if (it->future.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+            try {
+                auto ps = it->future.get();
+                cachedSpectra[it->fileId] = std::move(ps.spectrumY);
+                cachedFrequencies[it->fileId] = std::move(ps.spectrumX);
+
+                // Update lastSpectrumParams so isSpectrumDirty returns false next time
+                double activeParam = 0.0;
+                if (apodizationSelector == static_cast<int>(ApodizationWindow::Gauss))
+                    activeParam = static_cast<double>(apodizationParams.gaussSigma);
+                else if (apodizationSelector == static_cast<int>(ApodizationWindow::Rectangular))
+                    activeParam = static_cast<double>(apodizationParams.rectWidth);
+                else if (apodizationSelector == static_cast<int>(ApodizationWindow::DolphChebyshev))
+                    activeParam = static_cast<double>(apodizationParams.dolphChebyshevAt);
+
+                // Update primary detector cache to prevent re-computation
+                lastPrimaryDetectors[it->fileId] = it->primaryDetector;
+                lastSpectrumParams[it->fileId] = { static_cast<double>(Kpadding),
+                                                   static_cast<double>(xUnitSelector),
+                                                   static_cast<double>(refLaserTextbox),
+                                                   static_cast<double>(apodizationSelector),
+                                                   activeParam,
+                                                   apodizationParams.rectAsymMode ? 1.0 : 0.0 };
+            } catch (const std::exception& e) {
+                fprintf(stderr, "WARNING: Spectrum computation failed for %s: %s\n",
+                        it->fileId.c_str(), e.what());
+            }
+            it = pendingSpectra_.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, std::vector<double>>>& primaryDetectors,
@@ -517,10 +561,8 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
             // (Arrow-key pan and X-range selection are now handled before BeginPlot
             //  using SetNextAxisLimits, to avoid the ImPlot SetupLocked assert.)
 
-            // First pass: compute spectra and populate caches for all files.
-            // Must complete BEFORE SetupAxisLimits clamping (below), which in turn
-            // must run before IsPlotHovered/PlotLine, which lock ImPlot axis setup
-            // via SetupLock().
+            // First pass: submit async computations for dirty files, poll pending results.
+            // This replaces the old synchronous compute-inside-BeginPlot loop.
             for (size_t i = 0; i < primaryDetectors.size(); i++) {
                 const auto& fileData = primaryDetectors[i];
                 const std::string& fileId = fileData.first;
@@ -540,32 +582,41 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                     if (rawData.primaryDetector.empty() || rawData.referenceDetector.empty()) {
                         continue;
                     }
-                    auto ps = SpectralToolbox::processSpectrum(
-                        rawData.primaryDetector, rawData.referenceDetector, refLaserTextbox,
-                        Kpadding, static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector),
-                        static_cast<ApodizationWindow>(apodizationSelector),
-                        apodizationParams);
 
-                    cachedSpectra[fileId]      = std::move(ps.spectrumY);
-                    cachedFrequencies[fileId]  = std::move(ps.spectrumX);
+                    // Check if there's already a pending computation for this file
+                    auto pit = std::find_if(pendingSpectra_.begin(), pendingSpectra_.end(),
+                        [&](const PendingSpectrum& p) { return p.fileId == fileId; });
 
-                    double activeParam = 0.0;
-                    if (apodizationSelector == static_cast<int>(ApodizationWindow::Gauss))
-                        activeParam = static_cast<double>(apodizationParams.gaussSigma);
-                    else if (apodizationSelector == static_cast<int>(ApodizationWindow::Rectangular))
-                        activeParam = static_cast<double>(apodizationParams.rectWidth);
-                    else if (apodizationSelector == static_cast<int>(ApodizationWindow::DolphChebyshev))
-                        activeParam = static_cast<double>(apodizationParams.dolphChebyshevAt);
-
-                    lastPrimaryDetectors[fileId] = rawData.primaryDetector;
-                    lastSpectrumParams[fileId]   = { static_cast<double>(Kpadding),
-                                                     static_cast<double>(xUnitSelector),
-                                                     static_cast<double>(refLaserTextbox),
-                                                     static_cast<double>(apodizationSelector),
-                                                     activeParam,
-                                                     apodizationParams.rectAsymMode ? 1.0 : 0.0 };
+                    if (pit == pendingSpectra_.end() && appState && appState->computationPool) {
+                        // Submit async computation
+                        auto fut = appState->computationPool->enqueue(
+                            [primary = rawData.primaryDetector,
+                             ref = rawData.referenceDetector,
+                             refLaser = refLaserTextbox,
+                             K = Kpadding,
+                             xUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector),
+                             apodWin = static_cast<ApodizationWindow>(apodizationSelector),
+                             apodParams = apodizationParams]() {
+                                // FFTW must be single-threaded per worker
+                                thread_local bool fftwInited = false;
+                                if (!fftwInited) {
+                                    fftw_plan_with_nthreads(1);
+                                    fftwInited = true;
+                                }
+                                return SpectralToolbox::processSpectrum(
+                                    primary, ref, refLaser, K, xUnit, apodWin, apodParams);
+                            });
+                        PendingSpectrum ps;
+                        ps.future = std::move(fut);
+                        ps.fileId = fileId;
+                        ps.primaryDetector = rawData.primaryDetector;
+                        pendingSpectra_.push_back(std::move(ps));
+                    }
                 }
             }
+
+            // Poll pending async computations and retrieve ready results
+            pollPendingSpectra();
 
             // After a unit switch, clamp converted X-axis limits to the actual data range.
             // Must run AFTER cache population but BEFORE IsPlotHovered/PlotLine, which
@@ -691,18 +742,35 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                 }
             }
 
-            // Second pass: plot each spectrum
+            // Second pass: plot each spectrum (show "Computing..." placeholder if pending)
             for (size_t i = 0; i < primaryDetectors.size(); i++) {
                 const auto& fileData = primaryDetectors[i];
                 const std::string& fileId = fileData.first;
 
+                // Check if this file has a pending async computation
+                bool isPending = false;
+                for (const auto& p : pendingSpectra_) {
+                    if (p.fileId == fileId) { isPending = true; break; }
+                }
+
                 auto specIt = cachedSpectra.find(fileId);
                 auto freqIt = cachedFrequencies.find(fileId);
-                if (specIt == cachedSpectra.end() || freqIt == cachedFrequencies.end())
+                bool hasCache = (specIt != cachedSpectra.end() && freqIt != cachedFrequencies.end() &&
+                                !specIt->second.empty() && !freqIt->second.empty());
+
+                if (isPending && !hasCache) {
+                    // Show "Computing..." placeholder
+                    auto limits = ImPlot::GetPlotLimits();
+                    double cx = (limits.X.Min + limits.X.Max) * 0.5;
+                    double cy = (limits.Y.Min + limits.Y.Max) * 0.5;
+                    ImPlot::PlotText("Computing...", cx, cy);
                     continue;
+                }
+
+                if (!hasCache) continue;
+
                 const auto& spectrum    = specIt->second;
                 const auto& frequencies = freqIt->second;
-                if (spectrum.empty() || frequencies.empty()) continue;
 
                 plotSpecs[i].LineWeight = 2.0f;
 

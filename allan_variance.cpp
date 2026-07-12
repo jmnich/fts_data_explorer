@@ -661,18 +661,88 @@ bool AllanVariance::tickCalculation() {
 }
 
 bool AllanVariance::tickPhase0_AverageSpectrum() {
-    calcState.progressTotal = 0;
-    for (size_t i = 0; i < appState->sortedFiles.size() && i < appState->filesSelectedForAveraging.size(); i++) {
-        if (appState->filesSelectedForAveraging[i]) calcState.progressTotal++;
+    // Phase 1: Batch submission (first call only)
+    if (!calcState.batchAvgActive) {
+        calcState.batchAvgActive = true;
+        calcState.completedAvgCount = 0;
+        calcState.totalAvgSubmitted = 0;
+        calcState.pendingAvgFutures.clear();
+        calcState.avgFirstFile = true;
+        calcState.avgValidFiles = 0;
+        calcState.avgSumY.clear();
+        calcState.fileSpectraY.clear();
+
+        double refLaser = appState->spectrum.refLaserTextbox;
+        int K = appState->spectrum.Kpadding;
+        auto xUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
+        int apodSelector = appState->spectrum.apodizationSelector;
+        auto apodParams = appState->spectrum.apodizationParams;
+
+        for (size_t i = 0; i < appState->sortedFiles.size(); ++i) {
+            if (i >= appState->filesSelectedForAveraging.size() ||
+                !appState->filesSelectedForAveraging[i]) continue;
+
+            std::string filePath = appState->sortedFiles[i];
+            auto fut = appState->computationPool->enqueue([filePath, refLaser, K, xUnit,
+                                                           apodSelector, apodParams]() {
+                auto raw = CSVAdapter::loadFromCSV(filePath);
+                return SpectralToolbox::processSpectrum(
+                    raw.primaryDetector, raw.referenceDetector,
+                    refLaser, K, xUnit,
+                    static_cast<ApodizationWindow>(apodSelector),
+                    apodParams);
+            });
+            calcState.pendingAvgFutures.push_back(std::move(fut));
+            calcState.totalAvgSubmitted++;
+        }
+        calcState.progressTotal = calcState.totalAvgSubmitted;
+
+        if (calcState.totalAvgSubmitted == 0) {
+            allanAvailable = false;
+            calcInProgress = false;
+            return true;
+        }
     }
 
-    size_t idx = static_cast<size_t>(calcState.progressCurrent);
-    while (idx < appState->sortedFiles.size() && idx < appState->filesSelectedForAveraging.size()
-           && !appState->filesSelectedForAveraging[idx]) {
-        idx++;
-    }
+    // Phase 2: Poll futures
+    for (auto& fut : calcState.pendingAvgFutures) {
+        if (!fut.valid()) continue;
+        if (fut.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+            try {
+                auto ps = fut.get();
+                if (ps.spectrumX.empty() || ps.spectrumY.empty()) {
+                    calcState.completedAvgCount++;
+                    continue;
+                }
 
-    if (idx >= appState->sortedFiles.size() || idx >= appState->filesSelectedForAveraging.size()) {
+                if (calcState.avgFirstFile) {
+                    calcState.avgX = ps.spectrumX;
+                    calcState.avgNumBins = calcState.avgX.size();
+                    calcState.avgFirstFile = false;
+                    calcState.avgSumY.assign(calcState.avgNumBins, 0.0);
+                    calcState.fileSpectraY.clear();
+                    calcState.fileSpectraY.reserve(calcState.totalAvgSubmitted);
+                }
+
+                std::vector<double> interpolated = interpolateToCommonGrid(ps.spectrumX, ps.spectrumY, calcState.avgX);
+                if (interpolated.size() == calcState.avgNumBins) {
+                    for (size_t j = 0; j < calcState.avgNumBins; j++)
+                        calcState.avgSumY[j] += interpolated[j];
+                    calcState.avgValidFiles++;
+                    calcState.fileSpectraY.push_back(std::move(interpolated));
+                }
+            } catch (const std::exception& e) {
+                fprintf(stderr, "WARNING: Skipping failed file in Allan average: %s\n", e.what());
+                calcState.totalAvgSubmitted--;
+            }
+            calcState.completedAvgCount++;
+        }
+    }
+    calcState.progressCurrent = calcState.completedAvgCount.load();
+    progressCurrent = calcState.progressCurrent;
+    progressTotal = calcState.progressTotal;
+
+    if (calcState.completedAvgCount.load() >= calcState.totalAvgSubmitted) {
         if (calcState.avgValidFiles == 0) {
             allanAvailable = false;
             calcInProgress = false;
@@ -690,42 +760,6 @@ bool AllanVariance::tickPhase0_AverageSpectrum() {
         return false;
     }
 
-    auto raw = CSVAdapter::loadFromCSV(appState->sortedFiles[idx]);
-    auto ps = SpectralToolbox::processSpectrum(
-        raw.primaryDetector, raw.referenceDetector,
-        appState->spectrum.refLaserTextbox,
-        appState->spectrum.Kpadding,
-        static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector),
-        static_cast<ApodizationWindow>(appState->spectrum.apodizationSelector),
-        appState->spectrum.apodizationParams);
-
-    if (ps.spectrumX.empty() || ps.spectrumY.empty()) {
-        calcState.progressCurrent = static_cast<int>(idx) + 1;
-        progressCurrent = calcState.progressCurrent;
-        progressTotal = calcState.progressTotal;
-        return false;
-    }
-
-    if (calcState.avgFirstFile) {
-        calcState.avgX = ps.spectrumX;
-        calcState.avgNumBins = calcState.avgX.size();
-        calcState.avgFirstFile = false;
-        calcState.avgSumY.assign(calcState.avgNumBins, 0.0);
-        calcState.fileSpectraY.clear();
-        calcState.fileSpectraY.reserve(calcState.progressTotal);
-    }
-
-    std::vector<double> interpolated = interpolateToCommonGrid(ps.spectrumX, ps.spectrumY, calcState.avgX);
-    if (interpolated.size() == calcState.avgNumBins) {
-        for (size_t j = 0; j < calcState.avgNumBins; j++)
-            calcState.avgSumY[j] += interpolated[j];
-        calcState.avgValidFiles++;
-        calcState.fileSpectraY.push_back(std::move(interpolated));
-    }
-
-    calcState.progressCurrent = static_cast<int>(idx) + 1;
-    progressCurrent = calcState.progressCurrent;
-    progressTotal = calcState.progressTotal;
     return false;
 }
 
@@ -774,63 +808,140 @@ bool AllanVariance::tickPhase2_AllanVariance() {
         return true;
     }
 
-    std::vector<size_t> validBinIndices;
-    cachedSurfaceWavelengths.clear();
+    // Phase 2a: Build wavelength grid (first call only)
+    if (!calcState.batchAllanActive) {
+        std::vector<size_t> validBinIndices;
+        cachedSurfaceWavelengths.clear();
 
-    for (int i = 0; i < N_bins; i += wavelengthDecimation) {
-        double um = calcState.avgX[i];
-        if (xUnitSelector == 0) um = SpectralToolbox::convertCmToUm(um);
-        else if (xUnitSelector == 2) um = SpectralToolbox::convertTHzToUm(um);
+        for (int i = 0; i < N_bins; i += wavelengthDecimation) {
+            double um = calcState.avgX[i];
+            if (xUnitSelector == 0) um = SpectralToolbox::convertCmToUm(um);
+            else if (xUnitSelector == 2) um = SpectralToolbox::convertTHzToUm(um);
 
-        if (um >= xRangeMin && um <= xRangeMax) {
-            cachedSurfaceWavelengths.push_back(um);
-            validBinIndices.push_back(i);
+            if (um >= xRangeMin && um <= xRangeMax) {
+                cachedSurfaceWavelengths.push_back(um);
+                validBinIndices.push_back(i);
+            }
+        }
+
+        int M = static_cast<int>(cachedSurfaceWavelengths.size());
+        if (M == 0) {
+            allanAvailable = false;
+            calcInProgress = false;
+            return true;
+        }
+
+        // Compute reference tau from first wavelength
+        int firstBin = validBinIndices[0];
+        std::vector<double> firstSignal(M_raw);
+        for (int f = 0; f < M_raw; ++f) {
+            firstSignal[f] = calcState.transmittanceCurves[f][firstBin];
+        }
+        std::vector<double> refTau;
+        std::vector<double> refAvar;
+        computeAllanVariance(firstSignal, refTau, refAvar);
+        cachedSurfaceTaus = refTau;
+        numSurfaceTaus = static_cast<int>(cachedSurfaceTaus.size());
+        int N_taus = numSurfaceTaus;
+
+        // Batch submit: one task per wavelength bin
+        calcState.batchAllanActive = true;
+        calcState.completedAllanCount = 0;
+        calcState.totalAllanSubmitted = 0;
+        calcState.pendingAllanFutures.clear();
+        cachedSurfaceAllanVar.assign(M * N_taus, 0.0);
+
+        bool useParallel = (M > 20); // threshold: parallelize only when many bins
+
+        for (int wi = 0; wi < M; ++wi) {
+            int binIdx = validBinIndices[wi];
+            std::vector<double> signal(M_raw);
+            for (int f = 0; f < M_raw; ++f) {
+                signal[f] = calcState.transmittanceCurves[f][binIdx];
+            }
+
+            if (useParallel) {
+                auto fut = appState->computationPool->enqueue([signal = std::move(signal), N_taus]() {
+                    std::vector<double> tau, avar;
+                    AllanVariance::computeAllanVariance(signal, tau, avar);
+                    // Pad to N_taus if needed
+                    if ((int)avar.size() < N_taus) {
+                        avar.resize(N_taus, 0.0);
+                    }
+                    return avar;
+                });
+                calcState.pendingAllanFutures.push_back(std::move(fut));
+                calcState.totalAllanSubmitted++;
+            } else {
+                // Single-threaded path for small datasets
+                std::vector<double> tau, avar;
+                computeAllanVariance(signal, tau, avar);
+                for (int ti = 0; ti < N_taus && ti < (int)avar.size(); ++ti) {
+                    cachedSurfaceAllanVar[wi * N_taus + ti] = avar[ti];
+                }
+            }
+        }
+
+        if (useParallel) {
+            calcState.progressTotal = calcState.totalAllanSubmitted;
+            if (calcState.totalAllanSubmitted == 0) {
+                calcState.batchAllanActive = false;
+                numSurfaceWavelengths = M;
+                fileCount = M_raw;
+                allanAvailable = (numSurfaceWavelengths > 0 && numSurfaceTaus > 0);
+                if (selectedSliceIndex >= numSurfaceWavelengths)
+                    selectedSliceIndex = (numSurfaceWavelengths > 0) ? numSurfaceWavelengths - 1 : 0;
+                calcInProgress = false;
+                return true;
+            }
+            // Fall through to polling
+        } else {
+            // Single-threaded path: done immediately
+            calcState.batchAllanActive = false;
+            numSurfaceWavelengths = M;
+            fileCount = M_raw;
+            allanAvailable = (numSurfaceWavelengths > 0 && numSurfaceTaus > 0);
+            if (selectedSliceIndex >= numSurfaceWavelengths)
+                selectedSliceIndex = (numSurfaceWavelengths > 0) ? numSurfaceWavelengths - 1 : 0;
+            calcInProgress = false;
+            return true;
         }
     }
 
-    int M = static_cast<int>(cachedSurfaceWavelengths.size());
-    if (M == 0) {
-        allanAvailable = false;
+    // Phase 2b: Poll futures (only reached for parallel path)
+    int N_taus = numSurfaceTaus;
+    for (size_t wi = 0; wi < calcState.pendingAllanFutures.size(); ++wi) {
+        auto& fut = calcState.pendingAllanFutures[wi];
+        if (!fut.valid()) continue;
+        if (fut.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+            try {
+                auto avar = fut.get();
+                for (int ti = 0; ti < N_taus && ti < (int)avar.size(); ++ti) {
+                    cachedSurfaceAllanVar[wi * N_taus + ti] = avar[ti];
+                }
+            } catch (const std::exception& e) {
+                fprintf(stderr, "WARNING: Allan variance bin failed: %s\n", e.what());
+            }
+            calcState.completedAllanCount++;
+        }
+    }
+    calcState.progressCurrent = calcState.completedAllanCount.load();
+    progressCurrent = calcState.progressCurrent;
+
+    if (calcState.completedAllanCount.load() >= calcState.totalAllanSubmitted) {
+        calcState.batchAllanActive = false;
+        numSurfaceWavelengths = static_cast<int>(cachedSurfaceWavelengths.size());
+        fileCount = M_raw;
+        allanAvailable = (numSurfaceWavelengths > 0 && numSurfaceTaus > 0);
+
+        if (selectedSliceIndex >= numSurfaceWavelengths)
+            selectedSliceIndex = (numSurfaceWavelengths > 0) ? numSurfaceWavelengths - 1 : 0;
+
         calcInProgress = false;
         return true;
     }
 
-    cachedSurfaceAllanVar.clear();
-    bool firstWavelength = true;
-
-    for (int wi = 0; wi < M; ++wi) {
-        int binIdx = validBinIndices[wi];
-
-        std::vector<double> signal(M_raw);
-        for (int f = 0; f < M_raw; ++f) {
-            signal[f] = calcState.transmittanceCurves[f][binIdx];
-        }
-
-        std::vector<double> tau, avar;
-        computeAllanVariance(signal, tau, avar);
-
-        if (firstWavelength) {
-            cachedSurfaceTaus = tau;
-            firstWavelength = false;
-        }
-
-        if (avar.size() == cachedSurfaceTaus.size()) {
-            cachedSurfaceAllanVar.insert(cachedSurfaceAllanVar.end(), avar.begin(), avar.end());
-        } else {
-            cachedSurfaceAllanVar.insert(cachedSurfaceAllanVar.end(), cachedSurfaceTaus.size(), 0.0);
-        }
-    }
-
-    numSurfaceWavelengths = M;
-    numSurfaceTaus = static_cast<int>(cachedSurfaceTaus.size());
-    fileCount = M_raw;
-    allanAvailable = (numSurfaceWavelengths > 0 && numSurfaceTaus > 0);
-
-    if (selectedSliceIndex >= numSurfaceWavelengths)
-        selectedSliceIndex = (numSurfaceWavelengths > 0) ? numSurfaceWavelengths - 1 : 0;
-
-    calcInProgress = false;
-    return true;
+    return false;
 }
 
 std::vector<double> AllanVariance::interpolateToCommonGrid(const std::vector<double>& srcX,

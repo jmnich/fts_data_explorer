@@ -22,6 +22,9 @@ struct AppConfig {
     std::string uiSize = "normal"; // tiny, small, normal, large, huge
     std::string accentColor = "default"; // default, green, purple, red, brown
     
+    // Thread pool config
+    int workerThreads = -1; // -1 = AUTO
+    
     // Window state
     int windowWidth = 1280;
     int windowHeight = 720;
@@ -132,6 +135,7 @@ struct AppConfig {
             configFile << "last_working_directory=" << lastWorkingDirectory << "\n";
             configFile << "ui_size=" << uiSize << "\n";
             configFile << "accent_color=" << accentColor << "\n";
+            configFile << "worker_threads=" << workerThreads << "\n";
             
             // Write window settings
             configFile << "\n[Window]\n";
@@ -264,6 +268,8 @@ struct AppConfig {
                             uiSize = value;
                         } else if (key == "accent_color") {
                             accentColor = value;
+                        } else if (key == "worker_threads") {
+                            workerThreads = std::stoi(value);
                         }
                     } else if (currentSection == "Window") {
                         if (key == "width") {

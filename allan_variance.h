@@ -2,9 +2,14 @@
 
 #include <vector>
 #include <string>
+#include "pthread_compat.h"
+#include <future>
+#include <atomic>
+#include <memory>
 #include "imgui.h"
 #include "implot.h"
 #include "apodization.h"
+#include "spectral_toolbox.h"
 
 struct InterferogramData;
 class AppState;
@@ -62,8 +67,8 @@ int wavelengthDecimation;
     bool tickCalculation();
 
     static void computeAllanVariance(const std::vector<double>& signal,
-                                     std::vector<double>& outTau,
-                                     std::vector<double>& outAllanVar);
+                                      std::vector<double>& outTau,
+                                      std::vector<double>& outAllanVar);
 
 private:
     struct CalculationState {
@@ -80,6 +85,19 @@ private:
         std::vector<std::vector<double>> fileSpectraY;
         std::vector<std::vector<double>> transmittanceCurves;
 
+        // Parallel execution state for phase 0
+        std::vector<std::future<SpectralToolbox::ProcessedSpectrum>> pendingAvgFutures;
+        std::atomic<int> completedAvgCount{0};
+        int totalAvgSubmitted{0};
+        bool batchAvgActive{false};
+
+        // Parallel execution state for phase 2
+        using AllanResult = std::vector<double>;
+        std::vector<std::future<AllanResult>> pendingAllanFutures;
+        std::atomic<int> completedAllanCount{0};
+        int totalAllanSubmitted{0};
+        bool batchAllanActive{false};
+
         void reset() {
             phase = 0;
             progressCurrent = 0;
@@ -91,6 +109,14 @@ private:
             avgFirstFile = true;
             fileSpectraY.clear();
             transmittanceCurves.clear();
+            pendingAvgFutures.clear();
+            completedAvgCount = 0;
+            totalAvgSubmitted = 0;
+            batchAvgActive = false;
+            pendingAllanFutures.clear();
+            completedAllanCount = 0;
+            totalAllanSubmitted = 0;
+            batchAllanActive = false;
         }
     };
 
@@ -101,6 +127,6 @@ private:
     bool tickPhase2_AllanVariance();
 
     static std::vector<double> interpolateToCommonGrid(const std::vector<double>& srcX,
-                                                        const std::vector<double>& srcY,
-                                                        const std::vector<double>& targetX);
+                                                         const std::vector<double>& srcY,
+                                                         const std::vector<double>& targetX);
 };

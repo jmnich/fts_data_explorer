@@ -4,9 +4,14 @@
 #include <map>
 #include <string>
 #include <set>
+#include "pthread_compat.h"
+#include <future>
+#include <atomic>
+#include <memory>
 #include "imgui.h"
 #include "implot.h"
 #include "apodization.h"
+#include "spectral_toolbox.h"
 
 struct InterferogramData;
 class AppState;
@@ -81,6 +86,11 @@ public:
     double ratioAvgA, ratioAvgB, ratioAvgC;
     double ratioSpreadA, ratioSpreadB, ratioSpreadC;
     double ratioStdDevA, ratioStdDevB, ratioStdDevC;
+
+    // Parallel execution state
+    std::vector<std::future<SpectralToolbox::ProcessedSpectrum>> pendingFutures_;
+    int totalSubmitted_{0};
+    bool batchActive_{false};
 
     T100Spectrum();
     void reset();

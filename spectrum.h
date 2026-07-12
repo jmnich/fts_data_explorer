@@ -5,9 +5,14 @@
 #include <complex>
 #include <map>
 #include <array>
+#include "pthread_compat.h"
+#include <future>
+#include <atomic>
+#include <memory>
 #include "imgui.h"
 #include "implot.h"
 #include "apodization.h"
+#include "spectral_toolbox.h"
 
 // Forward declaration to avoid circular dependency
 class AppState;
@@ -85,6 +90,14 @@ public:
     // Per-file last-seen spectrum computation parameters (for cache invalidation)
     // Stored as {K, xUnit, refLaser, apodizationSelector, activeParam}
     std::map<std::string, std::array<double, 6>> lastSpectrumParams;
+
+    // Async spectrum pre-computation (Phase 5)
+    struct PendingSpectrum {
+        std::future<SpectralToolbox::ProcessedSpectrum> future;
+        std::string fileId;
+        std::vector<double> primaryDetector; // cached for updating lastPrimaryDetectors on completion
+    };
+    std::vector<PendingSpectrum> pendingSpectra_;
     
     Spectrum();
     
@@ -97,4 +110,7 @@ public:
     
     // Check if spectrum needs recalculation for a specific file
     bool isSpectrumDirty(const std::string& fileId, const std::vector<double>& primaryDetector);
+    
+    // Poll pending async computations
+    void pollPendingSpectra();
 };

@@ -157,6 +157,8 @@ target_compile_options(fts_data_explorer PRIVATE
     -D_FORTIFY_SOURCE=0
     -U_FORTIFY_SOURCE
     $<$<COMPILE_LANGUAGE:C>:-std=gnu11>
+    # pthread_cond_clockwait/pthread_mutex_clocklock fallbacks are
+    # provided in glibc_compat.cpp for older GLIBC compatibility.
 )
 
 
@@ -169,6 +171,7 @@ target_link_libraries(fts_data_explorer
     glfw
     GL
     fftw3  # Use the FFTW target that was built
+    fftw3_threads  # For fftw_plan_with_nthreads (used per-worker in async lambdas)
     X11
     m
 )

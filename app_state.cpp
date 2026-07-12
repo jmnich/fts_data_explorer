@@ -57,7 +57,10 @@ AppState::AppState()
       welcomeScreenInitialized(false),
       defaultLayoutApplied(false),
       spectrum(),
-      xAxisBase(0)
+      xAxisBase(0),
+      computationPool(std::make_unique<ThreadPool>(
+          std::thread::hardware_concurrency())),
+      configuredWorkerCount(-1)
 {
     // Constructor body
 }
@@ -138,6 +141,16 @@ void AppState::clearAllanVariance() {
 
 void AppState::clearT100Spectrum() {
     t100.reset();
+}
+
+void AppState::reconfigurePool(int count) {
+    int actual = (count <= 0) ? static_cast<int>(std::thread::hardware_concurrency()) : count;
+    if (computationPool && actual == static_cast<int>(computationPool->workerCount())) return;
+    if (computationPool) {
+        computationPool->waitAll();
+    }
+    computationPool = std::make_unique<ThreadPool>(actual);
+    configuredWorkerCount = count;
 }
 
 // Global application state instance

@@ -2,9 +2,14 @@
 
 #include <vector>
 #include <string>
+#include "pthread_compat.h"
+#include <future>
+#include <atomic>
+#include <memory>
 #include "imgui.h"
 #include "implot.h"
 #include "apodization.h"
+#include "spectral_toolbox.h"
 
 struct InterferogramData;
 class AppState;
@@ -61,6 +66,12 @@ public:
     bool calcFirstFile;
     std::vector<double> calcSumY;
     std::vector<double> calcSumSqY;
+
+    // Parallel execution state
+    std::vector<std::future<SpectralToolbox::ProcessedSpectrum>> pendingFutures_;
+    std::atomic<int> completedCount_{0};
+    int totalSubmitted_{0};
+    bool batchActive_{false};
 
     SnrSpectrum();
     void reset();

@@ -6,6 +6,11 @@
 #include <cstring>
 #include <limits>
 #include <numeric>
+#include <pthread.h>
+
+// Global mutex to serialise FFTW plan creation across threads.
+// FFTW's planner is not thread-safe even with FFTW_ESTIMATE.
+static pthread_mutex_t fftwPlanMutex = PTHREAD_MUTEX_INITIALIZER;
 
 #define REAL 0
 #define IMAG 1
@@ -109,7 +114,10 @@ void SpectralToolbox::xAxisFromHilbert(const std::vector<double>& referenceSigna
         in[i][IMAG] = 0.0;
     }
 
-    fftw_plan plan_forward = fftw_plan_dft_1d((int)n, in, hilbert, FFTW_FORWARD, FFTW_ESTIMATE);
+    fftw_plan plan_forward;
+    pthread_mutex_lock(&fftwPlanMutex);
+    plan_forward = fftw_plan_dft_1d((int)n, in, hilbert, FFTW_FORWARD, FFTW_ESTIMATE);
+    pthread_mutex_unlock(&fftwPlanMutex);
     fftw_execute(plan_forward);
 
     int hN = static_cast<int>(n) >> 1; // N/2
@@ -131,7 +139,10 @@ void SpectralToolbox::xAxisFromHilbert(const std::vector<double>& referenceSigna
         std::memset(&hilbert[hN + 1][REAL], 0, static_cast<std::size_t>(numRem) * sizeof(fftw_complex));
     }
 
-    fftw_plan plan_inverse = fftw_plan_dft_1d((int)n, hilbert, out, FFTW_BACKWARD, FFTW_ESTIMATE);
+    fftw_plan plan_inverse;
+    pthread_mutex_lock(&fftwPlanMutex);
+    plan_inverse = fftw_plan_dft_1d((int)n, hilbert, out, FFTW_BACKWARD, FFTW_ESTIMATE);
+    pthread_mutex_unlock(&fftwPlanMutex);
     fftw_execute(plan_inverse);
 
     // Phase difference via complex division (wrap-robust), cumulative sum -> distance in um.
@@ -212,7 +223,10 @@ SpectralToolbox::ProcessedSpectrum SpectralToolbox::processSpectrum(
         in[i][REAL] = padded[i];
         in[i][IMAG] = 0.0;
     }
-    fftw_plan plan = fftw_plan_dft_1d((int)N, in, out, FFTW_FORWARD, FFTW_ESTIMATE);
+    fftw_plan plan;
+    pthread_mutex_lock(&fftwPlanMutex);
+    plan = fftw_plan_dft_1d((int)N, in, out, FFTW_FORWARD, FFTW_ESTIMATE);
+    pthread_mutex_unlock(&fftwPlanMutex);
     fftw_execute(plan);
 
     // 7. Magnitude + build X axis (drop index 0 -> Inf), convert unit.

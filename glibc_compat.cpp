@@ -97,6 +97,8 @@ extern "C" int getentropy(void *buffer, size_t length)
     return 0;
 }
 
+#include <pthread.h>
+
 // ---- pthread functions @ GLIBC_2.2.5 instead of GLIBC_2.34 ----
 
 extern "C" int pthread_key_create_old(unsigned int* key, void (*destructor)(void*));
@@ -182,3 +184,26 @@ __asm__(".symver __fxstat64_old, __fxstat64@GLIBC_2.2.5");
 
 extern "C" int fstat(int fd, struct stat* buf)
     { return __fxstat64_old(1, fd, buf); }
+
+// ---- pthread_cond_clockwait / pthread_mutex_clocklock (GLIBC_2.30) ----
+// The C++ stdlib uses them internally but they aren't declared when
+// _GNU_SOURCE is undefined. Provide declarations + fallback implementations
+// that delegate to the basic versions.
+// These are only used internally by std::mutex (not by our ThreadPool).
+
+extern "C" int pthread_mutex_clocklock(pthread_mutex_t *mutex,
+                                       clockid_t clk_id,
+                                       const struct timespec *abstime)
+{
+    (void)clk_id;
+    return pthread_mutex_timedlock(mutex, abstime);
+}
+
+extern "C" int pthread_cond_clockwait(pthread_cond_t *cond,
+                                       pthread_mutex_t *mutex,
+                                       clockid_t clk_id,
+                                       const struct timespec *abstime)
+{
+    (void)clk_id;
+    return pthread_cond_timedwait(cond, mutex, abstime);
+}

@@ -407,6 +407,7 @@ int main() {
     // UI size settings
     appState.currentUiSize = config.uiSize;
     appState.currentAccentColor = config.accentColor;
+    appState.reconfigurePool(config.workerThreads);
 
     // Initialize application
     GLFWwindow* window = nullptr;
@@ -567,25 +568,31 @@ int main() {
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
-        // Tick average spectrum calculation (multi-frame, one file per frame)
+        // Poll pending async spectrum computations
+        if (!appState.spectrum.pendingSpectra_.empty()) {
+            appState.needsRedraw = true;
+            appState.spectrum.pollPendingSpectra();
+        }
+
+        // Tick average spectrum calculation (parallel batch-submit + poll)
         if (appState.averageSpectrum.calcInProgress) {
             appState.needsRedraw = true;
             appState.averageSpectrum.tickCalculation();
         }
 
-        // Tick SNR spectrum calculation (multi-frame, one file per frame)
+        // Tick SNR spectrum calculation (parallel batch-submit + poll)
         if (appState.snrSpectrum.calcInProgress) {
             appState.needsRedraw = true;
             appState.snrSpectrum.tickCalculation();
         }
 
-        // Tick Allan variance calculation (multi-frame, one file per frame)
+        // Tick Allan variance calculation (parallel batch-submit + poll)
         if (appState.allanVariance.calcInProgress) {
             appState.needsRedraw = true;
             appState.allanVariance.tickCalculation();
         }
 
-        // Tick T100 standard deviation calculation (multi-frame, one file per frame)
+        // Tick T100 standard deviation calculation (parallel batch-submit + poll)
         if (appState.t100.calcStdInProgress) {
             appState.needsRedraw = true;
             if (appState.t100.tickStdCalculation()) {
@@ -1086,6 +1093,23 @@ int main() {
                                 appState.accentColorChanged = true;
                             }
                             ImGui::PopStyleColor(3);
+                        }
+                        ImGui::EndMenu();
+                    }
+
+                    // Worker Threads selection
+                    if (ImGui::BeginMenu("Worker Threads"))
+                    {
+                        const char* workerLabels[] = {"AUTO", "1", "2", "4", "8", "16"};
+                        int workerValues[] = {-1, 1, 2, 4, 8, 16};
+                        int currentWorker = appState.configuredWorkerCount;
+                        for (int wi = 0; wi < 6; ++wi) {
+                            bool selected = (currentWorker == workerValues[wi]);
+                            if (ImGui::MenuItem(workerLabels[wi], NULL, selected)) {
+                                appState.reconfigurePool(workerValues[wi]);
+                                config.workerThreads = workerValues[wi];
+                                config.saveToFile(configFilePath);
+                            }
                         }
                         ImGui::EndMenu();
                     }

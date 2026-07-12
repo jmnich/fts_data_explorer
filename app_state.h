@@ -5,6 +5,7 @@
 #include <map>
 #include <filesystem>
 #include "config.h"
+#include "thread_pool.h"
 #include "spectrum.h"
 #include "average_spectrum.h"
 #include "snr_spectrum.h"
@@ -64,7 +65,7 @@ struct AppState {
     float lastTime;
 
     // Idle rendering optimization
-    bool needsRedraw;
+    std::atomic<bool> needsRedraw;
     
     // X-range selection state
     bool isSelectingXRange;
@@ -154,6 +155,12 @@ struct AppState {
 
     // Clear T100 spectrum data (call when dataset changes)
     void clearT100Spectrum();
+
+    // Thread pool for parallel computation
+    std::unique_ptr<ThreadPool> computationPool;
+    int configuredWorkerCount = -1;   // -1 = AUTO
+
+    void reconfigurePool(int count);
 };
 
 // Global application state instance

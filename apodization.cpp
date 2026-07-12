@@ -2,9 +2,13 @@
 #include <cmath>
 #include <algorithm>
 #include "fftw3.h"
+#include <pthread.h>
 
 #define REAL 0
 #define IMAG 1
+
+// Global mutex to serialise FFTW plan creation across threads.
+static pthread_mutex_t fftwPlanMutex = PTHREAD_MUTEX_INITIALIZER;
 
 // Generate a symmetric Norton-Beer window of given length using precomputed coefficients
 static std::vector<double> genSymmetricNortonBeer(std::size_t n, const std::array<double, 9>& coeffs) {
@@ -69,8 +73,11 @@ static std::vector<double> genSymmetricDolphChebyshev(std::size_t n, double at) 
         }
     }
 
-    fftw_plan plan = fftw_plan_dft_1d(
+    fftw_plan plan;
+    pthread_mutex_lock(&fftwPlanMutex);
+    plan = fftw_plan_dft_1d(
         static_cast<int>(n), in, out, FFTW_FORWARD, FFTW_ESTIMATE);
+    pthread_mutex_unlock(&fftwPlanMutex);
     fftw_execute(plan);
 
     if (n % 2) {

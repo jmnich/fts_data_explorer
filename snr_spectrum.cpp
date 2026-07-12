@@ -454,23 +454,128 @@ void SnrSpectrum::startCalculation() {
     cachedSnrX.clear();
     snrAvailable = false;
     fileCount = 0;
+    batchActive_ = false;
+    pendingFutures_.clear();
+    completedCount_ = 0;
+    totalSubmitted_ = 0;
 }
 
 bool SnrSpectrum::tickCalculation() {
     if (!calcInProgress) return false;
 
-    progressTotal = 0;
-    for (size_t i = 0; i < appState->sortedFiles.size() && i < appState->filesSelectedForAveraging.size(); i++) {
-        if (appState->filesSelectedForAveraging[i]) progressTotal++;
+    // Phase 1: Batch submission (first call only)
+    if (!batchActive_) {
+        batchActive_ = true;
+        completedCount_ = 0;
+        totalSubmitted_ = 0;
+        pendingFutures_.clear();
+        calcFirstFile = true;
+        calcValidFiles = 0;
+        calcSumY.clear();
+        calcSumSqY.clear();
+
+        double refLaser = appState->spectrum.refLaserTextbox;
+        int K = appState->spectrum.Kpadding;
+        auto xUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
+        int apodSelector = appState->spectrum.apodizationSelector;
+        auto apodParams = appState->spectrum.apodizationParams;
+
+        for (size_t i = 0; i < appState->sortedFiles.size(); ++i) {
+            if (i >= appState->filesSelectedForAveraging.size() ||
+                !appState->filesSelectedForAveraging[i]) continue;
+
+            std::string filePath = appState->sortedFiles[i];
+            auto fut = appState->computationPool->enqueue([filePath, refLaser, K, xUnit,
+                                                           apodSelector, apodParams]() {
+                auto raw = CSVAdapter::loadFromCSV(filePath);
+                return SpectralToolbox::processSpectrum(
+                    raw.primaryDetector, raw.referenceDetector,
+                    refLaser, K, xUnit,
+                    static_cast<ApodizationWindow>(apodSelector),
+                    apodParams);
+            });
+            pendingFutures_.push_back(std::move(fut));
+            totalSubmitted_++;
+        }
+        progressTotal = totalSubmitted_;
+
+        if (totalSubmitted_ == 0) {
+            batchActive_ = false;
+            calcInProgress = false;
+            return true;
+        }
     }
 
-    size_t idx = static_cast<size_t>(progressCurrent);
-    while (idx < appState->sortedFiles.size() && idx < appState->filesSelectedForAveraging.size()
-           && !appState->filesSelectedForAveraging[idx]) {
-        idx++;
-    }
+    // Phase 2: Poll futures
+    for (auto& fut : pendingFutures_) {
+        if (!fut.valid()) continue;
+        if (fut.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+            try {
+                auto ps = fut.get();
+                if (ps.spectrumX.empty() || ps.spectrumY.empty()) {
+                    completedCount_++;
+                    continue;
+                }
 
-    if (idx >= appState->sortedFiles.size() || idx >= appState->filesSelectedForAveraging.size()) {
+                if (calcFirstFile) {
+                    calcCommonX = ps.spectrumX;
+                    calcNumBins = calcCommonX.size();
+                    calcFirstFile = false;
+                    calcSumY.assign(calcNumBins, 0.0);
+                    calcSumSqY.assign(calcNumBins, 0.0);
+                }
+
+                if (calcNumBins > 0) {
+                    std::vector<double> toAdd;
+                    if (ps.spectrumX.size() == calcNumBins &&
+                        std::equal(calcCommonX.begin(), calcCommonX.end(), ps.spectrumX.begin())) {
+                        toAdd = ps.spectrumY;
+                    } else {
+                        toAdd.reserve(calcNumBins);
+                        for (size_t j = 0; j < calcNumBins; j++) {
+                            double targetX = calcCommonX[j];
+                            const auto& sx = ps.spectrumX;
+                            if (sx.front() < sx.back()) {
+                                auto it = std::lower_bound(sx.begin(), sx.end(), targetX);
+                                if (it == sx.begin()) toAdd.push_back(ps.spectrumY[0]);
+                                else if (it == sx.end()) toAdd.push_back(ps.spectrumY.back());
+                                else {
+                                    size_t hi = it - sx.begin();
+                                    size_t lo = hi - 1;
+                                    double frac = (targetX - sx[lo]) / (sx[hi] - sx[lo]);
+                                    toAdd.push_back(ps.spectrumY[lo] * (1.0 - frac) + ps.spectrumY[hi] * frac);
+                                }
+                            } else {
+                                auto it = std::lower_bound(sx.begin(), sx.end(), targetX, std::greater<double>());
+                                if (it == sx.begin()) toAdd.push_back(ps.spectrumY[0]);
+                                else if (it == sx.end()) toAdd.push_back(ps.spectrumY.back());
+                                else {
+                                    size_t hi = it - sx.begin();
+                                    size_t lo = hi - 1;
+                                    double frac = (targetX - sx[lo]) / (sx[hi] - sx[lo]);
+                                    toAdd.push_back(ps.spectrumY[lo] * (1.0 - frac) + ps.spectrumY[hi] * frac);
+                                }
+                            }
+                        }
+                    }
+                    if (toAdd.size() == calcNumBins) {
+                        for (size_t j = 0; j < calcNumBins; j++) {
+                            calcSumY[j] += toAdd[j];
+                            calcSumSqY[j] += toAdd[j] * toAdd[j];
+                        }
+                        calcValidFiles++;
+                    }
+                }
+            } catch (const std::exception& e) {
+                fprintf(stderr, "WARNING: Skipping failed file in SNR calculation: %s\n", e.what());
+                totalSubmitted_--;
+            }
+            completedCount_++;
+        }
+    }
+    progressCurrent = completedCount_.load();
+
+    if (completedCount_.load() >= totalSubmitted_) {
         if (calcValidFiles > 1) {
             cachedSnrY.resize(calcNumBins, 0.0);
             for (size_t j = 0; j < calcNumBins; j++) {
@@ -487,73 +592,10 @@ bool SnrSpectrum::tickCalculation() {
             snrAvailable = false;
             fileCount = 0;
         }
+        batchActive_ = false;
         calcInProgress = false;
         return true;
     }
 
-    auto raw = CSVAdapter::loadFromCSV(appState->sortedFiles[idx]);
-    auto ps = SpectralToolbox::processSpectrum(
-        raw.primaryDetector, raw.referenceDetector,
-        appState->spectrum.refLaserTextbox,
-        appState->spectrum.Kpadding,
-        static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector),
-        static_cast<ApodizationWindow>(appState->spectrum.apodizationSelector),
-        appState->spectrum.apodizationParams);
-
-    if (ps.spectrumX.empty() || ps.spectrumY.empty()) {
-        progressCurrent = static_cast<int>(idx) + 1;
-        return false;
-    }
-
-    if (calcFirstFile) {
-        calcCommonX = ps.spectrumX;
-        calcNumBins = calcCommonX.size();
-        calcFirstFile = false;
-        calcSumY.assign(calcNumBins, 0.0);
-        calcSumSqY.assign(calcNumBins, 0.0);
-    }
-
-    std::vector<double> toAdd;
-    if (!calcFirstFile && ps.spectrumX.size() == calcNumBins &&
-        std::equal(calcCommonX.begin(), calcCommonX.end(), ps.spectrumX.begin())) {
-        toAdd = ps.spectrumY;
-    } else {
-        toAdd.reserve(calcNumBins);
-        for (size_t j = 0; j < calcNumBins; j++) {
-            double targetX = calcCommonX[j];
-            const auto& sx = ps.spectrumX;
-            if (sx.front() < sx.back()) {
-                auto it = std::lower_bound(sx.begin(), sx.end(), targetX);
-                if (it == sx.begin()) toAdd.push_back(ps.spectrumY[0]);
-                else if (it == sx.end()) toAdd.push_back(ps.spectrumY.back());
-                else {
-                    size_t hi = it - sx.begin();
-                    size_t lo = hi - 1;
-                    double frac = (targetX - sx[lo]) / (sx[hi] - sx[lo]);
-                    toAdd.push_back(ps.spectrumY[lo] * (1.0 - frac) + ps.spectrumY[hi] * frac);
-                }
-            } else {
-                auto it = std::lower_bound(sx.begin(), sx.end(), targetX, std::greater<double>());
-                if (it == sx.begin()) toAdd.push_back(ps.spectrumY[0]);
-                else if (it == sx.end()) toAdd.push_back(ps.spectrumY.back());
-                else {
-                    size_t hi = it - sx.begin();
-                    size_t lo = hi - 1;
-                    double frac = (targetX - sx[lo]) / (sx[hi] - sx[lo]);
-                    toAdd.push_back(ps.spectrumY[lo] * (1.0 - frac) + ps.spectrumY[hi] * frac);
-                }
-            }
-        }
-    }
-
-    if (toAdd.size() == calcNumBins) {
-        for (size_t j = 0; j < calcNumBins; j++) {
-            calcSumY[j] += toAdd[j];
-            calcSumSqY[j] += toAdd[j] * toAdd[j];
-        }
-        calcValidFiles++;
-    }
-
-    progressCurrent = static_cast<int>(idx) + 1;
     return false;
 }

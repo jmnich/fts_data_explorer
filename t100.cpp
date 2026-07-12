@@ -538,23 +538,150 @@ void T100Spectrum::startStdCalculation() {
     calcRatioB.clear();
     calcRatioC.clear();
     ratioStatsAvailable = false;
+    batchActive_ = false;
+    pendingFutures_.clear();
+    totalSubmitted_ = 0;
 }
 
 bool T100Spectrum::tickStdCalculation() {
     if (!calcStdInProgress) return false;
 
-    stdProgressTotal = 0;
-    for (size_t i = 0; i < appState->sortedFiles.size() && i < appState->filesSelectedForAveraging.size(); i++) {
-        if (appState->filesSelectedForAveraging[i]) stdProgressTotal++;
+    // Phase 1: Batch submission (first call only)
+    if (!batchActive_) {
+        batchActive_ = true;
+        totalSubmitted_ = 0;
+        pendingFutures_.clear();
+        calcStdFirstFile = true;
+        calcStdValidFiles = 0;
+        calcStdSum.clear();
+        calcStdSum2.clear();
+        calcRatioA.clear();
+        calcRatioB.clear();
+        calcRatioC.clear();
+
+        double refLaser = appState->spectrum.refLaserTextbox;
+        int K = appState->spectrum.Kpadding;
+        auto xUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
+        int apodSelector = appState->spectrum.apodizationSelector;
+        auto apodParams = appState->spectrum.apodizationParams;
+
+        // Capture energy ratio configs for use in worker threads
+        std::string numA(energyRatioNumA), denA(energyRatioDenA);
+        std::string numB(energyRatioNumB), denB(energyRatioDenB);
+        std::string numC(energyRatioNumC), denC(energyRatioDenC);
+
+        for (size_t i = 0; i < appState->sortedFiles.size(); ++i) {
+            if (i >= appState->filesSelectedForAveraging.size() ||
+                !appState->filesSelectedForAveraging[i]) continue;
+
+            std::string filePath = appState->sortedFiles[i];
+            auto fut = appState->computationPool->enqueue(
+                [filePath, refLaser, K, xUnit, apodSelector, apodParams]() {
+                    auto raw = CSVAdapter::loadFromCSV(filePath);
+                    return SpectralToolbox::processSpectrum(
+                        raw.primaryDetector, raw.referenceDetector,
+                        refLaser, K, xUnit,
+                        static_cast<ApodizationWindow>(apodSelector),
+                        apodParams);
+                });
+            pendingFutures_.push_back(std::move(fut));
+            totalSubmitted_++;
+        }
+        stdProgressTotal = totalSubmitted_;
+
+        if (totalSubmitted_ == 0) {
+            batchActive_ = false;
+            calcStdInProgress = false;
+            return true;
+        }
     }
 
-    size_t idx = static_cast<size_t>(stdProgressCurrent);
-    while (idx < appState->sortedFiles.size() && idx < appState->filesSelectedForAveraging.size()
-           && !appState->filesSelectedForAveraging[idx]) {
-        idx++;
+    // Phase 2: Poll futures
+    for (auto& fut : pendingFutures_) {
+        if (!fut.valid()) continue;
+        if (fut.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+            try {
+                auto ps = fut.get();
+
+                // Compute energy ratios on main thread
+                bool collectRatios = (energyRatioNumA[0] != '\0' || energyRatioDenA[0] != '\0' ||
+                                      energyRatioNumB[0] != '\0' || energyRatioDenB[0] != '\0' ||
+                                      energyRatioNumC[0] != '\0' || energyRatioDenC[0] != '\0');
+                if (collectRatios) {
+                    EnergyRatios er = computeEnergyRatiosDirect(
+                        energyRatioNumA, energyRatioDenA,
+                        energyRatioNumB, energyRatioDenB,
+                        energyRatioNumC, energyRatioDenC,
+                        xUnitSelector, ps.spectrumX, ps.spectrumY);
+                    if (er.validA) calcRatioA.push_back(er.a);
+                    if (er.validB) calcRatioB.push_back(er.b);
+                    if (er.validC) calcRatioC.push_back(er.c);
+                }
+
+                std::vector<double> transX, transY;
+                if (!computeTransmittanceFromVectors(ps.spectrumX, ps.spectrumY,
+                        xUnitSelector, transX, transY)) {
+                    stdProgressCurrent++;
+                    continue;
+                }
+
+                if (calcStdFirstFile) {
+                    calcStdCommonX = transX;
+                    calcStdBins = calcStdCommonX.size();
+                    calcStdFirstFile = false;
+                    calcStdSum.assign(calcStdBins, 0.0);
+                    calcStdSum2.assign(calcStdBins, 0.0);
+                }
+
+                if (calcStdBins > 0) {
+                    if (transX.size() == calcStdBins &&
+                        std::equal(calcStdCommonX.begin(), calcStdCommonX.end(), transX.begin())) {
+                        for (size_t j = 0; j < calcStdBins; j++) {
+                            calcStdSum[j] += transY[j];
+                            calcStdSum2[j] += transY[j] * transY[j];
+                        }
+                        calcStdValidFiles++;
+                    } else {
+                        for (size_t j = 0; j < calcStdBins; j++) {
+                            double targetX = calcStdCommonX[j];
+                            const auto& sx = transX;
+                            double interpY;
+                            if (sx.front() < sx.back()) {
+                                auto it = std::lower_bound(sx.begin(), sx.end(), targetX);
+                                if (it == sx.begin()) interpY = transY[0];
+                                else if (it == sx.end()) interpY = transY.back();
+                                else {
+                                    size_t hi = it - sx.begin();
+                                    size_t lo = hi - 1;
+                                    double frac = (targetX - sx[lo]) / (sx[hi] - sx[lo]);
+                                    interpY = transY[lo] * (1.0 - frac) + transY[hi] * frac;
+                                }
+                            } else {
+                                auto it = std::lower_bound(sx.begin(), sx.end(), targetX, std::greater<double>());
+                                if (it == sx.begin()) interpY = transY[0];
+                                else if (it == sx.end()) interpY = transY.back();
+                                else {
+                                    size_t hi = it - sx.begin();
+                                    size_t lo = hi - 1;
+                                    double frac = (targetX - sx[lo]) / (sx[hi] - sx[lo]);
+                                    interpY = transY[lo] * (1.0 - frac) + transY[hi] * frac;
+                                }
+                            }
+                            calcStdSum[j] += interpY;
+                            calcStdSum2[j] += interpY * interpY;
+                        }
+                        calcStdValidFiles++;
+                    }
+                }
+            } catch (const std::exception& e) {
+                fprintf(stderr, "WARNING: Skipping failed file in T100 std dev: %s\n", e.what());
+                totalSubmitted_--;
+            }
+            stdProgressCurrent++;
+        }
     }
 
-    if (idx >= appState->sortedFiles.size() || idx >= appState->filesSelectedForAveraging.size()) {
+    if (stdProgressCurrent >= totalSubmitted_) {
         if (calcStdValidFiles >= 2) {
             cachedStdX = calcStdCommonX;
             cachedStdY.resize(calcStdBins);
@@ -587,88 +714,11 @@ bool T100Spectrum::tickStdCalculation() {
             computeStats(calcRatioC, ratioAvgC, ratioSpreadC, ratioStdDevC);
             ratioStatsAvailable = true;
         }
+        batchActive_ = false;
         calcStdInProgress = false;
         return true;
     }
 
-    auto raw = CSVAdapter::loadFromCSV(appState->sortedFiles[idx]);
-    auto ps = SpectralToolbox::processSpectrum(
-        raw.primaryDetector, raw.referenceDetector,
-        appState->spectrum.refLaserTextbox,
-        appState->spectrum.Kpadding,
-        static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector),
-        static_cast<ApodizationWindow>(appState->spectrum.apodizationSelector),
-        appState->spectrum.apodizationParams);
-
-    bool collectRatios = (energyRatioNumA[0] != '\0' || energyRatioDenA[0] != '\0' ||
-                          energyRatioNumB[0] != '\0' || energyRatioDenB[0] != '\0' ||
-                          energyRatioNumC[0] != '\0' || energyRatioDenC[0] != '\0');
-    if (collectRatios) {
-        EnergyRatios er = computeEnergyRatiosDirect(
-            energyRatioNumA, energyRatioDenA,
-            energyRatioNumB, energyRatioDenB,
-            energyRatioNumC, energyRatioDenC,
-            xUnitSelector, ps.spectrumX, ps.spectrumY);
-        if (er.validA) calcRatioA.push_back(er.a);
-        if (er.validB) calcRatioB.push_back(er.b);
-        if (er.validC) calcRatioC.push_back(er.c);
-    }
-
-    std::vector<double> transX, transY;
-    if (!computeTransmittanceFromVectors(ps.spectrumX, ps.spectrumY,
-            xUnitSelector, transX, transY)) {
-        stdProgressCurrent = static_cast<int>(idx) + 1;
-        return false;
-    }
-
-    if (calcStdFirstFile) {
-        calcStdCommonX = transX;
-        calcStdBins = calcStdCommonX.size();
-        calcStdFirstFile = false;
-        calcStdSum.assign(calcStdBins, 0.0);
-        calcStdSum2.assign(calcStdBins, 0.0);
-    }
-
-    if (transX.size() == calcStdBins &&
-        std::equal(calcStdCommonX.begin(), calcStdCommonX.end(), transX.begin())) {
-        for (size_t j = 0; j < calcStdBins; j++) {
-            calcStdSum[j] += transY[j];
-            calcStdSum2[j] += transY[j] * transY[j];
-        }
-        calcStdValidFiles++;
-    } else {
-        for (size_t j = 0; j < calcStdBins; j++) {
-            double targetX = calcStdCommonX[j];
-            const auto& sx = transX;
-            double interpY;
-            if (sx.front() < sx.back()) {
-                auto it = std::lower_bound(sx.begin(), sx.end(), targetX);
-                if (it == sx.begin()) interpY = transY[0];
-                else if (it == sx.end()) interpY = transY.back();
-                else {
-                    size_t hi = it - sx.begin();
-                    size_t lo = hi - 1;
-                    double frac = (targetX - sx[lo]) / (sx[hi] - sx[lo]);
-                    interpY = transY[lo] * (1.0 - frac) + transY[hi] * frac;
-                }
-            } else {
-                auto it = std::lower_bound(sx.begin(), sx.end(), targetX, std::greater<double>());
-                if (it == sx.begin()) interpY = transY[0];
-                else if (it == sx.end()) interpY = transY.back();
-                else {
-                    size_t hi = it - sx.begin();
-                    size_t lo = hi - 1;
-                    double frac = (targetX - sx[lo]) / (sx[hi] - sx[lo]);
-                    interpY = transY[lo] * (1.0 - frac) + transY[hi] * frac;
-                }
-            }
-            calcStdSum[j] += interpY;
-            calcStdSum2[j] += interpY * interpY;
-        }
-        calcStdValidFiles++;
-    }
-
-    stdProgressCurrent = static_cast<int>(idx) + 1;
     return false;
 }
 
