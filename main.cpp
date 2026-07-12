@@ -1053,29 +1053,39 @@ int main() {
                     // Accent color selection dropdown
                     if (ImGui::BeginMenu("Accent"))
                     {
-                        if (ImGui::MenuItem("Default (Blue)", NULL, appState.currentAccentColor == "default")) {
-                            appState.currentAccentColor = "default";
-                            appState.accentColorChanged = true;
-                        }
-                        if (ImGui::MenuItem("Green", NULL, appState.currentAccentColor == "green")) {
-                            appState.currentAccentColor = "green";
-                            appState.accentColorChanged = true;
-                        }
-                        if (ImGui::MenuItem("Purple", NULL, appState.currentAccentColor == "purple")) {
-                            appState.currentAccentColor = "purple";
-                            appState.accentColorChanged = true;
-                        }
-                        if (ImGui::MenuItem("Red", NULL, appState.currentAccentColor == "red")) {
-                            appState.currentAccentColor = "red";
-                            appState.accentColorChanged = true;
-                        }
-                        if (ImGui::MenuItem("Brown", NULL, appState.currentAccentColor == "brown")) {
-                            appState.currentAccentColor = "brown";
-                            appState.accentColorChanged = true;
-                        }
-                        if (ImGui::MenuItem("Cyan", NULL, appState.currentAccentColor == "cyan")) {
-                            appState.currentAccentColor = "cyan";
-                            appState.accentColorChanged = true;
+                        struct AccentOption { const char* name; const char* key; AccentColor color; };
+                        AccentOption options[] = {
+                            {"Default (Blue)", "default", AccentColor::DefaultBlue},
+                            {"Green",          "green",   AccentColor::Green},
+                            {"Purple",         "purple",  AccentColor::Purple},
+                            {"Red",            "red",     AccentColor::Red},
+                            {"Brown",          "brown",   AccentColor::Brown},
+                            {"Cyan",           "cyan",    AccentColor::Cyan},
+                        };
+                        for (const auto& opt : options) {
+                            bool isSelected = (appState.currentAccentColor == opt.key);
+                            ImVec4 base = GetAccentBase(opt.color);
+
+                            // Draw colored badge in the left margin, horizontally stacked before the text
+                            ImDrawList* dl = ImGui::GetWindowDrawList();
+                            ImVec2 p = ImGui::GetCursorScreenPos();
+                            float h = ImGui::GetTextLineHeight();
+                            float badgeSize = h * 0.6f;
+                            ImVec2 badgeMin(p.x, p.y + (h - badgeSize) * 0.5f);
+                            ImVec2 badgeMax(badgeMin.x + badgeSize, badgeMin.y + badgeSize);
+                            dl->AddRectFilled(badgeMin, badgeMax, ImColor(base));
+
+                            // Offset cursor past the badge so text doesn't intersect it
+                            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + badgeSize + 4.0f);
+
+                            ImGui::PushStyleColor(ImGuiCol_Header, GetAccentMuted(opt.color));
+                            ImGui::PushStyleColor(ImGuiCol_HeaderHovered, GetAccentHovered(opt.color));
+                            ImGui::PushStyleColor(ImGuiCol_HeaderActive, GetAccentActive(opt.color));
+                            if (ImGui::MenuItem(opt.name, NULL, isSelected)) {
+                                appState.currentAccentColor = opt.key;
+                                appState.accentColorChanged = true;
+                            }
+                            ImGui::PopStyleColor(3);
                         }
                         ImGui::EndMenu();
                     }
