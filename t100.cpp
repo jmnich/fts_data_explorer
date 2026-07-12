@@ -1532,6 +1532,65 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
             ImPlot::PlotLine("##T100StdDevLine", cachedStdX.data(), cachedStdY.data(),
                              cachedStdY.size(), stdSpec);
 
+            // Tracking cursor for std dev plot
+            if (showTrackingCursor && ImPlot::IsPlotHovered()) {
+                ImPlotPoint mousePos = ImPlot::GetPlotMousePos();
+                double signalY = mousePos.y;
+
+                if (!cachedStdX.empty() && !cachedStdY.empty()) {
+                    const auto& freqs = cachedStdX;
+                    const auto& specs = cachedStdY;
+                    size_t idx = 0;
+                    if (freqs.front() < freqs.back()) {
+                        auto it = std::lower_bound(freqs.begin(), freqs.end(), mousePos.x);
+                        if (it == freqs.begin()) idx = 0;
+                        else if (it == freqs.end()) idx = freqs.size() - 1;
+                        else {
+                            size_t hi = it - freqs.begin();
+                            size_t lo = hi - 1;
+                            idx = (mousePos.x - freqs[lo] <= freqs[hi] - mousePos.x) ? lo : hi;
+                        }
+                    } else {
+                        auto it = std::lower_bound(freqs.begin(), freqs.end(), mousePos.x,
+                                                    std::greater<double>());
+                        if (it == freqs.begin()) idx = 0;
+                        else if (it == freqs.end()) idx = freqs.size() - 1;
+                        else {
+                            size_t hi = it - freqs.begin();
+                            size_t lo = hi - 1;
+                            idx = (std::abs(mousePos.x - freqs[lo]) <=
+                                   std::abs(freqs[hi] - mousePos.x)) ? lo : hi;
+                        }
+                    }
+                    signalY = specs[idx];
+                }
+
+                double yAxisMin = ImPlot::GetPlotLimits().Y.Min;
+                double lineX[2] = { mousePos.x, mousePos.x };
+                double lineY[2] = { yAxisMin, signalY };
+                ImPlot::PlotLine("##T100StdCursorLine", lineX, lineY, 2);
+
+                ImPlotSpec cursorSpec;
+                cursorSpec.Marker = ImPlotMarker_Circle;
+                cursorSpec.MarkerSize = 4.0f;
+                cursorSpec.MarkerFillColor = ImVec4(1, 1, 1, 1);
+                ImPlot::PlotScatter("##T100StdCursorPoint", &mousePos.x, &signalY, 1, cursorSpec);
+
+                using ST = SpectralToolbox::SpectrumXUnit;
+                auto unit = static_cast<ST>(xUnitSelector);
+                double cm1 = (unit == ST::CmInv) ? mousePos.x :
+                             SpectralToolbox::convertXValue(mousePos.x, unit, ST::CmInv);
+                double um  = (unit == ST::Um) ? mousePos.x :
+                             SpectralToolbox::convertXValue(mousePos.x, unit, ST::Um);
+                double thz = (unit == ST::THz) ? mousePos.x :
+                               SpectralToolbox::convertXValue(mousePos.x, unit, ST::THz);
+                char txt[512];
+                std::snprintf(txt, sizeof(txt), "%.2f cm-1\n%.4f um\n%.4f THz\nStd Dev: %.4g %%",
+                              cm1, um, thz, signalY);
+                ImPlot::Annotation(mousePos.x, signalY, ImVec4(1, 1, 1, 1),
+                                   ImVec2(10, -10), true, "%s", txt);
+            }
+
             ImPlot::EndPlot();
         }
         ImPlot::PopStyleColor();

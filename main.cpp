@@ -2552,6 +2552,34 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             if (ImGui::Button("THz##AvgXUnitTHz")) { appState.averageSpectrum.xUnitSelector = 2; if (appState.averageSpectrum.averageAvailable && !appState.averageSpectrum.calcInProgress) appState.averageSpectrum.startCalculation(); }
             ImGui::PopStyleColor(3);
 
+                // Match X to Spectrum View
+                if (ImGui::Button("Match X to Spectrum View##AvgMatchX")) {
+                    int newXUnit = appState.spectrum.xUnitSelector;
+                    double specMin = appState.spectrum.manualXMin;
+                    double specMax = appState.spectrum.manualXMax;
+
+                    if (specMin < specMax) {
+                        auto specU = static_cast<SpectralToolbox::SpectrumXUnit>(appState.spectrum.xUnitSelector);
+                        auto avgU  = static_cast<SpectralToolbox::SpectrumXUnit>(newXUnit);
+                        double newMin = SpectralToolbox::convertXValue(specMin, specU, avgU);
+                        double newMax = SpectralToolbox::convertXValue(specMax, specU, avgU);
+                        if (newMin > newMax) std::swap(newMin, newMax);
+                        appState.averageSpectrum.manualXMin = newMin;
+                        appState.averageSpectrum.manualXMax = newMax;
+                        appState.averageSpectrum.pendingNextXMin = newMin;
+                        appState.averageSpectrum.pendingNextXMax = newMax;
+                        appState.averageSpectrum.shouldAutoscale = false;
+                    } else {
+                        appState.averageSpectrum.shouldAutoscale = true;
+                    }
+
+                    appState.averageSpectrum.xUnitSelector = newXUnit;
+                    appState.averageSpectrum.prevXUnitSelector = newXUnit;
+                    if (appState.averageSpectrum.averageAvailable && !appState.averageSpectrum.calcInProgress)
+                        appState.averageSpectrum.startCalculation();
+                    appState.needsRedraw = true;
+                }
+
             // ---- Y Axis mode selector (INDEPENDENT) ----
             ImGui::Text("Y Axis");
             ImGui::SameLine();
@@ -2725,6 +2753,34 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
             if (ImGui::Button("THz##SnrXUnitTHz")) { appState.snrSpectrum.xUnitSelector = 2; if (appState.snrSpectrum.snrAvailable && !appState.snrSpectrum.calcInProgress) appState.snrSpectrum.startCalculation(); }
             ImGui::PopStyleColor(3);
+
+                // Match X to Spectrum View
+                if (ImGui::Button("Match X to Spectrum View##SnrMatchX")) {
+                    int newXUnit = appState.spectrum.xUnitSelector;
+                    double specMin = appState.spectrum.manualXMin;
+                    double specMax = appState.spectrum.manualXMax;
+
+                    if (specMin < specMax) {
+                        auto specU = static_cast<SpectralToolbox::SpectrumXUnit>(appState.spectrum.xUnitSelector);
+                        auto snrU  = static_cast<SpectralToolbox::SpectrumXUnit>(newXUnit);
+                        double newMin = SpectralToolbox::convertXValue(specMin, specU, snrU);
+                        double newMax = SpectralToolbox::convertXValue(specMax, specU, snrU);
+                        if (newMin > newMax) std::swap(newMin, newMax);
+                        appState.snrSpectrum.manualXMin = newMin;
+                        appState.snrSpectrum.manualXMax = newMax;
+                        appState.snrSpectrum.pendingNextXMin = newMin;
+                        appState.snrSpectrum.pendingNextXMax = newMax;
+                        appState.snrSpectrum.shouldAutoscale = false;
+                    } else {
+                        appState.snrSpectrum.shouldAutoscale = true;
+                    }
+
+                    appState.snrSpectrum.xUnitSelector = newXUnit;
+                    appState.snrSpectrum.prevXUnitSelector = newXUnit;
+                    if (appState.snrSpectrum.snrAvailable && !appState.snrSpectrum.calcInProgress)
+                        appState.snrSpectrum.startCalculation();
+                    appState.needsRedraw = true;
+                }
 
             ImGui::Text("Y Axis");
             ImGui::SameLine();
