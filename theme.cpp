@@ -120,7 +120,7 @@ void ApplyTheme(ImGuiStyle& style, ImPlotStyle& plotStyle, AccentColor accent) {
     style.Colors[ImGuiCol_TitleBgCollapsed] = blackBg;
 
     // Menubar
-    style.Colors[ImGuiCol_MenuBarBg] = darkBg;
+    style.Colors[ImGuiCol_MenuBarBg] = ImVec4(accentVeryMuted.x, accentVeryMuted.y, accentVeryMuted.z, 1.0f);
 
     // Docking
     style.Colors[ImGuiCol_DockingPreview] = accentMuted;
