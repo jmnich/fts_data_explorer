@@ -2000,7 +2000,7 @@ int main() {
         }
         ImGui::End();
 
-        // Spectrum panel (bottom)
+// Spectrum panel (bottom)
         ImGui::Begin("Spectrum");
         if (appState.dataLoaded) {
             // Spectrum panel controls
@@ -2015,203 +2015,6 @@ int main() {
                 appState.spectrum.lastSpectrumParams.clear();
                 appState.needsRedraw = true;
             };
-
-            // Shared button style colors for X-unit and Y-scale toggle buttons
-            const ImVec4 btnColors[2] = {
-                ImVec4(0.22f, 0.22f, 0.22f, 0.7f), // unselected: visible gray
-                ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive) // selected: highlight
-            };
-
-            // Tracking cursor toggle
-            ImGui::Text("Cursor");
-            ImGui::SameLine();
-            const bool cursorOn = appState.spectrum.showTrackingCursor;
-
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[cursorOn ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cursorOn ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("On##CursorOn")) {
-                if (!cursorOn) {
-                    appState.spectrum.showTrackingCursor = true;
-                    appState.needsRedraw = true;
-                }
-            }
-            ImGui::PopStyleColor(3);
-            ImGui::SameLine(0.0f, 0.0f);
-
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[!cursorOn ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  !cursorOn ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("Off##CursorOff")) {
-                if (cursorOn) {
-                    appState.spectrum.showTrackingCursor = false;
-                    appState.needsRedraw = true;
-                }
-            }
-            ImGui::PopStyleColor(3);
-
-            // Y scale selector (lin / log / dB) - rendering only, no cache invalidation needed
-            ImGui::Text("Y scale");
-            ImGui::SameLine();
-
-            const bool linSelected = (appState.spectrum.yScaleSelector == 0);
-            const bool logSelected = (appState.spectrum.yScaleSelector == 1);
-
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[linSelected ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  linSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("lin##YScaleLin")) {
-                if (!linSelected) {
-                    appState.spectrum.yScaleSelector = 0;
-                    appState.needsRedraw = true;
-                }
-            }
-            ImGui::PopStyleColor(3);
-
-            ImGui::SameLine();
-
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[logSelected ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  logSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("log##YScaleLog")) {
-                if (!logSelected) {
-                    appState.spectrum.yScaleSelector = 1;
-                    appState.needsRedraw = true;
-                }
-            }
-            ImGui::PopStyleColor(3);
-
-            ImGui::SameLine();
-
-            const bool dbSelected = (appState.spectrum.yScaleSelector == 2);
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[dbSelected ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  dbSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("dB##YScaleDb")) {
-                if (!dbSelected) {
-                    appState.spectrum.yScaleSelector = 2;
-                    appState.needsRedraw = true;
-                }
-            }
-            ImGui::PopStyleColor(3);
-
-            // X unit selector (cm-1 / µm / THz) - changing unit invalidates spectrum cache
-            ImGui::Text("X unit");
-            ImGui::SameLine();
-
-            const bool cmSelected  = (appState.spectrum.xUnitSelector == 0);
-            const bool umSelected  = (appState.spectrum.xUnitSelector == 1);
-            const bool thzSelected = (appState.spectrum.xUnitSelector == 2);
-
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[cmSelected ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cmSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("cm-1##XUnitCm")) {
-                if (!cmSelected) {
-                    appState.spectrum.xUnitSelector = 0;
-                    invalidateSpectrumCaches();
-                }
-            }
-            ImGui::PopStyleColor(3);
-
-            ImGui::SameLine();
-
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[umSelected ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  umSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("\xC2\xB5""m##XUnitUm")) {
-                if (!umSelected) {
-                    appState.spectrum.xUnitSelector = 1;
-                    invalidateSpectrumCaches();
-                }
-            }
-            ImGui::PopStyleColor(3);
-
-            ImGui::SameLine();
-
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[thzSelected ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  thzSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("THz##XUnitTHz")) {
-                if (!thzSelected) {
-                    appState.spectrum.xUnitSelector = 2;
-                    invalidateSpectrumCaches();
-                }
-            }
-            ImGui::PopStyleColor(3);
-
-            // Y-axis mode selector (all / tight / force) - matching X-unit / Y-scale button style
-            ImGui::Text("Y Axis");
-            ImGui::SameLine();
-
-            const bool allSelected   = (appState.spectrum.yAxisMode == 0);
-            const bool tightSelected = (appState.spectrum.yAxisMode == 1);
-            const bool forceSelected = (appState.spectrum.yAxisMode == 2);
-
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[allSelected ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("all##YAxisAll")) {
-                if (!allSelected) {
-                    appState.spectrum.yAxisMode = 0;
-                    appState.needsRedraw = true;
-                }
-            }
-            ImGui::PopStyleColor(3);
-
-            ImGui::SameLine();
-
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[tightSelected ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  tightSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("tight##YAxisTight")) {
-                if (!tightSelected) {
-                    appState.spectrum.yAxisMode = 1;
-                    appState.needsRedraw = true;
-                }
-            }
-            ImGui::PopStyleColor(3);
-
-            ImGui::SameLine();
-
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[forceSelected ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  forceSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("force##YAxisForce")) {
-                if (!forceSelected) {
-                    appState.spectrum.yAxisMode = 2;
-                    appState.needsRedraw = true;
-                }
-            }
-            ImGui::PopStyleColor(3);
-
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("all: auto-fit Y to all data\n"
-                                  "tight: auto-fit Y to visible data only\n"
-                                  "force: lock Y to the given min/max");
-            }
-
-            if (forceSelected) {
-                ImGui::Text("min:");
-                ImGui::SameLine();
-                ImGui::SetNextItemWidth(80.0f);
-                if (ImGui::InputDouble("##ForcedYMin", &appState.spectrum.forcedYMin, 0.0, 0.0, "%.6g")) {
-                    appState.needsRedraw = true;
-                }
-                ImGui::SameLine();
-                ImGui::Text("max:");
-                ImGui::SameLine();
-                ImGui::SetNextItemWidth(80.0f);
-                if (ImGui::InputDouble("##ForcedYMax", &appState.spectrum.forcedYMax, 0.0, 0.0, "%.6g")) {
-                    appState.needsRedraw = true;
-                }
-                if (appState.spectrum.forcedYMin >= appState.spectrum.forcedYMax) {
-                    ImGui::SameLine();
-                    ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "(min<max!)");
-                }
-            }
-
-            ImGui::Separator();
 
             // Detector sensitivity textbox
             ImGui::Text("Detector sensitivity [kV/W]:");
@@ -2304,7 +2107,7 @@ int main() {
                     invalidateSpectrumCaches();
                 }
                 if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("Rectangular window width fraction (0.05-1.0).\n1.0 = full signal, 0.05 = 5%% of signal.");
+                    ImGui::SetTooltip("Rectangular window width fraction (0.05-1.0).\n1.0 = full signal, 0.05 = 5% of signal.");
                 }
             } else if (appState.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::NortonBeer)) {
                 if (ImGui::SliderFloat("FWHM##NortonBeerFwhm", &appState.spectrum.apodizationParams.nortonBeerFwhm,
@@ -2327,7 +2130,187 @@ int main() {
                     ImGui::SetTooltip("Dolph-Chebyshev attenuation (50-160 dB, step 10).\nHigher values produce lower sidelobes.");
                 }
             }
-            
+
+            ImGui::Separator();
+
+            // Navigation block: Cursor, Y scale, X unit, Y Axis (moved to bottom)
+            {
+                // Shared button style colors for X-unit and Y-scale toggle buttons
+                const ImVec4 btnColors[2] = {
+                    ImVec4(0.22f, 0.22f, 0.22f, 0.7f), // unselected: visible gray
+                    ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive) // selected: highlight
+                };
+
+                // Tracking cursor toggle
+                ImGui::Text("Cursor");
+                ImGui::SameLine();
+                const bool cursorOn = appState.spectrum.showTrackingCursor;
+
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[cursorOn ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cursorOn ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("On##CursorOn")) {
+                    if (!cursorOn) {
+                        appState.spectrum.showTrackingCursor = true;
+                        appState.needsRedraw = true;
+                    }
+                }
+                ImGui::PopStyleColor(3);
+                ImGui::SameLine(0.0f, 0.0f);
+
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[!cursorOn ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  !cursorOn ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("Off##CursorOff")) {
+                    if (cursorOn) {
+                        appState.spectrum.showTrackingCursor = false;
+                        appState.needsRedraw = true;
+                    }
+                }
+                ImGui::PopStyleColor(3);
+
+                // Y scale selector (lin / log / dB) - rendering only, no cache invalidation needed
+                ImGui::Text("Y scale");
+                ImGui::SameLine();
+
+                const bool linSelected = (appState.spectrum.yScaleSelector == 0);
+                const bool logSelected = (appState.spectrum.yScaleSelector == 1);
+
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[linSelected ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  linSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("lin##YScaleLin")) {
+                    if (!linSelected) {
+                        appState.spectrum.yScaleSelector = 0;
+                        appState.needsRedraw = true;
+                    }
+                }
+                ImGui::PopStyleColor(3);
+
+                ImGui::SameLine();
+
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[logSelected ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  logSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("log##YScaleLog")) {
+                    if (!logSelected) {
+                        appState.spectrum.yScaleSelector = 1;
+                        appState.needsRedraw = true;
+                    }
+                }
+                ImGui::PopStyleColor(3);
+
+                ImGui::SameLine();
+
+                const bool dbSelected = (appState.spectrum.yScaleSelector == 2);
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[dbSelected ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  dbSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("dB##YScaleDb")) {
+                    if (!dbSelected) {
+                        appState.spectrum.yScaleSelector = 2;
+                        appState.needsRedraw = true;
+                    }
+                }
+                ImGui::PopStyleColor(3);
+
+                // X unit selector (cm-1 / µm / THz) - changing unit invalidates spectrum cache
+                ImGui::Text("X unit");
+                ImGui::SameLine();
+
+                const bool cmSelected  = (appState.spectrum.xUnitSelector == 0);
+                const bool umSelected  = (appState.spectrum.xUnitSelector == 1);
+                const bool thzSelected = (appState.spectrum.xUnitSelector == 2);
+
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[cmSelected ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cmSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("cm-1##XUnitCm")) {
+                    if (!cmSelected) {
+                        appState.spectrum.xUnitSelector = 0;
+                        invalidateSpectrumCaches();
+                    }
+                }
+                ImGui::PopStyleColor(3);
+
+                ImGui::SameLine();
+
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[umSelected ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  umSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("\xC2\xB5""m##XUnitUm")) {
+                    if (!umSelected) {
+                        appState.spectrum.xUnitSelector = 1;
+                        invalidateSpectrumCaches();
+                    }
+                }
+                ImGui::PopStyleColor(3);
+
+                ImGui::SameLine();
+
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[thzSelected ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  thzSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("THz##XUnitTHz")) {
+                    if (!thzSelected) {
+                        appState.spectrum.xUnitSelector = 2;
+                        invalidateSpectrumCaches();
+                    }
+                }
+                ImGui::PopStyleColor(3);
+
+                // Y-axis mode selector (all / tight / force) - matching X-unit / Y-scale button style
+                ImGui::Text("Y Axis");
+                ImGui::SameLine();
+
+                const bool allSelected   = (appState.spectrum.yAxisMode == 0);
+                const bool tightSelected = (appState.spectrum.yAxisMode == 1);
+                const bool forceSelected = (appState.spectrum.yAxisMode == 2);
+
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[allSelected ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("all##YAxisAll")) {
+                    if (!allSelected) {
+                        appState.spectrum.yAxisMode = 0;
+                        appState.needsRedraw = true;
+                    }
+                }
+                ImGui::PopStyleColor(3);
+
+                ImGui::SameLine();
+
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[tightSelected ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  tightSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("tight##YAxisTight")) {
+                    if (!tightSelected) {
+                        appState.spectrum.yAxisMode = 1;
+                        appState.needsRedraw = true;
+                    }
+                }
+                ImGui::PopStyleColor(3);
+
+                ImGui::SameLine();
+
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[forceSelected ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  forceSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("force##YAxisForce")) {
+                    if (!forceSelected) {
+                        appState.spectrum.yAxisMode = 2;
+                        appState.needsRedraw = true;
+                    }
+                }
+                ImGui::PopStyleColor(3);
+
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("all: auto-fit Y to all data\n"
+                                      "tight: auto-fit Y to visible data only\n"
+                                      "force: lock Y to the given min/max");
+                }
+            }
+
         } else {
             ImGui::Text("No data loaded.");
         }
@@ -2698,8 +2681,112 @@ int main() {
                     if (appState.filesSelectedForAveraging[i]) selCount++;
                 ImGui::Text("Selected: %d files", selCount);
 
-                // X range min/max (stored in um, displayed in selected unit)
+                ImGui::Text("Decimation");
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(80.0f);
+                if (ImGui::InputInt("##AllanDecimation", &appState.allanVariance.wavelengthDecimation, 1, 1)) {
+                    if (appState.allanVariance.wavelengthDecimation < 1)
+                        appState.allanVariance.wavelengthDecimation = 1;
+                    appState.needsRedraw = true;
+                }
+
+                const ImVec4 btnColors[2] = {
+                    ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
+                    ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
+                };
+
+                ImGui::Text("Calc base");
+                ImGui::SameLine();
+                const bool allanCalcBase100T = (appState.allanVariance.calcBaseSelector == 0);
+                const bool allanCalcBaseSpectrum = (appState.allanVariance.calcBaseSelector == 1);
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[allanCalcBase100T ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allanCalcBase100T ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("100% T##AllanCalcBase100T")) { appState.allanVariance.calcBaseSelector = 0; appState.needsRedraw = true; }
+                ImGui::PopStyleColor(3);
+                ImGui::SameLine();
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[allanCalcBaseSpectrum ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allanCalcBaseSpectrum ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("Spectrum##AllanCalcBaseSpectrum")) { appState.allanVariance.calcBaseSelector = 1; appState.needsRedraw = true; }
+                ImGui::PopStyleColor(3);
+
+                if (ImGui::Button("Calculate Allan")) {
+                    appState.allanVariance.startCalculation();
+                    appState.needsRedraw = true;
+                }
+
+                ImGui::Separator();
+
+                // Navigation block (X unit, Cursor, X range) - moved to bottom
                 {
+                    const ImVec4 navBtnColors[2] = {
+                        ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
+                        ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
+                    };
+
+                    // X unit
+                    ImGui::Text("X unit");
+                    ImGui::SameLine();
+                    const bool allanCmSel  = (appState.allanVariance.xUnitSelector == 0);
+                    const bool allanUmSel  = (appState.allanVariance.xUnitSelector == 1);
+                    const bool allanThzSel = (appState.allanVariance.xUnitSelector == 2);
+
+                    ImGui::PushStyleColor(ImGuiCol_Button,        navBtnColors[allanCmSel ? 1 : 0]);
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allanCmSel ? navBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive,   navBtnColors[1]);
+                    if (ImGui::Button("cm-1##AllanXUnitCm")) { appState.allanVariance.xUnitSelector = 0; appState.needsRedraw = true; }
+                    ImGui::PopStyleColor(3);
+                    ImGui::SameLine(0.0f, 0.0f);
+
+                    ImGui::PushStyleColor(ImGuiCol_Button,        navBtnColors[allanUmSel ? 1 : 0]);
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allanUmSel ? navBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive,   navBtnColors[1]);
+                    if (ImGui::Button("\xC2\xB5""m##AllanXUnitUm")) { appState.allanVariance.xUnitSelector = 1; appState.needsRedraw = true; }
+                    ImGui::PopStyleColor(3);
+                    ImGui::SameLine(0.0f, 0.0f);
+
+                    ImGui::PushStyleColor(ImGuiCol_Button,        navBtnColors[allanThzSel ? 1 : 0]);
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allanThzSel ? navBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive,   navBtnColors[1]);
+                    if (ImGui::Button("THz##AllanXUnitTHz")) { appState.allanVariance.xUnitSelector = 2; appState.needsRedraw = true; }
+                    ImGui::PopStyleColor(3);
+
+                    // Cursor On/Off
+                    ImGui::Text("Cursor");
+                    ImGui::SameLine();
+                    const bool cursorOn = appState.spectrum.showTrackingCursor;
+                    const ImVec4 cursorBtnColors[2] = {
+                        ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
+                        ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
+                    };
+                    ImGui::PushStyleColor(ImGuiCol_Button,        cursorBtnColors[cursorOn ? 1 : 0]);
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cursorOn ? cursorBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cursorBtnColors[1]);
+                    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
+                    if (ImGui::Button("On##AllanCursorOn")) {
+                        if (!cursorOn) {
+                            appState.spectrum.showTrackingCursor = true;
+                            appState.needsRedraw = true;
+                        }
+                    }
+                    ImGui::PopStyleVar();
+                    ImGui::PopStyleColor(3);
+                    ImGui::SameLine(0.0f, 0.0f);
+                    ImGui::PushStyleColor(ImGuiCol_Button,        cursorBtnColors[!cursorOn ? 1 : 0]);
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  !cursorOn ? cursorBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cursorBtnColors[1]);
+                    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
+                    if (ImGui::Button("Off##AllanCursorOff")) {
+                        if (cursorOn) {
+                            appState.spectrum.showTrackingCursor = false;
+                            appState.needsRedraw = true;
+                        }
+                    }
+                    ImGui::PopStyleVar();
+                    ImGui::PopStyleColor(3);
+
+                    // X range min/max (stored in um, displayed in selected unit)
                     double displayMin = appState.allanVariance.xRangeMin;
                     double displayMax = appState.allanVariance.xRangeMax;
                     if (appState.allanVariance.xUnitSelector == 0) {
@@ -2744,67 +2831,6 @@ int main() {
                         ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "(min<max!)");
                     }
                 }
-
-                ImGui::Text("Decimation");
-                ImGui::SameLine();
-                ImGui::SetNextItemWidth(80.0f);
-                if (ImGui::InputInt("##AllanDecimation", &appState.allanVariance.wavelengthDecimation, 1, 1)) {
-                    if (appState.allanVariance.wavelengthDecimation < 1)
-                        appState.allanVariance.wavelengthDecimation = 1;
-                    appState.needsRedraw = true;
-                }
-
-                const ImVec4 btnColors[2] = {
-                    ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
-                    ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
-                };
-
-                ImGui::Text("Calc base");
-                ImGui::SameLine();
-                const bool allanCalcBase100T = (appState.allanVariance.calcBaseSelector == 0);
-                const bool allanCalcBaseSpectrum = (appState.allanVariance.calcBaseSelector == 1);
-                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[allanCalcBase100T ? 1 : 0]);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allanCalcBase100T ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-                if (ImGui::Button("100% T##AllanCalcBase100T")) { appState.allanVariance.calcBaseSelector = 0; appState.needsRedraw = true; }
-                ImGui::PopStyleColor(3);
-                ImGui::SameLine();
-                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[allanCalcBaseSpectrum ? 1 : 0]);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allanCalcBaseSpectrum ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-                if (ImGui::Button("Spectrum##AllanCalcBaseSpectrum")) { appState.allanVariance.calcBaseSelector = 1; appState.needsRedraw = true; }
-                ImGui::PopStyleColor(3);
-
-                ImGui::Text("X unit");
-                ImGui::SameLine();
-                const bool allanCmSel  = (appState.allanVariance.xUnitSelector == 0);
-                const bool allanUmSel  = (appState.allanVariance.xUnitSelector == 1);
-                const bool allanThzSel = (appState.allanVariance.xUnitSelector == 2);
-
-                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[allanCmSel ? 1 : 0]);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allanCmSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-                if (ImGui::Button("cm-1##AllanXUnitCm")) { appState.allanVariance.xUnitSelector = 0; appState.needsRedraw = true; }
-                ImGui::PopStyleColor(3);
-                ImGui::SameLine();
-
-                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[allanUmSel ? 1 : 0]);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allanUmSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-                if (ImGui::Button("\xC2\xB5""m##AllanXUnitUm")) { appState.allanVariance.xUnitSelector = 1; appState.needsRedraw = true; }
-                ImGui::PopStyleColor(3);
-                ImGui::SameLine();
-
-                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[allanThzSel ? 1 : 0]);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allanThzSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-                if (ImGui::Button("THz##AllanXUnitTHz")) { appState.allanVariance.xUnitSelector = 2; appState.needsRedraw = true; }
-                ImGui::PopStyleColor(3);
-
-                if (ImGui::Button("Calculate Allan")) {
-                    appState.allanVariance.startCalculation();
-                    appState.needsRedraw = true;
-                }
             } else {
                 ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.2f, 0.6f, 0.5f, 1.0f));
                 char pctBuf[48];
@@ -2817,38 +2843,6 @@ int main() {
                     ImVec2(ImGui::GetContentRegionAvail().x, 0), pctBuf);
                 ImGui::PopStyleColor();
             }
-
-            ImGui::Separator();
-
-            const ImVec4 cursorBtnColors[2] = {
-                ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
-                ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
-            };
-
-            ImGui::Text("Cursor");
-            ImGui::SameLine();
-            const bool cursorOn = appState.spectrum.showTrackingCursor;
-            ImGui::PushStyleColor(ImGuiCol_Button,        cursorBtnColors[cursorOn ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cursorOn ? cursorBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cursorBtnColors[1]);
-            if (ImGui::Button("On##AllanCursorOn")) {
-                if (!cursorOn) {
-                    appState.spectrum.showTrackingCursor = true;
-                    appState.needsRedraw = true;
-                }
-            }
-            ImGui::PopStyleColor(3);
-            ImGui::SameLine(0.0f, 0.0f);
-            ImGui::PushStyleColor(ImGuiCol_Button,        cursorBtnColors[!cursorOn ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  !cursorOn ? cursorBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cursorBtnColors[1]);
-            if (ImGui::Button("Off##AllanCursorOff")) {
-                if (cursorOn) {
-                    appState.spectrum.showTrackingCursor = false;
-                    appState.needsRedraw = true;
-                }
-            }
-            ImGui::PopStyleColor(3);
 
         } else {
             ImGui::Text("No data loaded.");
@@ -2953,8 +2947,103 @@ int main() {
 
             ImGui::Separator();
 
-            // Cursor On/Off
+            // Energy Ratios
             {
+                auto ratioInput = [](const char* label, char* buf, size_t bufSize) {
+                    ImGui::SetNextItemWidth(70);
+                    ImGui::InputText(label, buf, bufSize);
+                };
+
+                ImGui::Text("Energy Ratios");
+                ImGui::SameLine();
+                ImGui::SetWindowFontScale(0.7f);
+                ImGui::Text("(cm-1)");
+                ImGui::SetWindowFontScale(1.0f);
+                ImGui::SameLine();
+                if (ImGui::Button("ASTM E1421##T100AstmE1421")) {
+                    strncpy(appState.t100.energyRatioNumA, "4000", 31);
+                    strncpy(appState.t100.energyRatioDenA, "2000", 31);
+                    strncpy(appState.t100.energyRatioNumB, "2000", 31);
+                    strncpy(appState.t100.energyRatioDenB, "1000", 31);
+                    strncpy(appState.t100.energyRatioNumC, "150", 31);
+                    strncpy(appState.t100.energyRatioDenC, "max", 31);
+                    appState.needsRedraw = true;
+                }
+
+                ImGui::Text("A: "); ImGui::SameLine();
+                ratioInput("##T100RatioNumA", appState.t100.energyRatioNumA,
+                           sizeof(appState.t100.energyRatioNumA));
+                ImGui::SameLine(); ImGui::Text("/"); ImGui::SameLine();
+                ratioInput("##T100RatioDenA", appState.t100.energyRatioDenA,
+                           sizeof(appState.t100.energyRatioDenA));
+
+                ImGui::Text("B: "); ImGui::SameLine();
+                ratioInput("##T100RatioNumB", appState.t100.energyRatioNumB,
+                           sizeof(appState.t100.energyRatioNumB));
+                ImGui::SameLine(); ImGui::Text("/"); ImGui::SameLine();
+                ratioInput("##T100RatioDenB", appState.t100.energyRatioDenB,
+                           sizeof(appState.t100.energyRatioDenB));
+
+                ImGui::Text("C: "); ImGui::SameLine();
+                ratioInput("##T100RatioNumC", appState.t100.energyRatioNumC,
+                           sizeof(appState.t100.energyRatioNumC));
+                ImGui::SameLine(); ImGui::Text("/"); ImGui::SameLine();
+                ratioInput("##T100RatioDenC", appState.t100.energyRatioDenC,
+                           sizeof(appState.t100.energyRatioDenC));
+            }
+
+            ImGui::Separator();
+
+            // Force Y min/max (shown when force mode)
+            if (appState.t100.yAxisMode == 2) {
+                ImGui::Text("Force Y");
+                double vMin = appState.t100.forcedYMin;
+                double vMax = appState.t100.forcedYMax;
+                ImGui::SetNextItemWidth(100);
+                if (ImGui::InputDouble("Min##T100ForceYMin", &vMin, 0.0, 0.0, "%.4f")) {
+                    if (vMax > vMin) {
+                        appState.t100.forcedYMin = vMin;
+                        appState.needsRedraw = true;
+                    }
+                }
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(100);
+                if (ImGui::InputDouble("Max##T100ForceYMax", &vMax, 0.0, 0.0, "%.4f")) {
+                    if (vMax > vMin) {
+                        appState.t100.forcedYMax = vMax;
+                        appState.needsRedraw = true;
+                    }
+                }
+                ImGui::Separator();
+            }
+
+            ImGui::Text("Std Deviation");
+            if (!appState.t100.calcStdInProgress) {
+                if (ImGui::Button("Calculate std##T100CalcStd")) {
+                    if (appState.t100.referenceAvailable) {
+                        appState.t100.startStdCalculation();
+                        appState.needsRedraw = true;
+                    }
+                }
+            } else {
+                float pct = appState.t100.stdProgressTotal > 0
+                    ? (float)appState.t100.stdProgressCurrent / (float)appState.t100.stdProgressTotal
+                    : 0.0f;
+                ImGui::ProgressBar(pct, ImVec2(-1, 0), "");
+                ImGui::Text("Processing %d/%d", appState.t100.stdProgressCurrent,
+                            appState.t100.stdProgressTotal);
+            }
+
+            ImGui::Separator();
+
+            // Navigation block (Cursor, X unit, Match X, Y Axis) - moved to bottom
+            {
+                const ImVec4 cfgBtnColors[2] = {
+                    ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
+                    ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
+                };
+
+                // Cursor On/Off
                 ImGui::Text("Cursor");
                 ImGui::SameLine();
                 const bool cursorOn = appState.spectrum.showTrackingCursor;
@@ -2987,17 +3076,11 @@ int main() {
                 }
                 ImGui::PopStyleVar();
                 ImGui::PopStyleColor(3);
-            }
 
-            // X unit: cm-1 / µm / THz
-            {
-                int& sel = appState.t100.xUnitSelector;
-                const ImVec4 cfgBtnColors[2] = {
-                    ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
-                    ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
-                };
+                // X unit
                 ImGui::Text("X unit");
                 ImGui::SameLine();
+                int& sel = appState.t100.xUnitSelector;
                 ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[sel == 0 ? 1 : 0]);
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  sel == 0 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
@@ -3024,88 +3107,39 @@ int main() {
                     appState.needsRedraw = true;
                 }
                 ImGui::PopStyleColor(3);
-            }
 
-            if (ImGui::Button("Match X to Spectrum View##T100MatchX")) {
-                int newXUnit = appState.spectrum.xUnitSelector;
-                double specMin = appState.spectrum.manualXMin;
-                double specMax = appState.spectrum.manualXMax;
+                // Match X to Spectrum View
+                if (ImGui::Button("Match X to Spectrum View##T100MatchX")) {
+                    int newXUnit = appState.spectrum.xUnitSelector;
+                    double specMin = appState.spectrum.manualXMin;
+                    double specMax = appState.spectrum.manualXMax;
 
-                if (specMin < specMax) {
-                    auto specU = static_cast<SpectralToolbox::SpectrumXUnit>(appState.spectrum.xUnitSelector);
-                    auto stabU = static_cast<SpectralToolbox::SpectrumXUnit>(newXUnit);
-                    double newMin = SpectralToolbox::convertXValue(specMin, specU, stabU);
-                    double newMax = SpectralToolbox::convertXValue(specMax, specU, stabU);
-                    if (newMin > newMax) std::swap(newMin, newMax);
-                    appState.t100.manualXMin = newMin;
-                    appState.t100.manualXMax = newMax;
-                    appState.t100.pendingNextXMin = newMin;
-                    appState.t100.pendingNextXMax = newMax;
-                    appState.t100.shouldAutoscale = false;
-                } else {
-                    appState.t100.shouldAutoscale = true;
-                }
+                    if (specMin < specMax) {
+                        auto specU = static_cast<SpectralToolbox::SpectrumXUnit>(appState.spectrum.xUnitSelector);
+                        auto stabU = static_cast<SpectralToolbox::SpectrumXUnit>(newXUnit);
+                        double newMin = SpectralToolbox::convertXValue(specMin, specU, stabU);
+                        double newMax = SpectralToolbox::convertXValue(specMax, specU, stabU);
+                        if (newMin > newMax) std::swap(newMin, newMax);
+                        appState.t100.manualXMin = newMin;
+                        appState.t100.manualXMax = newMax;
+                        appState.t100.pendingNextXMin = newMin;
+                        appState.t100.pendingNextXMax = newMax;
+                        appState.t100.shouldAutoscale = false;
+                    } else {
+                        appState.t100.shouldAutoscale = true;
+                    }
 
-                appState.t100.xUnitSelector = newXUnit;
-                appState.t100.prevXUnitSelector = newXUnit;
-                appState.t100.needsRecompute = true;
-                appState.t100.clearStdDev();
-                appState.needsRedraw = true;
-            }
-
-            ImGui::Separator();
-
-            // Energy Ratios
-            {
-                auto ratioInput = [](const char* label, char* buf, size_t bufSize) {
-                    ImGui::SetNextItemWidth(70);
-                    ImGui::InputText(label, buf, bufSize);
-                };
-
-                ImGui::Text("Energy Ratios (cm-1)");
-                ImGui::Text("A: "); ImGui::SameLine();
-                ratioInput("##T100RatioNumA", appState.t100.energyRatioNumA,
-                           sizeof(appState.t100.energyRatioNumA));
-                ImGui::SameLine(); ImGui::Text("/"); ImGui::SameLine();
-                ratioInput("##T100RatioDenA", appState.t100.energyRatioDenA,
-                           sizeof(appState.t100.energyRatioDenA));
-
-                ImGui::Text("B: "); ImGui::SameLine();
-                ratioInput("##T100RatioNumB", appState.t100.energyRatioNumB,
-                           sizeof(appState.t100.energyRatioNumB));
-                ImGui::SameLine(); ImGui::Text("/"); ImGui::SameLine();
-                ratioInput("##T100RatioDenB", appState.t100.energyRatioDenB,
-                           sizeof(appState.t100.energyRatioDenB));
-
-                ImGui::Text("C: "); ImGui::SameLine();
-                ratioInput("##T100RatioNumC", appState.t100.energyRatioNumC,
-                           sizeof(appState.t100.energyRatioNumC));
-                ImGui::SameLine(); ImGui::Text("/"); ImGui::SameLine();
-                ratioInput("##T100RatioDenC", appState.t100.energyRatioDenC,
-                           sizeof(appState.t100.energyRatioDenC));
-
-                if (ImGui::Button("ASTM E1421##T100AstmE1421")) {
-                    strncpy(appState.t100.energyRatioNumA, "4000", 31);
-                    strncpy(appState.t100.energyRatioDenA, "2000", 31);
-                    strncpy(appState.t100.energyRatioNumB, "2000", 31);
-                    strncpy(appState.t100.energyRatioDenB, "1000", 31);
-                    strncpy(appState.t100.energyRatioNumC, "150", 31);
-                    strncpy(appState.t100.energyRatioDenC, "max", 31);
+                    appState.t100.xUnitSelector = newXUnit;
+                    appState.t100.prevXUnitSelector = newXUnit;
+                    appState.t100.needsRecompute = true;
+                    appState.t100.clearStdDev();
                     appState.needsRedraw = true;
                 }
-            }
 
-            ImGui::Separator();
-
-            // Y Axis mode: all / tight / force
-            {
-                int& mode = appState.t100.yAxisMode;
-                const ImVec4 cfgBtnColors[2] = {
-                    ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
-                    ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
-                };
+                // Y Axis
                 ImGui::Text("Y Axis");
                 ImGui::SameLine();
+                int& mode = appState.t100.yAxisMode;
                 ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[mode == 0 ? 1 : 0]);
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  mode == 0 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
@@ -3132,46 +3166,6 @@ int main() {
                     appState.needsRedraw = true;
                 }
                 ImGui::PopStyleColor(3);
-            }
-
-            if (appState.t100.yAxisMode == 2) {
-                ImGui::Text("Force Y");
-                double vMin = appState.t100.forcedYMin;
-                double vMax = appState.t100.forcedYMax;
-                ImGui::SetNextItemWidth(100);
-                if (ImGui::InputDouble("Min##T100ForceYMin", &vMin, 0.0, 0.0, "%.4f")) {
-                    if (vMax > vMin) {
-                        appState.t100.forcedYMin = vMin;
-                        appState.needsRedraw = true;
-                    }
-                }
-                ImGui::SameLine();
-                ImGui::SetNextItemWidth(100);
-                if (ImGui::InputDouble("Max##T100ForceYMax", &vMax, 0.0, 0.0, "%.4f")) {
-                    if (vMax > vMin) {
-                        appState.t100.forcedYMax = vMax;
-                        appState.needsRedraw = true;
-                    }
-                }
-            }
-
-            ImGui::Separator();
-
-            ImGui::Text("Std Deviation");
-            if (!appState.t100.calcStdInProgress) {
-                if (ImGui::Button("Calculate std##T100CalcStd")) {
-                    if (appState.t100.referenceAvailable) {
-                        appState.t100.startStdCalculation();
-                        appState.needsRedraw = true;
-                    }
-                }
-            } else {
-                float pct = appState.t100.stdProgressTotal > 0
-                    ? (float)appState.t100.stdProgressCurrent / (float)appState.t100.stdProgressTotal
-                    : 0.0f;
-                ImGui::ProgressBar(pct, ImVec2(-1, 0), "");
-                ImGui::Text("Processing %d/%d", appState.t100.stdProgressCurrent,
-                            appState.t100.stdProgressTotal);
             }
 
         } else {
