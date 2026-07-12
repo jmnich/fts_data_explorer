@@ -44,6 +44,18 @@ void initWelcomeBackground() {
         return;
     }
 
+    // Replace all non-transparent pixel RGB with white so the tint color
+    // (accent-colored via IM_COL32) completely controls the pattern appearance.
+    int totalPixels = w * h;
+    for (int i = 0; i < totalPixels; i++) {
+        int idx = i * 4;
+        if (rgba[idx + 3] > 0) {
+            rgba[idx] = 255;
+            rgba[idx + 1] = 255;
+            rgba[idx + 2] = 255;
+        }
+    }
+
     glGenTextures(1, &g_bg.textureID);
     glBindTexture(GL_TEXTURE_2D, g_bg.textureID);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA,
@@ -63,26 +75,26 @@ void initWelcomeBackground() {
     // scale is relative to the original 2400×900 texture (0.10 ≈ 240×90 px).
     // Alpha values reduced to 30-80 for subtle decorative effect.
     g_bg.scatterCopies = {
-        {0.03f, 0.02f, 0.18f, 60},
-        {0.28f, 0.01f, 0.12f, 55},
-        {0.52f, 0.04f, 0.22f, 65},
-        {0.72f, 0.02f, 0.15f, 50},
-        {0.02f, 0.20f, 0.24f, 70},
-        {0.32f, 0.22f, 0.10f, 55},
-        {0.55f, 0.18f, 0.18f, 65},
-        {0.80f, 0.22f, 0.20f, 60},
-        {0.05f, 0.40f, 0.14f, 60},
-        {0.30f, 0.42f, 0.20f, 55},
-        {0.50f, 0.38f, 0.16f, 70},
-        {0.75f, 0.42f, 0.22f, 60},
-        {0.08f, 0.58f, 0.20f, 60},
-        {0.35f, 0.60f, 0.14f, 65},
-        {0.55f, 0.56f, 0.22f, 55},
-        {0.78f, 0.58f, 0.12f, 60},
-        {0.05f, 0.90f, 0.18f, 70},
-        {0.30f, 0.74f, 0.24f, 60},
-        {0.55f, 0.78f, 0.12f, 55},
-        {0.78f, 0.86f, 0.18f, 65},
+        {0.03f, 0.02f, 0.18f, 90},
+        {0.28f, 0.01f, 0.12f, 83},
+        {0.52f, 0.04f, 0.22f, 98},
+        {0.72f, 0.02f, 0.15f, 75},
+        {0.02f, 0.20f, 0.24f, 105},
+        {0.32f, 0.22f, 0.10f, 83},
+        {0.55f, 0.18f, 0.18f, 98},
+        {0.80f, 0.22f, 0.20f, 90},
+        {0.05f, 0.40f, 0.14f, 90},
+        {0.30f, 0.42f, 0.20f, 83},
+        {0.50f, 0.38f, 0.16f, 105},
+        {0.75f, 0.42f, 0.22f, 90},
+        {0.08f, 0.58f, 0.20f, 90},
+        {0.35f, 0.60f, 0.14f, 98},
+        {0.55f, 0.56f, 0.22f, 83},
+        {0.78f, 0.58f, 0.12f, 90},
+        {0.05f, 0.90f, 0.18f, 105},
+        {0.30f, 0.74f, 0.24f, 90},
+        {0.55f, 0.78f, 0.12f, 83},
+        {0.78f, 0.86f, 0.18f, 98},
     };
 
     std::cout << "Welcome background texture loaded (" << w << "x" << h
@@ -103,7 +115,8 @@ void addToRecentDatasets(AppConfig& config, const std::string& configFilePath,
 }
 
 // Draw scattered copies of the decorative curve on the viewport background (full screen)
-static void drawWelcomeBackgroundScatter(ImDrawList* drawList, const ImVec2& vpSize) {
+static void drawWelcomeBackgroundScatter(ImDrawList* drawList, const ImVec2& vpSize,
+                                         const ImVec4& accentColor) {
     if (!g_bg.textureID) return;
 
     const float baseW = static_cast<float>(g_bg.width);
@@ -120,7 +133,11 @@ static void drawWelcomeBackgroundScatter(ImDrawList* drawList, const ImVec2& vpS
             ImVec2(x, y),
             ImVec2(x + w, y + h),
             ImVec2(0, 0), ImVec2(1, 1),
-            IM_COL32(255, 255, 255, copy.alpha));
+            IM_COL32(
+                (int)(accentColor.x * 255.0f),
+                (int)(accentColor.y * 255.0f),
+                (int)(accentColor.z * 255.0f),
+                copy.alpha));
     }
 }
 
@@ -128,7 +145,16 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                          const std::string& configFilePath) {
     // Draw decorative background scatter on viewport background draw list (full screen, every frame)
     ImVec2 vpSize = ImGui::GetMainViewport()->Size;
-    drawWelcomeBackgroundScatter(ImGui::GetBackgroundDrawList(), vpSize);
+    AccentColor accentScatter = StringToAccentColor(appState.currentAccentColor);
+    ImVec4 scatterColor = GetAccentBase(accentScatter);
+    float scatterMax = std::max({scatterColor.x, scatterColor.y, scatterColor.z});
+    if (scatterMax > 0.0f) {
+        float inv = 1.0f / scatterMax;
+        scatterColor.x *= inv;
+        scatterColor.y *= inv;
+        scatterColor.z *= inv;
+    }
+    drawWelcomeBackgroundScatter(ImGui::GetBackgroundDrawList(), vpSize, scatterColor);
 
     // Center the welcome screen
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
