@@ -152,7 +152,7 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
         ImVec2 winPos = ImGui::GetWindowPos();
         ImVec2 winSize = ImGui::GetWindowSize();
         winDrawList->AddRectFilled(winPos, ImVec2(winPos.x + winSize.x, winPos.y + winSize.y),
-                                   IM_COL32(0, 0, 0, 180));
+                                   IM_COL32(0, 0, 0, 100));
 
         ImGui::Spacing();
 
