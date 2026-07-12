@@ -801,14 +801,14 @@ static ImVec4 getT100LineColor(size_t index) {
 static void formatEnergyRatio(char* buf, size_t bufSize, double val) {
     double abs = std::abs(val);
     if (abs < 1e-15) {
-        std::snprintf(buf, bufSize, "0.0E0");
+        std::snprintf(buf, bufSize, "0.00E0");
         return;
     }
     int exp = static_cast<int>(std::floor(std::log10(abs)));
     double mant = val / std::pow(10.0, exp);
-    mant = std::round(mant * 10.0) / 10.0;
+    mant = std::round(mant * 100.0) / 100.0;
     if (std::abs(mant) >= 10.0) { mant /= 10.0; exp++; }
-    std::snprintf(buf, bufSize, "%.1fE%d", mant, exp);
+    std::snprintf(buf, bufSize, "%.2fE%d", mant, exp);
 }
 
 void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
@@ -818,6 +818,7 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
                                                    appState->selectedFilenames.end());
         if (currentSelection != lastKnownSelection) {
             needsRecompute = true;
+            appState->needsRedraw = true;
             lastKnownSelection = currentSelection;
         }
     }
@@ -1325,7 +1326,7 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
                 if (energyRatioNumA[0] != '\0' && energyRatioDenA[0] != '\0') {
                     ImGui::SameLine(0, 0);
                     ImGui::SetWindowFontScale(2.0f / 3.0f);
-                    ImGui::Text("%s/%s", energyRatioNumA, energyRatioDenA);
+                    ImGui::Text(" %s/%s", energyRatioNumA, energyRatioDenA);
                     ImGui::SetWindowFontScale(1.0f);
                 }
             }
@@ -1335,7 +1336,7 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
                 if (energyRatioNumB[0] != '\0' && energyRatioDenB[0] != '\0') {
                     ImGui::SameLine(0, 0);
                     ImGui::SetWindowFontScale(2.0f / 3.0f);
-                    ImGui::Text("%s/%s", energyRatioNumB, energyRatioDenB);
+                    ImGui::Text(" %s/%s", energyRatioNumB, energyRatioDenB);
                     ImGui::SetWindowFontScale(1.0f);
                 }
             }
@@ -1345,7 +1346,7 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
                 if (energyRatioNumC[0] != '\0' && energyRatioDenC[0] != '\0') {
                     ImGui::SameLine(0, 0);
                     ImGui::SetWindowFontScale(2.0f / 3.0f);
-                    ImGui::Text("%s/%s", energyRatioNumC, energyRatioDenC);
+                    ImGui::Text(" %s/%s", energyRatioNumC, energyRatioDenC);
                     ImGui::SetWindowFontScale(1.0f);
                 }
             }

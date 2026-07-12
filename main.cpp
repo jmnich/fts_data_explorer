@@ -581,7 +581,9 @@ int main() {
         // Tick T100 standard deviation calculation (multi-frame, one file per frame)
         if (appState.t100.calcStdInProgress) {
             appState.needsRedraw = true;
-            appState.t100.tickStdCalculation();
+            if (appState.t100.tickStdCalculation()) {
+                appState.needsRedraw = true;
+            }
         }
 
         // FPS overlay: force periodic redraw when idle so the counter stays live
