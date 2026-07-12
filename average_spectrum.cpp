@@ -199,6 +199,13 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
             convertedXMin = newMin;
             convertedXMax = newMax;
         }
+        // Convert cached average X data in-place (unit-independent Y stays unchanged)
+        if (averageAvailable && !cachedAverageX.empty()) {
+            auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(prevXUnitSelector);
+            auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
+            for (double& x : cachedAverageX)
+                x = SpectralToolbox::convertXValue(x, oldU, newU);
+        }
         pendingNextXMin = 0.0;
         pendingNextXMax = -1.0;
         prevXUnitSelector = xUnitSelector;

@@ -150,7 +150,8 @@ bool Spectrum::isSpectrumDirty(const std::string& fileId, const std::vector<doub
 
     if (lp.size() < 6 ||
         lp[0] != static_cast<double>(Kpadding)               ||
-        lp[1] != static_cast<double>(xUnitSelector)          ||
+        /* lp[1] was xUnitSelector — removed from cache key (converted in-place) */
+        false                                                 ||
         lp[2] != static_cast<double>(refLaserTextbox)        ||
         lp[3] != static_cast<double>(apodizationSelector)    ||
         lp[4] != activeParam                                  ||
@@ -383,6 +384,23 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                 xUnitSwitchedThisFrame = true;
                 convertedXMin = newMin;
                 convertedXMax = newMax;
+            }
+            // Convert cached frequency data in-place (unit-independent Y stays unchanged)
+            {
+                auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(prevXUnitSelector);
+                auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
+                for (auto& [fid, freqs] : cachedFrequencies) {
+                    for (double& x : freqs) {
+                        x = SpectralToolbox::convertXValue(x, oldU, newU);
+                    }
+                }
+                // Update cache params so isSpectrumDirty stays clean
+                for (auto& [fid, params] : lastSpectrumParams) {
+                    if (params.size() >= 2)
+                        params[1] = static_cast<double>(xUnitSelector);
+                }
+                // Discard in-flight async results (they would overwrite with old-unit data)
+                pendingSpectra_.clear();
             }
             pendingNextXMin = 0.0;
             pendingNextXMax = -1.0;

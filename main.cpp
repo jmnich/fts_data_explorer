@@ -2336,7 +2336,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                 if (ImGui::Button("cm-1##XUnitCm")) {
                     if (!cmSelected) {
                         appState.spectrum.xUnitSelector = 0;
-                        invalidateSpectrumCaches();
+                        appState.needsRedraw = true;
                     }
                 }
                 ImGui::PopStyleColor(3);
@@ -2349,7 +2349,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                 if (ImGui::Button("\xC2\xB5""m##XUnitUm")) {
                     if (!umSelected) {
                         appState.spectrum.xUnitSelector = 1;
-                        invalidateSpectrumCaches();
+                        appState.needsRedraw = true;
                     }
                 }
                 ImGui::PopStyleColor(3);
@@ -2362,7 +2362,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                 if (ImGui::Button("THz##XUnitTHz")) {
                     if (!thzSelected) {
                         appState.spectrum.xUnitSelector = 2;
-                        invalidateSpectrumCaches();
+                        appState.needsRedraw = true;
                     }
                 }
                 ImGui::PopStyleColor(3);
@@ -2535,48 +2535,49 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[cmSel ? 1 : 0]);
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cmSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("cm-1##AvgXUnitCm")) { appState.averageSpectrum.xUnitSelector = 0; if (appState.averageSpectrum.averageAvailable && !appState.averageSpectrum.calcInProgress) appState.averageSpectrum.startCalculation(); }
+            if (ImGui::Button("cm-1##AvgXUnitCm")) { appState.averageSpectrum.xUnitSelector = 0; appState.needsRedraw = true; }
             ImGui::PopStyleColor(3);
             ImGui::SameLine();
 
             ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[umSel ? 1 : 0]);
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  umSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("\xC2\xB5""m##AvgXUnitUm")) { appState.averageSpectrum.xUnitSelector = 1; if (appState.averageSpectrum.averageAvailable && !appState.averageSpectrum.calcInProgress) appState.averageSpectrum.startCalculation(); }
+            if (ImGui::Button("\xC2\xB5""m##AvgXUnitUm")) { appState.averageSpectrum.xUnitSelector = 1; appState.needsRedraw = true; }
             ImGui::PopStyleColor(3);
             ImGui::SameLine();
 
             ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[thzSel ? 1 : 0]);
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  thzSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("THz##AvgXUnitTHz")) { appState.averageSpectrum.xUnitSelector = 2; if (appState.averageSpectrum.averageAvailable && !appState.averageSpectrum.calcInProgress) appState.averageSpectrum.startCalculation(); }
+            if (ImGui::Button("THz##AvgXUnitTHz")) { appState.averageSpectrum.xUnitSelector = 2; appState.needsRedraw = true; }
             ImGui::PopStyleColor(3);
 
                 // Match X to Spectrum View
                 if (ImGui::Button("Match X to Spectrum View##AvgMatchX")) {
                     int newXUnit = appState.spectrum.xUnitSelector;
+                    int oldUnit = appState.averageSpectrum.prevXUnitSelector;
                     double specMin = appState.spectrum.manualXMin;
                     double specMax = appState.spectrum.manualXMax;
 
                     if (specMin < specMax) {
-                        auto specU = static_cast<SpectralToolbox::SpectrumXUnit>(appState.spectrum.xUnitSelector);
-                        auto avgU  = static_cast<SpectralToolbox::SpectrumXUnit>(newXUnit);
-                        double newMin = SpectralToolbox::convertXValue(specMin, specU, avgU);
-                        double newMax = SpectralToolbox::convertXValue(specMax, specU, avgU);
-                        if (newMin > newMax) std::swap(newMin, newMax);
-                        appState.averageSpectrum.manualXMin = newMin;
-                        appState.averageSpectrum.manualXMax = newMax;
-                        appState.averageSpectrum.pendingNextXMin = newMin;
-                        appState.averageSpectrum.pendingNextXMax = newMax;
+                        appState.averageSpectrum.manualXMin = specMin;
+                        appState.averageSpectrum.manualXMax = specMax;
+                        appState.averageSpectrum.pendingNextXMin = specMin;
+                        appState.averageSpectrum.pendingNextXMax = specMax;
                         appState.averageSpectrum.shouldAutoscale = false;
                     } else {
                         appState.averageSpectrum.shouldAutoscale = true;
                     }
 
+                    if (appState.averageSpectrum.averageAvailable && !appState.averageSpectrum.cachedAverageX.empty()) {
+                        auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(oldUnit);
+                        auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(newXUnit);
+                        for (double& x : appState.averageSpectrum.cachedAverageX)
+                            x = SpectralToolbox::convertXValue(x, oldU, newU);
+                    }
+
                     appState.averageSpectrum.xUnitSelector = newXUnit;
                     appState.averageSpectrum.prevXUnitSelector = newXUnit;
-                    if (appState.averageSpectrum.averageAvailable && !appState.averageSpectrum.calcInProgress)
-                        appState.averageSpectrum.startCalculation();
                     appState.needsRedraw = true;
                 }
 
@@ -2737,48 +2738,49 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[snrCmSel ? 1 : 0]);
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  snrCmSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("cm-1##SnrXUnitCm")) { appState.snrSpectrum.xUnitSelector = 0; if (appState.snrSpectrum.snrAvailable && !appState.snrSpectrum.calcInProgress) appState.snrSpectrum.startCalculation(); }
+            if (ImGui::Button("cm-1##SnrXUnitCm")) { appState.snrSpectrum.xUnitSelector = 0; appState.needsRedraw = true; }
             ImGui::PopStyleColor(3);
             ImGui::SameLine();
 
             ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[snrUmSel ? 1 : 0]);
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  snrUmSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("\xC2\xB5""m##SnrXUnitUm")) { appState.snrSpectrum.xUnitSelector = 1; if (appState.snrSpectrum.snrAvailable && !appState.snrSpectrum.calcInProgress) appState.snrSpectrum.startCalculation(); }
+            if (ImGui::Button("\xC2\xB5""m##SnrXUnitUm")) { appState.snrSpectrum.xUnitSelector = 1; appState.needsRedraw = true; }
             ImGui::PopStyleColor(3);
             ImGui::SameLine();
 
             ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[snrThzSel ? 1 : 0]);
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  snrThzSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("THz##SnrXUnitTHz")) { appState.snrSpectrum.xUnitSelector = 2; if (appState.snrSpectrum.snrAvailable && !appState.snrSpectrum.calcInProgress) appState.snrSpectrum.startCalculation(); }
+            if (ImGui::Button("THz##SnrXUnitTHz")) { appState.snrSpectrum.xUnitSelector = 2; appState.needsRedraw = true; }
             ImGui::PopStyleColor(3);
 
                 // Match X to Spectrum View
                 if (ImGui::Button("Match X to Spectrum View##SnrMatchX")) {
                     int newXUnit = appState.spectrum.xUnitSelector;
+                    int oldUnit = appState.snrSpectrum.prevXUnitSelector;
                     double specMin = appState.spectrum.manualXMin;
                     double specMax = appState.spectrum.manualXMax;
 
                     if (specMin < specMax) {
-                        auto specU = static_cast<SpectralToolbox::SpectrumXUnit>(appState.spectrum.xUnitSelector);
-                        auto snrU  = static_cast<SpectralToolbox::SpectrumXUnit>(newXUnit);
-                        double newMin = SpectralToolbox::convertXValue(specMin, specU, snrU);
-                        double newMax = SpectralToolbox::convertXValue(specMax, specU, snrU);
-                        if (newMin > newMax) std::swap(newMin, newMax);
-                        appState.snrSpectrum.manualXMin = newMin;
-                        appState.snrSpectrum.manualXMax = newMax;
-                        appState.snrSpectrum.pendingNextXMin = newMin;
-                        appState.snrSpectrum.pendingNextXMax = newMax;
+                        appState.snrSpectrum.manualXMin = specMin;
+                        appState.snrSpectrum.manualXMax = specMax;
+                        appState.snrSpectrum.pendingNextXMin = specMin;
+                        appState.snrSpectrum.pendingNextXMax = specMax;
                         appState.snrSpectrum.shouldAutoscale = false;
                     } else {
                         appState.snrSpectrum.shouldAutoscale = true;
                     }
 
+                    if (appState.snrSpectrum.snrAvailable && !appState.snrSpectrum.cachedSnrX.empty()) {
+                        auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(oldUnit);
+                        auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(newXUnit);
+                        for (double& x : appState.snrSpectrum.cachedSnrX)
+                            x = SpectralToolbox::convertXValue(x, oldU, newU);
+                    }
+
                     appState.snrSpectrum.xUnitSelector = newXUnit;
                     appState.snrSpectrum.prevXUnitSelector = newXUnit;
-                    if (appState.snrSpectrum.snrAvailable && !appState.snrSpectrum.calcInProgress)
-                        appState.snrSpectrum.startCalculation();
                     appState.needsRedraw = true;
                 }
 
@@ -3275,28 +3277,36 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                 // Match X to Spectrum View
                 if (ImGui::Button("Match X to Spectrum View##T100MatchX")) {
                     int newXUnit = appState.spectrum.xUnitSelector;
+                    int oldUnit = appState.t100.prevXUnitSelector;
                     double specMin = appState.spectrum.manualXMin;
                     double specMax = appState.spectrum.manualXMax;
 
                     if (specMin < specMax) {
-                        auto specU = static_cast<SpectralToolbox::SpectrumXUnit>(appState.spectrum.xUnitSelector);
-                        auto stabU = static_cast<SpectralToolbox::SpectrumXUnit>(newXUnit);
-                        double newMin = SpectralToolbox::convertXValue(specMin, specU, stabU);
-                        double newMax = SpectralToolbox::convertXValue(specMax, specU, stabU);
-                        if (newMin > newMax) std::swap(newMin, newMax);
-                        appState.t100.manualXMin = newMin;
-                        appState.t100.manualXMax = newMax;
-                        appState.t100.pendingNextXMin = newMin;
-                        appState.t100.pendingNextXMax = newMax;
+                        appState.t100.manualXMin = specMin;
+                        appState.t100.manualXMax = specMax;
+                        appState.t100.pendingNextXMin = specMin;
+                        appState.t100.pendingNextXMax = specMax;
                         appState.t100.shouldAutoscale = false;
                     } else {
                         appState.t100.shouldAutoscale = true;
                     }
 
+                    if (appState.t100.transmittanceAvailable && !appState.t100.cachedTransX.empty()) {
+                        auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(oldUnit);
+                        auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(newXUnit);
+                        for (auto& [fid, vec] : appState.t100.cachedTransX)
+                            for (double& x : vec)
+                                x = SpectralToolbox::convertXValue(x, oldU, newU);
+                    }
+                    if (appState.t100.stddevAvailable && !appState.t100.cachedStdX.empty()) {
+                        auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(oldUnit);
+                        auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(newXUnit);
+                        for (double& x : appState.t100.cachedStdX)
+                            x = SpectralToolbox::convertXValue(x, oldU, newU);
+                    }
+
                     appState.t100.xUnitSelector = newXUnit;
                     appState.t100.prevXUnitSelector = newXUnit;
-                    appState.t100.needsRecompute = true;
-                    appState.t100.clearStdDev();
                     appState.needsRedraw = true;
                 }
 

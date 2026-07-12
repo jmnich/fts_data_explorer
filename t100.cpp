@@ -1028,10 +1028,24 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
             convertedXMin = newMin;
             convertedXMax = newMax;
         }
+        // Convert cached transmittance X data in-place (unit-independent T% stays unchanged)
+        if (transmittanceAvailable && !cachedTransX.empty()) {
+            auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(prevXUnitSelector);
+            auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
+            for (auto& [fid, vec] : cachedTransX) {
+                for (double& x : vec)
+                    x = SpectralToolbox::convertXValue(x, oldU, newU);
+            }
+        }
+        // Convert cached std dev X data in-place
+        if (stddevAvailable && !cachedStdX.empty()) {
+            auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(prevXUnitSelector);
+            auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
+            for (double& x : cachedStdX)
+                x = SpectralToolbox::convertXValue(x, oldU, newU);
+        }
         pendingNextXMin = 0.0;
         pendingNextXMax = -1.0;
-        needsRecompute = true;
-        clearStdDev();
         prevXUnitSelector = xUnitSelector;
     }
 
