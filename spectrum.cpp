@@ -758,15 +758,6 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                 bool hasCache = (specIt != cachedSpectra.end() && freqIt != cachedFrequencies.end() &&
                                 !specIt->second.empty() && !freqIt->second.empty());
 
-                if (isPending && !hasCache) {
-                    // Show "Computing..." placeholder
-                    auto limits = ImPlot::GetPlotLimits();
-                    double cx = (limits.X.Min + limits.X.Max) * 0.5;
-                    double cy = (limits.Y.Min + limits.Y.Max) * 0.5;
-                    ImPlot::PlotText("Computing...", cx, cy);
-                    continue;
-                }
-
                 if (!hasCache) continue;
 
                 const auto& spectrum    = specIt->second;

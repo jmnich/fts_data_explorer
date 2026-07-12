@@ -293,17 +293,45 @@ bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
     if (!referenceAvailable || refX.empty() || refY.empty())
         return false;
 
+    std::vector<double> localFreq, localSpec;
+    bool useLocal = false;
+
     auto freqIt = appState->spectrum.cachedFrequencies.find(fileId);
     auto specIt = appState->spectrum.cachedSpectra.find(fileId);
     if (freqIt == appState->spectrum.cachedFrequencies.end() ||
         specIt == appState->spectrum.cachedSpectra.end() ||
         freqIt->second.empty() || specIt->second.empty()) {
-        fprintf(stderr, "[t100] computeTransmittanceForFile: file spectrum not in cache, fileId=%s\n", fileId.c_str());
-        return false;
+        // Spectrum not yet cached — compute synchronously as fallback
+        std::string fullPath = fileId;
+        // fileId may be just a filename; find the full path in sortedFiles
+        for (const auto& sp : appState->sortedFiles) {
+            std::string fn = sp;
+            size_t ls = fn.find_last_of("/\\");
+            if (ls != std::string::npos) fn = fn.substr(ls + 1);
+            if (fn == fileId) { fullPath = sp; break; }
+        }
+        try {
+            auto raw = CSVAdapter::loadFromCSV(fullPath);
+            auto ps = SpectralToolbox::processSpectrum(
+                raw.primaryDetector, raw.referenceDetector,
+                appState->spectrum.refLaserTextbox,
+                appState->spectrum.Kpadding,
+                static_cast<SpectralToolbox::SpectrumXUnit>(appState->spectrum.xUnitSelector),
+                static_cast<ApodizationWindow>(appState->spectrum.apodizationSelector),
+                appState->spectrum.apodizationParams);
+            if (ps.spectrumX.empty() || ps.spectrumY.empty())
+                return false;
+            localFreq = std::move(ps.spectrumX);
+            localSpec = std::move(ps.spectrumY);
+            useLocal = true;
+        } catch (const std::exception& e) {
+            fprintf(stderr, "[t100] computeTransmittanceForFile: failed to compute fallback: %s\n", e.what());
+            return false;
+        }
     }
 
-    const auto& curFreq = freqIt->second;
-    const auto& curSpec = specIt->second;
+    const auto& curFreq = useLocal ? localFreq : freqIt->second;
+    const auto& curSpec = useLocal ? localSpec : specIt->second;
 
     using ST = SpectralToolbox::SpectrumXUnit;
     auto displayUnit = static_cast<ST>(xUnitSelector);
@@ -1071,6 +1099,7 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
 
         if (!transmittanceAvailable || cachedTransY.empty()) {
             ImPlot::EndPlot();
+            ImGui::EndChild();
             return;
         }
 
