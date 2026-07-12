@@ -561,8 +561,10 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
             // (Arrow-key pan and X-range selection are now handled before BeginPlot
             //  using SetNextAxisLimits, to avoid the ImPlot SetupLocked assert.)
 
-            // First pass: submit async computations for dirty files, poll pending results.
-            // This replaces the old synchronous compute-inside-BeginPlot loop.
+            // First pass: compute or submit dirty files.
+            // Strategy to avoid one-frame blink:
+            //  - File has NO cached data at all  → compute synchronously (fill cache now)
+            //  - File has stale cached data       → submit async (old data visible while computing)
             for (size_t i = 0; i < primaryDetectors.size(); i++) {
                 const auto& fileData = primaryDetectors[i];
                 const std::string& fileId = fileData.first;
@@ -586,31 +588,65 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                     // Check if there's already a pending computation for this file
                     auto pit = std::find_if(pendingSpectra_.begin(), pendingSpectra_.end(),
                         [&](const PendingSpectrum& p) { return p.fileId == fileId; });
+                    if (pit != pendingSpectra_.end()) continue;
 
-                    if (pit == pendingSpectra_.end() && appState && appState->computationPool) {
-                        // Submit async computation
-                        auto fut = appState->computationPool->enqueue(
-                            [primary = rawData.primaryDetector,
-                             ref = rawData.referenceDetector,
-                             refLaser = refLaserTextbox,
-                             K = Kpadding,
-                             xUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector),
-                             apodWin = static_cast<ApodizationWindow>(apodizationSelector),
-                             apodParams = apodizationParams]() {
-                                // FFTW must be single-threaded per worker
-                                thread_local bool fftwInited = false;
-                                if (!fftwInited) {
-                                    fftw_plan_with_nthreads(1);
-                                    fftwInited = true;
-                                }
-                                return SpectralToolbox::processSpectrum(
-                                    primary, ref, refLaser, K, xUnit, apodWin, apodParams);
-                            });
-                        PendingSpectrum ps;
-                        ps.future = std::move(fut);
-                        ps.fileId = fileId;
-                        ps.primaryDetector = rawData.primaryDetector;
-                        pendingSpectra_.push_back(std::move(ps));
+                    // Check if cached data exists (even if stale)
+                    bool hasAnyCache = cachedSpectra.find(fileId) != cachedSpectra.end() &&
+                                       cachedFrequencies.find(fileId) != cachedFrequencies.end() &&
+                                       !cachedSpectra[fileId].empty() &&
+                                       !cachedFrequencies[fileId].empty();
+
+                    if (!hasAnyCache) {
+                        // No cached data at all → compute synchronously to avoid one-frame gap
+                        auto ps = SpectralToolbox::processSpectrum(
+                            rawData.primaryDetector, rawData.referenceDetector, refLaserTextbox,
+                            Kpadding, static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector),
+                            static_cast<ApodizationWindow>(apodizationSelector),
+                            apodizationParams);
+
+                        cachedSpectra[fileId]     = std::move(ps.spectrumY);
+                        cachedFrequencies[fileId] = std::move(ps.spectrumX);
+
+                        double activeParam = 0.0;
+                        if (apodizationSelector == static_cast<int>(ApodizationWindow::Gauss))
+                            activeParam = static_cast<double>(apodizationParams.gaussSigma);
+                        else if (apodizationSelector == static_cast<int>(ApodizationWindow::Rectangular))
+                            activeParam = static_cast<double>(apodizationParams.rectWidth);
+                        else if (apodizationSelector == static_cast<int>(ApodizationWindow::DolphChebyshev))
+                            activeParam = static_cast<double>(apodizationParams.dolphChebyshevAt);
+
+                        lastPrimaryDetectors[fileId] = rawData.primaryDetector;
+                        lastSpectrumParams[fileId]   = { static_cast<double>(Kpadding),
+                                                         static_cast<double>(xUnitSelector),
+                                                         static_cast<double>(refLaserTextbox),
+                                                         static_cast<double>(apodizationSelector),
+                                                         activeParam,
+                                                         apodizationParams.rectAsymMode ? 1.0 : 0.0 };
+                    } else {
+                        // Stale cached data exists → submit async, old spectrum stays visible
+                        if (appState && appState->computationPool) {
+                            auto fut = appState->computationPool->enqueue(
+                                [primary = rawData.primaryDetector,
+                                 ref = rawData.referenceDetector,
+                                 refLaser = refLaserTextbox,
+                                 K = Kpadding,
+                                 xUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector),
+                                 apodWin = static_cast<ApodizationWindow>(apodizationSelector),
+                                 apodParams = apodizationParams]() {
+                                    thread_local bool fftwInited = false;
+                                    if (!fftwInited) {
+                                        fftw_plan_with_nthreads(1);
+                                        fftwInited = true;
+                                    }
+                                    return SpectralToolbox::processSpectrum(
+                                        primary, ref, refLaser, K, xUnit, apodWin, apodParams);
+                                });
+                            PendingSpectrum ps;
+                            ps.future = std::move(fut);
+                            ps.fileId = fileId;
+                            ps.primaryDetector = rawData.primaryDetector;
+                            pendingSpectra_.push_back(std::move(ps));
+                        }
                     }
                 }
             }
