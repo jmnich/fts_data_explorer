@@ -222,6 +222,11 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
 
     // ---- 8. BeginPlot ----
     ImPlotFlags plot_flags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend;
+    {
+        ImVec4 avgGridCol = ImPlot::GetStyle().Colors[ImPlotCol_AxisGrid];
+        avgGridCol.w *= appState->gridAlpha;
+        ImPlot::PushStyleColor(ImPlotCol_AxisGrid, avgGridCol);
+    }
     if (ImPlot::BeginPlot("AverageViewPlot", ImVec2(-1, -1), plot_flags)) {
 
         ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoTickMarks;
@@ -490,6 +495,7 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
 
         ImPlot::EndPlot();
     }
+    ImPlot::PopStyleColor();
 }
 
 void AverageSpectrum::startCalculation() {

@@ -28,6 +28,7 @@ AppState::AppState()
       shouldAutoscale(false),
       forceXAutofit(false),
       showFPS(false),
+      gridAlpha(1.0f),
       fps(0.0f),
       frameCount(0),
       lastTime(0.0f),
@@ -90,6 +91,7 @@ void AppState::reset() {
     shouldAutoscale = false;
     forceXAutofit = false;
     showFPS = false;
+    gridAlpha = 1.0f;
     fps = 0.0f;
     frameCount = 0;
     lastTime = 0.0f;

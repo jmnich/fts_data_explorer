@@ -216,6 +216,11 @@ void SnrSpectrum::renderSnrContents(bool showTrackingCursor) {
     }
 
     ImPlotFlags plot_flags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend;
+    {
+        ImVec4 snrGridCol = ImPlot::GetStyle().Colors[ImPlotCol_AxisGrid];
+        snrGridCol.w *= appState->gridAlpha;
+        ImPlot::PushStyleColor(ImPlotCol_AxisGrid, snrGridCol);
+    }
     if (ImPlot::BeginPlot("SnrViewPlot", ImVec2(-1, -1), plot_flags)) {
 
         ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoTickMarks;
@@ -438,6 +443,7 @@ void SnrSpectrum::renderSnrContents(bool showTrackingCursor) {
 
         ImPlot::EndPlot();
     }
+    ImPlot::PopStyleColor();
 }
 
 void SnrSpectrum::startCalculation() {

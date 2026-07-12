@@ -1103,6 +1103,12 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
             return;
         }
 
+        {
+            ImVec4 t100GridCol = ImPlot::GetStyle().Colors[ImPlotCol_AxisGrid];
+            t100GridCol.w *= appState->gridAlpha;
+            ImPlot::PushStyleColor(ImPlotCol_AxisGrid, t100GridCol);
+        }
+
         ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoTickMarks;
         ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
 
@@ -1383,6 +1389,7 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
         }
 
         ImPlot::EndPlot();
+        ImPlot::PopStyleColor();
     }
     ImGui::EndChild(); // ##T100PlotArea
 
@@ -1504,6 +1511,11 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
         const char* xLabel = (xUnitSelector == 0) ? "Wavenumber (cm-1)"
                             : (xUnitSelector == 1) ? "Wavelength (\xC2\xB5" "m)"
                             : "Frequency (THz)";
+        {
+            ImVec4 t100SdGridCol = ImPlot::GetStyle().Colors[ImPlotCol_AxisGrid];
+            t100SdGridCol.w *= appState->gridAlpha;
+            ImPlot::PushStyleColor(ImPlotCol_AxisGrid, t100SdGridCol);
+        }
         if (ImPlot::BeginPlot("100% transmission line standard deviation", ImVec2(-1, stdPlotHeight),
                               ImPlotFlags_NoLegend)) {
             ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoTickMarks;
@@ -1522,6 +1534,7 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
 
             ImPlot::EndPlot();
         }
+        ImPlot::PopStyleColor();
     } else {
         float phHeight = ImGui::CalcTextSize("Std dev not calculated").y + 40.0f;
         ImGui::BeginChild("##StdDevPlaceholder", ImVec2(0, phHeight), false,

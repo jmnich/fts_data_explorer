@@ -60,6 +60,7 @@ struct AppState {
     
     // FPS counter state
     bool showFPS;
+    float gridAlpha; // Grid opacity (0.0 = invisible, 1.0 = full)
     float fps;
     int frameCount;
     float lastTime;

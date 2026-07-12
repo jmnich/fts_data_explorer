@@ -16,6 +16,7 @@ struct AppConfig {
     bool autoFitYAxis = true;
     bool maxAtZero = false;
     bool showFPS = false; // FPS counter display setting
+    float gridAlpha = 1.0f; // Grid opacity (0.0 = invisible, 1.0 = full)
     bool enableDownsampling = true;
     int xAxisBase = 0;
     std::string lastWorkingDirectory;
@@ -132,6 +133,7 @@ struct AppConfig {
             configFile << "enable_downsampling=" << (enableDownsampling ? "true" : "false") << "\n";
             configFile << "x_axis_base=" << xAxisBase << "\n";
             configFile << "show_fps=" << (showFPS ? "true" : "false") << "\n";
+            configFile << "grid_alpha=" << gridAlpha << "\n";
             configFile << "last_working_directory=" << lastWorkingDirectory << "\n";
             configFile << "ui_size=" << uiSize << "\n";
             configFile << "accent_color=" << accentColor << "\n";
@@ -262,6 +264,8 @@ struct AppConfig {
                             xAxisBase = std::stoi(value);
                         } else if (key == "show_fps") {
                             showFPS = (value == "true");
+                        } else if (key == "grid_alpha") {
+                            gridAlpha = std::stof(value);
                         } else if (key == "last_working_directory") {
                             lastWorkingDirectory = value;
                         } else if (key == "ui_size") {

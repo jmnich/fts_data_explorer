@@ -157,6 +157,11 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
 
     if (surfaceHeight > 60.0f) {
         ImPlot3DFlags plot3dFlags = ImPlot3DFlags_NoTitle | ImPlot3DFlags_NoLegend;
+        {
+            ImVec4 allan3dGridCol = ImPlot3D::GetStyle().Colors[ImPlot3DCol_AxisGrid];
+            allan3dGridCol.w *= appState->gridAlpha;
+            ImPlot3D::PushStyleColor(ImPlot3DCol_AxisGrid, allan3dGridCol);
+        }
         if (ImPlot3D::BeginPlot("Allan3DSurface", ImVec2(-1, surfaceHeight), plot3dFlags)) {
             const int M = numSurfaceWavelengths;
             const int N = numSurfaceTaus;
@@ -302,6 +307,8 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
                 drawList->AddText(textPos, ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, 0.9f)), label);
             }
         }
+        ImPlot3D::PopStyleColor();
+
     }
 
     std::vector<double> sliceY = getSliceData(cachedSurfaceAllanVar,
@@ -370,6 +377,11 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
         }
 
         ImPlotFlags plot_flags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend;
+        {
+            ImVec4 allan2dGridCol = ImPlot::GetStyle().Colors[ImPlotCol_AxisGrid];
+            allan2dGridCol.w *= appState->gridAlpha;
+            ImPlot::PushStyleColor(ImPlotCol_AxisGrid, allan2dGridCol);
+        }
         if (ImPlot::BeginPlot("AllanViewPlot", ImVec2(-1, plot2dHeight), plot_flags)) {
 
             ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
@@ -538,6 +550,7 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
 
             ImPlot::EndPlot();
         }
+        ImPlot::PopStyleColor();
     }
 
     if (sliderHeight > 20.0f && numSurfaceWavelengths > 0) {

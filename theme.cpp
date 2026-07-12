@@ -204,8 +204,8 @@ void ApplyTheme(ImGuiStyle& style, ImPlotStyle& plotStyle, AccentColor accent) {
     // Axis text (labels and ticks)
     plotStyle.Colors[ImPlotCol_AxisText] = ImVec4(0.85f, 0.85f, 0.85f, 1.0f);
 
-    // Axis grid
-    plotStyle.Colors[ImPlotCol_AxisGrid] = ImVec4(0.2f, 0.2f, 0.2f, 1.0f);
+    // Axis grid (light gray, opacity controlled by user slider at runtime)
+    plotStyle.Colors[ImPlotCol_AxisGrid] = ImVec4(0.75f, 0.75f, 0.75f, 1.0f);
 
     // Axis ticks
     plotStyle.Colors[ImPlotCol_AxisTick] = ImVec4(0.3f, 0.3f, 0.3f, 1.0f);

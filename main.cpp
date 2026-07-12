@@ -196,6 +196,12 @@ bool initializeApplication(AppConfig& config, GLFWwindow*& window) {
     // Initialize ImPlot context
     ImPlot::CreateContext();
     ImPlot3D::CreateContext();
+
+    // Use a lighter grid color for improved visibility
+    ImPlot::GetStyle().Colors[ImPlotCol_AxisGrid] = ImVec4(0.85f, 0.85f, 0.85f, 0.85f);
+    ImPlot::GetStyle().MajorGridSize = ImVec2(2.5f, 2.5f);
+    ImPlot::GetStyle().MinorGridSize = ImVec2(1.5f, 1.5f);
+    ImPlot3D::GetStyle().Colors[ImPlot3DCol_AxisGrid] = ImVec4(0.85f, 0.85f, 0.85f, 0.85f);
     
     // Optimize for large datasets - disable anti-aliasing (will be conditionally applied)
     // ImGuiStyle& style = ImGui::GetStyle();
@@ -494,6 +500,7 @@ int main() {
     appState.enableDownsampling = config.enableDownsampling; // Load from config
     appState.xAxisBase = config.xAxisBase; // Load from config
     appState.showFPS = config.showFPS; // Load from config
+    appState.gridAlpha = config.gridAlpha; // Load from config
     appState.currentAccentColor = config.accentColor; // Load accent color from config
     
     // Load spectrum window settings from config
@@ -1030,6 +1037,12 @@ int main() {
                 {
                     // Display FPS toggle
                     ImGui::MenuItem("Display fps", NULL, &appState.showFPS);
+                    ImGui::Text("Grid opacity");
+                    ImGui::SameLine();
+                    float gridPct = appState.gridAlpha * 100.0f;
+                    if (ImGui::SliderFloat("##gridOpacity", &gridPct, 0.0f, 100.0f, "%.0f%%")) {
+                        appState.gridAlpha = gridPct / 100.0f;
+                    }
                     
                     // UI Size selection dropdown
                     if (ImGui::BeginMenu("UI Size"))
@@ -1593,6 +1606,11 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                     ref_flags |= ImPlotFlags_NoInputs; // Only disable inputs for large datasets
                 }
                 // Never show crosshairs
+                {
+                    ImVec4 refGridCol = ImPlot::GetStyle().Colors[ImPlotCol_AxisGrid];
+                    refGridCol.w *= appState.gridAlpha;
+                    ImPlot::PushStyleColor(ImPlotCol_AxisGrid, refGridCol);
+                }
                 if (ImPlot::BeginPlot("Reference", ImVec2(-1, -1), ref_flags)) {
                     // Set up axes with auto-fit flag for Y-axis when enabled
                     ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
@@ -1603,7 +1621,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                     ImPlot::SetupAxes(refXLabel, "Voltage [V]", ImPlotAxisFlags_NoTickMarks, y_flags);
                     // Conditionally optimize grid rendering for large datasets
                     if (appState.dataLoaded && appState.loadedData[0].referenceDetector.size() > 50000) {
-                        ImPlot::PushStyleColor(ImPlotCol_AxisGrid, ImVec4(0.3f, 0.3f, 0.3f, 0.5f));
+                        ImPlot::PushStyleColor(ImPlotCol_AxisGrid, ImVec4(0.6f, 0.6f, 0.6f, 0.75f * appState.gridAlpha));
                         // Optimize by reducing grid line rendering overhead for large datasets
                     }
 
@@ -1803,6 +1821,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                         ImPlot::PopStyleColor(); // Pop grid color only if we pushed it
                     }
                 }
+                ImPlot::PopStyleColor(); // Restore original grid color
 
                 
                 
@@ -1813,6 +1832,11 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                 }
 
                 // Never show crosshairs
+                {
+                    ImVec4 primGridCol = ImPlot::GetStyle().Colors[ImPlotCol_AxisGrid];
+                    primGridCol.w *= appState.gridAlpha;
+                    ImPlot::PushStyleColor(ImPlotCol_AxisGrid, primGridCol);
+                }
                 if (ImPlot::BeginPlot("Primary", ImVec2(-1, -1), prim_flags)) {
                     // Set up axes with auto-fit flag for Y-axis when enabled
                     ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
@@ -1820,13 +1844,12 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                         y_flags |= ImPlotAxisFlags_AutoFit;
                     }
 
-
                     const char* primXLabel = (appState.xAxisBase == 1) ? "OPD [\xC2\xB5m]" : "Sample num";
                     ImPlot::SetupAxes(primXLabel, "Voltage [V]", ImPlotAxisFlags_NoTickMarks, y_flags);
 
                     // Conditionally optimize grid rendering for large datasets
                     if (appState.dataLoaded && appState.loadedData[0].primaryDetector.size() > 50000) {
-                        ImPlot::PushStyleColor(ImPlotCol_AxisGrid, ImVec4(0.3f, 0.3f, 0.3f, 0.5f));
+                        ImPlot::PushStyleColor(ImPlotCol_AxisGrid, ImVec4(0.6f, 0.6f, 0.6f, 0.75f * appState.gridAlpha));
                         // Optimize by reducing grid line rendering overhead for large datasets
                     }
 
@@ -2069,6 +2092,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                         ImPlot::PopStyleColor(); // Pop grid color only if we pushed it
                     }
                 }
+                ImPlot::PopStyleColor(); // Restore original grid color
                 
                 // Reset autoscale flag after use
                 if (appState.shouldAutoscale) {
@@ -3613,6 +3637,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
 
     // Update config with current FPS setting before saving
     config.showFPS = appState.showFPS;
+    config.gridAlpha = appState.gridAlpha;
     config.accentColor = appState.currentAccentColor;
     
     // Save spectrum window settings

@@ -414,6 +414,11 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
         ImPlotFlags plot_flags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend;
 
         bool plotRendered = false;
+        {
+            ImVec4 specGridCol = ImPlot::GetStyle().Colors[ImPlotCol_AxisGrid];
+            specGridCol.w *= appState->gridAlpha;
+            ImPlot::PushStyleColor(ImPlotCol_AxisGrid, specGridCol);
+        }
         if (ImPlot::BeginPlot("Spectrum", ImVec2(-1, -1), plot_flags)) {
             plotRendered = true;
 
@@ -950,5 +955,6 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
             }
             ImPlot::EndPlot();
         }
+        ImPlot::PopStyleColor();
 }
 

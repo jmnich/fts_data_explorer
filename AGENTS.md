@@ -30,6 +30,7 @@ It presents a tree view of information available in the dataset and then allows 
         - recent datasets selector, allowing to quickly switch between recently opened datasets stored in the config
     - Settings
         - FPS display toggle
+        - Grid opacity slider (0–100%) controlling grid line visibility across all plots
         - UI size selection droplist
         - Note: Max at zero, Auto-fit Y, and Downsample toggles are now in the Interferogram panel
     - Help
@@ -193,6 +194,7 @@ It presents a tree view of information available in the dataset and then allows 
   - `filesSelectedForAveraging`: Per-file checkbox state (shared by Average, SNR, Allan, and 100% T panels), indexed identically to sortedFiles
   - `computationPool`: `std::unique_ptr<ThreadPool>` — worker thread pool for parallel computation
   - `configuredWorkerCount`: int — user-configured thread count (-1 = AUTO)
+  - `gridAlpha`: float (0.0–1.0) — global grid opacity setting, persisted in config, applied per-plot via `ImPlot::PushStyleColor` on `ImPlotCol_AxisGrid`/`ImPlot3DCol_AxisGrid`
 - State persistence: Configuration settings are saved to and loaded from a config file for session restoration.
 
 ## Idle rendering optimization (`needsRedraw`)
