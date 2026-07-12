@@ -280,7 +280,9 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
 
         // Directory selection button - use accent color
         AccentColor accent = StringToAccentColor(appState.currentAccentColor);
-        ImGui::PushStyleColor(ImGuiCol_Button, GetAccentMuted(accent));
+        ImVec4 btnBg = GetAccentMuted(accent);
+        btnBg.w = 1.0f;
+        ImGui::PushStyleColor(ImGuiCol_Button, btnBg);
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, GetAccentHovered(accent));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, GetAccentActive(accent));
 
