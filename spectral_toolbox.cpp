@@ -10,7 +10,7 @@
 
 // Global mutex to serialise FFTW plan creation across threads.
 // FFTW's planner is not thread-safe even with FFTW_ESTIMATE.
-static pthread_mutex_t fftwPlanMutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t fftwPlanMutex = PTHREAD_MUTEX_INITIALIZER;
 
 #define REAL 0
 #define IMAG 1

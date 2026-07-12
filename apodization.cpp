@@ -4,11 +4,11 @@
 #include "fftw3.h"
 #include <pthread.h>
 
+// Shared FFTW plan creation mutex (defined in spectral_toolbox.cpp)
+extern pthread_mutex_t fftwPlanMutex;
+
 #define REAL 0
 #define IMAG 1
-
-// Global mutex to serialise FFTW plan creation across threads.
-static pthread_mutex_t fftwPlanMutex = PTHREAD_MUTEX_INITIALIZER;
 
 // Generate a symmetric Norton-Beer window of given length using precomputed coefficients
 static std::vector<double> genSymmetricNortonBeer(std::size_t n, const std::array<double, 9>& coeffs) {
