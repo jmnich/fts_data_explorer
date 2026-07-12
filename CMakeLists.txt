@@ -138,6 +138,7 @@ add_executable(fts_data_explorer
     adapters/csv_adapter.cpp
     file_browser.cpp
     welcome.cpp
+    about.cpp
     ${EXTRA_SOURCES}
 )
 

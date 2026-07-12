@@ -26,6 +26,7 @@
 #include "tinyfiledialogs.h"
 #include "file_browser.h"
 #include "welcome.h"
+#include "about.h"
 #include "theme.h"
 
 // Include imgui and other dependencies
@@ -1144,10 +1145,15 @@ int main() {
                     ImGui::Text("Ctrl+D: Toggle downsampling");
                     ImGui::Text("Ctrl+H: Go back to home");
                     ImGui::Text("Ctrl+Q: Toggle tracking cursor");
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("About")) {
+                        openAboutPopup();
+                    }
                     ImGui::EndMenu();
                 }
                 
-ImGui::EndMainMenuBar();
+                ImGui::EndMainMenuBar();
+                renderAboutPopup();
             }
 
             // Always create dockspace, but make background transparent when welcome screen is active
