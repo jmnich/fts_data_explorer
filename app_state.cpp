@@ -7,6 +7,8 @@ AppState::AppState()
       currentUiSize("normal"),
       uiScale(1.0f),
       uiSizeChanged(false),
+      currentAccentColor("default"),
+      accentColorChanged(false),
       currentDirectory(""),
       dataLoaded(false),
       currentDatasetName("No dataset selected"),

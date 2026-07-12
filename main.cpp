@@ -26,6 +26,7 @@
 #include "tinyfiledialogs.h"
 #include "file_browser.h"
 #include "welcome.h"
+#include "theme.h"
 
 // Include imgui and other dependencies
 #include "imgui.h"
@@ -405,6 +406,7 @@ int main() {
 
     // UI size settings
     appState.currentUiSize = config.uiSize;
+    appState.currentAccentColor = config.accentColor;
 
     // Initialize application
     GLFWwindow* window = nullptr;
@@ -423,11 +425,15 @@ int main() {
     
     ImGui::StyleColorsDark();
 
+    // Apply accent theme
+    ImGuiStyle& style = ImGui::GetStyle();
+    ImPlotStyle& plotStyle = ImPlot::GetStyle();
+    ApplyTheme(style, plotStyle, StringToAccentColor(appState.currentAccentColor));
+
     // Load welcome screen background texture
     initWelcomeBackground();
     
     // Customize colors to use black background
-    ImGuiStyle& style = ImGui::GetStyle();
     style.Colors[ImGuiCol_WindowBg] = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
     style.Colors[ImGuiCol_ChildBg] = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
     style.Colors[ImGuiCol_PopupBg] = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
@@ -444,7 +450,6 @@ int main() {
     style.Colors[ImGuiCol_PlotHistogramHovered] = yellow_color;
     
     // Set ImPlot selection color to match our custom purple
-    ImPlotStyle& plotStyle = ImPlot::GetStyle();
     plotStyle.Colors[ImPlotCol_Selection] = purple_color;
     
     ImGui_ImplGlfw_InitForOpenGL(window, true);
@@ -488,6 +493,7 @@ int main() {
     appState.enableDownsampling = config.enableDownsampling; // Load from config
     appState.xAxisBase = config.xAxisBase; // Load from config
     appState.showFPS = config.showFPS; // Load from config
+    appState.currentAccentColor = config.accentColor; // Load accent color from config
     
     // Load spectrum window settings from config
     appState.spectrum.yAxisMode           = config.spectrumYAxisMode;
@@ -711,6 +717,15 @@ int main() {
 
         // Reapply UI scaling if size changed
         handleUIScaling(io, appState.uiScale, appState.currentUiSize, appState.uiSizeChanged);
+
+        // Apply accent color theme if changed
+        if (appState.accentColorChanged) {
+            ImGuiStyle& style = ImGui::GetStyle();
+            ImPlotStyle& plotStyle = ImPlot::GetStyle();
+            ApplyTheme(style, plotStyle, StringToAccentColor(appState.currentAccentColor));
+            appState.accentColorChanged = false;
+            appState.needsRedraw = true;
+        }
         
         // Calculate FPS
         float currentTime = ImGui::GetTime();
@@ -1029,6 +1044,36 @@ int main() {
                         if (ImGui::MenuItem("huge", NULL, appState.currentUiSize == "huge")) {
                             appState.currentUiSize = "huge";
                             appState.uiSizeChanged = true;
+                        }
+                        ImGui::EndMenu();
+                    }
+
+                    // Accent color selection dropdown
+                    if (ImGui::BeginMenu("Accent"))
+                    {
+                        if (ImGui::MenuItem("Default (Blue)", NULL, appState.currentAccentColor == "default")) {
+                            appState.currentAccentColor = "default";
+                            appState.accentColorChanged = true;
+                        }
+                        if (ImGui::MenuItem("Green", NULL, appState.currentAccentColor == "green")) {
+                            appState.currentAccentColor = "green";
+                            appState.accentColorChanged = true;
+                        }
+                        if (ImGui::MenuItem("Purple", NULL, appState.currentAccentColor == "purple")) {
+                            appState.currentAccentColor = "purple";
+                            appState.accentColorChanged = true;
+                        }
+                        if (ImGui::MenuItem("Red", NULL, appState.currentAccentColor == "red")) {
+                            appState.currentAccentColor = "red";
+                            appState.accentColorChanged = true;
+                        }
+                        if (ImGui::MenuItem("Brown", NULL, appState.currentAccentColor == "brown")) {
+                            appState.currentAccentColor = "brown";
+                            appState.accentColorChanged = true;
+                        }
+                        if (ImGui::MenuItem("Cyan", NULL, appState.currentAccentColor == "cyan")) {
+                            appState.currentAccentColor = "cyan";
+                            appState.accentColorChanged = true;
                         }
                         ImGui::EndMenu();
                     }
@@ -3521,6 +3566,7 @@ int main() {
 
     // Update config with current FPS setting before saving
     config.showFPS = appState.showFPS;
+    config.accentColor = appState.currentAccentColor;
     
     // Save spectrum window settings
     config.spectrumYAxisMode           = appState.spectrum.yAxisMode;
@@ -3569,6 +3615,9 @@ int main() {
     strncpy(config.t100EnergyRatioDenB, appState.t100.energyRatioDenB, 31);
     strncpy(config.t100EnergyRatioNumC, appState.t100.energyRatioNumC, 31);
     strncpy(config.t100EnergyRatioDenC, appState.t100.energyRatioDenC, 31);
+
+    // Save accent color
+    config.accentColor = appState.currentAccentColor;
 
     // Save config to file
     if (!config.saveToFile(configFilePath)) {

@@ -20,6 +20,7 @@ struct AppConfig {
     int xAxisBase = 0;
     std::string lastWorkingDirectory;
     std::string uiSize = "normal"; // tiny, small, normal, large, huge
+    std::string accentColor = "default"; // default, green, purple, red, brown
     
     // Window state
     int windowWidth = 1280;
@@ -130,6 +131,7 @@ struct AppConfig {
             configFile << "show_fps=" << (showFPS ? "true" : "false") << "\n";
             configFile << "last_working_directory=" << lastWorkingDirectory << "\n";
             configFile << "ui_size=" << uiSize << "\n";
+            configFile << "accent_color=" << accentColor << "\n";
             
             // Write window settings
             configFile << "\n[Window]\n";
@@ -260,6 +262,8 @@ struct AppConfig {
                             lastWorkingDirectory = value;
                         } else if (key == "ui_size") {
                             uiSize = value;
+                        } else if (key == "accent_color") {
+                            accentColor = value;
                         }
                     } else if (currentSection == "Window") {
                         if (key == "width") {

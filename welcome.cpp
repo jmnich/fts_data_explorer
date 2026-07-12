@@ -5,6 +5,7 @@
 #include "app_state.h"
 #include "config.h"
 #include "file_browser.h"
+#include "theme.h"
 
 #include "imgui.h"
 #include <GL/gl.h>
@@ -56,31 +57,31 @@ void initWelcomeBackground() {
     g_bg.width = w;
     g_bg.height = h;
 
-    // ── Scatter copy layout ────────────────────────────────────────────
+    // ── Scatter copy layout ────────────────────────────────────────────────
     // Each entry: { viewportX (0-1), viewportY (0-1), scale, alpha }
     // (vpX, vpY) is the top-left corner as a fraction of the viewport size.
     // scale is relative to the original 2400×900 texture (0.10 ≈ 240×90 px).
-    // Adjust these values freely to change the background composition.
+    // Alpha values reduced to 30-80 for subtle decorative effect.
     g_bg.scatterCopies = {
-        {0.03f, 0.02f, 0.18f, 55},
-        {0.28f, 0.01f, 0.12f, 50},
-        {0.52f, 0.04f, 0.22f, 60},
-        {0.72f, 0.02f, 0.15f, 45},
+        {0.03f, 0.02f, 0.18f, 60},
+        {0.28f, 0.01f, 0.12f, 55},
+        {0.52f, 0.04f, 0.22f, 65},
+        {0.72f, 0.02f, 0.15f, 50},
         {0.02f, 0.20f, 0.24f, 70},
-        {0.32f, 0.22f, 0.10f, 50},
+        {0.32f, 0.22f, 0.10f, 55},
         {0.55f, 0.18f, 0.18f, 65},
-        {0.80f, 0.22f, 0.20f, 55},
+        {0.80f, 0.22f, 0.20f, 60},
         {0.05f, 0.40f, 0.14f, 60},
-        {0.30f, 0.42f, 0.20f, 50},
+        {0.30f, 0.42f, 0.20f, 55},
         {0.50f, 0.38f, 0.16f, 70},
         {0.75f, 0.42f, 0.22f, 60},
-        {0.08f, 0.58f, 0.20f, 55},
+        {0.08f, 0.58f, 0.20f, 60},
         {0.35f, 0.60f, 0.14f, 65},
-        {0.55f, 0.56f, 0.22f, 50},
+        {0.55f, 0.56f, 0.22f, 55},
         {0.78f, 0.58f, 0.12f, 60},
         {0.05f, 0.90f, 0.18f, 70},
-        {0.30f, 0.74f, 0.24f, 55},
-        {0.55f, 0.78f, 0.12f, 50},
+        {0.30f, 0.74f, 0.24f, 60},
+        {0.55f, 0.78f, 0.12f, 55},
         {0.78f, 0.86f, 0.18f, 65},
     };
 
@@ -101,12 +102,9 @@ void addToRecentDatasets(AppConfig& config, const std::string& configFilePath,
     config.saveToFile(configFilePath);
 }
 
-// Draw scattered copies of the decorative curve in the background
-static void drawWelcomeBackgroundScatter() {
+// Draw scattered copies of the decorative curve on the viewport background
+static void drawWelcomeBackgroundScatter(ImDrawList* drawList, const ImVec2& vpSize) {
     if (!g_bg.textureID) return;
-
-    ImDrawList* drawList = ImGui::GetBackgroundDrawList();
-    ImVec2 vpSize = ImGui::GetMainViewport()->Size;
 
     const float baseW = static_cast<float>(g_bg.width);
     const float baseH = static_cast<float>(g_bg.height);
@@ -137,8 +135,9 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
     }
     welcomeScreenActive = true;
 
-    // Draw decorative background scatter
-    drawWelcomeBackgroundScatter();
+    // Draw decorative background scatter on viewport background (before popup)
+    ImVec2 vpSize = ImGui::GetMainViewport()->Size;
+    drawWelcomeBackgroundScatter(ImGui::GetBackgroundDrawList(), vpSize);
 
     // Center the welcome screen
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
@@ -153,9 +152,8 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
         ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
         ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar)) {
 
-        // Set up welcome screen with minimal styling
-        ImVec4 darkBackground(0.1f, 0.1f, 0.1f, 1.0f);
-        ImGui::PushStyleColor(ImGuiCol_PopupBg, darkBackground);
+        // Make PopupBg transparent so viewport background shows through
+        ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
 
         ImGui::Spacing();
 
@@ -255,10 +253,11 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
         }
         ImGui::Spacing();
 
-        // Directory selection button
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.1f, 0.3f, 0.1f, 0.8f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.15f, 0.35f, 0.15f, 0.9f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.05f, 0.25f, 0.05f, 1.0f));
+        // Directory selection button - use accent color
+        AccentColor accent = StringToAccentColor(appState.currentAccentColor);
+        ImGui::PushStyleColor(ImGuiCol_Button, GetAccentMuted(accent));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, GetAccentHovered(accent));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, GetAccentActive(accent));
 
         float buttonHeight = ImGui::GetContentRegionAvail().y - ImGui::GetStyle().ItemSpacing.y * 2;
         if (buttonHeight > 60.0f) buttonHeight = 60.0f;

@@ -133,6 +133,7 @@ add_executable(fts_data_explorer
     spectral_toolbox.cpp
     apodization.cpp
     export.cpp
+    theme.cpp
     glibc_compat.cpp
     adapters/csv_adapter.cpp
     file_browser.cpp

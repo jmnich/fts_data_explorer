@@ -21,6 +21,8 @@ struct AppState {
     std::string currentUiSize;
     float uiScale;
     bool uiSizeChanged;
+    std::string currentAccentColor;
+    bool accentColorChanged;
     
     // Main application state
     std::string currentDirectory;
