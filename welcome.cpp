@@ -102,7 +102,7 @@ void addToRecentDatasets(AppConfig& config, const std::string& configFilePath,
     config.saveToFile(configFilePath);
 }
 
-// Draw scattered copies of the decorative curve on the viewport background
+// Draw scattered copies of the decorative curve on the viewport background (full screen)
 static void drawWelcomeBackgroundScatter(ImDrawList* drawList, const ImVec2& vpSize) {
     if (!g_bg.textureID) return;
 
@@ -126,16 +126,7 @@ static void drawWelcomeBackgroundScatter(ImDrawList* drawList, const ImVec2& vpS
 
 void renderWelcomeScreen(AppState& appState, AppConfig& config,
                          const std::string& configFilePath) {
-    // Safety check to prevent multiple welcome screen instances
-    static bool welcomeScreenActive = false;
-    if (welcomeScreenActive) {
-        std::cerr << "Warning: Attempted to show welcome screen while already active!" << std::endl;
-        appState.showWelcomeScreen = false;
-        return;
-    }
-    welcomeScreenActive = true;
-
-    // Draw decorative background scatter on viewport background (before popup)
+    // Draw decorative background scatter on viewport background draw list (full screen, every frame)
     ImVec2 vpSize = ImGui::GetMainViewport()->Size;
     drawWelcomeBackgroundScatter(ImGui::GetBackgroundDrawList(), vpSize);
 
@@ -144,16 +135,24 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
     ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(ImVec2(1200, 800));
 
+    // Disable the modal dimmer overlay (which fades in over ~10 frames) so the decorative
+    // background pattern behind the popup stays fully visible.
+    ImGui::PushStyleColor(ImGuiCol_ModalWindowDimBg, ImVec4(0, 0, 0, 0));
+
     // Create a modal popup that blocks all interaction
     ImGui::OpenPopup("Welcome to FTS Data Explorer");
-    appState.needsRedraw = true;
 
     if (ImGui::BeginPopupModal("Welcome to FTS Data Explorer", NULL,
         ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
-        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar)) {
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar |
+        ImGuiWindowFlags_NoBackground)) {
 
-        // Make PopupBg transparent so viewport background shows through
-        ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+        // Draw semi-transparent dark background on window draw list
+        ImDrawList* winDrawList = ImGui::GetWindowDrawList();
+        ImVec2 winPos = ImGui::GetWindowPos();
+        ImVec2 winSize = ImGui::GetWindowSize();
+        winDrawList->AddRectFilled(winPos, ImVec2(winPos.x + winSize.x, winPos.y + winSize.y),
+                                   IM_COL32(0, 0, 0, 180));
 
         ImGui::Spacing();
 
@@ -290,15 +289,11 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
             }
         }
 
-        ImGui::PopStyleColor(); // PopupBg
-
         ImGui::EndPopup();
 
         if (!appState.showWelcomeScreen) {
             appState.welcomeScreenInitialized = true;
         }
-        welcomeScreenActive = false;
-    } else {
-        welcomeScreenActive = false;
     }
+    ImGui::PopStyleColor(); // ModalWindowDimBg
 }

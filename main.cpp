@@ -608,7 +608,9 @@ int main() {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
         }
-        appState.needsRedraw = false;
+        if (!appState.showWelcomeScreen || appState.welcomeScreenInitialized) {
+            appState.needsRedraw = false;
+        }
 
         appState.multiSelectMode = ImGui::GetIO().KeyCtrl;
         appState.shiftSelectMode = ImGui::GetIO().KeyShift;
@@ -1098,16 +1100,17 @@ int main() {
                     ImGui::EndMenu();
                 }
                 
-                ImGui::EndMainMenuBar();
+ImGui::EndMainMenuBar();
             }
 
+            // Always create dockspace, but make background transparent when welcome screen is active
             // Push style variables for full viewport docking
             ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
             ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-            
-            // Make the dockspace background match the welcome screen when welcome screen is active
+
+            // Make dockspace background transparent when welcome screen is active to show pattern
             if (appState.showWelcomeScreen && !appState.welcomeScreenInitialized) {
-                ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.0f, 0.0f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
             }
             
             window_flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
@@ -1121,71 +1124,73 @@ int main() {
             ImGui::Begin("DockSpace", nullptr, window_flags);
             ImGui::PopStyleVar(2);
             
-            // Create docking space
-            ImGuiID dockspace_id = ImGui::GetID("MainDockSpace_v2");
-            
-            // Apply default layout only on first launch (no saved imgui.ini)
-            if (!appState.defaultLayoutApplied) {
-                appState.defaultLayoutApplied = true;
-                
-                const char* iniPath = io.IniFilename ? io.IniFilename : "imgui.ini";
-                bool iniExists = std::filesystem::exists(iniPath) && std::filesystem::file_size(iniPath) > 0;
-                
-                if (!iniExists) {
-                    ImGui::DockBuilderRemoveNode(dockspace_id);
-                    ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
-                    ImGui::DockBuilderSetNodeSize(dockspace_id,
-                        ImVec2(viewport->Size.x, viewport->Size.y - ImGui::GetFrameHeight()));
-                    
-                    // Split dockspace: left (16%) / right (84%)
-                    ImGuiID dock_left, dock_right;
-                    ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Left, 0.16f, &dock_left, &dock_right);
-                    
-                    // Split left: Files (40%) / bottom (60%)
-                    ImGuiID dock_left_top, dock_left_bottom;
-                    ImGui::DockBuilderSplitNode(dock_left, ImGuiDir_Up, 0.40f, &dock_left_top, &dock_left_bottom);
-                    
-                    // Split left-bottom: Metadata/Export/SNR (50%) / Spectrum/Interferogram/Average (50%)
-                    ImGuiID dock_left_bottom_top, dock_left_bottom_bottom;
-                    ImGui::DockBuilderSplitNode(dock_left_bottom, ImGuiDir_Up, 0.50f, &dock_left_bottom_top, &dock_left_bottom_bottom);
-                    
-                    // Split right: Interferogram View (48%) / right panel (52%)
-                    ImGuiID dock_center, dock_right_panel;
-                    ImGui::DockBuilderSplitNode(dock_right, ImGuiDir_Left, 0.48f, &dock_center, &dock_right_panel);
-                    
-                    // Split right panel: view tabs (50%) / Spectrum View (50%)
-                    ImGuiID dock_right_top, dock_right_bottom;
-                    ImGui::DockBuilderSplitNode(dock_right_panel, ImGuiDir_Up, 0.50f, &dock_right_top, &dock_right_bottom);
-                    
-                    // Dock all windows to their zones
-                    ImGui::DockBuilderDockWindow("Files",              dock_left_top);
-                    ImGui::DockBuilderDockWindow("Metadata",           dock_left_bottom_top);
-                    ImGui::DockBuilderDockWindow("Export",             dock_left_bottom_top);
-        ImGui::DockBuilderDockWindow("SNR",                dock_left_bottom_top);
-        ImGui::DockBuilderDockWindow("100% T",          dock_left_bottom_top);
-        ImGui::DockBuilderDockWindow("Allan",              dock_left_bottom_top);
-                    ImGui::DockBuilderDockWindow("Spectrum",           dock_left_bottom_bottom);
-                    ImGui::DockBuilderDockWindow("Interferogram",      dock_left_bottom_bottom);
-                    ImGui::DockBuilderDockWindow("Average",            dock_left_bottom_bottom);
-                    ImGui::DockBuilderDockWindow("Interferogram View", dock_center);
-                    ImGui::DockBuilderDockWindow("SNR View",           dock_right_top);
-                    ImGui::DockBuilderDockWindow("Average View",       dock_right_top);
-        ImGui::DockBuilderDockWindow("Allan View",         dock_right_top);
-        ImGui::DockBuilderDockWindow("100% T View",     dock_right_top);
-        ImGui::DockBuilderDockWindow("Spectrum View",      dock_right_bottom);
-                    
-                    ImGui::DockBuilderFinish(dockspace_id);
-                }
-            }
-            
-            ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
-            
             if (appState.showWelcomeScreen && !appState.welcomeScreenInitialized) {
                 ImGui::PopStyleColor(); // Restore window background color
             }
             
-            ImGui::End();
-        
+            // Create docking space
+            ImGuiID dockspace_id = ImGui::GetID("MainDockSpace_v2");
+
+                // Apply default layout only on first launch (no saved imgui.ini)
+                if (!appState.defaultLayoutApplied) {
+                    appState.defaultLayoutApplied = true;
+
+                    const char* iniPath = io.IniFilename ? io.IniFilename : "imgui.ini";
+                    bool iniExists = std::filesystem::exists(iniPath) && std::filesystem::file_size(iniPath) > 0;
+
+                    if (!iniExists) {
+                        ImGui::DockBuilderRemoveNode(dockspace_id);
+                        ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
+                        ImGui::DockBuilderSetNodeSize(dockspace_id,
+                            ImVec2(viewport->Size.x, viewport->Size.y - ImGui::GetFrameHeight()));
+
+                        // Split dockspace: left (16%) / right (84%)
+                        ImGuiID dock_left, dock_right;
+                        ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Left, 0.16f, &dock_left, &dock_right);
+
+                        // Split left: Files (40%) / bottom (60%)
+                        ImGuiID dock_left_top, dock_left_bottom;
+                        ImGui::DockBuilderSplitNode(dock_left, ImGuiDir_Up, 0.40f, &dock_left_top, &dock_left_bottom);
+
+                        // Split left-bottom: Metadata/Export/SNR (50%) / Spectrum/Interferogram/Average (50%)
+                        ImGuiID dock_left_bottom_top, dock_left_bottom_bottom;
+                        ImGui::DockBuilderSplitNode(dock_left_bottom, ImGuiDir_Up, 0.50f, &dock_left_bottom_top, &dock_left_bottom_bottom);
+
+                        // Split right: Interferogram View (48%) / right panel (52%)
+                        ImGuiID dock_center, dock_right_panel;
+                        ImGui::DockBuilderSplitNode(dock_right, ImGuiDir_Left, 0.48f, &dock_center, &dock_right_panel);
+
+                        // Split right panel: view tabs (50%) / Spectrum View (50%)
+                        ImGuiID dock_right_top, dock_right_bottom;
+                        ImGui::DockBuilderSplitNode(dock_right_panel, ImGuiDir_Up, 0.50f, &dock_right_top, &dock_right_bottom);
+
+                        // Dock all windows to their zones
+                        ImGui::DockBuilderDockWindow("Files",              dock_left_top);
+                        ImGui::DockBuilderDockWindow("Metadata",           dock_left_bottom_top);
+                        ImGui::DockBuilderDockWindow("Export",             dock_left_bottom_top);
+                        ImGui::DockBuilderDockWindow("SNR",                dock_left_bottom_top);
+                        ImGui::DockBuilderDockWindow("100% T",          dock_left_bottom_top);
+                        ImGui::DockBuilderDockWindow("Allan",              dock_left_bottom_top);
+                        ImGui::DockBuilderDockWindow("Spectrum",           dock_left_bottom_bottom);
+                        ImGui::DockBuilderDockWindow("Interferogram",      dock_left_bottom_bottom);
+                        ImGui::DockBuilderDockWindow("Average",            dock_left_bottom_bottom);
+                        ImGui::DockBuilderDockWindow("Interferogram View", dock_center);
+                        ImGui::DockBuilderDockWindow("SNR View",           dock_right_top);
+                        ImGui::DockBuilderDockWindow("Average View",       dock_right_top);
+                        ImGui::DockBuilderDockWindow("Allan View",         dock_right_top);
+                        ImGui::DockBuilderDockWindow("100% T View",     dock_right_top);
+                        ImGui::DockBuilderDockWindow("Spectrum View",      dock_right_bottom);
+
+                        ImGui::DockBuilderFinish(dockspace_id);
+                    }
+                }
+
+ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
+                
+                ImGui::End();
+            
+        // Only render panels when welcome screen is not active
+        if (!appState.showWelcomeScreen || appState.welcomeScreenInitialized) {
         // Files panel (left)
         ImGui::Begin("Files");
         ImGui::PushTextWrapPos(); // Enable text wrapping
@@ -3516,6 +3521,9 @@ int main() {
         }
         ImGui::End();
 
+        // Close the panel condition (welcome screen)
+        }
+        
         // Close the docking condition
         }
         
@@ -3547,6 +3555,11 @@ int main() {
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         
         glfwSwapBuffers(window);
+        
+        // Force redraw every frame while welcome screen is active (pattern persistence)
+        if (appState.showWelcomeScreen && !appState.welcomeScreenInitialized) {
+            appState.needsRedraw = true;
+        }
         
         // Reset keyboard navigation flag after rendering
         appState.keyboardNavigation = false;
