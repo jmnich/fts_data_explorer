@@ -102,4 +102,18 @@ public:
                                             SpectrumXUnit xUnit,
                                             ApodizationWindow apodizationWindow = ApodizationWindow::Rectangular,
                                             const ApodizationParams& apodizationParams = {});
+
+    /**
+     * @brief Compute a magnitude spectrum from an interferogram with a pre-corrected OPD axis.
+     *
+     * Same as processSpectrum but skips Hilbert correction (step 1) and uses the
+     * provided @p opdAxisUm directly as the corrected X axis in um.
+     */
+    static ProcessedSpectrum processSpectrumFromCorrectedAxis(
+                                            const std::vector<double>& primaryDetector,
+                                            const std::vector<double>& opdAxisUm,
+                                            int  K,
+                                            SpectrumXUnit xUnit,
+                                            ApodizationWindow apodizationWindow = ApodizationWindow::Rectangular,
+                                            const ApodizationParams& apodizationParams = {});
 };

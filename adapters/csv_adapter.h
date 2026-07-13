@@ -11,7 +11,15 @@
 struct InterferogramData {
     std::vector<double> referenceDetector;
     std::vector<double> primaryDetector;
+    std::vector<double> opdAxis;    // pre-corrected OPD axis (empty if not available, e.g. WUST)
     std::string metadata;
+
+    size_t dataSize() const {
+        if (!primaryDetector.empty()) return primaryDetector.size();
+        if (!referenceDetector.empty()) return referenceDetector.size();
+        if (!opdAxis.empty()) return opdAxis.size();
+        return 0;
+    }
 };
 
 class CSVAdapter {

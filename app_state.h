@@ -13,11 +13,23 @@
 #include "t100.h"
 #include "export.h"
 #include "adapters/csv_adapter.h"
+#include "adapters/dataset_info.h"
+#include "adapters/data_adapter.h"
 
 // Use InterferogramData from csv_adapter.h
 
+void selectAdapterForDirectory(const std::string& directoryPath);
+void applyAdapterSelection(const std::string& adapterName, const std::string& directoryPath);
+
 // Application state structure
 struct AppState {
+    // Data adapter state
+    DatasetInfo datasetInfo;
+    std::unique_ptr<DataAdapter> currentAdapter;
+    bool showAdapterSelectionPopup = false;
+    bool showAdapterErrorPopup = false;
+    std::string adapterErrorMsg;
+    std::vector<DataAdapter*> compatibleAdapters;
     // UI state
     std::string currentUiSize;
     float uiScale;

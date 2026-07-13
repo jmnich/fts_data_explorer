@@ -1,6 +1,7 @@
 #include "spectrum.h"
 #include "spectral_toolbox.h"
 #include "adapters/csv_adapter.h"
+#include "adapters/adapter_registry.h"
 #include <cmath>
 #include <algorithm>
 #include <cstdio>
@@ -604,7 +605,10 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                 const bool needsComputation = isSpectrumDirty(fileId, rawData.primaryDetector);
 
                 if (needsComputation) {
-                    if (rawData.primaryDetector.empty() || rawData.referenceDetector.empty()) {
+                    if (rawData.primaryDetector.empty()) {
+                        continue;
+                    }
+                    if (!(appState && appState->datasetInfo.axisIsCorrected) && rawData.referenceDetector.empty()) {
                         continue;
                     }
 
@@ -621,11 +625,23 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
 
                     if (!hasAnyCache) {
                         // No cached data at all → compute synchronously to avoid one-frame gap
-                        auto ps = SpectralToolbox::processSpectrum(
-                            rawData.primaryDetector, rawData.referenceDetector, refLaserTextbox,
-                            Kpadding, static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector),
-                            static_cast<ApodizationWindow>(apodizationSelector),
-                            apodizationParams);
+                        SpectralToolbox::ProcessedSpectrum ps;
+                        if (appState && appState->datasetInfo.axisIsCorrected) {
+                            std::vector<double> opdUm(rawData.opdAxis.size());
+                            for (size_t j = 0; j < rawData.opdAxis.size(); j++)
+                                opdUm[j] = rawData.opdAxis[j] * 1e6;
+                            ps = SpectralToolbox::processSpectrumFromCorrectedAxis(
+                                rawData.primaryDetector, opdUm,
+                                Kpadding, static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector),
+                                static_cast<ApodizationWindow>(apodizationSelector),
+                                apodizationParams);
+                        } else {
+                            ps = SpectralToolbox::processSpectrum(
+                                rawData.primaryDetector, rawData.referenceDetector, refLaserTextbox,
+                                Kpadding, static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector),
+                                static_cast<ApodizationWindow>(apodizationSelector),
+                                apodizationParams);
+                        }
 
                         cachedSpectra[fileId]     = std::move(ps.spectrumY);
                         cachedFrequencies[fileId] = std::move(ps.spectrumX);
@@ -648,9 +664,17 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                     } else {
                         // Stale cached data exists → submit async, old spectrum stays visible
                         if (appState && appState->computationPool) {
+                            bool axisCorr = appState->datasetInfo.axisIsCorrected;
+                            std::vector<double> opd;
+                            if (axisCorr) {
+                                opd = rawData.opdAxis;
+                                for (auto& v : opd) v *= 1e6;
+                            }
                             auto fut = appState->computationPool->enqueue(
                                 [primary = rawData.primaryDetector,
                                  ref = rawData.referenceDetector,
+                                 opd = std::move(opd),
+                                 axisCorr,
                                  refLaser = refLaserTextbox,
                                  K = Kpadding,
                                  xUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector),
@@ -661,8 +685,13 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                                         fftw_plan_with_nthreads(1);
                                         fftwInited = true;
                                     }
-                                    return SpectralToolbox::processSpectrum(
-                                        primary, ref, refLaser, K, xUnit, apodWin, apodParams);
+                                    if (axisCorr) {
+                                        return SpectralToolbox::processSpectrumFromCorrectedAxis(
+                                            primary, opd, K, xUnit, apodWin, apodParams);
+                                    } else {
+                                        return SpectralToolbox::processSpectrum(
+                                            primary, ref, refLaser, K, xUnit, apodWin, apodParams);
+                                    }
                                 });
                             PendingSpectrum ps;
                             ps.future = std::move(fut);

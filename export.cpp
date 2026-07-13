@@ -6,6 +6,7 @@
 #include "t100.h"
 #include "spectral_toolbox.h"
 #include "adapters/csv_adapter.h"
+#include "adapters/adapter_registry.h"
 
 #include "imgui.h"
 #include "tinyfiledialogs.h"
@@ -36,7 +37,10 @@ bool ExportPanel::isArtifactAvailable(const char* label) const
 {
     if (!appState) return false;
     std::string lbl(label);
-    if (lbl == ARTIFACT_CORR_IFG || lbl == ARTIFACT_UNCORR_IFG || lbl == ARTIFACT_SPECTRA)
+    if (lbl == ARTIFACT_CORR_IFG || lbl == ARTIFACT_UNCORR_IFG)
+        return appState->dataLoaded && !appState->selectedFiles.empty()
+               && appState->datasetInfo.hasInterferograms;
+    if (lbl == ARTIFACT_SPECTRA)
         return appState->dataLoaded && !appState->selectedFiles.empty();
     if (lbl == ARTIFACT_AVG_SPECT)
         return appState->averageSpectrum.averageAvailable;
@@ -465,14 +469,25 @@ void ExportPanel::writeT100AllTransCsv(const std::string& dir)
     bool anyValid = false;
 
     for (size_t i = 0; i < checkedFiles.size(); i++) {
-        auto raw = CSVAdapter::loadFromCSV(checkedFiles[i]);
-        auto ps = SpectralToolbox::processSpectrum(
-            raw.primaryDetector, raw.referenceDetector,
-            appState->spectrum.refLaserTextbox,
-            appState->spectrum.Kpadding,
-            static_cast<SpectralToolbox::SpectrumXUnit>(t100.xUnitSelector),
-            static_cast<ApodizationWindow>(appState->spectrum.apodizationSelector),
-            appState->spectrum.apodizationParams);
+        auto raw = AdapterRegistry::instance().loadFileStatic(appState->datasetInfo.adapterName, checkedFiles[i]);
+        SpectralToolbox::ProcessedSpectrum ps;
+        if (appState->datasetInfo.axisIsCorrected) {
+            for (auto& v : raw.opdAxis) v *= 1e6;
+            ps = SpectralToolbox::processSpectrumFromCorrectedAxis(
+                raw.primaryDetector, raw.opdAxis,
+                appState->spectrum.Kpadding,
+                static_cast<SpectralToolbox::SpectrumXUnit>(t100.xUnitSelector),
+                static_cast<ApodizationWindow>(appState->spectrum.apodizationSelector),
+                appState->spectrum.apodizationParams);
+        } else {
+            ps = SpectralToolbox::processSpectrum(
+                raw.primaryDetector, raw.referenceDetector,
+                appState->spectrum.refLaserTextbox,
+                appState->spectrum.Kpadding,
+                static_cast<SpectralToolbox::SpectrumXUnit>(t100.xUnitSelector),
+                static_cast<ApodizationWindow>(appState->spectrum.apodizationSelector),
+                appState->spectrum.apodizationParams);
+        }
         if (ps.spectrumX.empty() || ps.spectrumY.empty()) continue;
         std::vector<double> tx, ty;
         if (appState->t100.computeTransmittanceFromVectors(

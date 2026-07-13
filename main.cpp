@@ -23,6 +23,10 @@
 #include "allan_variance.h"
 #include "spectral_toolbox.h"
 #include "adapters/csv_adapter.h"
+#include "adapters/adapter_registry.h"
+#include "adapters/wust_mini_fts_adapter.h"
+#include "adapters/arcoptix_igms_adapter.h"
+#include "adapters/arcoptix_spectra_adapter.h"
 #include "tinyfiledialogs.h"
 #include "file_browser.h"
 #include "welcome.h"
@@ -238,6 +242,146 @@ void handleWindowEvents(GLFWwindow* window, AppConfig& config) {
     config.windowMaximized = glfwGetWindowAttrib(window, GLFW_MAXIMIZED);
 }
 
+void applyAdapterSelection(const std::string& adapterName, const std::string& directoryPath);
+
+void selectAdapterForDirectory(const std::string& directoryPath) {
+    // Commented out: auto-filtering of adapters based on directory contents.
+    // For now, always show all registered adapters so user can pick.
+    // auto adapters = AdapterRegistry::instance().findAdaptersForDirectory(directoryPath);
+    const auto& allAdapters = AdapterRegistry::instance().getAll();
+    std::vector<DataAdapter*> adapters;
+    for (const auto& a : allAdapters) adapters.push_back(a.get());
+
+    if (adapters.empty()) {
+        appState.adapterErrorMsg = "No compatible data format found in:\n" + directoryPath;
+        appState.showAdapterErrorPopup = true;
+        appState.showWelcomeScreen = true;
+        appState.welcomeScreenInitialized = false;
+        appState.csvFiles.clear();
+    } else {
+        // Always show popup — user picks adapter each time
+        appState.compatibleAdapters = adapters;
+        appState.showAdapterSelectionPopup = true;
+        // Keep welcome screen active so popup shows on top of it
+        appState.showWelcomeScreen = true;
+        appState.welcomeScreenInitialized = false;
+        appState.csvFiles.clear();
+    }
+}
+
+void applyAdapterSelection(const std::string& adapterName, const std::string& directoryPath) {
+    auto* adapter = AdapterRegistry::instance().getAdapter(adapterName);
+    if (!adapter) return;
+
+    appState.currentAdapter.reset();
+    // Create appropriate concrete adapter based on name
+    if (adapterName == "WUST Mini FTS Raw")
+        appState.currentAdapter = std::make_unique<WustMiniFtsAdapter>();
+    else if (adapterName == "ArcOptix raw IGMs")
+        appState.currentAdapter = std::make_unique<ArcoptixIgmsAdapter>();
+    else if (adapterName == "ArcOptix Spectra Sequence")
+        appState.currentAdapter = std::make_unique<ArcoptixSpectraAdapter>();
+    else return;
+
+    appState.datasetInfo = adapter->getDatasetInfo();
+    appState.csvFiles = adapter->listFiles(directoryPath);
+    appState.showAdapterSelectionPopup = false;
+
+    // Apply feature gates based on dataset info
+    if (appState.datasetInfo.axisIsCorrected) {
+        appState.xAxisBase = 1; // Force OPD mode
+    }
+    appState.clearAverageSpectrum();
+    appState.clearSnrSpectrum();
+    appState.clearAllanVariance();
+    appState.clearT100Spectrum();
+    appState.showWelcomeScreen = false;
+    appState.welcomeScreenInitialized = true;
+    appState.dataLoaded = false;
+    appState.loadedData.clear();
+    appState.rawDataCache.clear();
+    appState.selectedFiles.clear();
+    appState.selectedFilenames.clear();
+    appState.filesChanged = true;
+    appState.currentSortedFileIndex = 0;
+    appState.isFirstDataLoad = true;
+    appState.needsRedraw = true;
+
+    std::cout << "Adapter selected: " << adapterName << " for " << directoryPath << std::endl;
+}
+
+static void renderAdapterSelectionPopup() {
+    if (!appState.showAdapterSelectionPopup) return;
+
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(800, 250), ImGuiCond_Always);
+
+    ImGui::PushStyleColor(ImGuiCol_ModalWindowDimBg, ImVec4(0.0f, 0.0f, 0.0f, 0.7f));
+
+    if (ImGui::BeginPopupModal("Select Data Adapter##adapterSelect", &appState.showAdapterSelectionPopup,
+                               ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove)) {
+        ImGui::Text("Pick data adapter:");
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        static int selectedIdx = 0;
+        if (selectedIdx >= static_cast<int>(appState.compatibleAdapters.size()))
+            selectedIdx = 0;
+
+        for (size_t i = 0; i < appState.compatibleAdapters.size(); i++) {
+            const auto* adapter = appState.compatibleAdapters[i];
+            std::string label = std::string("- ") + adapter->getName() + " (" + adapter->getFileExtension() + ")";
+            if (ImGui::Selectable(label.c_str(), static_cast<int>(i) == selectedIdx)) {
+                selectedIdx = static_cast<int>(i);
+            }
+            if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) {
+                applyAdapterSelection(adapter->getName(), appState.currentDirectory);
+                selectedIdx = 0;
+                ImGui::PopStyleColor();
+                ImGui::EndPopup();
+                return;
+            }
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        // Keyboard navigation
+        if (ImGui::IsKeyPressed(ImGuiKey_UpArrow) && selectedIdx > 0)
+            selectedIdx--;
+        if (ImGui::IsKeyPressed(ImGuiKey_DownArrow) && selectedIdx < static_cast<int>(appState.compatibleAdapters.size()) - 1)
+            selectedIdx++;
+        if (ImGui::IsKeyPressed(ImGuiKey_Enter) && selectedIdx >= 0 && selectedIdx < static_cast<int>(appState.compatibleAdapters.size())) {
+            applyAdapterSelection(appState.compatibleAdapters[selectedIdx]->getName(), appState.currentDirectory);
+            selectedIdx = 0;
+            ImGui::PopStyleColor();
+            ImGui::EndPopup();
+            return;
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            appState.showAdapterSelectionPopup = false;
+            appState.compatibleAdapters.clear();
+            appState.currentDirectory = "";
+            selectedIdx = 0;
+            ImGui::PopStyleColor();
+            ImGui::EndPopup();
+            return;
+        }
+
+        if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+            appState.showAdapterSelectionPopup = false;
+            appState.compatibleAdapters.clear();
+            appState.currentDirectory = "";
+            selectedIdx = 0;
+        }
+
+        ImGui::EndPopup();
+    }
+    ImGui::PopStyleColor();
+}
+
 /**
  * Handle keyboard navigation for file selection
  * @param csvFiles List of available CSV files
@@ -291,7 +435,11 @@ void handleKeyboardNavigation(const std::vector<std::string>& csvFiles,
                 if (it == selectedFiles.end()) {
                     // File not already selected, add it
                     try {
-                        InterferogramData data = CSVAdapter::loadFromCSV(fullPath);
+                        if (!appState.currentAdapter) {
+                            filesChanged = false;
+                            return;
+                        }
+                        InterferogramData data = appState.currentAdapter->loadFile(fullPath);
                         InterferogramData rawData = data; // Store raw data before any processing
                         
                         // Apply downsampling
@@ -416,6 +564,11 @@ int main() {
     appState.currentAccentColor = config.accentColor;
     appState.reconfigurePool(config.workerThreads);
 
+    // Register data adapters
+    AdapterRegistry::instance().registerAdapter(std::make_unique<WustMiniFtsAdapter>());
+    AdapterRegistry::instance().registerAdapter(std::make_unique<ArcoptixIgmsAdapter>());
+    AdapterRegistry::instance().registerAdapter(std::make_unique<ArcoptixSpectraAdapter>());
+
     // Initialize application
     GLFWwindow* window = nullptr;
     if (!initializeApplication(config, window)) {
@@ -495,7 +648,6 @@ int main() {
         appState.currentDirectory = "";
     }
     
-    appState.csvFiles = FileBrowser::getCSVFilesInDirectory(appState.currentDirectory);
     appState.maxAtZero = config.maxAtZero; // Use config setting for peak alignment
     appState.autoFitYAxis = config.autoFitYAxis; // Load from config
     appState.enableDownsampling = config.enableDownsampling; // Load from config
@@ -641,10 +793,12 @@ int main() {
             if (yKeyPressed && !appState.yKeyPressedLastFrame) {
                 appState.autoFitYAxis = !appState.autoFitYAxis;
                 if (appState.autoFitYAxis && appState.dataLoaded) {
-                    auto ref_min_max = std::minmax_element(appState.loadedData[0].referenceDetector.begin(), appState.loadedData[0].referenceDetector.end());
+                    if (!appState.loadedData[0].referenceDetector.empty()) {
+                        auto ref_min_max = std::minmax_element(appState.loadedData[0].referenceDetector.begin(), appState.loadedData[0].referenceDetector.end());
+                        appState.ref_y_min = *ref_min_max.first;
+                        appState.ref_y_max = *ref_min_max.second;
+                    }
                     auto prim_min_max = std::minmax_element(appState.loadedData[0].primaryDetector.begin(), appState.loadedData[0].primaryDetector.end());
-                    appState.ref_y_min = *ref_min_max.first;
-                    appState.ref_y_max = *ref_min_max.second;
                     appState.prim_y_min = *prim_min_max.first;
                     appState.prim_y_max = *prim_min_max.second;
                 }
@@ -665,7 +819,7 @@ int main() {
                     std::vector<InterferogramData> reloadedData;
                     for (const auto& filePath : appState.selectedFiles) {
                         try {
-                            InterferogramData data = CSVAdapter::loadFromCSV(filePath);
+                            InterferogramData data = appState.currentAdapter->loadFile(filePath);
                             
                             // Apply downsampling if enabled and dataset is large
                             if (appState.enableDownsampling && data.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
@@ -695,7 +849,7 @@ int main() {
                         for (const auto& file : appState.selectedFiles) {
                             try {
                                 // Load the original raw data from file
-                                InterferogramData rawData = CSVAdapter::loadFromCSV(file);
+                                InterferogramData rawData = appState.currentAdapter->loadFile(file);
                                 appState.rawDataCache.push_back(rawData);
                             } catch (const std::exception& e) {
                                 std::cerr << "Error reloading raw data for spectrum: " << e.what() << std::endl;
@@ -794,7 +948,14 @@ int main() {
             appState.selectedFiles.clear();
             appState.selectedFilenames.clear();
             appState.rawDataCache.clear();
-            appState.clearAverageSpectrum();
+    appState.hilbertXCache.clear();
+    appState.hilbertCacheLaserWavelength = 0.0f;
+    appState.spectrum.cachedSpectra.clear();
+    appState.spectrum.cachedFrequencies.clear();
+    appState.spectrum.lastPrimaryDetectors.clear();
+    appState.spectrum.lastSpectrumParams.clear();
+    appState.spectrum.pendingSpectra_.clear();
+    appState.clearAverageSpectrum();
             appState.clearSnrSpectrum();
             appState.clearAllanVariance();
             appState.needsRedraw = true;
@@ -822,10 +983,10 @@ int main() {
         }
 
         // Load file if navigation changed
-        if (appState.filesChanged && !appState.csvFiles.empty()) {
+        if (appState.filesChanged && !appState.csvFiles.empty() && appState.currentAdapter) {
             try {
                 // Load the currently selected file
-                InterferogramData data = CSVAdapter::loadFromCSV(appState.sortedFiles[appState.currentSortedFileIndex]);
+                InterferogramData data = appState.currentAdapter->loadFile(appState.sortedFiles[appState.currentSortedFileIndex]);
                 
 
                 
@@ -898,10 +1059,12 @@ int main() {
                     appState.shouldAutoscale = true; // Trigger autoscale
                     
                     // Recalculate Y-axis limits from the actual data for autoscale
-                    auto ref_min_max = std::minmax_element(data.referenceDetector.begin(), data.referenceDetector.end());
+                    if (!data.referenceDetector.empty()) {
+                        auto ref_min_max = std::minmax_element(data.referenceDetector.begin(), data.referenceDetector.end());
+                        appState.ref_y_min = *ref_min_max.first;
+                        appState.ref_y_max = *ref_min_max.second;
+                    }
                     auto prim_min_max = std::minmax_element(data.primaryDetector.begin(), data.primaryDetector.end());
-                    appState.ref_y_min = *ref_min_max.first;
-                    appState.ref_y_max = *ref_min_max.second;
                     appState.prim_y_min = *prim_min_max.first;
                     appState.prim_y_max = *prim_min_max.second;
                     
@@ -936,15 +1099,40 @@ int main() {
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
-        
+
         // Conditionally disable anti-aliasing for large datasets (>50k points)
-        if (appState.dataLoaded && appState.loadedData[0].referenceDetector.size() > 50000) {
+        if (appState.dataLoaded && appState.loadedData[0].dataSize() > 50000) {
             ImGui::GetStyle().AntiAliasedLines = false;
         }
         
         // Show welcome screen if no data is loaded and we haven't initialized yet
         if (appState.showWelcomeScreen && !appState.welcomeScreenInitialized) {
-            renderWelcomeScreen(appState, config, configFilePath);
+            bool showPopup = !appState.showAdapterSelectionPopup && !appState.showAdapterErrorPopup;
+            renderWelcomeScreen(appState, config, configFilePath, showPopup);
+        }
+
+        // Render adapter selection popup on top of welcome screen or main interface
+        if (appState.showAdapterSelectionPopup) {
+            ImGui::OpenPopup("Select Data Adapter##adapterSelect");
+            appState.needsRedraw = true;
+        }
+        renderAdapterSelectionPopup();
+
+        // Render adapter error popup
+        if (appState.showAdapterErrorPopup) {
+            ImGui::OpenPopup("Adapter Error##adapterError");
+            appState.needsRedraw = true;
+        }
+        if (ImGui::BeginPopupModal("Adapter Error##adapterError", &appState.showAdapterErrorPopup,
+                                   ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                                   ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::Text("%s", appState.adapterErrorMsg.c_str());
+            ImGui::Spacing();
+            if (ImGui::Button("OK", ImVec2(120, 0)) || ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+                appState.showAdapterErrorPopup = false;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
         }
         
         // Only render main docking interface if welcome screen is not active
@@ -977,13 +1165,7 @@ int main() {
                                 // Update dataset name from selected directory
                                 appState.currentDatasetName = selectedDirectory.substr(selectedDirectory.find_last_of("/\\") + 1);
                             }
-                            appState.csvFiles = FileBrowser::getCSVFilesInDirectory(appState.currentDirectory);
-                            appState.clearAverageSpectrum();
-            appState.clearSnrSpectrum();
-            appState.clearAllanVariance();
-                            appState.dataLoaded = false;
-                            appState.isFirstDataLoad = true;
-                            appState.needsRedraw = true;
+                            selectAdapterForDirectory(appState.currentDirectory);
                             addToRecentDatasets(config, configFilePath, selectedDirectory);
                             std::cout << "Working directory set to: " << appState.currentDirectory << std::endl;
                         }
@@ -1012,14 +1194,7 @@ int main() {
                                         // Update current dataset name
                                         appState.currentDatasetName = datasetPath.substr(datasetPath.find_last_of("/\\") + 1);
                                         
-                                        appState.csvFiles = FileBrowser::getCSVFilesInDirectory(appState.currentDirectory);
-                                        appState.clearAverageSpectrum();
-            appState.clearSnrSpectrum();
-            appState.clearAllanVariance();
-                                        appState.dataLoaded = false;
-                                        appState.filesChanged = true;
-                                        appState.currentSortedFileIndex = 0;
-                                        appState.isFirstDataLoad = true; // Reset first load flag for new directory
+                                        selectAdapterForDirectory(appState.currentDirectory);
                                         std::cout << "Opened recent dataset: " << datasetPath << std::endl;
                                     } else {
                                         std::cerr << "Recent dataset path no longer exists: " << datasetPath << std::endl;
@@ -1274,9 +1449,11 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             for (size_t i = 0; i < appState.filesSelectedForAveraging.size(); i++)
                 appState.filesSelectedForAveraging[i] = (i < half);
             appState.needsRedraw = true;
-        }
-        ImGui::Separator();
+            }
 
+            if (appState.datasetInfo.hasPrecomputedSpectra) ImGui::EndDisabled();
+
+            ImGui::Separator();
         ImGui::BeginChild("##FileList", ImVec2(0, 0), ImGuiChildFlags_None,
                           ImGuiWindowFlags_AlwaysVerticalScrollbar);
 
@@ -1360,7 +1537,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                         // Check if we would exceed the limit
                         if (appState.selectedFiles.size() < appState.MAX_SELECTABLE_FILES) {
                             try {
-                                InterferogramData data = CSVAdapter::loadFromCSV(fullPath);
+                                InterferogramData data = appState.currentAdapter->loadFile(fullPath);
         
                                 
                                 // Store raw data in cache before downsampling
@@ -1410,7 +1587,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                         
                         try {
                             std::string fullPath = appState.sortedFiles[j];
-                            InterferogramData data = CSVAdapter::loadFromCSV(fullPath);
+                            InterferogramData data = appState.currentAdapter->loadFile(fullPath);
                             
                             // Store raw data in cache before downsampling
                             InterferogramData rawData = data;
@@ -1514,13 +1691,18 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
         }
         
         if (appState.dataLoaded) {
+            if (!appState.datasetInfo.hasInterferograms) {
+                ImGui::Text("Interferograms not available for this data type.");
+            } else {
             // Y-axis limits are now handled by the auto-fit toggle
             // When autoFitYAxis is true, ImPlot will auto-calculate Y-axis limits
             // When autoFitYAxis is false, we use the manually calculated limits
             
             // Determine zoom range
             size_t ref_start =  0;
-            size_t ref_end =  appState.loadedData[0].referenceDetector.size();
+            size_t ref_end =  appState.datasetInfo.hasReferenceChannel
+                              ? appState.loadedData[0].referenceDetector.size()
+                              : appState.loadedData[0].dataSize();
             size_t prim_start =  0;
             size_t prim_end =  appState.loadedData[0].primaryDetector.size();
             // Compute peak positions for X-axis alignment
@@ -1575,7 +1757,10 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             
             // Create ImPlot subplots - two vertically stacked plots with custom height ratio
             // Reference plot: 1 unit height, Primary plot: 2 units height (2x taller)
-            float row_ratios[2] = {1.0f, 2.0f}; // Reference:Primary height ratio
+            const bool hasRef = appState.datasetInfo.hasReferenceChannel;
+            float row_ratios[2] = {1.0f, 2.0f};
+            float row_ratios1[1] = {1.0f};
+            int numRows = hasRef ? 2 : 1;
             
             // Pre-allocate plot specs to avoid repeated construction in rendering loop
             std::vector<ImPlotSpec> plotSpecs;
@@ -1637,8 +1822,42 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             }
 
             
-            if (ImPlot::BeginSubplots("Detector Plots", 2, 1, ImVec2(-1, -1), ImPlotSubplotFlags_NoTitle | ImPlotSubplotFlags_LinkAllX | ImPlotSubplotFlags_NoLegend, row_ratios)) {
+            // Ensure Hilbert X cache is populated for OPD mode (moved before subplots
+            // so it runs regardless of hasRef)
+            if (appState.xAxisBase == 1 && appState.dataLoaded) {
+                if (appState.datasetInfo.axisIsCorrected) {
+                    for (size_t i = 0; i < appState.loadedData.size(); i++) {
+                        const std::string& fileId = appState.selectedFilenames[i];
+                        if (appState.hilbertXCache.find(fileId) == appState.hilbertXCache.end()) {
+                            const auto& opd = appState.loadedData[i].opdAxis;
+                            if (!opd.empty()) {
+                                std::vector<double> hilbX(opd.size());
+                                for (size_t j = 0; j < opd.size(); j++)
+                                    hilbX[j] = opd[j] * 1e6;
+                                appState.hilbertXCache[fileId] = std::move(hilbX);
+                            }
+                        }
+                    }
+                } else {
+                    if (appState.hilbertCacheLaserWavelength != appState.spectrum.refLaserTextbox) {
+                        appState.hilbertXCache.clear();
+                        appState.hilbertCacheLaserWavelength = appState.spectrum.refLaserTextbox;
+                    }
+                    for (size_t i = 0; i < appState.loadedData.size(); i++) {
+                        const std::string& fileId = appState.selectedFilenames[i];
+                        if (appState.hilbertXCache.find(fileId) == appState.hilbertXCache.end()) {
+                            std::vector<double> hilbX;
+                            const auto& refDet = appState.loadedData[i].referenceDetector;
+                            SpectralToolbox::xAxisFromHilbert(refDet, appState.hilbertCacheLaserWavelength, hilbX);
+                            appState.hilbertXCache[fileId] = hilbX;
+                        }
+                    }
+                }
+            }
 
+            if (ImPlot::BeginSubplots("Detector Plots", numRows, 1, ImVec2(-1, -1), ImPlotSubplotFlags_NoTitle | ImPlotSubplotFlags_LinkAllX | ImPlotSubplotFlags_NoLegend, hasRef ? row_ratios : row_ratios1)) {
+
+                if (hasRef) {
                 // Reference detector plot (top)
                 ImPlotFlags ref_flags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend;
                 if (appState.dataLoaded && appState.loadedData[0].referenceDetector.size() > 50000) {
@@ -1662,23 +1881,6 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                     if (appState.dataLoaded && appState.loadedData[0].referenceDetector.size() > 50000) {
                         ImPlot::PushStyleColor(ImPlotCol_AxisGrid, ImVec4(0.6f, 0.6f, 0.6f, 0.75f * appState.gridAlpha));
                         // Optimize by reducing grid line rendering overhead for large datasets
-                    }
-
-                    // Ensure Hilbert X cache is populated for OPD mode
-                    if (appState.xAxisBase == 1 && appState.dataLoaded) {
-                        if (appState.hilbertCacheLaserWavelength != appState.spectrum.refLaserTextbox) {
-                            appState.hilbertXCache.clear();
-                            appState.hilbertCacheLaserWavelength = appState.spectrum.refLaserTextbox;
-                        }
-                        for (size_t i = 0; i < appState.loadedData.size(); i++) {
-                            const std::string& fileId = appState.selectedFilenames[i];
-                            if (appState.hilbertXCache.find(fileId) == appState.hilbertXCache.end()) {
-                                std::vector<double> hilbX;
-                                const auto& refDet = appState.loadedData[i].referenceDetector;
-                                SpectralToolbox::xAxisFromHilbert(refDet, appState.hilbertCacheLaserWavelength, hilbX);
-                                appState.hilbertXCache[fileId] = hilbX;
-                            }
-                        }
                     }
 
                     if (appState.shouldAutoscale || appState.forceXAutofit) {
@@ -1861,8 +2063,8 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                     }
                 }
                 ImPlot::PopStyleColor(); // Restore original grid color
+                } // end of hasRef block
 
-                
                 
                 // Primary detector plot (bottom)
                 ImPlotFlags prim_flags = ImPlotFlags_NoTitle;
@@ -2142,6 +2344,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             }
             
             
+            } // end of hasInterferograms else block
         } else {
             ImGui::Text("No data loaded.");
         }
@@ -2180,17 +2383,20 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             // Reference laser textbox
             ImGui::Text("Ref laser [\xC2\xB5""m]:");
             ImGui::SameLine();
+            if (appState.datasetInfo.axisIsCorrected) ImGui::BeginDisabled();
 
             float remainingWidth = ImGui::GetContentRegionAvail().x;
             ImGui::SetNextItemWidth(remainingWidth);
             ImGui::InputFloat("##RefLaserTextbox", &(appState.spectrum.refLaserTextbox), 0.001, 0.01);
-            if (ImGui::IsItemDeactivatedAfterEdit()) {
+            if (ImGui::IsItemDeactivatedAfterEdit() && !appState.datasetInfo.axisIsCorrected) {
                 invalidateSpectrumCaches();
             }
+            if (appState.datasetInfo.axisIsCorrected) ImGui::EndDisabled();
 
             // Zero-pad factor K
             ImGui::Text("Zero-pad K:");
             ImGui::SameLine();
+            if (appState.datasetInfo.hasPrecomputedSpectra) ImGui::BeginDisabled();
 
             remainingWidth = ImGui::GetContentRegionAvail().x;
             ImGui::SetNextItemWidth(remainingWidth);
@@ -2884,9 +3090,9 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                 if (ImGui::Button("Calculate Allan")) {
                     appState.allanVariance.startCalculation();
                     appState.needsRedraw = true;
-                }
+            }
 
-                ImGui::Separator();
+            ImGui::Separator();
 
                 // Navigation block (X unit, Cursor, X range) - moved to bottom
                 {
@@ -3353,7 +3559,9 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
 
         // Interferogram Config panel (docked)
         ImGui::Begin("Interferogram");
-        if (appState.dataLoaded) {
+        if (!appState.datasetInfo.hasInterferograms && appState.dataLoaded) {
+            ImGui::Text("Interferograms not available for this data type.");
+        } else if (appState.dataLoaded) {
             const ImVec4 cfgBtnColors[2] = {
                 ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
                 ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
@@ -3364,18 +3572,21 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             ImGui::SameLine();
             const bool xSample = (appState.xAxisBase == 0);
             const bool xOPD = (appState.xAxisBase == 1);
+            const bool axisCorrected = appState.datasetInfo.axisIsCorrected;
 
-            ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[xSample ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  xSample ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            if (axisCorrected) ImGui::BeginDisabled();
+            ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[(xSample && !axisCorrected) ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  (xSample && !axisCorrected) ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
             if (ImGui::Button("sample##XBaseSample")) {
-                if (!xSample) {
+                if (!xSample && !axisCorrected) {
                     appState.xAxisBase = 0;
                     appState.shouldAutoscale = true;
                     appState.needsRedraw = true;
                 }
             }
             ImGui::PopStyleColor(3);
+            if (axisCorrected) ImGui::EndDisabled();
             ImGui::SameLine(0.0f, 0.0f);
 
             ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[xOPD ? 1 : 0]);
@@ -3446,10 +3657,12 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                 if (!appState.autoFitYAxis) {
                     appState.autoFitYAxis = true;
                     if (appState.dataLoaded) {
-                        auto ref_min_max = std::minmax_element(appState.loadedData[0].referenceDetector.begin(), appState.loadedData[0].referenceDetector.end());
+                        if (!appState.loadedData[0].referenceDetector.empty()) {
+                            auto ref_min_max = std::minmax_element(appState.loadedData[0].referenceDetector.begin(), appState.loadedData[0].referenceDetector.end());
+                            appState.ref_y_min = *ref_min_max.first;
+                            appState.ref_y_max = *ref_min_max.second;
+                        }
                         auto prim_min_max = std::minmax_element(appState.loadedData[0].primaryDetector.begin(), appState.loadedData[0].primaryDetector.end());
-                        appState.ref_y_min = *ref_min_max.first;
-                        appState.ref_y_max = *ref_min_max.second;
                         appState.prim_y_min = *prim_min_max.first;
                         appState.prim_y_max = *prim_min_max.second;
                     }
@@ -3476,7 +3689,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                         std::vector<InterferogramData> reloadedData;
                         for (const auto& filePath : appState.selectedFiles) {
                             try {
-                                InterferogramData data = CSVAdapter::loadFromCSV(filePath);
+                                InterferogramData data = appState.currentAdapter->loadFile(filePath);
                                 if (appState.enableDownsampling && data.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
                                     size_t localDownsampleFactor = data.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
                                     std::vector<double> downsampledRef, downsampledPrim;
@@ -3497,7 +3710,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                             appState.rawDataCache.clear();
                             for (const auto& file : appState.selectedFiles) {
                                 try {
-                                    InterferogramData rawData = CSVAdapter::loadFromCSV(file);
+                                    InterferogramData rawData = appState.currentAdapter->loadFile(file);
                                     appState.rawDataCache.push_back(rawData);
                                 } catch (const std::exception& e) {
                                     std::cerr << "Error reloading raw data: " << e.what() << std::endl;
@@ -3527,7 +3740,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                         std::vector<InterferogramData> reloadedData;
                         for (const auto& filePath : appState.selectedFiles) {
                             try {
-                                InterferogramData data = CSVAdapter::loadFromCSV(filePath);
+                                InterferogramData data = appState.currentAdapter->loadFile(filePath);
                                 if (appState.enableDownsampling && data.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
                                     size_t localDownsampleFactor = data.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
                                     std::vector<double> downsampledRef, downsampledPrim;
@@ -3548,7 +3761,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                             appState.rawDataCache.clear();
                             for (const auto& file : appState.selectedFiles) {
                                 try {
-                                    InterferogramData rawData = CSVAdapter::loadFromCSV(file);
+                                    InterferogramData rawData = appState.currentAdapter->loadFile(file);
                                     appState.rawDataCache.push_back(rawData);
                                 } catch (const std::exception& e) {
                                     std::cerr << "Error reloading raw data: " << e.what() << std::endl;
@@ -3583,28 +3796,38 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
         ImGui::PushTextWrapPos(); // Enable text wrapping
         if (appState.dataLoaded) {
             ImGui::Text("File: %s", appState.csvFiles.empty() ? "None" : appState.csvFiles[0].c_str());
-            ImGui::Text("Samples: %zu", appState.loadedData[0].referenceDetector.size());
+            ImGui::Text("Samples: %zu", appState.loadedData.empty() ? 0 : appState.loadedData[0].dataSize());
+            ImGui::Text("Adapter: %s", appState.datasetInfo.adapterName.c_str());
             
-            // Display comments if comments.txt exists
-            ImGui::Separator();
-            ImGui::Text("Comments:");
-            
-            std::string commentsPath = appState.currentDirectory;
-            size_t last_slash = commentsPath.find_last_of("/\\");
-            if (last_slash != std::string::npos) {
-                commentsPath = commentsPath.substr(0, last_slash); // Go up to parent directory
-            }
-            commentsPath += "/comments.txt";
-            
-            std::ifstream commentsFile(commentsPath);
-            if (commentsFile.is_open()) {
-                std::string line;
-                while (std::getline(commentsFile, line)) {
-                    ImGui::TextWrapped("%s", line.c_str());
+            // Display comments if comments.txt exists (WUST format)
+            if (appState.datasetInfo.hasMetadataFile) {
+                ImGui::Separator();
+                ImGui::Text("Comments:");
+                
+                std::string commentsPath = appState.currentDirectory;
+                size_t last_slash = commentsPath.find_last_of("/\\");
+                if (last_slash != std::string::npos) {
+                    commentsPath = commentsPath.substr(0, last_slash); // Go up to parent directory
                 }
-                commentsFile.close();
+                commentsPath += "/comments.txt";
+                
+                std::ifstream commentsFile(commentsPath);
+                if (commentsFile.is_open()) {
+                    std::string line;
+                    while (std::getline(commentsFile, line)) {
+                        ImGui::TextWrapped("%s", line.c_str());
+                    }
+                    commentsFile.close();
+                } else {
+                    ImGui::Text("<Comments Empty>");
+                }
             } else {
-                ImGui::Text("<Comments Empty>");
+                ImGui::Separator();
+                if (!appState.loadedData.empty() && !appState.loadedData[0].metadata.empty()) {
+                    ImGui::TextWrapped("%s", appState.loadedData[0].metadata.c_str());
+                } else {
+                    ImGui::Text("-no data-");
+                }
             }
         } else {
             ImGui::Text("No metadata available.");
@@ -3615,6 +3838,34 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
         // Spectrum View panel (docked)
         ImGui::Begin("Spectrum View");
         if (appState.dataLoaded && !appState.loadedData.empty()) {
+            // Pre-load precomputed spectra into spectrum cache
+            if (appState.datasetInfo.hasPrecomputedSpectra && appState.spectrum.cachedSpectra.empty()) {
+                for (size_t i = 0; i < appState.loadedData.size(); i++) {
+                    const std::string& fid = appState.selectedFilenames[i];
+                    if (appState.spectrum.cachedFrequencies.find(fid) == appState.spectrum.cachedFrequencies.end()) {
+                        appState.spectrum.cachedFrequencies[fid] = appState.rawDataCache[i].referenceDetector;
+                        appState.spectrum.cachedSpectra[fid] = appState.rawDataCache[i].primaryDetector;
+                        appState.spectrum.lastPrimaryDetectors[fid] = appState.rawDataCache[i].primaryDetector;
+                        double activeParam = 0.0;
+                        if (appState.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Gauss))
+                            activeParam = static_cast<double>(appState.spectrum.apodizationParams.gaussSigma);
+                        else if (appState.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Rectangular))
+                            activeParam = static_cast<double>(appState.spectrum.apodizationParams.rectWidth);
+                        else if (appState.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::NortonBeer))
+                            activeParam = static_cast<double>(appState.spectrum.apodizationParams.nortonBeerFwhm);
+                        else if (appState.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::DolphChebyshev))
+                            activeParam = static_cast<double>(appState.spectrum.apodizationParams.dolphChebyshevAt);
+                        appState.spectrum.lastSpectrumParams[fid] = {
+                            static_cast<double>(appState.spectrum.Kpadding),
+                            static_cast<double>(appState.spectrum.xUnitSelector),
+                            static_cast<double>(appState.spectrum.refLaserTextbox),
+                            static_cast<double>(appState.spectrum.apodizationSelector),
+                            activeParam,
+                            appState.spectrum.apodizationParams.rectAsymMode ? 1.0 : 0.0
+                        };
+                    }
+                }
+            }
             std::vector<std::pair<std::string, std::vector<double>>> primaryDetectors;
             for (size_t i = 0; i < appState.loadedData.size(); i++) {
                 primaryDetectors.emplace_back(appState.selectedFilenames[i], appState.loadedData[i].primaryDetector);

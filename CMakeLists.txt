@@ -136,6 +136,7 @@ add_executable(fts_data_explorer
     theme.cpp
     glibc_compat.cpp
     adapters/csv_adapter.cpp
+    adapters/adapter_registry.cpp
     file_browser.cpp
     welcome.cpp
     about.cpp

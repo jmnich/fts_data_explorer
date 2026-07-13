@@ -198,17 +198,17 @@ SpectralToolbox::ProcessedSpectrum SpectralToolbox::processSpectrum(
         maxOPD = std::max(maxOPD, correctedX[i]);
     }
     if (maxOPD <= 0.0) return result;
-    const double OPD = 2.0 * maxOPD;   // round-trip; matches test17 exactly
+    const double OPD = 2.0 * maxOPD;   // Hilbert gives mirror movement, round-trip OPD
 
     // 3. Uniform resample on [0, maxOPD] with linear interpolation
-    std::vector<double> uniformX = linspace(0.0, maxOPD, n, /*endpoint*/true);
+    std::vector<double> uniformX = linspace(0.0, maxOPD, n, true);
     std::vector<double> uniformY = interpVector(uniformX, correctedX, primaryDetector);
 
-    // 4. Mean removal (Python loadDataset does meas -= mean; CSVAdapter does not)
+    // 4. Mean removal
     double mean = std::accumulate(uniformY.begin(), uniformY.end(), 0.0) / static_cast<double>(n);
     for (double& y : uniformY) y -= mean;
 
-    // 4.5 Apodization: apply selected window function
+    // 4.5 Apodization
     Apodization::applyWindow(apodizationWindow, uniformY, apodizationParams);
 
     // 5. Zero pad: N = n*(K+1)
@@ -216,7 +216,7 @@ SpectralToolbox::ProcessedSpectrum SpectralToolbox::processSpectrum(
     std::vector<double> padded(N, 0.0);
     std::copy(uniformY.begin(), uniformY.end(), padded.begin());
 
-    // 6. FFT (FFTW complex forward, one-shot per file -> FFTW_ESTIMATE is cheap)
+    // 6. FFT
     fftw_complex* in  = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * N);
     fftw_complex* out = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * N);
     for (std::size_t i = 0; i < N; ++i) {
@@ -233,6 +233,76 @@ SpectralToolbox::ProcessedSpectrum SpectralToolbox::processSpectrum(
     //    Keep only the positive-frequency half [1, N/2] (Nyquist inclusive);
     //    the right half [N/2+1, N-1] holds the conjugate-redundant negative
     //    frequencies for a real-input FFT and is dropped.
+    const std::size_t halfN = N / 2;
+    result.spectrumX.reserve(halfN);
+    result.spectrumY.reserve(halfN);
+    const double factor = OPD * static_cast<double>(K + 1);
+    const double invN   = 1.0 / static_cast<double>(n);
+    for (std::size_t i = 1; i <= halfN; ++i) {
+        const double um = factor / static_cast<double>(i);
+        result.spectrumX.push_back(
+            xUnit == SpectrumXUnit::Um    ? um
+          : xUnit == SpectrumXUnit::CmInv ? convertUmToCm(um)
+                                          : convertUmToTHz(um));
+        const double re = out[i][REAL];
+        const double im = out[i][IMAG];
+        result.spectrumY.push_back(std::sqrt(re * re + im * im) * invN);
+    }
+
+    fftw_destroy_plan(plan);
+    fftw_free(in);
+    fftw_free(out);
+
+    return result;
+}
+// ============================================================================
+
+SpectralToolbox::ProcessedSpectrum SpectralToolbox::processSpectrumFromCorrectedAxis(
+    const std::vector<double>& primaryDetector,
+    const std::vector<double>& opdAxisUm,
+    int  K,
+    SpectrumXUnit xUnit,
+    ApodizationWindow apodizationWindow,
+    const ApodizationParams& apodizationParams)
+{
+    ProcessedSpectrum result;
+
+    const std::size_t n = primaryDetector.size();
+    if (n == 0 || opdAxisUm.size() != n || K < 0) return result;
+
+    const std::vector<double>& correctedX = opdAxisUm;
+
+    double maxOPD = 0.0;
+    for (std::size_t i = 1; i < correctedX.size(); ++i) {
+        maxOPD = std::max(maxOPD, correctedX[i]);
+    }
+    if (maxOPD <= 0.0) return result;
+    const double OPD = maxOPD;  // input axis is already OPD (not mirror movement)
+
+    std::vector<double> uniformX = linspace(0.0, maxOPD, n, true);
+    std::vector<double> uniformY = interpVector(uniformX, correctedX, primaryDetector);
+
+    double mean = std::accumulate(uniformY.begin(), uniformY.end(), 0.0) / static_cast<double>(n);
+    for (double& y : uniformY) y -= mean;
+
+    Apodization::applyWindow(apodizationWindow, uniformY, apodizationParams);
+
+    const std::size_t N = n * (static_cast<std::size_t>(K) + 1);
+    std::vector<double> padded(N, 0.0);
+    std::copy(uniformY.begin(), uniformY.end(), padded.begin());
+
+    fftw_complex* in  = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * N);
+    fftw_complex* out = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * N);
+    for (std::size_t i = 0; i < N; ++i) {
+        in[i][REAL] = padded[i];
+        in[i][IMAG] = 0.0;
+    }
+    fftw_plan plan;
+    pthread_mutex_lock(&fftwPlanMutex);
+    plan = fftw_plan_dft_1d((int)N, in, out, FFTW_FORWARD, FFTW_ESTIMATE);
+    pthread_mutex_unlock(&fftwPlanMutex);
+    fftw_execute(plan);
+
     const std::size_t halfN = N / 2;
     result.spectrumX.reserve(halfN);
     result.spectrumY.reserve(halfN);

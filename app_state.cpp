@@ -127,6 +127,12 @@ void AppState::reset() {
     allanVariance.reset();
     t100.reset();
     filesSelectedForAveraging.clear();
+    datasetInfo = DatasetInfo();
+    currentAdapter.reset();
+    showAdapterSelectionPopup = false;
+    compatibleAdapters.clear();
+    hilbertXCache.clear();
+    rawDataCache.clear();
 }
 
 void AppState::clearAverageSpectrum() {

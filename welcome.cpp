@@ -142,7 +142,7 @@ static void drawWelcomeBackgroundScatter(ImDrawList* drawList, const ImVec2& vpS
 }
 
 void renderWelcomeScreen(AppState& appState, AppConfig& config,
-                         const std::string& configFilePath) {
+                         const std::string& configFilePath, bool showPopup) {
     // Draw decorative background scatter on viewport background draw list (full screen, every frame)
     ImVec2 vpSize = ImGui::GetMainViewport()->Size;
     AccentColor accentScatter = StringToAccentColor(appState.currentAccentColor);
@@ -155,6 +155,8 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
         scatterColor.z *= inv;
     }
     drawWelcomeBackgroundScatter(ImGui::GetBackgroundDrawList(), vpSize, scatterColor);
+
+    if (!showPopup) return;
 
     // Center the welcome screen
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
@@ -221,15 +223,7 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
 
                             appState.currentDatasetName = datasetPath.substr(datasetPath.find_last_of("/\\") + 1);
 
-                            appState.csvFiles = FileBrowser::getCSVFilesInDirectory(appState.currentDirectory);
-                            appState.clearAverageSpectrum();
-                            appState.clearSnrSpectrum();
-                            appState.dataLoaded = false;
-                            appState.filesChanged = true;
-                            appState.currentSortedFileIndex = 0;
-                            appState.showWelcomeScreen = false;
-                            appState.welcomeScreenInitialized = true;
-                            appState.isFirstDataLoad = true;
+                            selectAdapterForDirectory(appState.currentDirectory);
                             appState.needsRedraw = true;
                             addToRecentDatasets(config, configFilePath, datasetPath);
                             std::cout << "Opened recent dataset: " << datasetPath << std::endl;
@@ -302,14 +296,7 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                     appState.currentDirectory = selectedDirectory;
                     appState.currentDatasetName = selectedDirectory.substr(selectedDirectory.find_last_of("/\\") + 1);
                 }
-                appState.csvFiles = FileBrowser::getCSVFilesInDirectory(appState.currentDirectory);
-                appState.clearAverageSpectrum();
-                appState.clearSnrSpectrum();
-                appState.dataLoaded = false;
-                appState.filesChanged = true;
-                appState.currentSortedFileIndex = 0;
-                appState.showWelcomeScreen = false;
-                appState.welcomeScreenInitialized = true;
+                selectAdapterForDirectory(appState.currentDirectory);
                 appState.needsRedraw = true;
                 addToRecentDatasets(config, configFilePath, selectedDirectory);
                 std::cout << "Working directory set to: " << appState.currentDirectory << std::endl;

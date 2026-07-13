@@ -1,6 +1,7 @@
 #include "average_spectrum.h"
 #include "spectral_toolbox.h"
 #include "adapters/csv_adapter.h"
+#include "adapters/adapter_registry.h"
 #include "app_state.h"
 #include <cmath>
 #include <algorithm>
@@ -546,9 +547,19 @@ bool AverageSpectrum::tickCalculation() {
                 !appState->filesSelectedForAveraging[i]) continue;
 
             std::string filePath = appState->sortedFiles[i];
+            std::string adapterName = appState->datasetInfo.adapterName;
+            bool axisCorr = appState->datasetInfo.axisIsCorrected;
             auto fut = appState->computationPool->enqueue([filePath, refLaser, K, xUnit,
-                                                           apodSelector, apodParams]() {
-                auto raw = CSVAdapter::loadFromCSV(filePath);
+                                                             apodSelector, apodParams, adapterName, axisCorr]() {
+                auto raw = AdapterRegistry::instance().loadFileStatic(adapterName, filePath);
+                if (axisCorr) {
+                    for (auto& v : raw.opdAxis) v *= 1e6;
+                    return SpectralToolbox::processSpectrumFromCorrectedAxis(
+                        raw.primaryDetector, raw.opdAxis,
+                        K, xUnit,
+                        static_cast<ApodizationWindow>(apodSelector),
+                        apodParams);
+                }
                 return SpectralToolbox::processSpectrum(
                     raw.primaryDetector, raw.referenceDetector,
                     refLaser, K, xUnit,

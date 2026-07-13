@@ -1,6 +1,7 @@
 #include "t100.h"
 #include "spectral_toolbox.h"
 #include "adapters/csv_adapter.h"
+#include "adapters/adapter_registry.h"
 #include "app_state.h"
 #include "average_spectrum.h"
 #include <cmath>
@@ -311,14 +312,25 @@ bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
             if (fn == fileId) { fullPath = sp; break; }
         }
         try {
-            auto raw = CSVAdapter::loadFromCSV(fullPath);
-            auto ps = SpectralToolbox::processSpectrum(
-                raw.primaryDetector, raw.referenceDetector,
-                appState->spectrum.refLaserTextbox,
-                appState->spectrum.Kpadding,
-                static_cast<SpectralToolbox::SpectrumXUnit>(appState->spectrum.xUnitSelector),
-                static_cast<ApodizationWindow>(appState->spectrum.apodizationSelector),
-                appState->spectrum.apodizationParams);
+            auto raw = AdapterRegistry::instance().loadFileStatic(appState->datasetInfo.adapterName, fullPath);
+            SpectralToolbox::ProcessedSpectrum ps;
+            if (appState->datasetInfo.axisIsCorrected) {
+                for (auto& v : raw.opdAxis) v *= 1e6;
+                ps = SpectralToolbox::processSpectrumFromCorrectedAxis(
+                    raw.primaryDetector, raw.opdAxis,
+                    appState->spectrum.Kpadding,
+                    static_cast<SpectralToolbox::SpectrumXUnit>(appState->spectrum.xUnitSelector),
+                    static_cast<ApodizationWindow>(appState->spectrum.apodizationSelector),
+                    appState->spectrum.apodizationParams);
+            } else {
+                ps = SpectralToolbox::processSpectrum(
+                    raw.primaryDetector, raw.referenceDetector,
+                    appState->spectrum.refLaserTextbox,
+                    appState->spectrum.Kpadding,
+                    static_cast<SpectralToolbox::SpectrumXUnit>(appState->spectrum.xUnitSelector),
+                    static_cast<ApodizationWindow>(appState->spectrum.apodizationSelector),
+                    appState->spectrum.apodizationParams);
+            }
             if (ps.spectrumX.empty() || ps.spectrumY.empty())
                 return false;
             localFreq = std::move(ps.spectrumX);
@@ -603,9 +615,19 @@ bool T100Spectrum::tickStdCalculation() {
                 !appState->filesSelectedForAveraging[i]) continue;
 
             std::string filePath = appState->sortedFiles[i];
+            std::string adapterName = appState->datasetInfo.adapterName;
+            bool axisCorr = appState->datasetInfo.axisIsCorrected;
             auto fut = appState->computationPool->enqueue(
-                [filePath, refLaser, K, xUnit, apodSelector, apodParams]() {
-                    auto raw = CSVAdapter::loadFromCSV(filePath);
+                [filePath, refLaser, K, xUnit, apodSelector, apodParams, adapterName, axisCorr]() {
+                    auto raw = AdapterRegistry::instance().loadFileStatic(adapterName, filePath);
+                    if (axisCorr) {
+                        for (auto& v : raw.opdAxis) v *= 1e6;
+                        return SpectralToolbox::processSpectrumFromCorrectedAxis(
+                            raw.primaryDetector, raw.opdAxis,
+                            K, xUnit,
+                            static_cast<ApodizationWindow>(apodSelector),
+                            apodParams);
+                    }
                     return SpectralToolbox::processSpectrum(
                         raw.primaryDetector, raw.referenceDetector,
                         refLaser, K, xUnit,
