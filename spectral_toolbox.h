@@ -65,7 +65,7 @@ public:
      *        reference interferogram using the analytic-signal phase (Hilbert transform).
      *
      * Port of calculateXAxisFromHilbertTransform (V3 complex-division unwrap style).
-     * Validated against scipy.signal.hilbert by test_hilbert_comparison/.
+     * Validated against scipy.signal.hilbert.
      */
     static void xAxisFromHilbert(const std::vector<double>& referenceSignal,
                                  double refLaserWavelength,
