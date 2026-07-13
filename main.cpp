@@ -432,7 +432,12 @@ static void renderAdapterSelectionPopup() {
 }
 
 static void renderIncompatibleAdapterPopup() {
-    if (!appState.showIncompatibleAdapterPopup) return;
+    static int focusIdx = 0;
+    static bool prevPopupOpen = false;
+    if (!appState.showIncompatibleAdapterPopup) {
+        prevPopupOpen = false;
+        return;
+    }
 
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
@@ -440,7 +445,7 @@ static void renderIncompatibleAdapterPopup() {
 
     ImGui::PushStyleColor(ImGuiCol_ModalWindowDimBg, ImVec4(0.0f, 0.0f, 0.0f, 0.7f));
 
-    bool popupOpened = ImGui::BeginPopupModal("Incompatible##incompatAdapter", &appState.showIncompatibleAdapterPopup,
+    bool popupOpened = ImGui::BeginPopupModal("Incompatible##incompatAdapter", nullptr,
                                ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
     if (popupOpened) {
         ImGui::TextWrapped("Incompatible data adapter. Continue anyway?");
@@ -448,7 +453,20 @@ static void renderIncompatibleAdapterPopup() {
         ImGui::Separator();
         ImGui::Spacing();
 
-        if (ImGui::Button("Back", ImVec2(120, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        bool enterPressed = ImGui::IsKeyPressed(ImGuiKey_Enter);
+        if (popupOpened && !prevPopupOpen)
+            focusIdx = 0;
+        if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow))
+            focusIdx = 0;
+        if (ImGui::IsKeyPressed(ImGuiKey_RightArrow))
+            focusIdx = 1;
+
+        // Highlight focused button with accent color
+        if (focusIdx == 0)
+            ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+        if (ImGui::Button("Back", ImVec2(120, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape) ||
+            (enterPressed && prevPopupOpen && focusIdx == 0)) {
+            if (focusIdx == 0) ImGui::PopStyleColor();
             const auto& allAdapters = AdapterRegistry::instance().getAll();
             std::vector<DataAdapter*> adapters;
             for (const auto& a : allAdapters) adapters.push_back(a.get());
@@ -458,18 +476,27 @@ static void renderIncompatibleAdapterPopup() {
             appState.pendingAdapterName.clear();
             appState.pendingAdapterDirectory.clear();
             ImGui::CloseCurrentPopup();
+        } else if (focusIdx == 0) {
+            ImGui::PopStyleColor();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Yes", ImVec2(120, 0))) {
+        if (focusIdx == 1)
+            ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+        if (ImGui::Button("Yes", ImVec2(120, 0)) ||
+            (enterPressed && prevPopupOpen && focusIdx == 1)) {
+            if (focusIdx == 1) ImGui::PopStyleColor();
             applyAdapterSelection(appState.pendingAdapterName, appState.pendingAdapterDirectory);
             appState.showIncompatibleAdapterPopup = false;
             appState.pendingAdapterName.clear();
             appState.pendingAdapterDirectory.clear();
             ImGui::CloseCurrentPopup();
+        } else if (focusIdx == 1) {
+            ImGui::PopStyleColor();
         }
 
         ImGui::EndPopup();
     }
+    prevPopupOpen = popupOpened;
     ImGui::PopStyleColor();
 }
 
