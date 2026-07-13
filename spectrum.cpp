@@ -134,6 +134,10 @@ bool Spectrum::isSpectrumDirty(const std::string& fileId, const std::vector<doub
         return true; // No cached data for this file, need to calculate
     }
 
+    // Precomputed spectra: data IS the final spectrum, no FFT needed.
+    // Only recompute when the file changed (handled above by missing cache).
+    if (appState && appState->datasetInfo.hasPrecomputedSpectra) return false;
+
     // Check if processing parameters changed (K, xUnit, refLaser, apodization)
     const auto paramsIt = lastSpectrumParams.find(fileId);
     if (paramsIt == lastSpectrumParams.end()) return true;
@@ -624,6 +628,24 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                                        !cachedFrequencies[fileId].empty();
 
                     if (!hasAnyCache) {
+                        if (appState && appState->datasetInfo.hasPrecomputedSpectra) {
+                            // Precomputed spectra: copy raw data directly, no FFT
+                            cachedSpectra[fileId]     = rawData.primaryDetector;
+                            // File stores wavenumber in cm-1; convert to target unit
+                            auto targetUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
+                            auto freqs = rawData.referenceDetector;
+                            for (double& f : freqs)
+                                f = SpectralToolbox::convertXValue(f,
+                                    SpectralToolbox::SpectrumXUnit::CmInv, targetUnit);
+                            cachedFrequencies[fileId] = std::move(freqs);
+                            lastPrimaryDetectors[fileId] = rawData.primaryDetector;
+                            lastSpectrumParams[fileId]   = { static_cast<double>(Kpadding),
+                                                             static_cast<double>(xUnitSelector),
+                                                             static_cast<double>(refLaserTextbox),
+                                                             static_cast<double>(apodizationSelector),
+                                                             0.0,
+                                                             0.0 };
+                        } else {
                         // No cached data at all → compute synchronously to avoid one-frame gap
                         SpectralToolbox::ProcessedSpectrum ps;
                         if (appState && appState->datasetInfo.axisIsCorrected) {
@@ -661,6 +683,7 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                                                          static_cast<double>(apodizationSelector),
                                                          activeParam,
                                                          apodizationParams.rectAsymMode ? 1.0 : 0.0 };
+                        }
                     } else {
                         // Stale cached data exists → submit async, old spectrum stays visible
                         if (appState && appState->computationPool) {

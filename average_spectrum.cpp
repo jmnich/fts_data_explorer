@@ -549,9 +549,18 @@ bool AverageSpectrum::tickCalculation() {
             std::string filePath = appState->sortedFiles[i];
             std::string adapterName = appState->datasetInfo.adapterName;
             bool axisCorr = appState->datasetInfo.axisIsCorrected;
+            bool hasPrecomp = appState->datasetInfo.hasPrecomputedSpectra;
             auto fut = appState->computationPool->enqueue([filePath, refLaser, K, xUnit,
-                                                             apodSelector, apodParams, adapterName, axisCorr]() {
+                                                              apodSelector, apodParams, adapterName, axisCorr, hasPrecomp]() {
                 auto raw = AdapterRegistry::instance().loadFileStatic(adapterName, filePath);
+                if (hasPrecomp) {
+                    SpectralToolbox::ProcessedSpectrum ps;
+                    ps.spectrumX = raw.referenceDetector;
+                    for (double& f : ps.spectrumX)
+                        f = SpectralToolbox::convertXValue(f, SpectralToolbox::SpectrumXUnit::CmInv, xUnit);
+                    ps.spectrumY = std::move(raw.primaryDetector);
+                    return ps;
+                }
                 if (axisCorr) {
                     for (auto& v : raw.opdAxis) v *= 1e6;
                     return SpectralToolbox::processSpectrumFromCorrectedAxis(

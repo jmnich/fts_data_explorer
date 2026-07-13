@@ -1451,8 +1451,6 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             appState.needsRedraw = true;
             }
 
-            if (appState.datasetInfo.hasPrecomputedSpectra) ImGui::EndDisabled();
-
             ImGui::Separator();
         ImGui::BeginChild("##FileList", ImVec2(0, 0), ImGuiChildFlags_None,
                           ImGuiWindowFlags_AlwaysVerticalScrollbar);
@@ -2483,6 +2481,8 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                     ImGui::SetTooltip("Dolph-Chebyshev attenuation (50-160 dB, step 10).\nHigher values produce lower sidelobes.");
                 }
             }
+
+            if (appState.datasetInfo.hasPrecomputedSpectra) ImGui::EndDisabled();
 
             ImGui::Separator();
 
@@ -3838,12 +3838,18 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
         // Spectrum View panel (docked)
         ImGui::Begin("Spectrum View");
         if (appState.dataLoaded && !appState.loadedData.empty()) {
-            // Pre-load precomputed spectra into spectrum cache
-            if (appState.datasetInfo.hasPrecomputedSpectra && appState.spectrum.cachedSpectra.empty()) {
+            // Pre-load precomputed spectra into spectrum cache (always refresh)
+            if (appState.datasetInfo.hasPrecomputedSpectra) {
+                auto targetUnit = static_cast<SpectralToolbox::SpectrumXUnit>(appState.spectrum.xUnitSelector);
                 for (size_t i = 0; i < appState.loadedData.size(); i++) {
                     const std::string& fid = appState.selectedFilenames[i];
                     if (appState.spectrum.cachedFrequencies.find(fid) == appState.spectrum.cachedFrequencies.end()) {
-                        appState.spectrum.cachedFrequencies[fid] = appState.rawDataCache[i].referenceDetector;
+                        // File stores wavenumber in cm-1; convert to target unit
+                        std::vector<double> freqs = appState.rawDataCache[i].referenceDetector;
+                        for (double& f : freqs)
+                            f = SpectralToolbox::convertXValue(f,
+                                SpectralToolbox::SpectrumXUnit::CmInv, targetUnit);
+                        appState.spectrum.cachedFrequencies[fid] = std::move(freqs);
                         appState.spectrum.cachedSpectra[fid] = appState.rawDataCache[i].primaryDetector;
                         appState.spectrum.lastPrimaryDetectors[fid] = appState.rawDataCache[i].primaryDetector;
                         double activeParam = 0.0;

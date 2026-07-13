@@ -471,7 +471,14 @@ void ExportPanel::writeT100AllTransCsv(const std::string& dir)
     for (size_t i = 0; i < checkedFiles.size(); i++) {
         auto raw = AdapterRegistry::instance().loadFileStatic(appState->datasetInfo.adapterName, checkedFiles[i]);
         SpectralToolbox::ProcessedSpectrum ps;
-        if (appState->datasetInfo.axisIsCorrected) {
+        if (appState->datasetInfo.hasPrecomputedSpectra) {
+            ps.spectrumX = raw.referenceDetector;
+            for (double& f : ps.spectrumX)
+                f = SpectralToolbox::convertXValue(f,
+                    SpectralToolbox::SpectrumXUnit::CmInv,
+                    static_cast<SpectralToolbox::SpectrumXUnit>(t100.xUnitSelector));
+            ps.spectrumY = std::move(raw.primaryDetector);
+        } else if (appState->datasetInfo.axisIsCorrected) {
             for (auto& v : raw.opdAxis) v *= 1e6;
             ps = SpectralToolbox::processSpectrumFromCorrectedAxis(
                 raw.primaryDetector, raw.opdAxis,
