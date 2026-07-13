@@ -338,6 +338,16 @@ The script handles CMake configuration, dependency fetching (ImGui, ImPlot, ImPl
 - **Parallel Processing**: cumulative counter, not per-frame; FFTW mutex for plan creation; capture by value in lambdas; sync fallback for first-time loads.
 - **GLIBC version symbols**: `_GNU_SOURCE` is undefined, hiding `pthread_mutex_clocklock`/`pthread_cond_clockwait` from GCC 16+ headers. Always include `pthread_compat.h` before `<future>` or `<mutex>`.
 
+# Playground test harness
+
+See `playground/README.md` for the Python test harness that processes
+instrument data, generates all 10 export artifacts, and produces
+interferogram/spectrum PNG plots.  Run with:
+
+    python3 playground/test_artifacts.py
+
+Outputs land in `playground/outputs/`; logs in `playground/log.txt`.
+
 # Working with the codebase
 
 1. Check both main.cpp and adapters/ for related functionality when modifying adapter code.

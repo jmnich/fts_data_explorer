@@ -1,0 +1,13 @@
+NAME: newconfig_zabercurr0.6A_his25000direct_prno2_1mm_1.5mms_avg100
+TIMESTAMP: 2024-06-10_11-38-54
+
+new config
+zaber current 0.6A
+his2500 4w
+pr no2
+omega
+direct coupled
+div 3
+gain 2
+lpf 10khz
+

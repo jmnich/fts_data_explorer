@@ -1,0 +1,60 @@
+{
+  "_artifact": "100% T transmission line",
+  "_description": "Single file's transmittance curve: T% = (sample / reference) * 100. First file only.",
+  "_columns": ["Wavenumber [cm-1]", "T(%)"],
+  "spectrum": {
+    "refLaserWavelengthUm": { "value": 1.55 },
+    "zeroPadK": { "value": 0 },
+    "apodizationWindow": { "value": "Rectangular" },
+    "gaussSigma": { "value": 1.0 },
+    "rectWidth": { "value": 1.0 },
+    "rectAsymMode": { "value": true },
+    "nortonBeerFwhm": { "value": 1.5 },
+    "dolphChebyshevAttenuationDb": { "value": 60.0 },
+    "detectorSensitivityKVperW": { "value": 0.0 },
+    "xUnit": { "value": "cm-1" },
+    "yScale": { "value": "lin" },
+    "yAxisMode": { "value": "all" },
+    "forcedYMin": { "value": 0.0 },
+    "forcedYMax": { "value": 1.0 }
+  },
+  "average": {
+    "xUnit": { "value": "cm-1" },
+    "yScale": { "value": "lin" },
+    "yAxisMode": { "value": "all" },
+    "forcedYMin": { "value": 0.0 },
+    "forcedYMax": { "value": 1.0 }
+  },
+  "snr": {
+    "xUnit": { "value": "cm-1" },
+    "yScale": { "value": "lin" },
+    "yAxisMode": { "value": "all" },
+    "forcedYMin": { "value": 0.0 },
+    "forcedYMax": { "value": 1.0 }
+  },
+  "allan": {
+    "xUnit": { "value": "um" },
+    "wavelengthDecimation": { "value": 5 },
+    "xRangeMinUm": { "value": 1.0 },
+    "xRangeMaxUm": { "value": 30.0 },
+    "calcBase": { "value": "100% T" },
+    "sliceIndex": { "value": 0 }
+  },
+  "t100": {
+    "xUnit": { "_comment": "X axis unit: cm-1, um, THz", "value": "cm-1" },
+    "referenceSource": { "_comment": "Reference: File, CSV, Average", "value": "File" },
+    "csvReferencePath": { "_comment": "Path for CSV reference", "value": "" },
+    "yAxisMode": { "_comment": "Y axis mode: all, tight, force", "value": "all" },
+    "forcedYMin": { "value": 0.0 },
+    "forcedYMax": { "value": 100.0 },
+    "energyRatioNumA": { "_comment": "Energy ratio A numerator", "value": "" },
+    "energyRatioDenA": { "_comment": "Energy ratio A denominator", "value": "" },
+    "energyRatioNumB": { "value": "" },
+    "energyRatioDenB": { "value": "" },
+    "energyRatioNumC": { "value": "" },
+    "energyRatioDenC": { "value": "" }
+  },
+  "processing": {
+    "workerThreads": { "value": -1 }
+  }
+}

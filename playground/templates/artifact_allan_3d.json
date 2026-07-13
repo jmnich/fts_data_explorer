@@ -1,0 +1,60 @@
+{
+  "_artifact": "Allan-Werle 3D",
+  "_description": "Full MxN Allan-Werle variance surface: Allan variance vs wavelength and integration time. Long format CSV.",
+  "_columns": ["Wavenumber [cm-1]", "Tau [measurements]", "Allan Variance"],
+  "spectrum": {
+    "refLaserWavelengthUm": { "value": 1.55 },
+    "zeroPadK": { "value": 0 },
+    "apodizationWindow": { "value": "Rectangular" },
+    "gaussSigma": { "value": 1.0 },
+    "rectWidth": { "value": 1.0 },
+    "rectAsymMode": { "value": true },
+    "nortonBeerFwhm": { "value": 1.5 },
+    "dolphChebyshevAttenuationDb": { "value": 60.0 },
+    "detectorSensitivityKVperW": { "value": 0.0 },
+    "xUnit": { "value": "cm-1" },
+    "yScale": { "value": "lin" },
+    "yAxisMode": { "value": "all" },
+    "forcedYMin": { "value": 0.0 },
+    "forcedYMax": { "value": 1.0 }
+  },
+  "average": {
+    "xUnit": { "value": "cm-1" },
+    "yScale": { "value": "lin" },
+    "yAxisMode": { "value": "all" },
+    "forcedYMin": { "value": 0.0 },
+    "forcedYMax": { "value": 1.0 }
+  },
+  "snr": {
+    "xUnit": { "value": "cm-1" },
+    "yScale": { "value": "lin" },
+    "yAxisMode": { "value": "all" },
+    "forcedYMin": { "value": 0.0 },
+    "forcedYMax": { "value": 1.0 }
+  },
+  "allan": {
+    "xUnit": { "_comment": "X axis unit: cm-1, um, THz", "value": "um" },
+    "wavelengthDecimation": { "_comment": "Spectral decimation factor 1-50", "value": 5 },
+    "xRangeMinUm": { "_comment": "Min X range in um", "value": 1.0 },
+    "xRangeMaxUm": { "_comment": "Max X range in um", "value": 30.0 },
+    "calcBase": { "_comment": "Base: 100% T or Spectrum", "value": "100% T" },
+    "sliceIndex": { "_comment": "Default slice index", "value": 0 }
+  },
+  "t100": {
+    "xUnit": { "value": "cm-1" },
+    "referenceSource": { "value": "File" },
+    "csvReferencePath": { "value": "" },
+    "yAxisMode": { "value": "all" },
+    "forcedYMin": { "value": 0.0 },
+    "forcedYMax": { "value": 100.0 },
+    "energyRatioNumA": { "value": "" },
+    "energyRatioDenA": { "value": "" },
+    "energyRatioNumB": { "value": "" },
+    "energyRatioDenB": { "value": "" },
+    "energyRatioNumC": { "value": "" },
+    "energyRatioDenC": { "value": "" }
+  },
+  "processing": {
+    "workerThreads": { "value": -1 }
+  }
+}
