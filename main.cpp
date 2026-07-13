@@ -329,7 +329,7 @@ static void renderAdapterSelectionPopup() {
 
     if (ImGui::BeginPopupModal("Select Data Adapter##adapterSelect", &appState.showAdapterSelectionPopup,
                                ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove)) {
-        ImGui::Text("Dataset: %s", appState.currentDirectory.c_str());
+        ImGui::TextWrapped("Dataset: %s", appState.currentDirectory.c_str());
         ImGui::Separator();
         ImGui::Spacing();
 
