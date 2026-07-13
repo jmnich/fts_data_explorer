@@ -787,6 +787,9 @@ int main(int argc, char* argv[]) {
     appState.showFPS = config.showFPS; // Load from config
     appState.gridAlpha = config.gridAlpha; // Load from config
     appState.currentAccentColor = config.accentColor; // Load accent color from config
+
+    // Load docking layout flag from config (persisted so DockBuilder runs only once)
+    appState.defaultLayoutApplied = config.defaultLayoutApplied;
     
     // Load spectrum window settings from config
     appState.spectrum.yAxisMode           = config.spectrumYAxisMode;
@@ -1498,38 +1501,36 @@ int main(int argc, char* argv[]) {
             // Create docking space
             ImGuiID dockspace_id = ImGui::GetID("MainDockSpace_v2");
 
-                // Apply default layout only on first launch (no saved imgui.ini)
+                // Apply default layout only on first launch (persisted via config)
                 if (!appState.defaultLayoutApplied) {
                     appState.defaultLayoutApplied = true;
+                    config.defaultLayoutApplied = true;
+                    config.saveToFile(configFilePath);
 
-                    const char* iniPath = io.IniFilename ? io.IniFilename : "imgui.ini";
-                    bool iniExists = std::filesystem::exists(iniPath) && std::filesystem::file_size(iniPath) > 0;
+                    ImGui::DockBuilderRemoveNode(dockspace_id);
+                    ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
+                    ImGui::DockBuilderSetNodeSize(dockspace_id,
+                        ImVec2(viewport->Size.x, viewport->Size.y - ImGui::GetFrameHeight()));
 
-                    if (!iniExists) {
-                        ImGui::DockBuilderRemoveNode(dockspace_id);
-                        ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
-                        ImGui::DockBuilderSetNodeSize(dockspace_id,
-                            ImVec2(viewport->Size.x, viewport->Size.y - ImGui::GetFrameHeight()));
+                    // Split dockspace: left (16%) / right (84%)
+                    ImGuiID dock_left, dock_right;
+                    ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Left, 0.16f, &dock_left, &dock_right);
 
-                        // Split dockspace: left (16%) / right (84%)
-                        ImGuiID dock_left, dock_right;
-                        ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Left, 0.16f, &dock_left, &dock_right);
+                    // Split left: Files (40%) / bottom (60%)
+                    ImGuiID dock_left_top, dock_left_bottom;
+                    ImGui::DockBuilderSplitNode(dock_left, ImGuiDir_Up, 0.40f, &dock_left_top, &dock_left_bottom);
 
-                        // Split left: Files (40%) / bottom (60%)
-                        ImGuiID dock_left_top, dock_left_bottom;
-                        ImGui::DockBuilderSplitNode(dock_left, ImGuiDir_Up, 0.40f, &dock_left_top, &dock_left_bottom);
+                    // Split left-bottom: Metadata/Export/SNR (50%) / Spectrum/Interferogram/Average (50%)
+                    ImGuiID dock_left_bottom_top, dock_left_bottom_bottom;
+                    ImGui::DockBuilderSplitNode(dock_left_bottom, ImGuiDir_Up, 0.50f, &dock_left_bottom_top, &dock_left_bottom_bottom);
 
-                        // Split left-bottom: Metadata/Export/SNR (50%) / Spectrum/Interferogram/Average (50%)
-                        ImGuiID dock_left_bottom_top, dock_left_bottom_bottom;
-                        ImGui::DockBuilderSplitNode(dock_left_bottom, ImGuiDir_Up, 0.50f, &dock_left_bottom_top, &dock_left_bottom_bottom);
+                    // Split right: Interferogram View (48%) / right panel (52%)
+                    ImGuiID dock_center, dock_right_panel;
+                    ImGui::DockBuilderSplitNode(dock_right, ImGuiDir_Left, 0.48f, &dock_center, &dock_right_panel);
 
-                        // Split right: Interferogram View (48%) / right panel (52%)
-                        ImGuiID dock_center, dock_right_panel;
-                        ImGui::DockBuilderSplitNode(dock_right, ImGuiDir_Left, 0.48f, &dock_center, &dock_right_panel);
-
-                        // Split right panel: view tabs (50%) / Spectrum View (50%)
-                        ImGuiID dock_right_top, dock_right_bottom;
-                        ImGui::DockBuilderSplitNode(dock_right_panel, ImGuiDir_Up, 0.50f, &dock_right_top, &dock_right_bottom);
+                    // Split right panel: view tabs (50%) / Spectrum View (50%)
+                    ImGuiID dock_right_top, dock_right_bottom;
+                    ImGui::DockBuilderSplitNode(dock_right_panel, ImGuiDir_Up, 0.50f, &dock_right_top, &dock_right_bottom);
 
                         // Dock all windows to their zones
                         ImGui::DockBuilderDockWindow("Files",              dock_left_top);
@@ -1542,14 +1543,13 @@ int main(int argc, char* argv[]) {
                         ImGui::DockBuilderDockWindow("Interferogram",      dock_left_bottom_bottom);
                         ImGui::DockBuilderDockWindow("Average",            dock_left_bottom_bottom);
                         ImGui::DockBuilderDockWindow("Interferogram View", dock_center);
+                        ImGui::DockBuilderDockWindow("100% T View",     dock_center);
+                        ImGui::DockBuilderDockWindow("Allan View",         dock_center);
                         ImGui::DockBuilderDockWindow("SNR View",           dock_right_top);
                         ImGui::DockBuilderDockWindow("Average View",       dock_right_top);
-                        ImGui::DockBuilderDockWindow("Allan View",         dock_right_top);
-                        ImGui::DockBuilderDockWindow("100% T View",     dock_right_top);
                         ImGui::DockBuilderDockWindow("Spectrum View",      dock_right_bottom);
 
-                        ImGui::DockBuilderFinish(dockspace_id);
-                    }
+                    ImGui::DockBuilderFinish(dockspace_id);
                 }
 
 ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);

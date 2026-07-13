@@ -26,6 +26,9 @@ struct AppConfig {
     // Thread pool config
     int workerThreads = -1; // -1 = AUTO
     
+    // Docking layout: tracks whether the default layout has been applied
+    bool defaultLayoutApplied = false;
+    
     // Window state
     int windowWidth = 1280;
     int windowHeight = 720;
@@ -138,6 +141,7 @@ struct AppConfig {
             configFile << "ui_size=" << uiSize << "\n";
             configFile << "accent_color=" << accentColor << "\n";
             configFile << "worker_threads=" << workerThreads << "\n";
+            configFile << "default_layout_applied=" << (defaultLayoutApplied ? "true" : "false") << "\n";
             
             // Write window settings
             configFile << "\n[Window]\n";
@@ -274,6 +278,8 @@ struct AppConfig {
                             accentColor = value;
                         } else if (key == "worker_threads") {
                             workerThreads = std::stoi(value);
+                        } else if (key == "default_layout_applied") {
+                            defaultLayoutApplied = (value == "true");
                         }
                     } else if (currentSection == "Window") {
                         if (key == "width") {
