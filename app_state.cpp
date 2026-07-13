@@ -130,6 +130,9 @@ void AppState::reset() {
     datasetInfo = DatasetInfo();
     currentAdapter.reset();
     showAdapterSelectionPopup = false;
+    showIncompatibleAdapterPopup = false;
+    pendingAdapterName.clear();
+    pendingAdapterDirectory.clear();
     compatibleAdapters.clear();
     hilbertXCache.clear();
     rawDataCache.clear();

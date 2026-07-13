@@ -29,6 +29,9 @@ struct AppState {
     bool showAdapterSelectionPopup = false;
     bool showAdapterErrorPopup = false;
     std::string adapterErrorMsg;
+    bool showIncompatibleAdapterPopup = false;
+    std::string pendingAdapterName;
+    std::string pendingAdapterDirectory;
     std::vector<DataAdapter*> compatibleAdapters;
     // UI state
     std::string currentUiSize;

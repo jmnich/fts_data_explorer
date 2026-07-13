@@ -245,6 +245,11 @@ void handleWindowEvents(GLFWwindow* window, AppConfig& config) {
 void applyAdapterSelection(const std::string& adapterName, const std::string& directoryPath);
 
 void selectAdapterForDirectory(const std::string& directoryPath) {
+    // Clear any stale incompatible-adapter state from previous interactions
+    appState.showIncompatibleAdapterPopup = false;
+    appState.pendingAdapterName.clear();
+    appState.pendingAdapterDirectory.clear();
+
     // Commented out: auto-filtering of adapters based on directory contents.
     // For now, always show all registered adapters so user can pick.
     // auto adapters = AdapterRegistry::instance().findAdaptersForDirectory(directoryPath);
@@ -286,6 +291,9 @@ void applyAdapterSelection(const std::string& adapterName, const std::string& di
     appState.datasetInfo = adapter->getDatasetInfo();
     appState.csvFiles = adapter->listFiles(directoryPath);
     appState.showAdapterSelectionPopup = false;
+    appState.showIncompatibleAdapterPopup = false;
+    appState.pendingAdapterName.clear();
+    appState.pendingAdapterDirectory.clear();
 
     // Apply feature gates based on dataset info
     if (appState.datasetInfo.axisIsCorrected) {
@@ -338,14 +346,40 @@ static void renderAdapterSelectionPopup() {
             selectedIdx = 0;
 
         for (size_t i = 0; i < appState.compatibleAdapters.size(); i++) {
-            const auto* adapter = appState.compatibleAdapters[i];
+            auto* adapter = appState.compatibleAdapters[i];
+            bool compatible = adapter->canLoadDirectory(appState.currentDirectory);
             std::string label = std::string("- ") + adapter->getName() + " (" + adapter->getFileExtension() + ")";
+
+            if (!compatible)
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.5f, 0.5f, 0.5f));
+
             if (ImGui::Selectable(label.c_str(), static_cast<int>(i) == selectedIdx)) {
-                applyAdapterSelection(adapter->getName(), appState.currentDirectory);
+                if (compatible) {
+                    applyAdapterSelection(adapter->getName(), appState.currentDirectory);
+                } else {
+                    appState.pendingAdapterName = adapter->getName();
+                    appState.pendingAdapterDirectory = appState.currentDirectory;
+                    appState.showIncompatibleAdapterPopup = true;
+                    appState.showAdapterSelectionPopup = false;
+                    appState.compatibleAdapters.clear();
+                }
                 selectedIdx = 0;
-                ImGui::PopStyleColor();
+                if (!compatible)
+                    ImGui::PopStyleColor(); // pop text color
+                ImGui::PopStyleColor(); // pop dim bg
                 ImGui::EndPopup();
                 return;
+            }
+
+            if (!compatible) {
+                ImVec2 textMin = ImGui::GetItemRectMin();
+                ImVec2 textMax = ImGui::GetItemRectMax();
+                float lineY = (textMin.y + textMax.y) * 0.5f;
+                ImGui::GetWindowDrawList()->AddLine(
+                    ImVec2(textMin.x, lineY),
+                    ImVec2(textMax.x, lineY),
+                    IM_COL32(128, 128, 128, 128), 1.0f);
+                ImGui::PopStyleColor();
             }
         }
 
@@ -359,9 +393,19 @@ static void renderAdapterSelectionPopup() {
         if (ImGui::IsKeyPressed(ImGuiKey_DownArrow) && selectedIdx < static_cast<int>(appState.compatibleAdapters.size()) - 1)
             selectedIdx++;
         if (ImGui::IsKeyPressed(ImGuiKey_Enter) && selectedIdx >= 0 && selectedIdx < static_cast<int>(appState.compatibleAdapters.size())) {
-            applyAdapterSelection(appState.compatibleAdapters[selectedIdx]->getName(), appState.currentDirectory);
+            auto* adapter = appState.compatibleAdapters[selectedIdx];
+            bool enterCompatible = adapter->canLoadDirectory(appState.currentDirectory);
+            if (enterCompatible) {
+                applyAdapterSelection(adapter->getName(), appState.currentDirectory);
+            } else {
+                appState.pendingAdapterName = adapter->getName();
+                appState.pendingAdapterDirectory = appState.currentDirectory;
+                appState.showIncompatibleAdapterPopup = true;
+                appState.showAdapterSelectionPopup = false;
+                appState.compatibleAdapters.clear();
+            }
             selectedIdx = 0;
-            ImGui::PopStyleColor();
+            ImGui::PopStyleColor(); // pop dim bg
             ImGui::EndPopup();
             return;
         }
@@ -380,6 +424,48 @@ static void renderAdapterSelectionPopup() {
             appState.compatibleAdapters.clear();
             appState.currentDirectory = "";
             selectedIdx = 0;
+        }
+
+        ImGui::EndPopup();
+    }
+    ImGui::PopStyleColor();
+}
+
+static void renderIncompatibleAdapterPopup() {
+    if (!appState.showIncompatibleAdapterPopup) return;
+
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(450, 160), ImGuiCond_Always);
+
+    ImGui::PushStyleColor(ImGuiCol_ModalWindowDimBg, ImVec4(0.0f, 0.0f, 0.0f, 0.7f));
+
+    bool popupOpened = ImGui::BeginPopupModal("Incompatible##incompatAdapter", &appState.showIncompatibleAdapterPopup,
+                               ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
+    if (popupOpened) {
+        ImGui::TextWrapped("Incompatible data adapter. Continue anyway?");
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::Button("Back", ImVec2(120, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            const auto& allAdapters = AdapterRegistry::instance().getAll();
+            std::vector<DataAdapter*> adapters;
+            for (const auto& a : allAdapters) adapters.push_back(a.get());
+            appState.compatibleAdapters = adapters;
+            appState.showAdapterSelectionPopup = true;
+            appState.showIncompatibleAdapterPopup = false;
+            appState.pendingAdapterName.clear();
+            appState.pendingAdapterDirectory.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Yes", ImVec2(120, 0))) {
+            applyAdapterSelection(appState.pendingAdapterName, appState.pendingAdapterDirectory);
+            appState.showIncompatibleAdapterPopup = false;
+            appState.pendingAdapterName.clear();
+            appState.pendingAdapterDirectory.clear();
+            ImGui::CloseCurrentPopup();
         }
 
         ImGui::EndPopup();
@@ -1112,7 +1198,7 @@ int main() {
         
         // Show welcome screen if no data is loaded and we haven't initialized yet
         if (appState.showWelcomeScreen && !appState.welcomeScreenInitialized) {
-            bool showPopup = !appState.showAdapterSelectionPopup && !appState.showAdapterErrorPopup;
+            bool showPopup = !appState.showAdapterSelectionPopup && !appState.showAdapterErrorPopup && !appState.showIncompatibleAdapterPopup;
             renderWelcomeScreen(appState, config, configFilePath, showPopup);
         }
 
@@ -1122,6 +1208,12 @@ int main() {
             appState.needsRedraw = true;
         }
         renderAdapterSelectionPopup();
+
+        if (appState.showIncompatibleAdapterPopup) {
+            ImGui::OpenPopup("Incompatible##incompatAdapter");
+            appState.needsRedraw = true;
+        }
+        renderIncompatibleAdapterPopup();
 
         // Render adapter error popup
         if (appState.showAdapterErrorPopup) {
