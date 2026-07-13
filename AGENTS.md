@@ -263,6 +263,41 @@ Main thread: pollEvents → pollPendingSpectra → tickCalculations → render �
 - **`std::mutex`/`std::condition_variable` avoided**: project undefines `_GNU_SOURCE`, hiding `pthread_mutex_clocklock`/`pthread_cond_clockwait` from GCC 16+ headers. Use raw `pthread_mutex_t`/`pthread_cond_t` directly, or include `pthread_compat.h` before `<future>`/`<mutex>`. (`glibc_compat.cpp` provides fallback implementations via `--wrap` linking.)
 - **`computeTransmittanceForFile` fallback**: must handle missing spectrum caches by loading CSV and computing synchronously.
 
+# Headless mode
+The behavior of the app depends on the flags with which it is called. 
+If something fails in headless mode then message is sent to terminal and app terminates.
+Message format: "Error: <message>" with a meaningful error message.
+
+## No flag
+App launches normally into welcome screen.
+
+## Flag: -v
+App returns version info in format <major num>.<minor num> (TODO - app has no versioning so just return 0.0).
+
+## Flag: -l <list type>
+App lists options of selected <list type>. The following are available:
+- <nothing>: when no type is provided all available list types are listed
+- data_adapter: all avaialble adapters are listed
+- output: all available outputs that can be requested for calculation
+- recent: all paths from recently opened list
+
+## Flag: -o <path> <adapter>
+The only headless command to open the GUI. Both arguments must be provided.
+Skips the welcome screen and goes directly to attempting to open the dataset at <path> in the primary GUI using the selected adapter. 
+
+## Flag -p <path> <adapter> <config path> <output type> <output directory>
+Process data in headless mode. 
+Load dataset at <path> using the data adapter <adapter>.
+Then attempt to calculate artifact of type <output type> and write results to <output directory> in the same way as if they were produced by export panel.
+<config path> leads to a .json file with all settings required for processing data. This .json looks the same for all output types and always contains all settings, even if they are irrelevant.
+All artifacts from export panel are available as headless output types.
+
+## Flag -t 
+Creates template.json in the app working directory. This template is for the configuration file required by -p. Contains explanations in comments.
+
+## Flag -r
+Reset the app by deleting the config file and imgui.ini, if they exist.
+
 # Build system
 
 ```
