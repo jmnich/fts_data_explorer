@@ -321,7 +321,7 @@ static void renderAdapterSelectionPopup() {
 
     if (ImGui::BeginPopupModal("Select Data Adapter##adapterSelect", &appState.showAdapterSelectionPopup,
                                ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove)) {
-        ImGui::Text("Pick data adapter:");
+        ImGui::Text("Dataset: %s", appState.currentDirectory.c_str());
         ImGui::Separator();
         ImGui::Spacing();
 
@@ -333,9 +333,6 @@ static void renderAdapterSelectionPopup() {
             const auto* adapter = appState.compatibleAdapters[i];
             std::string label = std::string("- ") + adapter->getName() + " (" + adapter->getFileExtension() + ")";
             if (ImGui::Selectable(label.c_str(), static_cast<int>(i) == selectedIdx)) {
-                selectedIdx = static_cast<int>(i);
-            }
-            if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) {
                 applyAdapterSelection(adapter->getName(), appState.currentDirectory);
                 selectedIdx = 0;
                 ImGui::PopStyleColor();
