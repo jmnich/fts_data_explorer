@@ -65,6 +65,14 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(tinyfiledialogs)
 
+# Download nlohmann/json for headless mode config parsing
+FetchContent_Declare(
+    nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG v3.11.3
+)
+FetchContent_MakeAvailable(nlohmann_json)
+
 # Add tinyfiledialogs source directly (matching imgui/implot pattern)
 list(APPEND EXTRA_SOURCES
     ${tinyfiledialogs_SOURCE_DIR}/tinyfiledialogs.c
@@ -125,6 +133,7 @@ include_directories(
 add_executable(fts_data_explorer
     main.cpp
     app_state.cpp
+    headless.cpp
     spectrum.cpp
     average_spectrum.cpp
     snr_spectrum.cpp
@@ -176,6 +185,7 @@ target_link_libraries(fts_data_explorer
     fftw3_threads  # For fftw_plan_with_nthreads (used per-worker in async lambdas)
     X11
     m
+    nlohmann_json::nlohmann_json
 )
 
 # Link pthread and dl explicitly for compatibility with older glibc

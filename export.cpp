@@ -154,6 +154,21 @@ void ExportPanel::performExport(const std::string& dir)
     if (artifactChecked[9]) writeT100StdDevCsv(dir);
 }
 
+bool ExportPanel::exportArtifact(const std::string& label, const std::string& dir)
+{
+    if (label == ARTIFACT_CORR_IFG)      { writeCorrectedIFGCsv(dir); return true; }
+    if (label == ARTIFACT_UNCORR_IFG)    { writeUncorrectedIFGCsv(dir); return true; }
+    if (label == ARTIFACT_AVG_SPECT)     { writeAvgSpectrumCsv(dir); return true; }
+    if (label == ARTIFACT_SNR_SPECT)     { writeSnrSpectrumCsv(dir); return true; }
+    if (label == ARTIFACT_SPECTRA)       { writeSpectraCsv(dir); return true; }
+    if (label == ARTIFACT_ALLAN_3D)      { writeAllan3DCsv(dir); return true; }
+    if (label == ARTIFACT_ALLAN_SLICE)   { writeAllanSliceCsv(dir); return true; }
+    if (label == ARTIFACT_T100_TRANS)    { writeT100TransCsv(dir); return true; }
+    if (label == ARTIFACT_T100_ALL_TRANS){ writeT100AllTransCsv(dir); return true; }
+    if (label == ARTIFACT_T100_STDDEV)   { writeT100StdDevCsv(dir); return true; }
+    return false;
+}
+
 // ---------------------------------------------------------------------------
 //  CSV exports
 // ---------------------------------------------------------------------------

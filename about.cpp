@@ -41,6 +41,7 @@ void renderAboutPopup() {
     ImGui::BulletText("FFTW3 (GPL) - fftw.org");
     ImGui::BulletText("tinyfiledialogs (zlib/libpng) - sourceforge.net/projects/tinyfiledialogs");
     ImGui::BulletText("stb_image (MIT/public domain) - github.com/nothings/stb");
+    ImGui::BulletText("Nlohmann JSON (MIT) - github.com/nlohmann/json");
 
     ImGui::EndChild();
 

@@ -271,6 +271,9 @@ Message format: "Error: <message>" with a meaningful error message.
 ## No flag
 App launches normally into welcome screen.
 
+## Flag: -help
+Prints usage information for all headless flags and exits. Takes no arguments.
+
 ## Flag: -v
 App returns version info in format <major num>.<minor num> (TODO - app has no versioning so just return 0.0).
 

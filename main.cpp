@@ -32,6 +32,7 @@
 #include "welcome.h"
 #include "about.h"
 #include "theme.h"
+#include "headless.h"
 
 // Include imgui and other dependencies
 #include "imgui.h"
@@ -652,7 +653,12 @@ void cleanupApplication(GLFWwindow* window) {
     glfwTerminate();
 }
 
-int main() {
+int main(int argc, char* argv[]) {
+    // Parse headless mode flags before any GUI initialization
+    HeadlessConfig headlessCfg;
+    if (parseHeadlessArgs(argc, argv, headlessCfg)) return 1;
+    if (runHeadlessCommand(headlessCfg)) return 0;
+
     // Set environment variables to prefer dedicated GPU on NVIDIA systems
     #ifdef _WIN32
     _putenv("D3D12_ENABLE_LAYERED_DRIVER_QUERY=1");
@@ -686,6 +692,14 @@ int main() {
     AdapterRegistry::instance().registerAdapter(std::make_unique<WustMiniFtsAdapter>());
     AdapterRegistry::instance().registerAdapter(std::make_unique<ArcoptixIgmsAdapter>());
     AdapterRegistry::instance().registerAdapter(std::make_unique<ArcoptixSpectraAdapter>());
+
+    // Handle -o flag: auto-apply adapter (skips welcome screen) before GUI init
+    if (headlessCfg.command == HeadlessConfig::Command::OpenGUI) {
+        std::cout << "Auto-selecting adapter: " << headlessCfg.adapter
+                  << " for " << headlessCfg.path << std::endl;
+        appState.currentDirectory = headlessCfg.path;
+        applyAdapterSelection(headlessCfg.adapter, headlessCfg.path);
+    }
 
     // Initialize application
     GLFWwindow* window = nullptr;

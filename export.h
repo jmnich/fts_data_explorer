@@ -30,6 +30,9 @@ public:
     bool isArtifactAvailable(const char* label) const;
     void performExport(const std::string& dir);
 
+    // Export a single artifact by label (used by headless mode -p)
+    bool exportArtifact(const std::string& label, const std::string& dir);
+
 private:
     void writeCorrectedIFGCsv(const std::string& dir);
     void writeUncorrectedIFGCsv(const std::string& dir);
