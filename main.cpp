@@ -310,6 +310,14 @@ void applyAdapterSelection(const std::string& adapterName, const std::string& di
     std::cout << "Adapter selected: " << adapterName << " for " << directoryPath << std::endl;
 }
 
+static std::string shortenFilename(const std::string& filename) {
+    const size_t maxLen = 38;
+    if (filename.length() <= maxLen) return filename;
+    const size_t keepStart = 8;
+    const size_t keepEnd = 24;
+    return filename.substr(0, keepStart) + "..." + filename.substr(filename.length() - keepEnd);
+}
+
 static void renderAdapterSelectionPopup() {
     if (!appState.showAdapterSelectionPopup) return;
 
@@ -1216,6 +1224,7 @@ int main() {
                     if (ImGui::SliderFloat("##gridOpacity", &gridPct, 0.0f, 100.0f, "%.0f%%")) {
                         appState.gridAlpha = gridPct / 100.0f;
                     }
+
                     
                     // UI Size selection dropdown
                     if (ImGui::BeginMenu("UI Size"))
@@ -1472,6 +1481,8 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             if (last_slash != std::string::npos) {
                 filename = filename.substr(last_slash + 1);
             }
+            std::string fullFilename = filename;
+            filename = shortenFilename(filename);
             
             // Enhanced highlighting for the currently selected file
             int stylesPushed = 1; // Default: push 1 style
@@ -1627,6 +1638,9 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                     appState.lastSelectedIndex = i;
                 }
             }
+            
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s", fullFilename.c_str());
             
             // Pop the correct number of styles
             ImGui::PopStyleColor(stylesPushed);
