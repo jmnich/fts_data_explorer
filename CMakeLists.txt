@@ -109,11 +109,31 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(glfw)
 
+# Generate asset headers from binary assets (via xxd, requires vim-common)
+set(ASSET_GENERATED_DIR "${CMAKE_BINARY_DIR}/generated")
+file(MAKE_DIRECTORY "${ASSET_GENERATED_DIR}")
+execute_process(
+    COMMAND xxd -i assets/interferogram_curve.png
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    OUTPUT_FILE "${ASSET_GENERATED_DIR}/interferogram_curve.h"
+    ERROR_VARIABLE XXD_ERR
+)
+if(NOT XXD_ERR STREQUAL "")
+    message(FATAL_ERROR "Failed to generate asset header: ${XXD_ERR}")
+endif()
+
 # Find required packages
 find_package(OpenGL REQUIRED)
-find_package(X11 REQUIRED)
+if(NOT WIN32)
+    find_package(X11 REQUIRED)
+endif()
 
 
+
+# Fix case-sensitive header includes on MinGW cross-compilation
+if(MINGW)
+    include_directories(${CMAKE_SOURCE_DIR}/cmake/mingw-case-fix/include)
+endif()
 
 # ImGui is now handled by FetchContent
 include_directories(
@@ -129,6 +149,14 @@ include_directories(
     ${CMAKE_BINARY_DIR}/generated        # xxd-generated asset headers
 )
 
+# Platform-specific sources
+set(PLATFORM_SOURCES
+    glibc_compat.cpp
+)
+if(WIN32)
+    set(PLATFORM_SOURCES)  # glibc_compat.cpp is Linux/GLIBC-specific
+endif()
+
 # Add executable
 add_executable(fts_data_explorer
     main.cpp
@@ -143,56 +171,69 @@ add_executable(fts_data_explorer
     apodization.cpp
     export.cpp
     theme.cpp
-    glibc_compat.cpp
     adapters/csv_adapter.cpp
     adapters/adapter_registry.cpp
     file_browser.cpp
     welcome.cpp
     about.cpp
+    ${PLATFORM_SOURCES}
     ${EXTRA_SOURCES}
 )
 
-# Statically link C++ runtime and apply --wrap flags (target-specific only)
-target_link_options(fts_data_explorer PRIVATE
-    -static-libgcc
-    -static-libstdc++
-    ${GLIBCOMPAT_WRAP}
-)
+# Platform-specific compile options
+if(WIN32)
+    target_compile_options(fts_data_explorer PRIVATE
+        $<$<COMPILE_LANGUAGE:C>:-std=gnu11>
+    )
+else()
+    # Avoid __isoc23_* functions (GLIBC_2.38) and fortified functions
+    # that use newer GLIBC symbol versions.
+    target_compile_options(fts_data_explorer PRIVATE
+        -U_GNU_SOURCE
+        -D_DEFAULT_SOURCE
+        -D_FORTIFY_SOURCE=0
+        -U_FORTIFY_SOURCE
+        $<$<COMPILE_LANGUAGE:C>:-std=gnu11>
+    )
+endif()
 
-# Avoid __isoc23_* functions (GLIBC_2.38) and fortified functions
-# that use newer GLIBC symbol versions. Target-specific only.
-# Also force C11 for C sources since GCC/glibc 2.43 defaults to C23.
-target_compile_options(fts_data_explorer PRIVATE
-    -U_GNU_SOURCE
-    -D_DEFAULT_SOURCE
-    -D_FORTIFY_SOURCE=0
-    -U_FORTIFY_SOURCE
-    $<$<COMPILE_LANGUAGE:C>:-std=gnu11>
-    # pthread_cond_clockwait/pthread_mutex_clocklock fallbacks are
-    # provided in glibc_compat.cpp for older GLIBC compatibility.
-)
-
-
+# Platform-specific linker options
+if(NOT WIN32)
+    target_link_options(fts_data_explorer PRIVATE
+        -static-libgcc
+        -static-libstdc++
+        ${GLIBCOMPAT_WRAP}
+    )
+else()
+    target_link_options(fts_data_explorer PRIVATE
+        -static-libgcc
+        -static-libstdc++
+    )
+endif()
 
 # Link libraries
-# Note: ImPlot is header-only, so we don't link to a library
-# Instead, we include the source files directly in our compilation
 target_link_libraries(fts_data_explorer
     ${OPENGL_LIBRARIES}
     glfw
-    GL
-    fftw3  # Use the FFTW target that was built
-    fftw3_threads  # For fftw_plan_with_nthreads (used per-worker in async lambdas)
-    X11
-    m
+    fftw3
+    fftw3_threads
     nlohmann_json::nlohmann_json
 )
 
-# Link pthread and dl explicitly for compatibility with older glibc
-target_link_libraries(fts_data_explorer
-    pthread
-    dl
-)
+# Platform-specific libraries
+if(NOT WIN32)
+    target_link_libraries(fts_data_explorer
+        GL
+        X11
+        m
+        pthread
+        dl
+    )
+else()
+    target_link_libraries(fts_data_explorer
+        pthread
+    )
+endif()
 
 
 
