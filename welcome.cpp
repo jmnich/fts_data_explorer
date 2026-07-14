@@ -199,7 +199,8 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                 ImGui::Text("No recent datasets found.");
                 ImGui::Text("Use the button below to select a dataset directory.");
             } else {
-                for (const auto& datasetPath : config.recentDatasets) {
+                for (size_t i = 0; i < config.recentDatasets.size(); ) {
+                    const auto& datasetPath = config.recentDatasets[i];
                     std::string displayName = datasetPath;
                     size_t last_slash = displayName.find_last_of("/\\");
                     if (last_slash != std::string::npos) {
@@ -211,6 +212,17 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                             }
                         }
                     }
+
+                    ImGui::PushID(datasetPath.c_str());
+
+                    float btnH = ImGui::GetFrameHeight();
+                    if (ImGui::Button("×", ImVec2(btnH, btnH))) {
+                        config.recentDatasets.erase(config.recentDatasets.begin() + i);
+                        config.saveToFile(configFilePath);
+                        ImGui::PopID();
+                        continue;
+                    }
+                    ImGui::SameLine();
 
                     if (ImGui::Button(displayName.c_str(), ImVec2(-FLT_MIN, 0))) {
                         if (std::filesystem::exists(datasetPath) && std::filesystem::is_directory(datasetPath)) {
@@ -236,6 +248,9 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                     if (ImGui::IsItemHovered()) {
                         ImGui::SetTooltip("%s", datasetPath.c_str());
                     }
+
+                    ImGui::PopID();
+                    i++;
                 }
             }
             ImGui::EndChild();

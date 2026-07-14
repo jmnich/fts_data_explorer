@@ -106,6 +106,13 @@ struct AppConfig {
             recentDatasets.resize(maxRecentDatasets);
         }
     }
+
+    void removeRecentDataset(const std::string& datasetPath) {
+        auto it = std::find(recentDatasets.begin(), recentDatasets.end(), datasetPath);
+        if (it != recentDatasets.end()) {
+            recentDatasets.erase(it);
+        }
+    }
     
     // Save configuration to file
     bool saveToFile(const std::string& filename) {
