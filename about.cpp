@@ -42,6 +42,35 @@ void renderAboutPopup() {
     ImGui::BulletText("tinyfiledialogs (zlib/libpng) - sourceforge.net/projects/tinyfiledialogs");
     ImGui::BulletText("stb_image (MIT/public domain) - github.com/nothings/stb");
     ImGui::BulletText("Nlohmann JSON (MIT) - github.com/nlohmann/json");
+    ImGui::Separator();
+
+    // ── Papers ────────────────────────────
+    ImGui::Text("Underlying literature");
+    ImGui::BulletText("Norton-Beer apodization windows:");
+    ImGui::Text("    K. F. F. Ntokas, J. Ungermann, and M. Kaufmann, Norton-Beer apodization");
+    ImGui::Text("    and its Fourier transform, Journal of the Optical Society of America A, vol. 40,");
+    ImGui::Text("    p. 2026, Nov. 2023.");
+
+    ImGui::BulletText("Apodization window formulas:");
+    ImGui::Text("    SciPy 1.0: Fundamental Algorithms for Scientific Computing in Python");
+    ImGui::Text("    Nature Methods, vol. 17, pp. 261–272, 2020.");
+
+    ImGui::BulletText("Building spectrometers and X-axis correction:");
+    ImGui::Text("    J. Mnich, J. Kunsch, M. Budden, T. Gebert, M. Schossig, J. Sotor, and");
+    ImGui::Text("    L. A. Sterczewski, Ultra-broadband room-temperature Fourier transform");
+    ImGui::Text("    spectrometer with watt-level power consumption, Optics Express, vol. 32,");
+    ImGui::Text("    p. 45801, Dec. 2024");
+
+    ImGui::BulletText("General FTS handbook:");
+    ImGui::Text("    P. R. Griffiths and J. A. De Haseth, Fourier transform infrared spectrometry.");
+    ImGui::Text("    No. v. 171 in Chemical analysis, Hoboken, N.J: Wiley-Interscience, 2nd ed ed., 2007");
+    ImGui::Text("");
+
+    // ── Disclosure ────────────────────────────
+    ImGui::Separator();
+    ImGui::Text("AI disclosure:");
+    ImGui::Text("This application was developped with the use of coding agents");
+    ImGui::Text("utilizing LLMs from various suppliers, including Mistral AI and Opencode GO.");
 
     ImGui::EndChild();
 
