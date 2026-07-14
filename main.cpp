@@ -432,6 +432,54 @@ static void renderAdapterSelectionPopup() {
     ImGui::PopStyleColor();
 }
 
+static void performFileDeletion(AppState& appState, size_t index) {
+    const auto& file = appState.sortedFiles[index];
+
+    std::error_code ec;
+    bool removed = std::filesystem::remove(file, ec);
+    if (!removed || ec) {
+        std::cerr << "Failed to delete file: " << file << " (" << ec.message() << ")" << std::endl;
+        return;
+    }
+
+    std::cout << "Deleted file: " << file << std::endl;
+
+    // Remove from csvFiles
+    auto csvIt = std::find(appState.csvFiles.begin(), appState.csvFiles.end(), file);
+    if (csvIt != appState.csvFiles.end())
+        appState.csvFiles.erase(csvIt);
+
+    // Remove from sortedFiles at index
+    appState.sortedFiles.erase(appState.sortedFiles.begin() + index);
+
+    // Remove from filesSelectedForAveraging
+    if (index < appState.filesSelectedForAveraging.size())
+        appState.filesSelectedForAveraging.erase(appState.filesSelectedForAveraging.begin() + index);
+
+    // If the file was in selectedFiles, remove it there too
+    auto selIt = std::find(appState.selectedFiles.begin(), appState.selectedFiles.end(), file);
+    if (selIt != appState.selectedFiles.end()) {
+        size_t selIdx = std::distance(appState.selectedFiles.begin(), selIt);
+        appState.selectedFiles.erase(appState.selectedFiles.begin() + selIdx);
+        appState.selectedFilenames.erase(appState.selectedFilenames.begin() + selIdx);
+        appState.loadedData.erase(appState.loadedData.begin() + selIdx);
+        appState.rawDataCache.erase(appState.rawDataCache.begin() + selIdx);
+    }
+
+    // Adjust currentSortedFileIndex: jump to previous file when deleting current
+    if (index < appState.currentSortedFileIndex) {
+        appState.currentSortedFileIndex--;
+    } else if (index == appState.currentSortedFileIndex) {
+        if (appState.currentSortedFileIndex > 0)
+            appState.currentSortedFileIndex--;
+        appState.filesChanged = true; // trigger reload from new position
+    }
+    if (appState.currentSortedFileIndex >= appState.sortedFiles.size())
+        appState.currentSortedFileIndex = appState.sortedFiles.empty() ? 0 : appState.sortedFiles.size() - 1;
+
+    appState.needsRedraw = true;
+}
+
 static void renderIncompatibleAdapterPopup() {
     static int focusIdx = 0;
     static bool prevPopupOpen = false;
@@ -1072,6 +1120,20 @@ int main(int argc, char* argv[]) {
         
 
         
+        // Handle Delete key to remove currently navigated file
+        // (OpenPopup is deferred to the Files panel, after NewFrame)
+        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) &&
+            ImGui::IsKeyPressed(ImGuiKey_Delete) &&
+            !appState.sortedFiles.empty()) {
+            if (appState.skipDeleteConfirm) {
+                performFileDeletion(appState, appState.currentSortedFileIndex);
+            } else {
+                appState.deleteConfirmIndex = appState.currentSortedFileIndex;
+                appState.showDeleteConfirmPopup = true;
+                appState.needsRedraw = true;
+            }
+        }
+
         // Handle Ctrl+H to return to welcome screen
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) && ImGui::IsKeyPressed(ImGuiKey_H) && ImGui::GetIO().KeyCtrl) {
             // Reset to welcome screen state
@@ -1560,6 +1622,10 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
         if (!appState.showWelcomeScreen || appState.welcomeScreenInitialized) {
         // Files panel (left)
         ImGui::Begin("Files");
+        // Open delete confirmation popup if pending (called within frame context)
+        if (appState.showDeleteConfirmPopup) {
+            ImGui::OpenPopup("Delete File##confirm");
+        }
         ImGui::PushTextWrapPos(); // Enable text wrapping
         ImGui::Text("Current Dataset: %s", appState.currentDatasetName.c_str());
         ImGui::Separator();
@@ -1606,7 +1672,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             }
         }
         
-        for (size_t i = 0; i < appState.sortedFiles.size(); i++) {
+        for (size_t i = 0; i < appState.sortedFiles.size(); ) {
             const auto& file = appState.sortedFiles[i];
             // Extract just the filename without path
             std::string filename = file;
@@ -1616,6 +1682,23 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             }
             std::string fullFilename = filename;
             filename = shortenFilename(filename);
+            
+            // Delete button (left) — unique label per row avoids needing PushID
+            float btnH = ImGui::GetFrameHeight();
+            std::string delBtnId = "×##del" + std::to_string(i);
+            if (ImGui::Button(delBtnId.c_str(), ImVec2(btnH, btnH))) {
+                if (appState.skipDeleteConfirm) {
+                    performFileDeletion(appState, i);
+                    continue;
+                } else {
+                    appState.deleteConfirmIndex = i;
+                    appState.showDeleteConfirmPopup = true;
+                }
+            }
+            
+            ImGui::SameLine();
+            
+            ImGui::PushID(static_cast<int>(i));
             
             // Enhanced highlighting for the currently selected file
             int stylesPushed = 1; // Default: push 1 style
@@ -1655,7 +1738,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                 ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.15f, 0.15f, 0.5f)); // Default button color
             }
             
-            // Compute widths: button on left, checkbox on right
+            // Compute widths: delete button already placed, then filename, then checkbox
             float chkWidth = ImGui::GetFrameHeight();
             float btnWidth = ImGui::GetContentRegionAvail().x - chkWidth - ImGui::GetStyle().ItemSpacing.x;
             
@@ -1802,6 +1885,9 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             if (i == appState.currentSortedFileIndex && appState.keyboardNavigation) {
                 ImGui::SetScrollHereY(0.5f); // Scroll to center the selected item
             }
+
+            ImGui::PopID();
+            i++;
         }
         ImGui::EndChild();
 
@@ -1815,6 +1901,80 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             }
             
             ImGui::EndPopup();
+        }
+
+        // Delete confirmation popup
+        {
+            static int focusIdx = 0;
+            static bool prevPopupOpen = false;
+            if (!appState.showDeleteConfirmPopup)
+                prevPopupOpen = false;
+
+            if (ImGui::BeginPopupModal("Delete File##confirm", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
+                size_t idx = appState.deleteConfirmIndex;
+                std::string fname = idx < appState.sortedFiles.size()
+                    ? appState.sortedFiles[idx].substr(appState.sortedFiles[idx].find_last_of("/\\") + 1)
+                    : "";
+
+                ImGui::Text("Are you sure you want to delete?");
+                ImGui::TextWrapped("%s", fname.c_str());
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+
+                bool enterPressed = ImGui::IsKeyPressed(ImGuiKey_Enter);
+
+                if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) && focusIdx > 0)
+                    focusIdx--;
+                if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) && focusIdx < 2)
+                    focusIdx++;
+
+                // Cancel
+                if (focusIdx == 0)
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+                if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape) ||
+                    (enterPressed && prevPopupOpen && focusIdx == 0)) {
+                    if (focusIdx == 0) ImGui::PopStyleColor();
+                    appState.showDeleteConfirmPopup = false;
+                    ImGui::CloseCurrentPopup();
+                } else if (focusIdx == 0) {
+                    ImGui::PopStyleColor();
+                }
+                ImGui::SameLine();
+
+                // Yes
+                if (focusIdx == 1)
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+                if (ImGui::Button("Yes") ||
+                    (enterPressed && prevPopupOpen && focusIdx == 1)) {
+                    if (focusIdx == 1) ImGui::PopStyleColor();
+                    if (idx < appState.sortedFiles.size())
+                        performFileDeletion(appState, idx);
+                    appState.showDeleteConfirmPopup = false;
+                    ImGui::CloseCurrentPopup();
+                } else if (focusIdx == 1) {
+                    ImGui::PopStyleColor();
+                }
+                ImGui::SameLine();
+
+                // Yes, don't ask again
+                if (focusIdx == 2)
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+                if (ImGui::Button("Yes, don't ask again") ||
+                    (enterPressed && prevPopupOpen && focusIdx == 2)) {
+                    if (focusIdx == 2) ImGui::PopStyleColor();
+                    appState.skipDeleteConfirm = true;
+                    if (idx < appState.sortedFiles.size())
+                        performFileDeletion(appState, idx);
+                    appState.showDeleteConfirmPopup = false;
+                    ImGui::CloseCurrentPopup();
+                } else if (focusIdx == 2) {
+                    ImGui::PopStyleColor();
+                }
+
+                ImGui::EndPopup();
+                prevPopupOpen = true;
+            }
         }
         
         ImGui::PopTextWrapPos(); // Disable text wrapping

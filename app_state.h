@@ -172,6 +172,11 @@ struct AppState {
     // Clear T100 spectrum data (call when dataset changes)
     void clearT100Spectrum();
 
+    // Delete confirmation state (session-only, not persisted)
+    bool showDeleteConfirmPopup = false;
+    size_t deleteConfirmIndex = 0;
+    bool skipDeleteConfirm = false; // "Don't ask again" flag — survives dataset changes, not config
+
     // Thread pool for parallel computation
     std::unique_ptr<ThreadPool> computationPool;
     int configuredWorkerCount = -1;   // -1 = AUTO

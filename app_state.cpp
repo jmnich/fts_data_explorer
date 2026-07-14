@@ -134,6 +134,9 @@ void AppState::reset() {
     pendingAdapterName.clear();
     pendingAdapterDirectory.clear();
     compatibleAdapters.clear();
+    showDeleteConfirmPopup = false;
+    deleteConfirmIndex = 0;
+    // skipDeleteConfirm intentionally NOT reset — it's a session-level flag
     hilbertXCache.clear();
     rawDataCache.clear();
 }
