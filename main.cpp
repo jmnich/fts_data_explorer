@@ -838,6 +838,12 @@ int main(int argc, char* argv[]) {
 
     // Load docking layout flag from config (persisted so DockBuilder runs only once)
     appState.defaultLayoutApplied = config.defaultLayoutApplied;
+
+    // If imgui.ini is missing (e.g. user deleted it to reset layout),
+    // force DockBuilder to run regardless of config state.
+    if (!std::filesystem::exists(io.IniFilename)) {
+        appState.defaultLayoutApplied = false;
+    }
     
     // Load spectrum window settings from config
     appState.spectrum.yAxisMode           = config.spectrumYAxisMode;
