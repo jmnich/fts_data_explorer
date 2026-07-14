@@ -201,6 +201,16 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                 ImGui::Text("No recent datasets found.");
                 ImGui::Text("Use the button below to select a dataset directory.");
             } else {
+                static int selectedIdx = 0;
+                if (selectedIdx >= (int)config.recentDatasets.size())
+                    selectedIdx = config.recentDatasets.empty() ? 0 : (int)config.recentDatasets.size() - 1;
+
+                // Arrow key navigation (only through dataset name rows, not × or A buttons)
+                if (ImGui::IsKeyPressed(ImGuiKey_UpArrow) && selectedIdx > 0)
+                    selectedIdx--;
+                if (ImGui::IsKeyPressed(ImGuiKey_DownArrow) && selectedIdx < (int)config.recentDatasets.size() - 1)
+                    selectedIdx++;
+
                 for (size_t i = 0; i < config.recentDatasets.size(); ) {
                     const auto& entry = config.recentDatasets[i];
                     const auto& datasetPath = entry.path;
@@ -220,10 +230,21 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
 
                     float btnH = ImGui::GetFrameHeight();
 
+                    // Highlight selected row
+                    if ((int)i == selectedIdx) {
+                        ImVec2 rowMin = ImGui::GetCursorScreenPos();
+                        float rowH = ImGui::GetFrameHeight();
+                        ImGui::GetWindowDrawList()->AddRectFilled(
+                            rowMin,
+                            ImVec2(rowMin.x + ImGui::GetContentRegionAvail().x, rowMin.y + rowH),
+                            IM_COL32(80, 80, 200, 120));
+                    }
+
                     // Cross (×) button — delete from recent list
                     if (ImGui::Button("×", ImVec2(btnH, btnH))) {
                         config.recentDatasets.erase(config.recentDatasets.begin() + i);
                         config.saveToFile(configFilePath);
+                        if (selectedIdx > (int)i) selectedIdx--;
                         ImGui::PopID();
                         continue;
                     }
@@ -252,8 +273,15 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                     }
                     ImGui::SameLine();
 
-                    // Dataset name button
+                    // Dataset name button (mouse click or Enter on selected row)
+                    bool shouldOpen = false;
                     if (ImGui::Button(displayName.c_str(), ImVec2(-FLT_MIN, 0))) {
+                        shouldOpen = true;
+                    }
+                    if (!shouldOpen && (int)i == selectedIdx && ImGui::IsKeyPressed(ImGuiKey_Enter)) {
+                        shouldOpen = true;
+                    }
+                    if (shouldOpen) {
                         if (std::filesystem::exists(datasetPath) && std::filesystem::is_directory(datasetPath)) {
                             std::string rawDataPath = datasetPath + "/raw_data";
                             if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {
