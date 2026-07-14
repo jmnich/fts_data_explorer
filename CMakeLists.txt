@@ -206,8 +206,7 @@ if(NOT WIN32)
     )
 else()
     target_link_options(fts_data_explorer PRIVATE
-        -static-libgcc
-        -static-libstdc++
+        -static
     )
 endif()
 
