@@ -1,5 +1,7 @@
 # Project overview
 
+> **IMPORTANT**: Always read and follow [`IMGUI_GUIDE.md`](./IMGUI_GUIDE.md) when writing or modifying any GUI code (ImGui, ImPlot, ImPlot3D, panels, windows, popups, plots, tables, async computation). This guide documents every pattern used in the project.
+
 FTS Data Explorer is a scientific GUI for rapid exploration of raw fourier spectrometer data. It presents a navigable file list with metadata, plots interferograms, and provides spectrum computation (FFT), average/SNR/Allan/100% T analysis pipelines — all driven by a pluggable data adapter system.
 
 # Toolchain
@@ -17,14 +19,18 @@ FTS Data Explorer is a scientific GUI for rapid exploration of raw fourier spect
 | **Interferogram View** | Primary + reference interferograms on 2 vertically stacked plots (shared X axis). Zoom, pan, shift+drag range select, ESC reset. |
 | **Interferogram controls** | X-axis base (sample/OPD), Max at zero, Auto-fit Y, Downsample toggles. |
 | **Metadata** | All available metadata for the selected file. |
-| **Files** | File list with checkboxes for Average/SNR/Allan/100% T inclusion. Ctrl+click multi-select (max 5). |
+| **Files** | File list with checkboxes for Average/SNR/Allan/100% T inclusion. Cross (×) button per file to delete from disk (with confirmation popup). Ctrl+click multi-select (max 5). Delete key triggers deletion. |
 | **Spectrum** | FFT controls (X unit, Y scale, Y mode, laser wavelength, zero-pad, apodization) + spectrum plot. |
 | **Average** | Mean-spectrum computation (multi-file) + plot. |
 | **SNR** | SNR-per-wavelength computation (multi-file, ≥2 files) + plot. |
 | **Allan** | 3D Allan-Werle variance surface + 2D slice plot. |
 | **100% T** | Transmittance curves, energy ratios, std dev plot. |
 
-## Ribbon menu
+## Welcome screen recent datasets
+
+Each entry has two buttons: **Name** (opens dataset) and **×** (removes from recent list, persists via `config.h:removeRecentDataset()`).
+
+# Ribbon menu
 
 - **File**: Set Working Directory, Recent Datasets
 - **Settings**: FPS toggle, Grid opacity (0–100%), UI size (tiny/small/normal/large/huge)
@@ -330,11 +336,21 @@ The script handles CMake configuration, dependency fetching (ImGui, ImPlot, ImPl
 - Visual verification of plots and GUI
 - Test with various CSV formats and malformed data
 
+# File deletion from Files panel
+
+- **Cross button** (×) per file row: deletes the file from disk. Opens confirmation popup unless `skipDeleteConfirm` is set.
+- **Delete key**: same action as cross button, operates on `currentSortedFileIndex`.
+- **Confirmation popup**: modal with Cancel / Yes / "Yes, don't ask again". Keyboard-navigable (Left/Right arrows, Enter, Escape). "Don't ask again" sets session-only `skipDeleteConfirm` flag (`app_state.h`), not persisted to config.
+- **State cleanup**: `performFileDeletion()` (`main.cpp:435-486`) removes the file from `csvFiles`, `sortedFiles`, `filesSelectedForAveraging`, and `selectedFiles`/`loadedData`/`rawDataCache` if present. Adjusts `currentSortedFileIndex` (jumps to previous file if current was deleted) and sets `filesChanged = true` to trigger reload.
+- **Popup ID scope**: `OpenPopup` must be called in same window frame context as `BeginPopupModal`. The centralized `OpenPopup` at top of Files panel (`main.cpp:1627-1630`) ensures this — do NOT call `OpenPopup` before `ImGui::NewFrame()`.
+
 # Common pitfalls for AI agents
 
 - **Duplicate Code**: CSV adapter code exists in both main.cpp and adapters/csv_adapter.h — check which is authoritative before editing.
 - **Build System**: CMake configuration may need updates for new library dependencies added to `build_script.sh`.
 - **GUI State**: ImGui state management is complex — prefer simple state variables over nested `PushID`/`PopID`.
+- **OpenPopup before NewFrame**: `ImGui::OpenPopup()` called before `ImGui::NewFrame()` gets cleared during frame setup. Always call `OpenPopup` within a frame context (between `NewFrame` and `Render`).
+- **Popup ID path**: `OpenPopup` inherits the current ID stack scope. If called inside `PushID`, the popup's full ID includes the PushID prefix and won't match a `BeginPopupModal` call outside that scope. Use unique labels with `##` suffix instead of relying on PushID for popup-triggering widgets.
 - **Parallel Processing**: cumulative counter, not per-frame; FFTW mutex for plan creation; capture by value in lambdas; sync fallback for first-time loads.
 - **GLIBC version symbols**: `_GNU_SOURCE` is undefined, hiding `pthread_mutex_clocklock`/`pthread_cond_clockwait` from GCC 16+ headers. Always include `pthread_compat.h` before `<future>` or `<mutex>`.
 
