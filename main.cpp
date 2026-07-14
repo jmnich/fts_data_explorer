@@ -860,6 +860,7 @@ int main(int argc, char* argv[]) {
     appState.spectrum.apodizationParams.nortonBeerFwhm = config.apodNortonBeerFwhm;
     appState.spectrum.apodizationParams.dolphChebyshevAt = config.apodDolphChebyshevAt;
     appState.spectrum.apodizationParams.hammingAlpha = config.apodHammingAlpha;
+    appState.spectrum.apodizationParams.kaiserBeta = config.apodKaiserBeta;
     appState.spectrum.apodizationParams.rectAsymMode = config.apodRectAsymMode;
     appState.spectrum.detectorSensitivity = config.spectrumDetectorSensitivity;
     
@@ -2798,6 +2799,13 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                 if (ImGui::IsItemHovered()) {
                     ImGui::SetTooltip("Generalized Hamming alpha (0.36-1.0).\n0.54 = standard Hamming, 1.0 = rectangular.");
                 }
+            } else if (appState.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Kaiser)) {
+                if (ImGui::SliderFloat("Beta##KaiserBeta", &appState.spectrum.apodizationParams.kaiserBeta, 0.5f, 12.0f, "%.1f")) {
+                    invalidateSpectrumCaches();
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Kaiser beta (0.5-12.0).\nHigher values suppress sidelobes at the cost of a broader mainlobe.\nDefault 6.0 is similar to Hamming.");
+                }
             }
 
             if (appState.datasetInfo.hasPrecomputedSpectra) ImGui::EndDisabled();
@@ -4181,6 +4189,8 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                             activeParam = static_cast<double>(appState.spectrum.apodizationParams.dolphChebyshevAt);
                         else if (appState.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Hamming))
                             activeParam = static_cast<double>(appState.spectrum.apodizationParams.hammingAlpha);
+                        else if (appState.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Kaiser))
+                            activeParam = static_cast<double>(appState.spectrum.apodizationParams.kaiserBeta);
                         appState.spectrum.lastSpectrumParams[fid] = {
                             static_cast<double>(appState.spectrum.Kpadding),
                             static_cast<double>(appState.spectrum.xUnitSelector),
@@ -4299,6 +4309,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
     config.apodNortonBeerFwhm  = appState.spectrum.apodizationParams.nortonBeerFwhm;
     config.apodDolphChebyshevAt = appState.spectrum.apodizationParams.dolphChebyshevAt;
     config.apodHammingAlpha     = appState.spectrum.apodizationParams.hammingAlpha;
+    config.apodKaiserBeta       = appState.spectrum.apodizationParams.kaiserBeta;
     config.apodRectAsymMode     = appState.spectrum.apodizationParams.rectAsymMode;
     config.spectrumDetectorSensitivity = appState.spectrum.detectorSensitivity;
     

@@ -77,6 +77,39 @@ static std::vector<double> genSymmetricBlackmanHarris(std::size_t n) {
     return window;
 }
 
+// Modified Bessel function of the first kind, zeroth order I₀(x)
+// Series expansion: I₀(x) = Σ_{k=0}∞ (x²/4)^k / (k!)²
+static double besselI0(double x) {
+    double sum = 1.0;
+    double term = 1.0;
+    const double xHalfSq = (x / 2.0) * (x / 2.0);
+    for (int k = 1; k <= 50; ++k) {
+        term *= xHalfSq / static_cast<double>(k * k);
+        sum += term;
+        if (term < 1e-15 * sum) break;
+    }
+    return sum;
+}
+
+// Generate a symmetric Kaiser window of given length with parameter beta
+// w(n) = I₀(β √(1 - (2n/(N-1) - 1)²)) / I₀(β)
+static std::vector<double> genSymmetricKaiser(std::size_t n, double beta) {
+    std::vector<double> window(n);
+    if (n < 2) {
+        for (std::size_t i = 0; i < n; ++i)
+            window[i] = 1.0;
+        return window;
+    }
+    const double denom = besselI0(beta);
+    const double invHalf = 2.0 / static_cast<double>(n - 1);
+    for (std::size_t i = 0; i < n; ++i) {
+        const double arg = static_cast<double>(i) * invHalf - 1.0;
+        const double t = beta * std::sqrt(std::max(0.0, 1.0 - arg * arg));
+        window[i] = besselI0(t) / denom;
+    }
+    return window;
+}
+
 // Generate a symmetric Dolph-Chebyshev window of given length with specified attenuation (dB)
 static std::vector<double> genSymmetricDolphChebyshev(std::size_t n, double at) {
     std::vector<double> window(n, 1.0);
@@ -160,7 +193,7 @@ static std::vector<double> genSymmetricDolphChebyshev(std::size_t n, double at) 
 }
 
 std::vector<const char*> Apodization::getWindowNames() {
-    return { "Rectangular", "Gauss", "Triangular", "Norton-Beer", "Dolph-Chebyshev", "Hamming", "Blackman-Harris" };
+    return { "Rectangular", "Gauss", "Triangular", "Norton-Beer", "Dolph-Chebyshev", "Hamming", "Blackman-Harris", "Hann", "Happ-Genzel", "Kaiser" };
 }
 
 std::vector<double> Apodization::createWindow(ApodizationWindow w,
@@ -333,6 +366,67 @@ std::vector<double> Apodization::createWindow(ApodizationWindow w,
 
             if (rightLen > 0) {
                 auto winFullRight = genSymmetricBlackmanHarris(2 * rightLen);
+                for (std::size_t i = 0; i < rightLen; ++i)
+                    window[leftLen + i] = winFullRight[rightLen + i];
+            }
+            break;
+        }
+        case ApodizationWindow::Hann: {
+            /*
+            Hann window: w(n) = 0.5·(1 - cos(2πn/(N-1)))  =  sin²(πn/(N-1))
+            Also known as Hanning window. Equivalent to Generalized Hamming with α = 0.5.
+            Asymmetric construction split at the peak position.
+            */
+
+            const std::size_t leftLen  = peakIdx + 1;
+            const std::size_t rightLen = n - 1 - peakIdx;
+
+            auto winFullLeft = genSymmetricHamming(2 * leftLen, 0.5f);
+            for (std::size_t i = 0; i < leftLen; ++i)
+                window[i] = winFullLeft[i];
+
+            if (rightLen > 0) {
+                auto winFullRight = genSymmetricHamming(2 * rightLen, 0.5f);
+                for (std::size_t i = 0; i < rightLen; ++i)
+                    window[leftLen + i] = winFullRight[rightLen + i];
+            }
+            break;
+        }
+        case ApodizationWindow::HappGenzel: {
+            /*
+            Happ-Genzel window (parabolic): w(δ) = 1 - (δ / δ_max)²
+            Asymmetric construction based on distance from peak, matching the pattern
+            used by Triangular and Gauss windows.
+            */
+
+            const double halfLeft  = pIdx;
+            const double halfRight = nLast - pIdx;
+            for (std::size_t i = 0; i < n; ++i) {
+                const double d = static_cast<double>(i) - pIdx;
+                const double halfWidth = (d < 0.0) ? halfLeft : halfRight;
+                if (halfWidth <= 0.0)
+                    window[i] = (d == 0.0) ? 1.0 : 0.0;
+                else
+                    window[i] = 1.0 - (d * d) / (halfWidth * halfWidth);
+            }
+            break;
+        }
+        case ApodizationWindow::Kaiser: {
+            /*
+            Kaiser window: w(n) = I₀(β √(1 - (2n/(N-1)-1)²)) / I₀(β)
+            Asymmetric construction split at the peak position, matching the pattern
+            used by Hamming/BlackmanHarris/NortonBeer.
+            */
+
+            const std::size_t leftLen  = peakIdx + 1;
+            const std::size_t rightLen = n - 1 - peakIdx;
+
+            auto winFullLeft = genSymmetricKaiser(2 * leftLen, p.kaiserBeta);
+            for (std::size_t i = 0; i < leftLen; ++i)
+                window[i] = winFullLeft[i];
+
+            if (rightLen > 0) {
+                auto winFullRight = genSymmetricKaiser(2 * rightLen, p.kaiserBeta);
                 for (std::size_t i = 0; i < rightLen; ++i)
                     window[leftLen + i] = winFullRight[rightLen + i];
             }

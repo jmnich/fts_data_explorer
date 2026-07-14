@@ -154,6 +154,8 @@ bool Spectrum::isSpectrumDirty(const std::string& fileId, const std::vector<doub
         activeParam = static_cast<double>(apodizationParams.dolphChebyshevAt);
     else if (apodizationSelector == static_cast<int>(ApodizationWindow::Hamming))
         activeParam = static_cast<double>(apodizationParams.hammingAlpha);
+    else if (apodizationSelector == static_cast<int>(ApodizationWindow::Kaiser))
+        activeParam = static_cast<double>(apodizationParams.kaiserBeta);
 
     if (lp.size() < 6 ||
         lp[0] != static_cast<double>(Kpadding)               ||
