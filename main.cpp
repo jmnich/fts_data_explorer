@@ -28,6 +28,8 @@
 #include "adapters/arcoptix_igms_adapter.h"
 #include "adapters/arcoptix_spectra_adapter.h"
 #include "tinyfiledialogs.h"
+#include "icon.h"
+#include "stb_image.h"
 #include "file_browser.h"
 #include "welcome.h"
 #include "about.h"
@@ -113,6 +115,62 @@ static bool naturalSortCompare(const std::string& a, const std::string& b) {
 }
 
 
+
+// ── Window icon (accent-color-aware, rebuilt from white template) ──────────
+
+static int s_iconW = 0, s_iconH = 0;
+static unsigned char* s_iconTemplate = nullptr; // cached white-on-transparent RGBA
+
+static void freeIconTemplate() {
+    if (s_iconTemplate) {
+        stbi_image_free(s_iconTemplate);
+        s_iconTemplate = nullptr;
+        s_iconW = s_iconH = 0;
+    }
+}
+
+static void applyWindowIcon(GLFWwindow* window, const ImVec4& accent) {
+    if (!s_iconTemplate) {
+        int ch;
+        s_iconTemplate = stbi_load_from_memory(
+            assets_icon_png, assets_icon_png_len, &s_iconW, &s_iconH, &ch, 4);
+        if (!s_iconTemplate) {
+            std::cerr << "Failed to decode icon PNG" << std::endl;
+            return;
+        }
+    }
+
+    int totalPixels = s_iconW * s_iconH;
+    auto* pixels = (unsigned char*)malloc((size_t)totalPixels * 4);
+    if (!pixels) return;
+
+    // Dark background (matches app theme)
+    memset(pixels, 26, (size_t)totalPixels * 4);
+
+    // Tint waveform pixels with accent color
+    // Boost saturation for icon visibility (1.5x, clamped)
+    float sr = std::min(accent.x * 2.0f, 1.0f);
+    float sg = std::min(accent.y * 2.0f, 1.0f);
+    float sb = std::min(accent.z * 2.0f, 1.0f);
+    int r = (int)(sr * 255.0f);
+    int g = (int)(sg * 255.0f);
+    int b = (int)(sb * 255.0f);
+    for (int i = 0; i < totalPixels; i++) {
+        int idx = i * 4;
+        if (s_iconTemplate[idx + 3] > 0) {
+            pixels[idx + 0] = (unsigned char)r;
+            pixels[idx + 1] = (unsigned char)g;
+            pixels[idx + 2] = (unsigned char)b;
+            pixels[idx + 3] = s_iconTemplate[idx + 3];
+        }
+    }
+
+    GLFWimage icon = { s_iconW, s_iconH, pixels };
+    glfwSetWindowIcon(window, 1, &icon);
+    free(pixels);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 
 /**
  * Initialize GLFW, ImGui, and application state
@@ -696,6 +754,8 @@ void cleanupApplication(GLFWwindow* window) {
     ImPlot3D::DestroyContext();
     ImPlot::DestroyContext();
     ImGui::DestroyContext();
+
+    freeIconTemplate();
     
     glfwDestroyWindow(window);
     glfwTerminate();
@@ -770,6 +830,9 @@ int main(int argc, char* argv[]) {
     ImGuiStyle& style = ImGui::GetStyle();
     ImPlotStyle& plotStyle = ImPlot::GetStyle();
     ApplyTheme(style, plotStyle, StringToAccentColor(appState.currentAccentColor));
+
+    // Set window icon tinted with current accent color
+    applyWindowIcon(window, GetAccentBase(StringToAccentColor(appState.currentAccentColor)));
 
     // Load welcome screen background texture
     initWelcomeBackground();
@@ -1085,6 +1148,7 @@ int main(int argc, char* argv[]) {
             ImGuiStyle& style = ImGui::GetStyle();
             ImPlotStyle& plotStyle = ImPlot::GetStyle();
             ApplyTheme(style, plotStyle, StringToAccentColor(appState.currentAccentColor));
+            applyWindowIcon(window, GetAccentBase(StringToAccentColor(appState.currentAccentColor)));
             appState.accentColorChanged = false;
             appState.needsRedraw = true;
         }

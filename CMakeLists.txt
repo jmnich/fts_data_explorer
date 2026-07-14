@@ -122,6 +122,16 @@ if(NOT XXD_ERR STREQUAL "")
     message(FATAL_ERROR "Failed to generate asset header: ${XXD_ERR}")
 endif()
 
+execute_process(
+    COMMAND xxd -i assets/icon.png
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    OUTPUT_FILE "${ASSET_GENERATED_DIR}/icon.h"
+    ERROR_VARIABLE XXD_ERR
+)
+if(NOT XXD_ERR STREQUAL "")
+    message(FATAL_ERROR "Failed to generate icon header: ${XXD_ERR}")
+endif()
+
 # Find required packages
 find_package(OpenGL REQUIRED)
 if(NOT WIN32)
