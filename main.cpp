@@ -859,6 +859,7 @@ int main(int argc, char* argv[]) {
     appState.spectrum.apodizationParams.rectWidth  = config.apodRectWidth;
     appState.spectrum.apodizationParams.nortonBeerFwhm = config.apodNortonBeerFwhm;
     appState.spectrum.apodizationParams.dolphChebyshevAt = config.apodDolphChebyshevAt;
+    appState.spectrum.apodizationParams.hammingAlpha = config.apodHammingAlpha;
     appState.spectrum.apodizationParams.rectAsymMode = config.apodRectAsymMode;
     appState.spectrum.detectorSensitivity = config.spectrumDetectorSensitivity;
     
@@ -4297,6 +4298,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
     config.apodRectWidth        = appState.spectrum.apodizationParams.rectWidth;
     config.apodNortonBeerFwhm  = appState.spectrum.apodizationParams.nortonBeerFwhm;
     config.apodDolphChebyshevAt = appState.spectrum.apodizationParams.dolphChebyshevAt;
+    config.apodHammingAlpha     = appState.spectrum.apodizationParams.hammingAlpha;
     config.apodRectAsymMode     = appState.spectrum.apodizationParams.rectAsymMode;
     config.spectrumDetectorSensitivity = appState.spectrum.detectorSensitivity;
     

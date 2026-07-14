@@ -42,13 +42,37 @@ static std::vector<double> genSymmetricHamming(std::size_t n, float alpha) {
     std::vector<double> window(n);
     if (n < 2) {
         for (std::size_t i = 0; i < n; ++i)
-            window[i] = 1.0f;
+            window[i] = 1.0;
         return window;
     }
     const float invN = 1.0f / static_cast<float>(n - 1);
     for (std::size_t i = 0; i < n; ++i) {
         const float x = static_cast<float>(i) * invN;
         window[i] = alpha - (1.0f - alpha) * std::cos(2.0f * M_PI * x);
+    }
+    return window;
+}
+
+// Generate a symmetric minimum 4-term Blackman-Harris window (cosine-sum)
+// w(n) = a0 - a1·cos(2πn/(N-1)) + a2·cos(4πn/(N-1)) - a3·cos(6πn/(N-1))
+// Coefficients: [0.358759, 0.488164, 0.141177, 0.011902] → first sidelobe -92.2 dB
+static std::vector<double> genSymmetricBlackmanHarris(std::size_t n) {
+    static const double a0 = 0.358759;
+    static const double a1 = 0.488164;
+    static const double a2 = 0.141177;
+    static const double a3 = 0.011902;
+    std::vector<double> window(n);
+    if (n < 2) {
+        for (std::size_t i = 0; i < n; ++i)
+            window[i] = 1.0;
+        return window;
+    }
+    const double theta0 = 2.0 * M_PI / static_cast<double>(n - 1);
+    for (std::size_t i = 0; i < n; ++i) {
+        const double theta = theta0 * static_cast<double>(i);
+        window[i] = a0 - a1 * std::cos(theta)
+                        + a2 * std::cos(2.0 * theta)
+                        - a3 * std::cos(3.0 * theta);
     }
     return window;
 }
@@ -136,7 +160,7 @@ static std::vector<double> genSymmetricDolphChebyshev(std::size_t n, double at) 
 }
 
 std::vector<const char*> Apodization::getWindowNames() {
-    return { "Rectangular", "Gauss", "Triangular", "Norton-Beer", "Dolph-Chebyshev", "Hamming" };
+    return { "Rectangular", "Gauss", "Triangular", "Norton-Beer", "Dolph-Chebyshev", "Hamming", "Blackman-Harris" };
 }
 
 std::vector<double> Apodization::createWindow(ApodizationWindow w,
@@ -288,6 +312,27 @@ std::vector<double> Apodization::createWindow(ApodizationWindow w,
 
             if (rightLen > 0) {
                 auto winFullRight = genSymmetricHamming(2 * rightLen, p.hammingAlpha);
+                for (std::size_t i = 0; i < rightLen; ++i)
+                    window[leftLen + i] = winFullRight[rightLen + i];
+            }
+            break;
+        }
+        case ApodizationWindow::BlackmanHarris: {
+            /*
+            Minimum 4-term Blackman-Harris cosine-sum window with classic coefficients.
+            Asymmetric construction split at the peak position, matching the pattern
+            used by Hamming/NortonBeer/DolphChebyshev.
+            */
+
+            const std::size_t leftLen  = peakIdx + 1;
+            const std::size_t rightLen = n - 1 - peakIdx;
+
+            auto winFullLeft = genSymmetricBlackmanHarris(2 * leftLen);
+            for (std::size_t i = 0; i < leftLen; ++i)
+                window[i] = winFullLeft[i];
+
+            if (rightLen > 0) {
+                auto winFullRight = genSymmetricBlackmanHarris(2 * rightLen);
                 for (std::size_t i = 0; i < rightLen; ++i)
                     window[leftLen + i] = winFullRight[rightLen + i];
             }
