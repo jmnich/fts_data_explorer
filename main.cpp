@@ -374,6 +374,18 @@ void applyAdapterSelection(const std::string& adapterName, const std::string& di
     appState.isFirstDataLoad = true;
     appState.needsRedraw = true;
 
+    // Save adapter to recent datasets if pendingRecentDatasetAdapterSave is set
+    if (appState.configPtr && !appState.pendingRecentDatasetAdapterSave.empty()) {
+        for (auto& entry : appState.configPtr->recentDatasets) {
+            if (entry.path == appState.pendingRecentDatasetAdapterSave) {
+                entry.adapterName = adapterName;
+                break;
+            }
+        }
+        appState.configPtr->saveToFile(appState.configFilePath);
+        appState.pendingRecentDatasetAdapterSave.clear();
+    }
+
     std::cout << "Adapter selected: " << adapterName << " for " << directoryPath << std::endl;
 }
 
@@ -790,6 +802,10 @@ int main(int argc, char* argv[]) {
     } else {
         std::cout << "No existing config found, using defaults" << std::endl;
     }
+
+    // Store config pointers for use by adapter selection
+    appState.configPtr = &config;
+    appState.configFilePath = configFilePath;
 
     // UI size settings
     appState.currentUiSize = config.uiSize;
@@ -1353,7 +1369,7 @@ int main(int argc, char* argv[]) {
                             parentDir.substr(raw_data_pos + 1) == "raw_data") {
                             parentDir = parentDir.substr(0, raw_data_pos);
                         }
-                        addToRecentDatasets(config, configFilePath, parentDir);
+                        addToRecentDatasets(config, configFilePath, parentDir, appState.currentAdapter ? appState.currentAdapter->getName() : "");
                     }
                 }
                 
@@ -1449,7 +1465,8 @@ int main(int argc, char* argv[]) {
                     // Recent datasets menu
                     if (!config.recentDatasets.empty()) {
                         if (ImGui::BeginMenu("Recent Datasets")) {
-                            for (const auto& datasetPath : config.recentDatasets) {
+                            for (const auto& entry : config.recentDatasets) {
+                                const auto& datasetPath = entry.path;
                                 if (ImGui::MenuItem(datasetPath.c_str())) {
                                     // Extract just the directory name for display
                                     size_t last_slash = datasetPath.find_last_of("/\\");
@@ -1469,7 +1486,12 @@ int main(int argc, char* argv[]) {
                                         // Update current dataset name
                                         appState.currentDatasetName = datasetPath.substr(datasetPath.find_last_of("/\\") + 1);
                                         
-                                        selectAdapterForDirectory(appState.currentDirectory);
+                                        // Use stored adapter if available, otherwise show selection popup
+                                        if (!entry.adapterName.empty() && AdapterRegistry::instance().getAdapter(entry.adapterName)) {
+                                            applyAdapterSelection(entry.adapterName, appState.currentDirectory);
+                                        } else {
+                                            selectAdapterForDirectory(appState.currentDirectory);
+                                        }
                                         std::cout << "Opened recent dataset: " << datasetPath << std::endl;
                                     } else {
                                         std::cerr << "Recent dataset path no longer exists: " << datasetPath << std::endl;

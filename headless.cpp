@@ -99,8 +99,12 @@ static void handleList(const std::string& type) {
         if (std::filesystem::exists(configFilePath)) {
             config.loadFromFile(configFilePath);
         }
-        for (const auto& ds : config.recentDatasets) {
-            std::cout << ds << std::endl;
+        for (const auto& entry : config.recentDatasets) {
+            std::cout << entry.path;
+            if (!entry.adapterName.empty()) {
+                std::cout << " (" << entry.adapterName << ")";
+            }
+            std::cout << std::endl;
         }
     } else {
         std::cerr << "Error: Unknown list type '" << type << "'. "

@@ -33,6 +33,9 @@ struct AppState {
     std::string pendingAdapterName;
     std::string pendingAdapterDirectory;
     std::vector<DataAdapter*> compatibleAdapters;
+    std::string pendingRecentDatasetAdapterSave; // Path to save adapter for in recent datasets
+    AppConfig* configPtr = nullptr;
+    std::string configFilePath;
     // UI state
     std::string currentUiSize;
     float uiScale;

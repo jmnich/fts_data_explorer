@@ -4,6 +4,7 @@
 #include "welcome.h"
 #include "app_state.h"
 #include "config.h"
+#include "adapters/adapter_registry.h"
 #include "file_browser.h"
 #include "theme.h"
 
@@ -109,8 +110,9 @@ void destroyWelcomeBackground() {
 }
 
 void addToRecentDatasets(AppConfig& config, const std::string& configFilePath,
-                         const std::string& datasetPath) {
-    config.addRecentDataset(datasetPath);
+                         const std::string& datasetPath,
+                         const std::string& adapterName) {
+    config.addRecentDataset(datasetPath, adapterName);
     config.saveToFile(configFilePath);
 }
 
@@ -200,7 +202,8 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                 ImGui::Text("Use the button below to select a dataset directory.");
             } else {
                 for (size_t i = 0; i < config.recentDatasets.size(); ) {
-                    const auto& datasetPath = config.recentDatasets[i];
+                    const auto& entry = config.recentDatasets[i];
+                    const auto& datasetPath = entry.path;
                     std::string displayName = datasetPath;
                     size_t last_slash = displayName.find_last_of("/\\");
                     if (last_slash != std::string::npos) {
@@ -216,6 +219,8 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                     ImGui::PushID(datasetPath.c_str());
 
                     float btnH = ImGui::GetFrameHeight();
+
+                    // Cross (×) button — delete from recent list
                     if (ImGui::Button("×", ImVec2(btnH, btnH))) {
                         config.recentDatasets.erase(config.recentDatasets.begin() + i);
                         config.saveToFile(configFilePath);
@@ -224,6 +229,30 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                     }
                     ImGui::SameLine();
 
+                    // Adapter override (A) button — pick new adapter
+                    if (ImGui::Button("A", ImVec2(btnH, btnH))) {
+                        if (std::filesystem::exists(datasetPath) && std::filesystem::is_directory(datasetPath)) {
+                            std::string rawDataPath = datasetPath + "/raw_data";
+                            if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {
+                                appState.currentDirectory = rawDataPath;
+                            } else {
+                                appState.currentDirectory = datasetPath;
+                            }
+                            appState.currentDatasetName = datasetPath.substr(datasetPath.find_last_of("/\\") + 1);
+                            appState.pendingRecentDatasetAdapterSave = datasetPath;
+                            selectAdapterForDirectory(appState.currentDirectory);
+                            appState.needsRedraw = true;
+                            ImGui::CloseCurrentPopup();
+                            std::cout << "Opening adapter selector for: " << datasetPath << std::endl;
+                        }
+                    }
+                    if (ImGui::IsItemHovered()) {
+                        std::string tip = "Select adapter for " + datasetPath;
+                        ImGui::SetTooltip("%s", tip.c_str());
+                    }
+                    ImGui::SameLine();
+
+                    // Dataset name button
                     if (ImGui::Button(displayName.c_str(), ImVec2(-FLT_MIN, 0))) {
                         if (std::filesystem::exists(datasetPath) && std::filesystem::is_directory(datasetPath)) {
                             std::string rawDataPath = datasetPath + "/raw_data";
@@ -235,9 +264,15 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
 
                             appState.currentDatasetName = datasetPath.substr(datasetPath.find_last_of("/\\") + 1);
 
-                            selectAdapterForDirectory(appState.currentDirectory);
+                            // Use stored adapter if available, otherwise show selection popup
+                            if (!entry.adapterName.empty() && AdapterRegistry::instance().getAdapter(entry.adapterName)) {
+                                applyAdapterSelection(entry.adapterName, appState.currentDirectory);
+                                addToRecentDatasets(config, configFilePath, datasetPath, entry.adapterName);
+                            } else {
+                                selectAdapterForDirectory(appState.currentDirectory);
+                                addToRecentDatasets(config, configFilePath, datasetPath);
+                            }
                             appState.needsRedraw = true;
-                            addToRecentDatasets(config, configFilePath, datasetPath);
                             std::cout << "Opened recent dataset: " << datasetPath << std::endl;
                             ImGui::CloseCurrentPopup();
                         } else {

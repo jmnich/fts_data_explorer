@@ -8,10 +8,15 @@
 #include <filesystem>
 #include <iostream>
 #include <cstring>
+#include <utility>
 
 // Configuration structure for app settings
 struct AppConfig {
-    std::vector<std::string> recentDatasets;
+    struct RecentDatasetEntry {
+        std::string path;
+        std::string adapterName;
+    };
+    std::vector<RecentDatasetEntry> recentDatasets;
     size_t maxRecentDatasets = 10;
     bool autoFitYAxis = true;
     bool maxAtZero = false;
@@ -88,21 +93,27 @@ struct AppConfig {
     char t100EnergyRatioDenC[32] = "";
     
     // Add a dataset to recent list (maintains max size, deduplicates)
-    void addRecentDataset(const std::string& datasetPath) {
+    void addRecentDataset(const std::string& datasetPath, const std::string& adapterName = "") {
         // Normalize path: strip trailing slash to prevent formatting mismatches
         std::string normalized = datasetPath;
         while (!normalized.empty() && (normalized.back() == '/' || normalized.back() == '\\'))
             normalized.pop_back();
 
-        // Remove if already exists
-        auto it = std::find(recentDatasets.begin(), recentDatasets.end(), normalized);
+        // Preserve existing adapter name if present and none provided
+        std::string existingAdapter;
+        auto it = std::find_if(recentDatasets.begin(), recentDatasets.end(),
+            [&](const RecentDatasetEntry& e) { return e.path == normalized; });
         if (it != recentDatasets.end()) {
+            existingAdapter = it->adapterName;
             recentDatasets.erase(it);
         }
-        
-        // Add to beginning
-        recentDatasets.insert(recentDatasets.begin(), normalized);
-        
+
+        // Add to beginning with adapter name (provided, or preserved from old entry)
+        recentDatasets.insert(recentDatasets.begin(), {
+            normalized,
+            adapterName.empty() ? existingAdapter : adapterName
+        });
+
         // Trim to max size
         if (recentDatasets.size() > maxRecentDatasets) {
             recentDatasets.resize(maxRecentDatasets);
@@ -110,7 +121,8 @@ struct AppConfig {
     }
 
     void removeRecentDataset(const std::string& datasetPath) {
-        auto it = std::find(recentDatasets.begin(), recentDatasets.end(), datasetPath);
+        auto it = std::find_if(recentDatasets.begin(), recentDatasets.end(),
+            [&](const RecentDatasetEntry& e) { return e.path == datasetPath; });
         if (it != recentDatasets.end()) {
             recentDatasets.erase(it);
         }
@@ -131,8 +143,12 @@ struct AppConfig {
             
             // Write recent datasets
             configFile << "[RecentDatasets]\n";
-            for (const auto& dataset : recentDatasets) {
-                configFile << "dataset=" << dataset << "\n";
+            for (const auto& entry : recentDatasets) {
+                configFile << "dataset=" << entry.path;
+                if (!entry.adapterName.empty()) {
+                    configFile << "|" << entry.adapterName;
+                }
+                configFile << "\n";
             }
             configFile << "\n";
             
@@ -264,7 +280,15 @@ struct AppConfig {
                     value.erase(value.find_last_not_of(" \t") + 1);
                     
                     if (currentSection == "RecentDatasets" && key == "dataset") {
-                        recentDatasets.push_back(value);
+                        RecentDatasetEntry entry;
+                        size_t pipePos = value.find('|');
+                        if (pipePos != std::string::npos) {
+                            entry.path = value.substr(0, pipePos);
+                            entry.adapterName = value.substr(pipePos + 1);
+                        } else {
+                            entry.path = value;
+                        }
+                        recentDatasets.push_back(entry);
                     } else if (currentSection == "Settings") {
                         if (key == "max_recent_datasets") {
                             maxRecentDatasets = std::stoul(value);
