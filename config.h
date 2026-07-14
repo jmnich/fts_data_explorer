@@ -48,6 +48,7 @@ struct AppConfig {
     float apodRectWidth = 1.0f;
     float apodNortonBeerFwhm = 1.5f; // Norton-Beer FWHM parameter (1.0-2.0)
     float apodDolphChebyshevAt = 60.0f; // Dolph-Chebyshev attenuation in dB
+    float apodHammingAlpha = 0.54f; // Generalized Hamming mixing coefficient (0.36-1.0)
     bool apodRectAsymMode = true; // Rectangular window: true=asymmetric, false=symmetric
     float spectrumDetectorSensitivity = 0.0f; // Detector sensitivity in kV/W
 
@@ -170,6 +171,7 @@ struct AppConfig {
             configFile << "apod_rect_width=" << apodRectWidth << "\n";
             configFile << "apod_norton_beer_fwhm=" << apodNortonBeerFwhm << "\n";
             configFile << "apod_dolph_chebyshev_at=" << apodDolphChebyshevAt << "\n";
+            configFile << "apod_hamming_alpha=" << apodHammingAlpha << "\n";
             configFile << "apod_rect_asym_mode=" << (apodRectAsymMode ? "1" : "0") << "\n";
             configFile << "detector_sensitivity=" << spectrumDetectorSensitivity << "\n";
             
@@ -321,6 +323,8 @@ struct AppConfig {
                             apodNortonBeerFwhm = std::stof(value);
                         } else if (key == "apod_dolph_chebyshev_at") {
                             apodDolphChebyshevAt = std::stof(value);
+                        } else if (key == "apod_hamming_alpha") {
+                            apodHammingAlpha = std::stof(value);
                         } else if (key == "apod_rect_asym_mode") {
                             apodRectAsymMode = (value == "1");
                         } else if (key == "detector_sensitivity") {

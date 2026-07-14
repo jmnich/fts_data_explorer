@@ -2790,6 +2790,13 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                 if (ImGui::IsItemHovered()) {
                     ImGui::SetTooltip("Dolph-Chebyshev attenuation (50-160 dB, step 10).\nHigher values produce lower sidelobes.");
                 }
+            } else if (appState.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Hamming)) {
+                if (ImGui::SliderFloat("Alpha##HammingAlpha", &appState.spectrum.apodizationParams.hammingAlpha, 0.36f, 1.0f, "%.2f")) {
+                    invalidateSpectrumCaches();
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Generalized Hamming alpha (0.36-1.0).\n0.54 = standard Hamming, 1.0 = rectangular.");
+                }
             }
 
             if (appState.datasetInfo.hasPrecomputedSpectra) ImGui::EndDisabled();
@@ -4171,6 +4178,8 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                             activeParam = static_cast<double>(appState.spectrum.apodizationParams.nortonBeerFwhm);
                         else if (appState.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::DolphChebyshev))
                             activeParam = static_cast<double>(appState.spectrum.apodizationParams.dolphChebyshevAt);
+                        else if (appState.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Hamming))
+                            activeParam = static_cast<double>(appState.spectrum.apodizationParams.hammingAlpha);
                         appState.spectrum.lastSpectrumParams[fid] = {
                             static_cast<double>(appState.spectrum.Kpadding),
                             static_cast<double>(appState.spectrum.xUnitSelector),

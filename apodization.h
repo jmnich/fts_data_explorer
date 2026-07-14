@@ -4,14 +4,15 @@
 #include <cstddef>
 #include <array>
 
-enum class ApodizationWindow { Rectangular = 0, Gauss = 1, Triangular = 2, NortonBeer = 3, DolphChebyshev = 4 };
-constexpr int APODIZATION_WINDOW_COUNT = 5;
+enum class ApodizationWindow { Rectangular = 0, Gauss = 1, Triangular = 2, NortonBeer = 3, DolphChebyshev = 4, Hamming = 5 };
+constexpr int APODIZATION_WINDOW_COUNT = 6;
 
 struct ApodizationParams {
     float gaussSigma = 1.0f;
     float rectWidth  = 1.0f;
     float nortonBeerFwhm = 1.5f; // FWHM parameter for Norton-Beer window (1.0-2.0)
     float dolphChebyshevAt = 60.0f; // Attenuation in dB for Dolph-Chebyshev (50-160)
+    float hammingAlpha = 0.54f; // Generalized Hamming mixing coefficient (0.36-1.0)
     bool  rectAsymMode = true; // Rectangular window: true=asymmetric (per-side), false=symmetric (use longer side)
 };
 

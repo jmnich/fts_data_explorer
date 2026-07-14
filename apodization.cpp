@@ -37,6 +37,22 @@ static std::vector<double> genSymmetricNortonBeer(std::size_t n, const std::arra
     return window;
 }
 
+// Generate a symmetric Hamming window of given length with mixing coefficient alpha
+static std::vector<double> genSymmetricHamming(std::size_t n, float alpha) {
+    std::vector<double> window(n);
+    if (n < 2) {
+        for (std::size_t i = 0; i < n; ++i)
+            window[i] = 1.0f;
+        return window;
+    }
+    const float invN = 1.0f / static_cast<float>(n - 1);
+    for (std::size_t i = 0; i < n; ++i) {
+        const float x = static_cast<float>(i) * invN;
+        window[i] = alpha - (1.0f - alpha) * std::cos(2.0f * M_PI * x);
+    }
+    return window;
+}
+
 // Generate a symmetric Dolph-Chebyshev window of given length with specified attenuation (dB)
 static std::vector<double> genSymmetricDolphChebyshev(std::size_t n, double at) {
     std::vector<double> window(n, 1.0);
@@ -120,7 +136,7 @@ static std::vector<double> genSymmetricDolphChebyshev(std::size_t n, double at) 
 }
 
 std::vector<const char*> Apodization::getWindowNames() {
-    return { "Rectangular", "Gauss", "Triangular", "Norton-Beer", "Dolph-Chebyshev" };
+    return { "Rectangular", "Gauss", "Triangular", "Norton-Beer", "Dolph-Chebyshev", "Hamming" };
 }
 
 std::vector<double> Apodization::createWindow(ApodizationWindow w,
@@ -254,6 +270,27 @@ std::vector<double> Apodization::createWindow(ApodizationWindow w,
                 window[i] = winLeft[i];
             for (std::size_t i = 0; i < rightLen; ++i)
                 window[leftLen + i] = winRight[i];
+            break;
+        }
+        case ApodizationWindow::Hamming: {
+            /*
+            Generalized Hamming window: w(n) = alpha - (1-alpha)*cos(2*pi*n/(N-1))
+            Asymmetric construction split at the peak position, matching the pattern
+            used by NortonBeer and DolphChebyshev.
+            */
+
+            const std::size_t leftLen  = peakIdx + 1;
+            const std::size_t rightLen = n - 1 - peakIdx;
+
+            auto winFullLeft = genSymmetricHamming(2 * leftLen, p.hammingAlpha);
+            for (std::size_t i = 0; i < leftLen; ++i)
+                window[i] = winFullLeft[i];
+
+            if (rightLen > 0) {
+                auto winFullRight = genSymmetricHamming(2 * rightLen, p.hammingAlpha);
+                for (std::size_t i = 0; i < rightLen; ++i)
+                    window[leftLen + i] = winFullRight[rightLen + i];
+            }
             break;
         }
     }
