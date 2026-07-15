@@ -2415,14 +2415,24 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                                     if (appState.xAxisBase == 1) {
                                         const auto& hilbX = appState.hilbertXCache[appState.selectedFilenames[i]];
                                         if (!hilbX.empty()) {
+                                            // Map downsampled index to full-res OPD cache proportionally
+                                            double ratio = static_cast<double>(hilbX.size()) / refData.size();
+                                            auto mapX = [&](size_t j) -> double {
+                                                size_t idx = static_cast<size_t>((ref_start + j) * ratio);
+                                                if (idx >= hilbX.size()) idx = hilbX.size() - 1;
+                                                return hilbX[idx];
+                                            };
                                             if (appState.maxAtZero && !peakPositions.empty()) {
                                                 std::vector<double> shiftedX(actual_count);
                                                 double peakHilbX = hilbX[peakPositions[i]];
                                                 for (size_t j = 0; j < actual_count; j++)
-                                                    shiftedX[j] = hilbX[j] - peakHilbX;
+                                                    shiftedX[j] = mapX(j) - peakHilbX;
                                                 ImPlot::PlotLine("", shiftedX.data(), &refData[ref_start], static_cast<int>(actual_count), plotSpecs[i]);
                                             } else {
-                                                ImPlot::PlotLine("", hilbX.data(), &refData[ref_start], static_cast<int>(actual_count), plotSpecs[i]);
+                                                std::vector<double> mappedX(actual_count);
+                                                for (size_t j = 0; j < actual_count; j++)
+                                                    mappedX[j] = mapX(j);
+                                                ImPlot::PlotLine("", mappedX.data(), &refData[ref_start], static_cast<int>(actual_count), plotSpecs[i]);
                                             }
                                         }
                                     } else if (appState.maxAtZero && !peakPositions.empty()) {
@@ -2668,14 +2678,24 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                                     if (appState.xAxisBase == 1) {
                                         const auto& hilbX = appState.hilbertXCache[appState.selectedFilenames[i]];
                                         if (!hilbX.empty()) {
+                                            // Map downsampled index to full-res OPD cache proportionally
+                                            double ratio = static_cast<double>(hilbX.size()) / primData.size();
+                                            auto mapX = [&](size_t j) -> double {
+                                                size_t idx = static_cast<size_t>((ref_start + j) * ratio);
+                                                if (idx >= hilbX.size()) idx = hilbX.size() - 1;
+                                                return hilbX[idx];
+                                            };
                                             if (appState.maxAtZero && !peakPositions.empty()) {
                                                 std::vector<double> shiftedX(actual_count);
                                                 double peakHilbX = hilbX[peakPositions[i]];
                                                 for (size_t j = 0; j < actual_count; j++)
-                                                    shiftedX[j] = hilbX[j] - peakHilbX;
+                                                    shiftedX[j] = mapX(j) - peakHilbX;
                                                 ImPlot::PlotLine("", shiftedX.data(), &primData[ref_start], static_cast<int>(actual_count), plotSpecs[i]);
                                             } else {
-                                                ImPlot::PlotLine("", hilbX.data(), &primData[ref_start], static_cast<int>(actual_count), plotSpecs[i]);
+                                                std::vector<double> mappedX(actual_count);
+                                                for (size_t j = 0; j < actual_count; j++)
+                                                    mappedX[j] = mapX(j);
+                                                ImPlot::PlotLine("", mappedX.data(), &primData[ref_start], static_cast<int>(actual_count), plotSpecs[i]);
                                             }
                                         }
                                     } else if (appState.maxAtZero && !peakPositions.empty()) {
