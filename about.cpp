@@ -32,6 +32,7 @@ void renderAboutPopup() {
     ImGui::Text("Version: %s", APP_VERSION);
     ImGui::Text("");
     ImGui::Text("Author: Jakub Mnich");
+    ImGui::Text("Affiliation: Wroclaw University of Science and Technology, Poland");
     ImGui::Text("Email: jakub.mnich@pwr.edu.pl");
     ImGui::Text("GitHub: https://github.com/jmnich/fts_data_explorer");
     ImGui::Text("");
