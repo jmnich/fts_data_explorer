@@ -1,6 +1,24 @@
 cmake_minimum_required(VERSION 3.14)  # FetchContent requires 3.14+
 project(fts_data_explorer)
 
+# -- Version header fallback ---------------------------------------------------
+# If build_script.sh hasn't generated version.h yet, create a dev fallback
+# from the VERSION file so bare 'cmake' invocations still work.
+set(VERSION_FILE "${CMAKE_SOURCE_DIR}/VERSION")
+if(NOT EXISTS "${CMAKE_SOURCE_DIR}/version.h")
+    if(EXISTS "${VERSION_FILE}")
+        file(READ "${VERSION_FILE}" RAW_VERSION)
+        string(STRIP "${RAW_VERSION}" RAW_VERSION)
+    else()
+        set(RAW_VERSION "0.0.0")
+    endif()
+    file(WRITE "${CMAKE_SOURCE_DIR}/version.h"
+        "#pragma once\n"
+        "#define APP_VERSION \"${RAW_VERSION} (dev)\"\n"
+        "#define APP_IS_RELEASE 0\n")
+    message(STATUS "Generated fallback version.h: ${RAW_VERSION} (dev)")
+endif()
+
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

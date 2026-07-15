@@ -35,6 +35,7 @@
 #include "about.h"
 #include "theme.h"
 #include "headless.h"
+#include "version.h"
 
 // Include imgui and other dependencies
 #include "imgui.h"
@@ -179,7 +180,7 @@ static void applyWindowIcon(GLFWwindow* window, const ImVec4& accent) {
  * @return true if initialization successful, false otherwise
  */
 bool initializeApplication(AppConfig& config, GLFWwindow*& window) {
-    std::cout << "FTS Data Explorer - Starting application..." << std::endl;
+    std::cout << "FTS Data Explorer " << APP_VERSION << " - Starting application..." << std::endl;
 
     // Initialize GLFW
     if (!glfwInit()) {
@@ -197,7 +198,10 @@ bool initializeApplication(AppConfig& config, GLFWwindow*& window) {
     glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GL_TRUE);
 
     // Create window with saved settings
-    window = glfwCreateWindow(config.windowWidth, config.windowHeight, "FTS Data Explorer", nullptr, nullptr);
+    {
+        std::string title = std::string("FTS Data Explorer ") + APP_VERSION;
+        window = glfwCreateWindow(config.windowWidth, config.windowHeight, title.c_str(), nullptr, nullptr);
+    }
     if (!window) {
         std::cerr << "Failed to create GLFW window" << std::endl;
         glfwTerminate();
@@ -789,7 +793,7 @@ int main(int argc, char* argv[]) {
     setenv("__VK_LAYER_NV_optimus", "NVIDIA_only", 1);
     #endif
     
-    std::cout << "FTS Data Explorer - Starting application..." << std::endl;
+    std::cout << "FTS Data Explorer " << APP_VERSION << " - Starting application..." << std::endl;
     
     // Initialize configuration
     AppConfig config;

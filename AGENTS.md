@@ -330,6 +330,23 @@ The script handles CMake configuration, dependency fetching (ImGui, ImPlot, ImPl
 - Doxygen-style comments for public APIs
 - Follow C++ Core Guidelines; prefer RAII, const-correctness, move semantics
 
+# Versioning
+
+Version format `<YY>.<MM>.<minor>` (e.g. `26.07.0`). Single source of truth is `VERSION` file in project root — stores the last release version.
+
+## Build modes
+
+| Command | Version shown | Bumps VERSION | Artifacts |
+|---------|---------------|---------------|-----------|
+| `./build_script.sh` | `26.07.0 (dev)` | No | Linux only |
+| `./build_script.sh -release` | `26.07.1` | Yes (minor) | Linux + Windows → `build/release_artifacts/` |
+
+**Version auto-increment**: `-release` compares current date with stored `YY.MM`. Same month → bump minor. Month/year changed → reset minor to 0.
+
+**Generated file**: `version.h` is produced by the build script from `version.h.in` (gitignored). Defines `APP_VERSION` and `APP_IS_RELEASE`. CMakeLists.txt creates a fallback if run without the build script.
+
+**Display locations**: window title, console banner, welcome screen title, About panel, `-v`/`-help` headless output.
+
 # Testing
 
 - Manual with example datasets in `example_datasets/`

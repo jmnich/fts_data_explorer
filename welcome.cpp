@@ -7,6 +7,7 @@
 #include "adapters/adapter_registry.h"
 #include "file_browser.h"
 #include "theme.h"
+#include "version.h"
 
 #include "imgui.h"
 #include <GL/gl.h>
@@ -170,9 +171,11 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
     ImGui::PushStyleColor(ImGuiCol_ModalWindowDimBg, ImVec4(0, 0, 0, 0));
 
     // Create a modal popup that blocks all interaction
-    ImGui::OpenPopup("Welcome to FTS Data Explorer");
+    {
+        std::string popupTitle = std::string("Welcome to FTS Data Explorer ") + APP_VERSION;
+        ImGui::OpenPopup(popupTitle.c_str());
 
-    if (ImGui::BeginPopupModal("Welcome to FTS Data Explorer", NULL,
+        if (ImGui::BeginPopupModal(popupTitle.c_str(), NULL,
         ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
         ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar |
         ImGuiWindowFlags_NoBackground)) {
@@ -387,6 +390,7 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
         if (!appState.showWelcomeScreen) {
             appState.welcomeScreenInitialized = true;
         }
+    }
     }
     ImGui::PopStyleColor(); // ModalWindowDimBg
 }

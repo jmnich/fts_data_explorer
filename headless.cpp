@@ -13,6 +13,7 @@
 #include "config.h"
 #include "app_state.h"
 #include "adapters/adapter_registry.h"
+#include "version.h"
 #include "adapters/wust_mini_fts_adapter.h"
 #include "adapters/arcoptix_igms_adapter.h"
 #include "adapters/arcoptix_spectra_adapter.h"
@@ -34,14 +35,14 @@ static std::string getImguiIniPath() {
 // Help (-help)
 // ---------------------------------------------------------------------------
 static void handleHelp() {
-    std::cout << "FTS Data Explorer - Headless Mode\n"
+    std::cout << "FTS Data Explorer " << APP_VERSION << " - Headless Mode\n"
               << "\n"
               << "Usage: fts_data_explorer [flag] [arguments]\n"
               << "\n"
               << "Flags:\n"
               << "  No flag        Launch the GUI normally with welcome screen.\n"
               << "  -help          Print this help message and exit.\n"
-              << "  -v             Print version (0.0) and exit.\n"
+              << "  -v             Print version (" << APP_VERSION << ") and exit.\n"
               << "  -l [type]      List available options. Types: data_adapter, output, recent.\n"
               << "  -o <path> <adapter>\n"
               << "                 Open GUI with dataset at <path> using <adapter>.\n"
@@ -56,7 +57,7 @@ static void handleHelp() {
 // Version (-v)
 // ---------------------------------------------------------------------------
 static void handleVersion() {
-    std::cout << "0.0" << std::endl;
+    std::cout << APP_VERSION << std::endl;
 }
 
 // ---------------------------------------------------------------------------

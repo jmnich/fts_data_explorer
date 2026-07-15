@@ -1,5 +1,6 @@
 #include "about.h"
 #include "imgui.h"
+#include "version.h"
 
 static bool s_showAbout = false;
 
@@ -27,6 +28,8 @@ void renderAboutPopup() {
     // ── Project info (easily editable) ─────────────────────────────────────
     ImGui::Text("Lightweight, fast scientific program for rapid exploration");
     ImGui::Text("of raw data produced by Fourier spectrometers.");
+    ImGui::Text("");
+    ImGui::Text("Version: %s", APP_VERSION);
     ImGui::Text("");
     ImGui::Text("Author: Jakub Mnich");
     ImGui::Text("Email: jakub.mnich@pwr.edu.pl");

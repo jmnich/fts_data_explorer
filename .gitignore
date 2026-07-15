@@ -69,6 +69,9 @@ cmake-*/
 *~
 *.orig
 
+# Generated version header
+version.h
+
 # macOS
 .DS_Store
 
