@@ -75,3 +75,4 @@ cmake-*/
 # temporary stuff
 temporary/
 playground/outputs/
+playground/validate_outputs/

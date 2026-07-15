@@ -529,8 +529,8 @@ static void handleProcess(const HeadlessConfig& cfg) {
         appState.currentDatasetName = dirPath;
     }
 
-    // Load all files as selected (up to MAX_SELECTABLE_FILES)
-    size_t maxSel = appState.MAX_SELECTABLE_FILES;
+    // Load all files as selected (no limit in headless mode)
+    size_t maxSel = appState.sortedFiles.size();
     for (size_t i = 0; i < appState.sortedFiles.size() && i < maxSel; i++) {
         try {
             const auto& filePath = appState.sortedFiles[i];
