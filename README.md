@@ -22,12 +22,16 @@ The application is designed to help with handling data from DIY lab instruments 
 - Rapid average spectrum calculation
 - Spectral SNR calculation
 - 100 % transmission line analysis for investigating spectrometer stability with built-in 100 % transmission line standard deviation plotting
+
+![Primary1](screenshots/scr_primary2.png)
+
 - Custom energy ratio calculation with statistics, with presets defined in ASTM E1421 for FTS-MIR
 - Allan plots calculated from T100% and spectral brightness to aid you in finding optimal integration time
+
+![Primary1](screenshots/scr_primary3.png)
+
 - Everything that you see on the screen can be exported to .csv
 - Headless mode lets you use the application as a shell-operated calculation engine, without GUI, for automation, verification and advanced integration purposes
 - Persistent configuration and a recently-opened dataset list
 
 ![Welcome](screenshots/scr_welcome.png)
-![Primary1](screenshots/scr_primary2.png)
-![Primary1](screenshots/scr_primary3.png)
