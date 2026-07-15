@@ -1,36 +1,33 @@
 {
-  "_artifact": "SNR spectrum",
-  "_description": "SNR = mean / std_dev per wavelength bin across all checked files (requires >= 2 files).",
-  "_columns": ["Wavenumber [cm-1]", "SNR"],
   "spectrum": {
     "refLaserWavelengthUm": { "value": 1.55 },
-    "zeroPadK": { "value": 0 },
+    "zeroPadK": { "value": 2 },
     "apodizationWindow": { "value": "Rectangular" },
-    "gaussSigma": { "value": 1.0 },
     "rectWidth": { "value": 1.0 },
     "rectAsymMode": { "value": true },
-    "nortonBeerFwhm": { "value": 1.5 },
-    "dolphChebyshevAttenuationDb": { "value": 60.0 },
-    "detectorSensitivityKVperW": { "value": 0.0 },
     "xUnit": { "value": "cm-1" },
     "yScale": { "value": "lin" },
     "yAxisMode": { "value": "all" },
     "forcedYMin": { "value": 0.0 },
-    "forcedYMax": { "value": 1.0 }
+    "forcedYMax": { "value": 0.0 },
+    "detectorSensitivityKVperW": { "value": 0.0 },
+    "gaussSigma": { "value": 1.0 },
+    "nortonBeerFwhm": { "value": 1.5 },
+    "dolphChebyshevAttenuationDb": { "value": 60.0 }
   },
   "average": {
     "xUnit": { "value": "cm-1" },
     "yScale": { "value": "lin" },
     "yAxisMode": { "value": "all" },
     "forcedYMin": { "value": 0.0 },
-    "forcedYMax": { "value": 1.0 }
+    "forcedYMax": { "value": 0.0 }
   },
   "snr": {
-    "xUnit": { "_comment": "X axis unit: cm-1, um, THz", "value": "cm-1" },
-    "yScale": { "_comment": "Y scale: lin, log10", "value": "lin" },
-    "yAxisMode": { "_comment": "Y axis mode: all, tight, force", "value": "all" },
+    "xUnit": { "value": "cm-1" },
+    "yScale": { "value": "lin" },
+    "yAxisMode": { "value": "all" },
     "forcedYMin": { "value": 0.0 },
-    "forcedYMax": { "value": 1.0 }
+    "forcedYMax": { "value": 0.0 }
   },
   "allan": {
     "xUnit": { "value": "um" },

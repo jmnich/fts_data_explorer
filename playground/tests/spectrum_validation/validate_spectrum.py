@@ -2,10 +2,9 @@
 """Validate spectrum computation: Python reimplementation vs C++ headless mode.
 
 Usage:
-    python3 playground/validate_spectrum.py
+    python3 playground/tests/spectrum_validation/validate_spectrum.py
 
-Output lands in playground/validate_outputs/:
-    python_spectrum.csv      — Python-computed spectrum
+Output lands in playground/outputs/spectrum_validation/:
     *_spectra.csv            — C++ headless export
     validate_plot.png        — comparison figure
     headless_config.json     — auto-generated config for the headless run
@@ -26,12 +25,12 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 HERE = Path(__file__).resolve().parent
-REPO_ROOT = HERE.parent
+REPO_ROOT = HERE.parents[2]
 BINARY = REPO_ROOT / "build" / "linux-release" / "fts_data_explorer"
-DATASET_DIR = (HERE / "test_data"
+DATASET_DIR = (REPO_ROOT / "playground" / "test_data"
                / "2024-06-10_11-38-54_newconfig_zabercurr0.6A_his25000direct_prno2_1mm_1.5mms_avg100")
 RAW_DATA_DIR = DATASET_DIR / "raw_data"
-OUTPUT_DIR = HERE / "validate_outputs"
+OUTPUT_DIR = REPO_ROOT / "playground" / "outputs" / "spectrum_validation"
 
 # ---------------------------------------------------------------------------
 # Config (matching C++ defaults — Rectangular, K=2, cm-1)

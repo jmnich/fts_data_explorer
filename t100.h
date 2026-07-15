@@ -111,8 +111,9 @@ public:
                                           std::vector<double>& outX,
                                           std::vector<double>& outY);
 
-private:
     bool computeTransmittanceForFile(const std::string& fileId);
+
+private:
 
     std::vector<double> calcStdCommonX;
     std::vector<double> calcStdSum;

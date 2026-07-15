@@ -659,29 +659,37 @@ static void handleProcess(const HeadlessConfig& cfg) {
     } else if (ot == "100% T transmission line" ||
                ot == "100% T lines for all files" ||
                ot == "100% T standard deviation") {
+        // Pre-compute spectrum for the first file (needed by setReferenceFromCurrentSpectrum)
+        if (!appState.selectedFilenames.empty()) {
+            std::string fid0 = appState.selectedFilenames[0];
+            if (appState.spectrum.cachedSpectra.find(fid0) == appState.spectrum.cachedSpectra.end()) {
+                computeSpectrumForFile(appState, appState.selectedFiles[0], fid0);
+            }
+        }
         // Set up reference
         if (!setupT100Reference()) {
             std::cerr << "Error: Failed to set 100% T reference" << std::endl;
             exit(1);
         }
 
-        // Compute transmittance for selected files (triggers spectrum computation)
+        // Compute transmittance for selected files
         if (!appState.t100.transmittanceAvailable) {
-            // Tick calculation to populate transmittance
             for (const auto& fp : appState.selectedFiles) {
                 std::string fid = fp;
                 size_t ls = fid.find_last_of("/\\");
                 if (ls != std::string::npos) fid = fid.substr(ls + 1);
-                // Ensure spectrum is cached
                 auto it = appState.spectrum.cachedSpectra.find(fid);
                 if (it == appState.spectrum.cachedSpectra.end()) {
                     computeSpectrumForFile(appState, fp, fid);
                 }
-                // Trigger transmittance computation
-                appState.t100.transmittanceAvailable = true;
             }
-            // Extend lastKnownSelection for export
             appState.t100.lastKnownSelection = appState.selectedFilenames;
+            appState.t100.needsRecompute = true;
+            // Explicitly compute transmittance for each file
+            for (const auto& fid : appState.t100.lastKnownSelection) {
+                appState.t100.computeTransmittanceForFile(fid);
+            }
+            appState.t100.transmittanceAvailable = true;
         }
 
         if (ot == "100% T standard deviation") {

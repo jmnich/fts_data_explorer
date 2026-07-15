@@ -1,0 +1,31 @@
+{
+  "spectrum": {
+    "refLaserWavelengthUm": { "value": 1.55 },
+    "zeroPadK": { "value": 2 },
+    "apodizationWindow": { "value": "Rectangular" },
+    "rectWidth": { "value": 1.0 },
+    "rectAsymMode": { "value": true },
+    "xUnit": { "value": "cm-1" },
+    "yScale": { "value": "lin" },
+    "yAxisMode": { "value": "all" },
+    "forcedYMin": { "value": 0.0 },
+    "forcedYMax": { "value": 0.0 }
+  },
+  "t100": {
+    "xUnit": { "value": "cm-1" },
+    "referenceSource": { "value": "Average" },
+    "csvReferencePath": { "value": "" },
+    "yAxisMode": { "value": "all" },
+    "forcedYMin": { "value": 0.0 },
+    "forcedYMax": { "value": 100.0 },
+    "energyRatioNumA": { "value": "" },
+    "energyRatioDenA": { "value": "" },
+    "energyRatioNumB": { "value": "" },
+    "energyRatioDenB": { "value": "" },
+    "energyRatioNumC": { "value": "" },
+    "energyRatioDenC": { "value": "" }
+  },
+  "processing": {
+    "workerThreads": { "value": -1 }
+  }
+}

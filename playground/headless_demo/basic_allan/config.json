@@ -1,0 +1,25 @@
+{
+  "spectrum": {
+    "refLaserWavelengthUm": { "value": 1.55 },
+    "zeroPadK": { "value": 2 },
+    "apodizationWindow": { "value": "Rectangular" },
+    "rectWidth": { "value": 1.0 },
+    "rectAsymMode": { "value": true },
+    "xUnit": { "value": "cm-1" },
+    "yScale": { "value": "lin" },
+    "yAxisMode": { "value": "all" },
+    "forcedYMin": { "value": 0.0 },
+    "forcedYMax": { "value": 0.0 }
+  },
+  "allan": {
+    "xUnit": { "value": "um" },
+    "wavelengthDecimation": { "value": 5 },
+    "xRangeMinUm": { "value": 1.0 },
+    "xRangeMaxUm": { "value": 30.0 },
+    "calcBase": { "value": "100% T" },
+    "sliceIndex": { "value": 10 }
+  },
+  "processing": {
+    "workerThreads": { "value": -1 }
+  }
+}
