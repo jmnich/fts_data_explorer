@@ -94,6 +94,89 @@ std::vector<double> SpectralToolbox::linspace(double start, double stop, std::si
 }
 
 // ============================================================================
+// Peak-finding helpers
+// ============================================================================
+
+namespace {
+
+std::vector<size_t> findPeaksWithProminence(const std::vector<double>& signal,
+                                            double prominenceThreshold) {
+    const size_t n = signal.size();
+    if (n < 3) return {};
+
+    double mean = std::accumulate(signal.begin(), signal.end(), 0.0) / static_cast<double>(n);
+    std::vector<double> centered(n);
+    for (size_t i = 0; i < n; ++i) centered[i] = signal[i] - mean;
+
+    // Find all local maxima
+    std::vector<size_t> candidates;
+    for (size_t i = 1; i + 1 < n; ++i) {
+        if (centered[i] > centered[i-1] && centered[i] > centered[i+1]) {
+            candidates.push_back(i);
+        }
+    }
+    if (candidates.empty()) return {};
+
+    // Compute prominence for each candidate peak
+    std::vector<double> prominences(candidates.size());
+    double maxProm = 0.0;
+    for (size_t p = 0; p < candidates.size(); ++p) {
+        size_t peakIdx = candidates[p];
+        double peakVal = centered[peakIdx];
+
+        double leftMin = peakVal;
+        for (size_t j = peakIdx; j > 0; --j) {
+            if (centered[j] > peakVal) break;
+            if (centered[j] < leftMin) leftMin = centered[j];
+        }
+
+        double rightMin = peakVal;
+        for (size_t j = peakIdx; j < n; ++j) {
+            if (centered[j] > peakVal) break;
+            if (centered[j] < rightMin) rightMin = centered[j];
+        }
+
+        double prom = peakVal - std::max(leftMin, rightMin);
+        prominences[p] = prom;
+        if (prom > maxProm) maxProm = prom;
+    }
+
+    if (maxProm <= 0.0) return {};
+
+    // Filter by prominence threshold
+    double threshold = maxProm * prominenceThreshold;
+    std::vector<size_t> filtered;
+    for (size_t p = 0; p < candidates.size(); ++p) {
+        if (prominences[p] >= threshold) {
+            filtered.push_back(candidates[p]);
+        }
+    }
+    if (filtered.size() < 2) return {};
+
+    // Compute median spacing
+    std::vector<size_t> spacing;
+    for (size_t p = 1; p < filtered.size(); ++p) {
+        spacing.push_back(filtered[p] - filtered[p-1]);
+    }
+    std::sort(spacing.begin(), spacing.end());
+    size_t medianSpacing = spacing[spacing.size() / 2];
+
+    // Filter by distance: remove peaks within 0.5× median spacing of a neighbor
+    std::vector<size_t> result;
+    result.push_back(filtered[0]);
+    for (size_t p = 1; p < filtered.size(); ++p) {
+        if (filtered[p] - result.back() >= medianSpacing / 2) {
+            result.push_back(filtered[p]);
+        }
+    }
+
+    if (result.size() < 2) return {};
+    return result;
+}
+
+} // anonymous namespace
+
+// ============================================================================
 // Hilbert-transform based X axis (reference interferogram -> um)
 // ============================================================================
 
@@ -169,6 +252,60 @@ void SpectralToolbox::xAxisFromHilbert(const std::vector<double>& referenceSigna
 }
 
 // ============================================================================
+// Peak-finding based X axis
+// ============================================================================
+
+void SpectralToolbox::xAxisFromPeaks(const std::vector<double>& referenceSignal,
+                                     double refLaserWavelength,
+                                     double prominenceThreshold,
+                                     std::vector<double>& outputOPD,
+                                     std::vector<size_t>* peakIndices) {
+    outputOPD.clear();
+    auto maxima = findPeaksWithProminence(referenceSignal, prominenceThreshold);
+
+    // Find minima by negating the signal — minima become maxima in negated space
+    std::vector<double> negSignal(referenceSignal.size());
+    for (size_t i = 0; i < referenceSignal.size(); ++i)
+        negSignal[i] = -referenceSignal[i];
+    auto minima = findPeaksWithProminence(negSignal, prominenceThreshold);
+
+    // Merge and sort maxima + minima
+    std::vector<size_t> anchors;
+    anchors.reserve(maxima.size() + minima.size());
+    anchors.insert(anchors.end(), maxima.begin(), maxima.end());
+    anchors.insert(anchors.end(), minima.begin(), minima.end());
+    std::sort(anchors.begin(), anchors.end());
+    if (anchors.size() < 2) return;
+
+    const size_t n = referenceSignal.size();
+    outputOPD.resize(n);
+
+    // Each anchor (max or min) advances OPD by λ/4
+    for (size_t k = 0; k < anchors.size(); ++k) {
+        outputOPD[anchors[k]] = static_cast<double>(k) * (refLaserWavelength / 4.0);
+    }
+
+    // Linear interpolation between anchors
+    for (size_t k = 0; k + 1 < anchors.size(); ++k) {
+        size_t pk = anchors[k];
+        size_t pk1 = anchors[k + 1];
+        double y0 = outputOPD[pk];
+        double y1 = outputOPD[pk1];
+        double len = static_cast<double>(pk1 - pk);
+        for (size_t i = pk + 1; i < pk1; ++i) {
+            outputOPD[i] = y0 + (static_cast<double>(i - pk) / len) * (y1 - y0);
+        }
+    }
+
+    // Clamp before first and after last anchor
+    for (size_t i = 0; i < anchors[0]; ++i) outputOPD[i] = 0.0;
+    for (size_t i = anchors.back() + 1; i < n; ++i)
+        outputOPD[i] = outputOPD[anchors.back()];
+
+    if (peakIndices) *peakIndices = std::move(anchors);
+}
+
+// ============================================================================
 // Main pipeline: magnitude spectrum from raw primary + reference interferograms
 // (test17 steps 1-4 + magnitude FFT + 10; apodization + Mertz deferred)
 // ============================================================================
@@ -180,16 +317,22 @@ SpectralToolbox::ProcessedSpectrum SpectralToolbox::processSpectrum(
     int  K,
     SpectrumXUnit xUnit,
     ApodizationWindow apodizationWindow,
-    const ApodizationParams& apodizationParams)
+    const ApodizationParams& apodizationParams,
+    XCorrectionMethod xMethod,
+    double prominenceThreshold)
 {
     ProcessedSpectrum result;
 
     const std::size_t n = primaryDetector.size();
     if (n == 0 || referenceDetector.size() != n || K < 0) return result;
 
-    // 1. Hilbert-corrected X axis (um) from the reference interferogram
+    // 1. Corrected X axis (um) from the reference interferogram
     std::vector<double> correctedX;
-    xAxisFromHilbert(referenceDetector, refLaserWavelength, correctedX);
+    if (xMethod == XCorrectionMethod::PeakFinding) {
+        xAxisFromPeaks(referenceDetector, refLaserWavelength, prominenceThreshold, correctedX);
+    } else {
+        xAxisFromHilbert(referenceDetector, refLaserWavelength, correctedX);
+    }
     if (correctedX.empty()) return result;
 
     // 2. Robust max OPD (skip index 0 to avoid start-of-cumsum contaminations)

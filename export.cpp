@@ -182,9 +182,15 @@ void ExportPanel::writeCorrectedIFGCsv(const std::string& dir)
         if (raw.referenceDetector.empty() || raw.primaryDetector.empty()) continue;
 
         std::vector<double> hilbX;
-        SpectralToolbox::xAxisFromHilbert(raw.referenceDetector,
-                                          appState->spectrum.refLaserTextbox,
-                                          hilbX);
+        if (appState->xCorrectionMethod == 1) {
+            SpectralToolbox::xAxisFromPeaks(
+                raw.referenceDetector, appState->spectrum.refLaserTextbox,
+                appState->peakProminenceThreshold, hilbX);
+        } else {
+            SpectralToolbox::xAxisFromHilbert(raw.referenceDetector,
+                                              appState->spectrum.refLaserTextbox,
+                                              hilbX);
+        }
         if (hilbX.empty()) continue;
 
         std::string fname = appState->selectedFilenames[i];
@@ -508,7 +514,9 @@ void ExportPanel::writeT100AllTransCsv(const std::string& dir)
                 appState->spectrum.Kpadding,
                 static_cast<SpectralToolbox::SpectrumXUnit>(t100.xUnitSelector),
                 static_cast<ApodizationWindow>(appState->spectrum.apodizationSelector),
-                appState->spectrum.apodizationParams);
+                appState->spectrum.apodizationParams,
+                static_cast<SpectralToolbox::XCorrectionMethod>(appState->xCorrectionMethod),
+                appState->peakProminenceThreshold);
         }
         if (ps.spectrumX.empty() || ps.spectrumY.empty()) continue;
         std::vector<double> tx, ty;

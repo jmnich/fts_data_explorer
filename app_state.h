@@ -156,6 +156,12 @@ struct AppState {
     int xAxisBase = 0;  // 0 = sample, 1 = OPD
     std::map<std::string, std::vector<double>> hilbertXCache;
     float hilbertCacheLaserWavelength = 0.0f;
+
+    // Peak-finding X correction state
+    int    xCorrectionMethod = 0;           // 0=Hilbert, 1=PeakFinding
+    float  peakProminenceThreshold = 0.02f; // fraction of max peak height
+    bool   showPeakIndicators = false;      // circular markers on ref interferogram
+    std::map<std::string, std::vector<size_t>> peakPositionsCache;
     
     // Constructor to initialize constants
     AppState();

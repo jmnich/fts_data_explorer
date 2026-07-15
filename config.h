@@ -28,6 +28,11 @@ struct AppConfig {
     std::string uiSize = "normal"; // tiny, small, normal, large, huge
     std::string accentColor = "default"; // default, green, purple, red, brown
     
+    // X correction config
+    int   xCorrectionMethod = 0;
+    float peakProminence = 0.02f;
+    bool  showPeakIndicators = false;
+
     // Thread pool config
     int workerThreads = -1; // -1 = AUTO
     
@@ -161,6 +166,9 @@ struct AppConfig {
             configFile << "enable_downsampling=" << (enableDownsampling ? "true" : "false") << "\n";
             configFile << "x_axis_base=" << xAxisBase << "\n";
             configFile << "show_fps=" << (showFPS ? "true" : "false") << "\n";
+            configFile << "x_correction_method=" << xCorrectionMethod << "\n";
+            configFile << "peak_prominence=" << peakProminence << "\n";
+            configFile << "show_peak_indicators=" << (showPeakIndicators ? "true" : "false") << "\n";
             configFile << "grid_alpha=" << gridAlpha << "\n";
             configFile << "last_working_directory=" << lastWorkingDirectory << "\n";
             configFile << "ui_size=" << uiSize << "\n";
@@ -303,6 +311,12 @@ struct AppConfig {
                             xAxisBase = std::stoi(value);
                         } else if (key == "show_fps") {
                             showFPS = (value == "true");
+                        } else if (key == "x_correction_method") {
+                            xCorrectionMethod = std::stoi(value);
+                        } else if (key == "peak_prominence") {
+                            peakProminence = std::stof(value);
+                        } else if (key == "show_peak_indicators") {
+                            showPeakIndicators = (value == "true");
                         } else if (key == "grid_alpha") {
                             gridAlpha = std::stof(value);
                         } else if (key == "last_working_directory") {

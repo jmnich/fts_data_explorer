@@ -19,6 +19,9 @@ public:
     /// X-axis unit selector for the output spectrum.
     enum class SpectrumXUnit { CmInv = 0, Um = 1, THz = 2 };
 
+    /// X-axis correction method (Hilbert transform vs peak-finding).
+    enum class XCorrectionMethod { Hilbert = 0, PeakFinding = 1 };
+
     /// Output of processSpectrum: X axis (units per SpectrumXUnit, index 0 dropped,
     /// negative-frequency half discarded) + magnitude.
     struct ProcessedSpectrum {
@@ -71,6 +74,25 @@ public:
                                  double refLaserWavelength,
                                  std::vector<double>& outputHilbertPhase);
 
+    /**
+     * @brief Build a corrected X axis (in um) from the reference interferogram
+     *        by finding fringe peaks and troughs (maxima and minima) and assigning
+     *        each anchor k an OPD of k*λ/4.
+     *
+     * Linear interpolation between anchors. Returns empty vector if < 2 anchors found.
+     *
+     * @param referenceSignal       Reference (laser) interferogram [V].
+     * @param refLaserWavelength    Reference laser wavelength [um].
+     * @param prominenceThreshold   Fraction of max prominence for peak filtering (0.0-0.5).
+     * @param outputOPD             Output mirror-displacement OPD axis [um].
+     * @param peakIndices           If non-null, receives the sample indices of all anchor points.
+     */
+    static void xAxisFromPeaks(const std::vector<double>& referenceSignal,
+                               double refLaserWavelength,
+                               double prominenceThreshold,
+                               std::vector<double>& outputOPD,
+                               std::vector<size_t>* peakIndices = nullptr);
+
     // ---- main pipeline ----------------------------------------------------
 
     /**
@@ -101,7 +123,9 @@ public:
                                             int  K,
                                             SpectrumXUnit xUnit,
                                             ApodizationWindow apodizationWindow = ApodizationWindow::Rectangular,
-                                            const ApodizationParams& apodizationParams = {});
+                                            const ApodizationParams& apodizationParams = {},
+                                            XCorrectionMethod xMethod = XCorrectionMethod::Hilbert,
+                                            double prominenceThreshold = 0.02);
 
     /**
      * @brief Compute a magnitude spectrum from an interferogram with a pre-corrected OPD axis.

@@ -701,7 +701,9 @@ bool AllanVariance::tickPhase0_AverageSpectrum() {
             bool axisCorr = appState->datasetInfo.axisIsCorrected;
             bool hasPrecomp = appState->datasetInfo.hasPrecomputedSpectra;
             auto fut = appState->computationPool->enqueue([filePath, refLaser, K, xUnit,
-                                                              apodSelector, apodParams, adapterName, axisCorr, hasPrecomp]() {
+                                                               apodSelector, apodParams, adapterName, axisCorr, hasPrecomp,
+                                                               xMethod = static_cast<SpectralToolbox::XCorrectionMethod>(appState->xCorrectionMethod),
+                                                               promThresh = appState->peakProminenceThreshold]() {
                 auto raw = AdapterRegistry::instance().loadFileStatic(adapterName, filePath);
                 if (hasPrecomp) {
                     SpectralToolbox::ProcessedSpectrum ps;
@@ -723,7 +725,7 @@ bool AllanVariance::tickPhase0_AverageSpectrum() {
                     raw.primaryDetector, raw.referenceDetector,
                     refLaser, K, xUnit,
                     static_cast<ApodizationWindow>(apodSelector),
-                    apodParams);
+                    apodParams, xMethod, promThresh);
             });
             calcState.pendingAvgFutures.push_back(std::move(fut));
             calcState.totalAvgSubmitted++;

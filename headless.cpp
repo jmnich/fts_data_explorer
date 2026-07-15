@@ -154,6 +154,8 @@ static void handleTemplate() {
     setting(spec, "nortonBeerFwhm", 1.5f, "Norton-Beer FWHM parameter (1.0-2.0 step 0.1).");
     setting(spec, "dolphChebyshevAttenuationDb", 60.0f, "Dolph-Chebyshev attenuation in dB (50-160, step 10).");
     setting(spec, "detectorSensitivityKVperW", 0.0f, "Detector sensitivity in kV/W. 0 = skip conversion.");
+    setting(spec, "xCorrectionMethod", "Hilbert", "X-axis correction method: Hilbert, PeakFinding");
+    setting(spec, "peakProminence", 0.02, "Peak prominence threshold (0.0-0.5). Only used when xCorrectionMethod = PeakFinding.");
     setting(spec, "xUnit", "cm-1", "X axis unit: cm-1, um, THz");
     setting(spec, "yScale", "lin", "Y scale: lin, log10, dB");
     setting(spec, "yAxisMode", "all", "Y axis mode: all, tight, force");
@@ -278,6 +280,10 @@ static void applyJsonConfig(AppState& state, const json& j) {
         state.spectrum.apodizationParams.nortonBeerFwhm = jsonVal<float>(s, "nortonBeerFwhm", 1.5f);
         state.spectrum.apodizationParams.dolphChebyshevAt = jsonVal<float>(s, "dolphChebyshevAttenuationDb", 60.0f);
         state.spectrum.detectorSensitivity = jsonVal<float>(s, "detectorSensitivityKVperW", 0.0f);
+        // NOTE: comparison is case-sensitive — "PeakFinding" only, "peakfinding" silently falls back to Hilbert
+        std::string xMethod = jsonVal<std::string>(s, "xCorrectionMethod", "Hilbert");
+        state.xCorrectionMethod = (xMethod == "PeakFinding") ? 1 : 0;
+        state.peakProminenceThreshold = jsonVal<float>(s, "peakProminence", 0.02f);
         state.spectrum.xUnitSelector   = jsonXUnitToInt(jsonVal<std::string>(s, "xUnit", "cm-1"));
         state.spectrum.yScaleSelector  = jsonYScaleToInt(jsonVal<std::string>(s, "yScale", "lin"));
         state.spectrum.yAxisMode       = jsonYAxisModeToInt(jsonVal<std::string>(s, "yAxisMode", "all"));
@@ -425,7 +431,9 @@ static bool computeSpectrumForFile(AppState& state, const std::string& filePath,
                 state.spectrum.Kpadding,
                 targetUnit,
                 static_cast<ApodizationWindow>(state.spectrum.apodizationSelector),
-                state.spectrum.apodizationParams);
+                state.spectrum.apodizationParams,
+                static_cast<SpectralToolbox::XCorrectionMethod>(state.xCorrectionMethod),
+                state.peakProminenceThreshold);
             state.spectrum.cachedFrequencies[fileId] = std::move(ps.spectrumX);
             state.spectrum.cachedSpectra[fileId] = std::move(ps.spectrumY);
             state.spectrum.lastPrimaryDetectors[fileId] = raw.primaryDetector;

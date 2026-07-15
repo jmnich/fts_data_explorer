@@ -666,7 +666,9 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                                 rawData.primaryDetector, rawData.referenceDetector, refLaserTextbox,
                                 Kpadding, static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector),
                                 static_cast<ApodizationWindow>(apodizationSelector),
-                                apodizationParams);
+                                apodizationParams,
+                                static_cast<SpectralToolbox::XCorrectionMethod>(appState->xCorrectionMethod),
+                                appState->peakProminenceThreshold);
                         }
 
                         cachedSpectra[fileId]     = std::move(ps.spectrumY);
@@ -706,7 +708,9 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                                  K = Kpadding,
                                  xUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector),
                                  apodWin = static_cast<ApodizationWindow>(apodizationSelector),
-                                 apodParams = apodizationParams]() {
+                                 apodParams = apodizationParams,
+                                 xMethod = static_cast<SpectralToolbox::XCorrectionMethod>(appState->xCorrectionMethod),
+                                 promThresh = appState->peakProminenceThreshold]() {
                                     thread_local bool fftwInited = false;
                                     if (!fftwInited) {
                                         fftw_plan_with_nthreads(1);
@@ -717,7 +721,7 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                                             primary, opd, K, xUnit, apodWin, apodParams);
                                     } else {
                                         return SpectralToolbox::processSpectrum(
-                                            primary, ref, refLaser, K, xUnit, apodWin, apodParams);
+                                            primary, ref, refLaser, K, xUnit, apodWin, apodParams, xMethod, promThresh);
                                     }
                                 });
                             PendingSpectrum ps;

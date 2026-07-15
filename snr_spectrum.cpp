@@ -503,7 +503,9 @@ bool SnrSpectrum::tickCalculation() {
             bool axisCorr = appState->datasetInfo.axisIsCorrected;
             bool hasPrecomp = appState->datasetInfo.hasPrecomputedSpectra;
             auto fut = appState->computationPool->enqueue([filePath, refLaser, K, xUnit,
-                                                              apodSelector, apodParams, adapterName, axisCorr, hasPrecomp]() {
+                                                               apodSelector, apodParams, adapterName, axisCorr, hasPrecomp,
+                                                               xMethod = static_cast<SpectralToolbox::XCorrectionMethod>(appState->xCorrectionMethod),
+                                                               promThresh = appState->peakProminenceThreshold]() {
                 auto raw = AdapterRegistry::instance().loadFileStatic(adapterName, filePath);
                 if (hasPrecomp) {
                     SpectralToolbox::ProcessedSpectrum ps;
@@ -525,7 +527,7 @@ bool SnrSpectrum::tickCalculation() {
                     raw.primaryDetector, raw.referenceDetector,
                     refLaser, K, xUnit,
                     static_cast<ApodizationWindow>(apodSelector),
-                    apodParams);
+                    apodParams, xMethod, promThresh);
             });
             pendingFutures_.push_back(std::move(fut));
             totalSubmitted_++;

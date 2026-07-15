@@ -138,6 +138,7 @@ void AppState::reset() {
     deleteConfirmIndex = 0;
     // skipDeleteConfirm intentionally NOT reset — it's a session-level flag
     hilbertXCache.clear();
+    peakPositionsCache.clear();
     rawDataCache.clear();
 }
 

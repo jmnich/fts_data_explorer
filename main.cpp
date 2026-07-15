@@ -371,6 +371,7 @@ void applyAdapterSelection(const std::string& adapterName, const std::string& di
     appState.dataLoaded = false;
     appState.loadedData.clear();
     appState.rawDataCache.clear();
+    appState.peakPositionsCache.clear();
     appState.selectedFiles.clear();
     appState.selectedFilenames.clear();
     appState.filesChanged = true;
@@ -917,6 +918,9 @@ int main(int argc, char* argv[]) {
     appState.xAxisBase = config.xAxisBase; // Load from config
     appState.showFPS = config.showFPS; // Load from config
     appState.gridAlpha = config.gridAlpha; // Load from config
+    appState.xCorrectionMethod = config.xCorrectionMethod;
+    appState.peakProminenceThreshold = config.peakProminence;
+    appState.showPeakIndicators = config.showPeakIndicators;
     appState.currentAccentColor = config.accentColor; // Load accent color from config
 
     // Load docking layout flag from config (persisted so DockBuilder runs only once)
@@ -2105,15 +2109,27 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                               : appState.loadedData[0].dataSize();
             size_t prim_start =  0;
             size_t prim_end =  appState.loadedData[0].primaryDetector.size();
-            // Compute peak positions for X-axis alignment
+            // Compute peak positions for X-axis alignment (from raw data for OPD accuracy)
             std::vector<size_t> peakPositions;
             if (appState.maxAtZero) {
                 for (size_t i = 0; i < appState.loadedData.size(); i++) {
-                    auto peakIt = std::max_element(appState.loadedData[i].primaryDetector.begin(),
-                                                   appState.loadedData[i].primaryDetector.end());
-                    peakPositions.push_back(static_cast<size_t>(std::distance(appState.loadedData[i].primaryDetector.begin(), peakIt)));
+                    const auto& prim = (i < appState.rawDataCache.size() && !appState.rawDataCache[i].primaryDetector.empty())
+                        ? appState.rawDataCache[i].primaryDetector
+                        : appState.loadedData[i].primaryDetector;
+                    auto peakIt = std::max_element(prim.begin(), prim.end());
+                    peakPositions.push_back(static_cast<size_t>(std::distance(prim.begin(), peakIt)));
                 }
             }
+            // Map raw peak index to downsampled space for sample-mode X-axis shifts
+            auto getDsPeak = [&](size_t i) -> size_t {
+                if (!appState.enableDownsampling || i >= appState.rawDataCache.size()) return peakPositions[i];
+                const auto& rawPrim = appState.rawDataCache[i].primaryDetector;
+                if (rawPrim.empty()) return peakPositions[i];
+                size_t rs = rawPrim.size();
+                size_t ls = appState.loadedData[i].primaryDetector.size();
+                if (rs <= ls || ls == 0) return peakPositions[i];
+                return peakPositions[i] * ls / rs;
+            };
             
             if (appState.loadedData.size() > 1) {
                 ImGui::BeginGroup(); // Start horizontal group
@@ -2222,9 +2238,9 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             }
 
             
-            // Ensure Hilbert X cache is populated for OPD mode (moved before subplots
-            // so it runs regardless of hasRef)
-            if (appState.xAxisBase == 1 && appState.dataLoaded) {
+            // Ensure X-axis cache is populated for OPD mode or peak-finding
+            // (runs before subplots regardless of hasRef)
+            if ((appState.xAxisBase == 1 || appState.xCorrectionMethod == 1) && appState.dataLoaded) {
                 if (appState.datasetInfo.axisIsCorrected) {
                     for (size_t i = 0; i < appState.loadedData.size(); i++) {
                         const std::string& fileId = appState.selectedFilenames[i];
@@ -2241,15 +2257,32 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                 } else {
                     if (appState.hilbertCacheLaserWavelength != appState.spectrum.refLaserTextbox) {
                         appState.hilbertXCache.clear();
+                        appState.peakPositionsCache.clear();
                         appState.hilbertCacheLaserWavelength = appState.spectrum.refLaserTextbox;
                     }
                     for (size_t i = 0; i < appState.loadedData.size(); i++) {
                         const std::string& fileId = appState.selectedFilenames[i];
                         if (appState.hilbertXCache.find(fileId) == appState.hilbertXCache.end()) {
                             std::vector<double> hilbX;
-                            const auto& refDet = appState.loadedData[i].referenceDetector;
-                            SpectralToolbox::xAxisFromHilbert(refDet, appState.hilbertCacheLaserWavelength, hilbX);
-                            appState.hilbertXCache[fileId] = hilbX;
+                            // Always use full-resolution raw data for computation
+                            const auto& refDet = (i < appState.rawDataCache.size())
+                                ? appState.rawDataCache[i].referenceDetector
+                                : appState.loadedData[i].referenceDetector;
+                            if (appState.xCorrectionMethod == 1) {
+                                std::vector<size_t> peakIdxs;
+                                SpectralToolbox::xAxisFromPeaks(
+                                    refDet, appState.hilbertCacheLaserWavelength,
+                                    appState.peakProminenceThreshold,
+                                    hilbX, &peakIdxs);
+                                if (!hilbX.empty()) {
+                                    appState.peakPositionsCache[fileId] = std::move(peakIdxs);
+                                }
+                            } else {
+                                SpectralToolbox::xAxisFromHilbert(refDet, appState.hilbertCacheLaserWavelength, hilbX);
+                            }
+                            if (!hilbX.empty()) {
+                                appState.hilbertXCache[fileId] = std::move(hilbX);
+                            }
                         }
                     }
                 }
@@ -2309,7 +2342,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                                 double xMax = std::numeric_limits<double>::lowest();
                                 for (size_t i = 0; i < appState.loadedData.size(); i++) {
                                     double N = static_cast<double>(appState.loadedData[i].referenceDetector.size());
-                                    double off = static_cast<double>(peakPositions[i]);
+                                    double off = static_cast<double>(getDsPeak(i));
                                     xMin = std::min(xMin, -off);
                                     xMax = std::max(xMax, N - 1.0 - off);
                                 }
@@ -2354,7 +2387,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                                 }
                             } else if (appState.maxAtZero && !peakPositions.empty()) {
                                 double N = static_cast<double>(appState.loadedData[0].referenceDetector.size());
-                                double off = static_cast<double>(peakPositions[0]);
+                                double off = static_cast<double>(getDsPeak(0));
                                 xMin = -off;
                                 xMax = N - 1.0 - off;
                             } else {
@@ -2394,7 +2427,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                                         }
                                     } else if (appState.maxAtZero && !peakPositions.empty()) {
                                         std::vector<double> shiftedX(actual_count);
-                                        int peak = static_cast<int>(peakPositions[i]);
+                                        int peak = static_cast<int>(getDsPeak(i));
                                         for (size_t j = 0; j < actual_count; j++)
                                             shiftedX[j] = static_cast<double>(static_cast<int>(ref_start + j) - peak);
                                         ImPlot::PlotLine("", shiftedX.data(), &refData[ref_start], static_cast<int>(actual_count), plotSpecs[i]);
@@ -2407,6 +2440,38 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                             }
                         } else {
                             std::cout << "DEBUG: Invalid data range for plotting: start=" << ref_start << ", end=" << ref_end << ", size=" << appState.loadedData[0].referenceDetector.size() << std::endl;
+                        }
+                    }
+
+                    // Peak markers overlay (peak-finding mode, sample-mode axis only)
+                    if (appState.showPeakIndicators && appState.xCorrectionMethod == 1 && appState.xAxisBase == 0 && appState.dataLoaded) {
+                        for (size_t i = 0; i < appState.loadedData.size(); i++) {
+                            const std::string& fileId = appState.selectedFilenames[i];
+                            auto pit = appState.peakPositionsCache.find(fileId);
+                            if (pit == appState.peakPositionsCache.end() || pit->second.empty()) continue;
+                            const auto& ref = (i < appState.rawDataCache.size() && !appState.rawDataCache[i].referenceDetector.empty())
+                                ? appState.rawDataCache[i].referenceDetector
+                                : appState.loadedData[i].referenceDetector;
+                            double dsScale = 1.0;
+                            if (appState.enableDownsampling && i < appState.rawDataCache.size() && !appState.rawDataCache[i].referenceDetector.empty()) {
+                                size_t rawSize = appState.rawDataCache[i].referenceDetector.size();
+                                size_t loadedSize = appState.loadedData[i].referenceDetector.size();
+                                if (rawSize > loadedSize && loadedSize > 0)
+                                    dsScale = static_cast<double>(loadedSize) / rawSize;
+                            }
+                            int xOffset = (appState.maxAtZero && i < peakPositions.size()) ? static_cast<int>(getDsPeak(i)) : 0;
+                            std::vector<double> mx(pit->second.size());
+                            std::vector<double> my(pit->second.size());
+                            for (size_t j = 0; j < pit->second.size(); j++) {
+                                size_t idx = pit->second[j];
+                                mx[j] = static_cast<double>(idx) * dsScale - xOffset;
+                                my[j] = ref[idx];
+                            }
+                            ImPlotSpec pkSpec;
+                            pkSpec.Marker = ImPlotMarker_Circle;
+                            pkSpec.MarkerSize = 4.0f;
+                            pkSpec.MarkerFillColor = ImVec4(1,0,0,1);
+                            ImPlot::PlotScatter("##PeakMarkers", mx.data(), my.data(), (int)mx.size(), pkSpec);
                         }
                     }
                     
@@ -2533,7 +2598,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                                 double xMax = std::numeric_limits<double>::lowest();
                                 for (size_t i = 0; i < appState.loadedData.size(); i++) {
                                     double N = static_cast<double>(appState.loadedData[i].primaryDetector.size());
-                                    double off = static_cast<double>(peakPositions[i]);
+                                    double off = static_cast<double>(getDsPeak(i));
                                     xMin = std::min(xMin, -off);
                                     xMax = std::max(xMax, N - 1.0 - off);
                                 }
@@ -2574,7 +2639,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                                 }
                             } else if (appState.maxAtZero && !peakPositions.empty()) {
                                 double N = static_cast<double>(appState.loadedData[0].primaryDetector.size());
-                                double off = static_cast<double>(peakPositions[0]);
+                                double off = static_cast<double>(getDsPeak(0));
                                 xMin = -off;
                                 xMax = N - 1.0 - off;
                             } else {
@@ -2615,7 +2680,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                                         }
                                     } else if (appState.maxAtZero && !peakPositions.empty()) {
                                         std::vector<double> shiftedX(actual_count);
-                                        int peak = static_cast<int>(peakPositions[i]);
+                                        int peak = static_cast<int>(getDsPeak(i));
                                         for (size_t j = 0; j < actual_count; j++)
                                             shiftedX[j] = static_cast<double>(static_cast<int>(ref_start + j) - peak);
                                         ImPlot::PlotLine("", shiftedX.data(), &primData[ref_start], static_cast<int>(actual_count), plotSpecs[i]);
@@ -2659,7 +2724,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                                     }
                                 } else if (appState.maxAtZero && !peakPositions.empty()) {
                                     std::vector<double> shiftedX(window.size());
-                                    int peak = static_cast<int>(peakPositions[0]);
+                                    int peak = static_cast<int>(getDsPeak(0));
                                     for (size_t j = 0; j < window.size(); j++)
                                         shiftedX[j] = static_cast<double>(static_cast<int>(j) - peak);
                                     ImPlot::PlotLine("##ApodWindow", shiftedX.data(), window.data(), static_cast<int>(window.size()), windowSpec);
@@ -4100,6 +4165,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                 if (appState.enableDownsampling) {
                     appState.enableDownsampling = false;
                     appState.hilbertXCache.clear();
+                    appState.peakPositionsCache.clear();
                     if (appState.dataLoaded) {
                         // Reload all selected files with new downsampling setting
                         std::vector<InterferogramData> reloadedData;
@@ -4151,6 +4217,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                 if (!appState.enableDownsampling) {
                     appState.enableDownsampling = true;
                     appState.hilbertXCache.clear();
+                    appState.peakPositionsCache.clear();
                     if (appState.dataLoaded) {
                         // Reload all selected files with new downsampling setting
                         std::vector<InterferogramData> reloadedData;
@@ -4193,6 +4260,104 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                 }
             }
             ImGui::PopStyleColor(3);
+
+            // Row 6: X correction (Hilbert / Peaks) — only when feature is available
+            const bool canPeakFind = !appState.datasetInfo.axisIsCorrected && appState.datasetInfo.hasReferenceChannel;
+            if (canPeakFind) {
+                ImGui::Text("X correction");
+                ImGui::SameLine();
+                const bool hilbSel = (appState.xCorrectionMethod == 0);
+                const bool peakSel = (appState.xCorrectionMethod == 1);
+
+                ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[hilbSel ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  hilbSel ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+                if (ImGui::Button("Hilbert##XCorrHilb")) {
+                    if (appState.xCorrectionMethod != 0) {
+                        appState.xCorrectionMethod = 0;
+                        appState.hilbertXCache.clear();
+                        appState.peakPositionsCache.clear();
+                        appState.spectrum.cachedFrequencies.clear();
+                        appState.spectrum.cachedSpectra.clear();
+                        appState.spectrum.lastPrimaryDetectors.clear();
+                        appState.spectrum.lastSpectrumParams.clear();
+                        appState.spectrum.pendingSpectra_.clear();
+                        appState.needsRedraw = true;
+                    }
+                }
+                ImGui::PopStyleColor(3);
+                ImGui::SameLine(0.0f, 0.0f);
+
+                ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[peakSel ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  peakSel ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+                if (ImGui::Button("Peaks##XCorrPeak")) {
+                    if (appState.xCorrectionMethod != 1) {
+                        appState.xCorrectionMethod = 1;
+                        appState.hilbertXCache.clear();
+                        appState.peakPositionsCache.clear();
+                        appState.spectrum.cachedFrequencies.clear();
+                        appState.spectrum.cachedSpectra.clear();
+                        appState.spectrum.lastPrimaryDetectors.clear();
+                        appState.spectrum.lastSpectrumParams.clear();
+                        appState.spectrum.pendingSpectra_.clear();
+                        appState.needsRedraw = true;
+                    }
+                }
+                ImGui::PopStyleColor(3);
+
+                // Row 7: Peak prominence slider — only visible when PeakFinding active
+                if (appState.xCorrectionMethod == 1) {
+                    ImGui::Text("Peak promin.");
+                    ImGui::SameLine();
+                    float prom = appState.peakProminenceThreshold;
+                    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+                    if (ImGui::SliderFloat("##PeakProm", &prom, 0.0f, 0.5f, "%.3f")) {
+                        if (std::abs(prom - appState.peakProminenceThreshold) > 1e-6f) {
+                            appState.peakProminenceThreshold = prom;
+                            appState.hilbertXCache.clear();
+                            appState.peakPositionsCache.clear();
+                            appState.spectrum.cachedFrequencies.clear();
+                            appState.spectrum.cachedSpectra.clear();
+                            appState.spectrum.lastPrimaryDetectors.clear();
+                            appState.spectrum.lastSpectrumParams.clear();
+                            appState.spectrum.pendingSpectra_.clear();
+                            appState.needsRedraw = true;
+                        }
+                    }
+
+                    // Row 8: Peak indicators (off / on) — only in sample mode
+                    if (appState.xAxisBase != 0) ImGui::BeginDisabled();
+                    ImGui::Text("Peak markers");
+                    ImGui::SameLine();
+                    const bool pmOff = !appState.showPeakIndicators;
+                    const bool pmOn  =  appState.showPeakIndicators;
+
+                    ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[pmOff ? 1 : 0]);
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  pmOff ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+                    if (ImGui::Button("off##PmOff")) {
+                        if (appState.showPeakIndicators) {
+                            appState.showPeakIndicators = false;
+                            appState.needsRedraw = true;
+                        }
+                    }
+                    ImGui::PopStyleColor(3);
+                    ImGui::SameLine(0.0f, 0.0f);
+
+                    ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[pmOn ? 1 : 0]);
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  pmOn ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+                    if (ImGui::Button("on##PmOn")) {
+                        if (!appState.showPeakIndicators) {
+                            appState.showPeakIndicators = true;
+                            appState.needsRedraw = true;
+                        }
+                    }
+                    ImGui::PopStyleColor(3);
+                    if (appState.xAxisBase != 0) ImGui::EndDisabled();
+                }
+            }
         } else {
             ImGui::Text("No data loaded.");
         }
@@ -4385,6 +4550,9 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
     // Update config with current FPS setting before saving
     config.showFPS = appState.showFPS;
     config.gridAlpha = appState.gridAlpha;
+    config.xCorrectionMethod = appState.xCorrectionMethod;
+    config.peakProminence = appState.peakProminenceThreshold;
+    config.showPeakIndicators = appState.showPeakIndicators;
     config.accentColor = appState.currentAccentColor;
     
     // Save spectrum window settings
