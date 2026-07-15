@@ -28,6 +28,6 @@ The application is designed to help with handling data from DIY lab instruments 
 - Headless mode lets you use the application as a shell-operated calculation engine, without GUI, for automation, verification and advanced integration purposes
 - Persistent configuration and a recently-opened dataset list
 
-![Welcome](screenshots/welcome.png)
+![Welcome](screenshots/scr_welcome.png)
 ![Primary1](screenshots/scr_primary2.png)
 ![Primary1](screenshots/scr_primary3.png)
