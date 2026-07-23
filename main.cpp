@@ -4532,6 +4532,22 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             ImGui::End();
         }
 
+        // Export progress overlay — drawn directly on foreground when export is pending
+        if (appState.exportPanel.exportPending) {
+            fprintf(stderr, "DEBUG: Export progress overlay rendering\n");
+            ImDrawList* dl = ImGui::GetForegroundDrawList();
+            ImVec2 size = ImGui::GetIO().DisplaySize;
+            dl->AddRectFilled(ImVec2(0, 0), size, IM_COL32(0, 0, 0, 160));
+            const char* msg = "Export in progress... Please wait.";
+            ImVec2 ts = ImGui::CalcTextSize(msg);
+            ImVec2 pos((size.x - ts.x) * 0.5f, (size.y - ts.y) * 0.5f);
+            dl->AddRectFilled(
+                ImVec2(pos.x - 20, pos.y - 12),
+                ImVec2(pos.x + ts.x + 20, pos.y + ts.y + 12),
+                IM_COL32(30, 30, 50, 230), 8.0f);
+            dl->AddText(pos, IM_COL32(255, 255, 255, 255), msg);
+        }
+
         // Rendering
         ImGui::Render();
         int display_w, display_h;
@@ -4545,6 +4561,12 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         
         glfwSwapBuffers(window);
+
+        // Execute deferred export after the frame is visible on screen
+        if (appState.exportPanel.exportPending) {
+            appState.exportPanel.executePendingExport();
+            appState.needsRedraw = true;
+        }
         
         // Force redraw every frame while welcome screen is active (pattern persistence)
         if (appState.showWelcomeScreen && !appState.welcomeScreenInitialized) {

@@ -23,12 +23,20 @@ public:
     std::vector<std::string> artifactLabels;
     std::vector<int>         artifactChecked; // 0=false, 1=true
 
+    // Deferred export state (between-frames processing)
+    bool        exportPending = false;
+    bool        exportJustCompleted = false;
+    std::string exportDir;
+
     ExportPanel();
 
     void render();
     void refreshArtifacts();
     bool isArtifactAvailable(const char* label) const;
     void performExport(const std::string& dir);
+
+    // Called from main loop after SwapBuffers to run the deferred export
+    void executePendingExport();
 
     // Export a single artifact by label (used by headless mode -p)
     bool exportArtifact(const std::string& label, const std::string& dir);

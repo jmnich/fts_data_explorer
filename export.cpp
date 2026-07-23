@@ -80,6 +80,12 @@ static std::string sanitizeFilename(const std::string& s)
 
 void ExportPanel::render()
 {
+    // Check for deferred export completion (set after SwapBuffers in main loop)
+    if (exportJustCompleted) {
+        exportJustCompleted = false;
+        ImGui::OpenPopup("Export Complete");
+    }
+
     refreshArtifacts();
 
     if (!appState || !appState->dataLoaded) {
@@ -125,8 +131,8 @@ void ExportPanel::render()
         } else {
             const char* folder = tinyfd_selectFolderDialog("Select Export Directory", "");
             if (folder) {
-                performExport(std::string(folder));
-                ImGui::OpenPopup("Export Complete");
+                exportDir = folder;
+                exportPending = true;
             }
         }
     }
@@ -142,6 +148,8 @@ void ExportPanel::render()
         if (ImGui::Button("OK")) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
+
+
 }
 
 void ExportPanel::performExport(const std::string& dir)
@@ -156,6 +164,14 @@ void ExportPanel::performExport(const std::string& dir)
     if (artifactChecked[7]) writeT100TransCsv(dir);
     if (artifactChecked[8]) writeT100AllTransCsv(dir);
     if (artifactChecked[9]) writeT100StdDevCsv(dir);
+}
+
+void ExportPanel::executePendingExport()
+{
+    if (!exportPending) return;
+    performExport(exportDir);
+    exportPending = false;
+    exportJustCompleted = true;
 }
 
 bool ExportPanel::exportArtifact(const std::string& label, const std::string& dir)
