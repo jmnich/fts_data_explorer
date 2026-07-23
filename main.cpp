@@ -778,6 +778,47 @@ void cleanupApplication(GLFWwindow* window) {
     glfwTerminate();
 }
 
+static void rebuildDefaultLayout(ImGuiID dockspace_id) {
+    ImGui::DockBuilderRemoveNode(dockspace_id);
+    ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::DockBuilderSetNodeSize(dockspace_id,
+        ImVec2(vp->Size.x, vp->Size.y - ImGui::GetFrameHeight()));
+
+    ImGuiID dock_left, dock_right;
+    ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Left, 0.16f, &dock_left, &dock_right);
+
+    ImGuiID dock_left_top, dock_left_bottom;
+    ImGui::DockBuilderSplitNode(dock_left, ImGuiDir_Up, 0.40f, &dock_left_top, &dock_left_bottom);
+
+    ImGuiID dock_left_bottom_top, dock_left_bottom_bottom;
+    ImGui::DockBuilderSplitNode(dock_left_bottom, ImGuiDir_Up, 0.50f, &dock_left_bottom_top, &dock_left_bottom_bottom);
+
+    ImGuiID dock_center, dock_right_panel;
+    ImGui::DockBuilderSplitNode(dock_right, ImGuiDir_Left, 0.48f, &dock_center, &dock_right_panel);
+
+    ImGuiID dock_right_top, dock_right_bottom;
+    ImGui::DockBuilderSplitNode(dock_right_panel, ImGuiDir_Up, 0.50f, &dock_right_top, &dock_right_bottom);
+
+    ImGui::DockBuilderDockWindow("Files",              dock_left_top);
+    ImGui::DockBuilderDockWindow("Metadata",           dock_left_bottom_top);
+    ImGui::DockBuilderDockWindow("Export",             dock_left_bottom_top);
+    ImGui::DockBuilderDockWindow("SNR",                dock_left_bottom_top);
+    ImGui::DockBuilderDockWindow("100% T",             dock_left_bottom_top);
+    ImGui::DockBuilderDockWindow("Allan",              dock_left_bottom_top);
+    ImGui::DockBuilderDockWindow("Spectrum",           dock_left_bottom_bottom);
+    ImGui::DockBuilderDockWindow("Interferogram",      dock_left_bottom_bottom);
+    ImGui::DockBuilderDockWindow("Average",            dock_left_bottom_bottom);
+    ImGui::DockBuilderDockWindow("Interferogram View", dock_center);
+    ImGui::DockBuilderDockWindow("100% T View",        dock_center);
+    ImGui::DockBuilderDockWindow("Allan View",         dock_center);
+    ImGui::DockBuilderDockWindow("SNR View",           dock_right_top);
+    ImGui::DockBuilderDockWindow("Average View",       dock_right_top);
+    ImGui::DockBuilderDockWindow("Spectrum View",      dock_right_bottom);
+
+    ImGui::DockBuilderFinish(dockspace_id);
+}
+
 int main(int argc, char* argv[]) {
     // Parse headless mode flags before any GUI initialization
     HeadlessConfig headlessCfg;
@@ -1525,6 +1566,10 @@ int main(int argc, char* argv[]) {
                         appState.gridAlpha = gridPct / 100.0f;
                     }
 
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("Restore layout")) {
+                        appState.restoreLayoutRequested = true;
+                    }
                     
                     // UI Size selection dropdown
                     if (ImGui::BeginMenu("UI Size"))
@@ -1665,55 +1710,18 @@ int main(int argc, char* argv[]) {
             // Create docking space
             ImGuiID dockspace_id = ImGui::GetID("MainDockSpace_v2");
 
+                // Handle manual layout restore request (from Settings menu)
+                if (appState.restoreLayoutRequested) {
+                    appState.restoreLayoutRequested = false;
+                    rebuildDefaultLayout(dockspace_id);
+                }
+
                 // Apply default layout only on first launch (persisted via config)
                 if (!appState.defaultLayoutApplied) {
                     appState.defaultLayoutApplied = true;
                     config.defaultLayoutApplied = true;
                     config.saveToFile(configFilePath);
-
-                    ImGui::DockBuilderRemoveNode(dockspace_id);
-                    ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
-                    ImGui::DockBuilderSetNodeSize(dockspace_id,
-                        ImVec2(viewport->Size.x, viewport->Size.y - ImGui::GetFrameHeight()));
-
-                    // Split dockspace: left (16%) / right (84%)
-                    ImGuiID dock_left, dock_right;
-                    ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Left, 0.16f, &dock_left, &dock_right);
-
-                    // Split left: Files (40%) / bottom (60%)
-                    ImGuiID dock_left_top, dock_left_bottom;
-                    ImGui::DockBuilderSplitNode(dock_left, ImGuiDir_Up, 0.40f, &dock_left_top, &dock_left_bottom);
-
-                    // Split left-bottom: Metadata/Export/SNR (50%) / Spectrum/Interferogram/Average (50%)
-                    ImGuiID dock_left_bottom_top, dock_left_bottom_bottom;
-                    ImGui::DockBuilderSplitNode(dock_left_bottom, ImGuiDir_Up, 0.50f, &dock_left_bottom_top, &dock_left_bottom_bottom);
-
-                    // Split right: Interferogram View (48%) / right panel (52%)
-                    ImGuiID dock_center, dock_right_panel;
-                    ImGui::DockBuilderSplitNode(dock_right, ImGuiDir_Left, 0.48f, &dock_center, &dock_right_panel);
-
-                    // Split right panel: view tabs (50%) / Spectrum View (50%)
-                    ImGuiID dock_right_top, dock_right_bottom;
-                    ImGui::DockBuilderSplitNode(dock_right_panel, ImGuiDir_Up, 0.50f, &dock_right_top, &dock_right_bottom);
-
-                        // Dock all windows to their zones
-                        ImGui::DockBuilderDockWindow("Files",              dock_left_top);
-                        ImGui::DockBuilderDockWindow("Metadata",           dock_left_bottom_top);
-                        ImGui::DockBuilderDockWindow("Export",             dock_left_bottom_top);
-                        ImGui::DockBuilderDockWindow("SNR",                dock_left_bottom_top);
-                        ImGui::DockBuilderDockWindow("100% T",          dock_left_bottom_top);
-                        ImGui::DockBuilderDockWindow("Allan",              dock_left_bottom_top);
-                        ImGui::DockBuilderDockWindow("Spectrum",           dock_left_bottom_bottom);
-                        ImGui::DockBuilderDockWindow("Interferogram",      dock_left_bottom_bottom);
-                        ImGui::DockBuilderDockWindow("Average",            dock_left_bottom_bottom);
-                        ImGui::DockBuilderDockWindow("Interferogram View", dock_center);
-                        ImGui::DockBuilderDockWindow("100% T View",     dock_center);
-                        ImGui::DockBuilderDockWindow("Allan View",         dock_center);
-                        ImGui::DockBuilderDockWindow("SNR View",           dock_right_top);
-                        ImGui::DockBuilderDockWindow("Average View",       dock_right_top);
-                        ImGui::DockBuilderDockWindow("Spectrum View",      dock_right_bottom);
-
-                    ImGui::DockBuilderFinish(dockspace_id);
+                    rebuildDefaultLayout(dockspace_id);
                 }
 
 ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);

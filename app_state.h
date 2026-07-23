@@ -128,6 +128,9 @@ struct AppState {
 
     // Docking layout: tracks whether we've applied the default layout (first-launch only)
     bool defaultLayoutApplied;
+
+    // Set by Settings > Restore layout menu item; consumed inside DockSpace window
+    bool restoreLayoutRequested = false;
     
     // Spectrum window state
     Spectrum spectrum;
