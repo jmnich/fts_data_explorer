@@ -401,69 +401,7 @@ static bool naturalSortCompare(const std::string& a, const std::string& b) {
 // Compute spectrum for a single file and cache it in appState
 // ---------------------------------------------------------------------------
 static bool computeSpectrumForFile(AppState& state, const std::string& filePath, const std::string& fileId) {
-    try {
-        auto raw = AdapterRegistry::instance().loadFileStatic(state.datasetInfo.adapterName, filePath);
-
-        auto targetUnit = static_cast<SpectralToolbox::SpectrumXUnit>(state.spectrum.xUnitSelector);
-
-        if (state.datasetInfo.hasPrecomputedSpectra) {
-            std::vector<double> freqs = raw.referenceDetector;
-            for (double& f : freqs)
-                f = SpectralToolbox::convertXValue(f, SpectralToolbox::SpectrumXUnit::CmInv, targetUnit);
-            state.spectrum.cachedFrequencies[fileId] = std::move(freqs);
-            state.spectrum.cachedSpectra[fileId] = std::move(raw.primaryDetector);
-            state.spectrum.lastPrimaryDetectors[fileId] = raw.primaryDetector;
-        } else if (state.datasetInfo.axisIsCorrected) {
-            for (auto& v : raw.opdAxis) v *= 1e6;
-            auto ps = SpectralToolbox::processSpectrumFromCorrectedAxis(
-                raw.primaryDetector, raw.opdAxis,
-                state.spectrum.Kpadding,
-                static_cast<SpectralToolbox::SpectrumXUnit>(state.spectrum.xUnitSelector),
-                static_cast<ApodizationWindow>(state.spectrum.apodizationSelector),
-                state.spectrum.apodizationParams);
-            state.spectrum.cachedFrequencies[fileId] = std::move(ps.spectrumX);
-            state.spectrum.cachedSpectra[fileId] = std::move(ps.spectrumY);
-            state.spectrum.lastPrimaryDetectors[fileId] = raw.primaryDetector;
-        } else {
-            auto ps = SpectralToolbox::processSpectrum(
-                raw.primaryDetector, raw.referenceDetector,
-                state.spectrum.refLaserTextbox,
-                state.spectrum.Kpadding,
-                targetUnit,
-                static_cast<ApodizationWindow>(state.spectrum.apodizationSelector),
-                state.spectrum.apodizationParams,
-                static_cast<SpectralToolbox::XCorrectionMethod>(state.xCorrectionMethod),
-                state.peakProminenceThreshold);
-            state.spectrum.cachedFrequencies[fileId] = std::move(ps.spectrumX);
-            state.spectrum.cachedSpectra[fileId] = std::move(ps.spectrumY);
-            state.spectrum.lastPrimaryDetectors[fileId] = raw.primaryDetector;
-        }
-
-        double activeParam = 0.0;
-        auto apodSel = static_cast<ApodizationWindow>(state.spectrum.apodizationSelector);
-        if (apodSel == ApodizationWindow::Gauss)
-            activeParam = state.spectrum.apodizationParams.gaussSigma;
-        else if (apodSel == ApodizationWindow::Rectangular)
-            activeParam = state.spectrum.apodizationParams.rectWidth;
-        else if (apodSel == ApodizationWindow::NortonBeer)
-            activeParam = state.spectrum.apodizationParams.nortonBeerFwhm;
-        else if (apodSel == ApodizationWindow::DolphChebyshev)
-            activeParam = state.spectrum.apodizationParams.dolphChebyshevAt;
-
-        state.spectrum.lastSpectrumParams[fileId] = {
-            static_cast<double>(state.spectrum.Kpadding),
-            static_cast<double>(state.spectrum.xUnitSelector),
-            static_cast<double>(state.spectrum.refLaserTextbox),
-            static_cast<double>(state.spectrum.apodizationSelector),
-            activeParam,
-            state.spectrum.apodizationParams.rectAsymMode ? 1.0 : 0.0
-        };
-
-        return true;
-    } catch (const std::exception& e) {
-        std::cerr << "Warning: Failed to compute spectrum for " << filePath << ": " << e.what() << std::endl;
-        return false;
-    }
+    return state.spectrum.computeAndCacheSpectrum(filePath, fileId);
 }
 
 // ---------------------------------------------------------------------------

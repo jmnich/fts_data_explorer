@@ -225,6 +225,73 @@ void Spectrum::pollPendingSpectra() {
     }
 }
 
+bool Spectrum::computeAndCacheSpectrum(const std::string& filePath, const std::string& fileId) {
+    if (!appState) return false;
+    try {
+        auto raw = AdapterRegistry::instance().loadFileStatic(appState->datasetInfo.adapterName, filePath);
+
+        auto targetUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
+
+        if (appState->datasetInfo.hasPrecomputedSpectra) {
+            std::vector<double> freqs = raw.referenceDetector;
+            for (double& f : freqs)
+                f = SpectralToolbox::convertXValue(f, SpectralToolbox::SpectrumXUnit::CmInv, targetUnit);
+            cachedFrequencies[fileId] = std::move(freqs);
+            cachedSpectra[fileId] = std::move(raw.primaryDetector);
+            lastPrimaryDetectors[fileId] = raw.primaryDetector;
+        } else if (appState->datasetInfo.axisIsCorrected) {
+            for (auto& v : raw.opdAxis) v *= 1e6;
+            auto ps = SpectralToolbox::processSpectrumFromCorrectedAxis(
+                raw.primaryDetector, raw.opdAxis,
+                Kpadding,
+                static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector),
+                static_cast<ApodizationWindow>(apodizationSelector),
+                apodizationParams);
+            cachedFrequencies[fileId] = std::move(ps.spectrumX);
+            cachedSpectra[fileId] = std::move(ps.spectrumY);
+            lastPrimaryDetectors[fileId] = raw.primaryDetector;
+        } else {
+            auto ps = SpectralToolbox::processSpectrum(
+                raw.primaryDetector, raw.referenceDetector,
+                refLaserTextbox,
+                Kpadding,
+                targetUnit,
+                static_cast<ApodizationWindow>(apodizationSelector),
+                apodizationParams,
+                static_cast<SpectralToolbox::XCorrectionMethod>(appState->xCorrectionMethod),
+                appState->peakProminenceThreshold);
+            cachedFrequencies[fileId] = std::move(ps.spectrumX);
+            cachedSpectra[fileId] = std::move(ps.spectrumY);
+            lastPrimaryDetectors[fileId] = raw.primaryDetector;
+        }
+
+        double activeParam = 0.0;
+        auto apodSel = static_cast<ApodizationWindow>(apodizationSelector);
+        if (apodSel == ApodizationWindow::Gauss)
+            activeParam = apodizationParams.gaussSigma;
+        else if (apodSel == ApodizationWindow::Rectangular)
+            activeParam = apodizationParams.rectWidth;
+        else if (apodSel == ApodizationWindow::NortonBeer)
+            activeParam = apodizationParams.nortonBeerFwhm;
+        else if (apodSel == ApodizationWindow::DolphChebyshev)
+            activeParam = apodizationParams.dolphChebyshevAt;
+
+        lastSpectrumParams[fileId] = {
+            static_cast<double>(Kpadding),
+            static_cast<double>(xUnitSelector),
+            static_cast<double>(refLaserTextbox),
+            static_cast<double>(apodizationSelector),
+            activeParam,
+            apodizationParams.rectAsymMode ? 1.0 : 0.0
+        };
+
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "Warning: Failed to compute spectrum for " << filePath << ": " << e.what() << std::endl;
+        return false;
+    }
+}
+
 void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, std::vector<double>>>& primaryDetectors,
                                      const std::vector<InterferogramData>& rawDataCache) {
 

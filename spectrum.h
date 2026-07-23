@@ -113,4 +113,9 @@ public:
     
     // Poll pending async computations
     void pollPendingSpectra();
+
+    // Compute spectrum for a file and store in cache. Uses current spectrum panel
+    // settings (K, xUnit, refLaser, apodization, xCorrectionMethod, etc.).
+    // Loads raw data from disk via the active adapter. Returns false on failure.
+    bool computeAndCacheSpectrum(const std::string& filePath, const std::string& fileId);
 };

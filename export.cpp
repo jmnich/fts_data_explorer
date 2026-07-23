@@ -40,8 +40,12 @@ bool ExportPanel::isArtifactAvailable(const char* label) const
     if (lbl == ARTIFACT_CORR_IFG || lbl == ARTIFACT_UNCORR_IFG)
         return appState->dataLoaded && !appState->selectedFiles.empty()
                && appState->datasetInfo.hasInterferograms;
-    if (lbl == ARTIFACT_SPECTRA)
-        return appState->dataLoaded && !appState->selectedFiles.empty();
+    if (lbl == ARTIFACT_SPECTRA) {
+        if (!appState->dataLoaded) return false;
+        for (bool v : appState->filesSelectedForAveraging)
+            if (v) return true;
+        return false;
+    }
     if (lbl == ARTIFACT_AVG_SPECT)
         return appState->averageSpectrum.averageAvailable;
     if (lbl == ARTIFACT_SNR_SPECT)
@@ -295,20 +299,48 @@ void ExportPanel::writeSnrSpectrumCsv(const std::string& dir)
 
 void ExportPanel::writeSpectraCsv(const std::string& dir)
 {
+    // Build list of checked files
+    std::vector<std::string> checkedFull;
+    std::vector<std::string> checkedShort;
+    for (size_t i = 0; i < appState->sortedFiles.size() && i < appState->filesSelectedForAveraging.size(); i++) {
+        if (appState->filesSelectedForAveraging[i]) {
+            checkedFull.push_back(appState->sortedFiles[i]);
+            std::string fn = appState->sortedFiles[i];
+            size_t ls = fn.find_last_of("/\\");
+            if (ls != std::string::npos) fn = fn.substr(ls + 1);
+            checkedShort.push_back(fn);
+        }
+    }
+    if (checkedFull.empty()) return;
+
+    // Ensure each checked file's spectrum is cached; track success
+    size_t nFiles = checkedFull.size();
+    std::vector<bool> fileOk(nFiles, false);
+    for (size_t i = 0; i < nFiles; i++) {
+        const std::string& fid = checkedShort[i];
+        if (appState->spectrum.cachedFrequencies.find(fid) == appState->spectrum.cachedFrequencies.end() ||
+            appState->spectrum.cachedSpectra.find(fid) == appState->spectrum.cachedSpectra.end()) {
+            if (!appState->spectrum.computeAndCacheSpectrum(checkedFull[i], fid)) {
+                std::cerr << "Warning: Could not compute spectrum for " << checkedFull[i] << std::endl;
+                continue;
+            }
+        }
+        if (appState->spectrum.cachedFrequencies.count(fid) &&
+            appState->spectrum.cachedSpectra.count(fid))
+            fileOk[i] = true;
+    }
+
+    // Find first successful file for master X axis
+    int masterIdx = -1;
+    for (size_t i = 0; i < nFiles; i++) {
+        if (fileOk[i]) { masterIdx = static_cast<int>(i); break; }
+    }
+    if (masterIdx < 0) return;
+
     std::string dsName = sanitizeFilename(appState->currentDatasetName);
     std::string path = dir + "/" + dsName + "_spectra.csv";
     std::ofstream ofs(path);
     if (!ofs.is_open()) return;
-
-    size_t nFiles = appState->selectedFilenames.size();
-    bool hasData = false;
-    for (size_t i = 0; i < nFiles; i++) {
-        const auto& fid = appState->selectedFilenames[i];
-        if (appState->spectrum.cachedFrequencies.count(fid) &&
-            appState->spectrum.cachedSpectra.count(fid))
-            hasData = true;
-    }
-    if (!hasData) { ofs.close(); return; }
 
     const char* xLabel = "Wavenumber [cm-1]";
     if (appState->spectrum.xUnitSelector == 1) xLabel = "Wavelength [um]";
@@ -316,19 +348,20 @@ void ExportPanel::writeSpectraCsv(const std::string& dir)
 
     ofs << xLabel;
     for (size_t i = 0; i < nFiles; i++) {
-        std::string fn = appState->selectedFilenames[i];
+        std::string fn = checkedShort[i];
         size_t dot = fn.rfind('.');
         if (dot != std::string::npos) fn = fn.substr(0, dot);
         ofs << ",Magnitude_" << i << " [" << fn << "]";
     }
     ofs << "\n";
 
-    const auto& masterFreq = appState->spectrum.cachedFrequencies.at(appState->selectedFilenames[0]);
+    const auto& masterFreq = appState->spectrum.cachedFrequencies.at(checkedShort[masterIdx]);
     size_t nRows = masterFreq.size();
     for (size_t r = 0; r < nRows; r++) {
         ofs << masterFreq[r];
         for (size_t i = 0; i < nFiles; i++) {
-            const auto& fid = appState->selectedFilenames[i];
+            if (!fileOk[i]) { ofs << ","; continue; }
+            const auto& fid = checkedShort[i];
             const auto& freq = appState->spectrum.cachedFrequencies.at(fid);
             const auto& spec = appState->spectrum.cachedSpectra.at(fid);
             if (freq.empty() || spec.empty()) {
