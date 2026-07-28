@@ -1276,6 +1276,22 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        // Space toggles the selection checkbox for all highlighted files
+        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) &&
+            !ImGui::GetIO().WantCaptureKeyboard &&
+            ImGui::IsKeyPressed(ImGuiKey_Space) &&
+            appState.dataLoaded) {
+            for (const auto& selFile : appState.selectedFiles) {
+                auto it = std::find(appState.sortedFiles.begin(), appState.sortedFiles.end(), selFile);
+                if (it != appState.sortedFiles.end()) {
+                    size_t idx = std::distance(appState.sortedFiles.begin(), it);
+                    if (idx < appState.filesSelectedForAveraging.size())
+                        appState.filesSelectedForAveraging[idx] = !appState.filesSelectedForAveraging[idx];
+                }
+            }
+            appState.needsRedraw = true;
+        }
+
         // Handle Ctrl+H to return to welcome screen
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) && ImGui::IsKeyPressed(ImGuiKey_H) && ImGui::GetIO().KeyCtrl) {
             // Reset to welcome screen state
@@ -1676,6 +1692,8 @@ int main(int argc, char* argv[]) {
                     ImGui::Text("Keyboard Shortcuts:");
                     ImGui::Separator();
                     ImGui::Text("Up/Down Arrows: Navigate files");
+                    ImGui::Text("Space: Toggle selection checkboxes for highlighted files");
+                    ImGui::Text("Delete: Delete current file");
                     ImGui::Text("Shift + mouse / Right click: X-axis range selection");
                     ImGui::Text("ESC: Reset zoom");
                     ImGui::Text("Mouse Scroll: Zoom in/out");
