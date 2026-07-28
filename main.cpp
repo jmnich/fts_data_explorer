@@ -999,6 +999,13 @@ int main(int argc, char* argv[]) {
     appState.spectrum.apodizationParams.kaiserBeta = config.apodKaiserBeta;
     appState.spectrum.apodizationParams.rectAsymMode = config.apodRectAsymMode;
     appState.spectrum.detectorSensitivity = config.spectrumDetectorSensitivity;
+    if (config.spectrumDetectorSensitivity == 0.0f)
+        snprintf(appState.spectrum.detectorSensitivityText,
+                 sizeof(appState.spectrum.detectorSensitivityText), "NA");
+    else
+        snprintf(appState.spectrum.detectorSensitivityText,
+                 sizeof(appState.spectrum.detectorSensitivityText), "%.4f",
+                 config.spectrumDetectorSensitivity);
     appState.spectrum.refLaserTextbox = config.spectrumRefLaser;
     
     // Set the appState pointer in the spectrum object for raw data access
@@ -2908,12 +2915,37 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
 
             float remWidth = ImGui::GetContentRegionAvail().x;
             ImGui::SetNextItemWidth(remWidth);
-            ImGui::InputFloat("##DetectorSensitivity", &appState.spectrum.detectorSensitivity, 0.0f, 0.0f, "%.4f");
+            ImGui::InputText("##DetectorSensitivity",
+                appState.spectrum.detectorSensitivityText,
+                sizeof(appState.spectrum.detectorSensitivityText));
             if (ImGui::IsItemDeactivatedAfterEdit()) {
-                invalidateSpectrumCaches();
+                std::string s(appState.spectrum.detectorSensitivityText);
+                s.erase(0, s.find_first_not_of(" \t\n\r"));
+                s.erase(s.find_last_not_of(" \t\n\r") + 1);
+
+                if (s == "NA" || s == "na" || s == "n/a" || s == "none") {
+                    appState.spectrum.detectorSensitivity = 0.0f;
+                    snprintf(appState.spectrum.detectorSensitivityText,
+                             sizeof(appState.spectrum.detectorSensitivityText), "NA");
+                    invalidateSpectrumCaches();
+                } else {
+                    char* end = nullptr;
+                    float val = std::strtof(s.c_str(), &end);
+                    if (end != s.c_str() && *end == '\0') {
+                        appState.spectrum.detectorSensitivity = val;
+                        if (val == 0.0f)
+                            snprintf(appState.spectrum.detectorSensitivityText,
+                                     sizeof(appState.spectrum.detectorSensitivityText), "NA");
+                        else
+                            snprintf(appState.spectrum.detectorSensitivityText,
+                                     sizeof(appState.spectrum.detectorSensitivityText), "%.4f", val);
+                        invalidateSpectrumCaches();
+                    }
+                }
             }
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Detector sensitivity in kV/W. Converts spectrum from V to W and enables dBm units.\nLeave at 0 to skip conversion.");
+                ImGui::SetTooltip("Detector sensitivity in kV/W.\n"
+                    "Set to 0 or enter 'NA' to normalize spectrum to max=1 (0 dB).");
             }
 
             // Reference laser textbox

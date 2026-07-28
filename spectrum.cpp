@@ -5,10 +5,34 @@
 #include <cmath>
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 #include <limits>
 #include <chrono>
 #include "app_state.h"
+
+// Normalize a display buffer so max = 1 (linear/log10) or max = 0 dB (dB mode).
+// raw provides the pre-normalization values for computing the max.
+static void normalizeBuffer(std::vector<double>& buf,
+                            const std::vector<double>& raw,
+                            int yScaleSelector) {
+    double maxVal = *std::max_element(raw.begin(), raw.end());
+    if (maxVal > 0.0) {
+        if (yScaleSelector == 2)
+            for (size_t i = 0; i < buf.size(); ++i)
+                buf[i] = 10.0 * std::log10(std::max(buf[i] / maxVal, 1e-300));
+        else
+            for (size_t i = 0; i < buf.size(); ++i)
+                buf[i] /= maxVal;
+    }
+}
+
+static double normalizeValue(double val, double maxVal, int yScaleSelector) {
+    if (maxVal <= 0.0) return (yScaleSelector == 2) ? -300.0 : 0.0;
+    return (yScaleSelector == 2)
+        ? 10.0 * std::log10(std::max(val / maxVal, 1e-300))
+        : val / maxVal;
+}
 
 static void SetupAxisTicksLimited(ImAxis axis, double min, double max, int maxTicks = 12) {
     double range = max - min;
@@ -73,10 +97,10 @@ Spectrum::Spectrum()
       pendingNextXMin(0.0),
       pendingNextXMax(-1.0), // sentinel: invalid range -> no pending value
        xUnitSwitchedThisFrame(false),
-       convertedXMin(0.0),
-       convertedXMax(0.0) {
-      
-      }
+        convertedXMin(0.0),
+        convertedXMax(0.0) {
+       strcpy(detectorSensitivityText, "NA");
+       }
 
 void Spectrum::resetSpectrumWindow() {
     // Reset X-range selection state
@@ -108,6 +132,7 @@ void Spectrum::resetSpectrumWindow() {
     prevYScaleSelector = 0;
     refLaserTextbox = 1.550; // Reset to default value
     detectorSensitivity = 0.0f; // Reset to no conversion
+    strcpy(detectorSensitivityText, "NA");
     Kpadding = 2; // Reset to default zero-pad factor
     apodizationSelector = 0;
     apodizationParams = ApodizationParams();
@@ -533,7 +558,9 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
             const char* xLabel = (xUnitSelector == 0) ? "Wavenumber (cm-1)"
                                : (xUnitSelector == 1) ? "Wavelength (\xC2\xB5" "m)"
                                                      : "Frequency (THz)";
-            const char* yLabel = (yScaleSelector == 2 && detectorSensitivity > 0.0f) ? "dBm" : "";
+            const char* yLabel = "";
+            if (yScaleSelector == 2)
+                yLabel = (detectorSensitivity > 0.0f) ? "dBm" : "dB";
             ImPlot::SetupAxes(xLabel, yLabel, x_flags, y_flags);
 
             // Apply Y-axis scale (log10 / linear) selected in the Spectrum panel.
@@ -541,15 +568,14 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                 ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Log10);
             }
 
-            // Helper: convert raw magnitude to display value (V→W, dB, dBm)
+            // Helper: convert raw magnitude to display value (V→W only).
+            // When detectorSensitivity == 0, caller applies normalization.
             auto toDisplay = [&](double raw) -> double {
-                if (yScaleSelector == 2) {
-                    if (detectorSensitivity > 0.0f)
+                if (detectorSensitivity > 0.0f) {
+                    if (yScaleSelector == 2)
                         return 10.0 * std::log10(std::max(raw / detectorSensitivity, 1e-300));
-                    return 10.0 * std::log10(std::max(raw, 1e-300));
-                }
-                if (detectorSensitivity > 0.0f)
                     return raw / (detectorSensitivity * 1000.0);
+                }
                 return raw;
             };
 
@@ -599,7 +625,7 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                     const double localXMin = std::min(freqs.front(), freqs.back());
                     const double localXMax = std::max(freqs.front(), freqs.back());
                     double localYMin, localYMax;
-                    if (yScaleSelector == 2 || detectorSensitivity > 0.0f) {
+                    if (detectorSensitivity > 0.0f) {
                         localYMin = std::numeric_limits<double>::max();
                         localYMax = std::numeric_limits<double>::lowest();
                         for (double v : spec) {
@@ -608,9 +634,14 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                             localYMax = std::max(localYMax, d);
                         }
                     } else {
-                        auto mmY = std::minmax_element(spec.begin(), spec.end());
-                        localYMin = *mmY.first;
-                        localYMax = *mmY.second;
+                        double maxVal = *std::max_element(spec.begin(), spec.end());
+                        localYMin = std::numeric_limits<double>::max();
+                        localYMax = std::numeric_limits<double>::lowest();
+                        for (double v : spec) {
+                            double d = normalizeValue(v, maxVal, yScaleSelector);
+                            localYMin = std::min(localYMin, d);
+                            localYMax = std::max(localYMax, d);
+                        }
                     }
 
                     if (!haveRange) {
@@ -848,7 +879,7 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                         if (csIt == cachedSpectra.end() || csIt->second.empty())
                             continue;
                         double localYMin, localYMax;
-                        if (yScaleSelector == 2 || detectorSensitivity > 0.0f) {
+                        if (detectorSensitivity > 0.0f) {
                             localYMin = std::numeric_limits<double>::max();
                             localYMax = std::numeric_limits<double>::lowest();
                             for (double v : csIt->second) {
@@ -857,9 +888,14 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                                 localYMax = std::max(localYMax, d);
                             }
                         } else {
-                            auto mmY = std::minmax_element(csIt->second.begin(), csIt->second.end());
-                            localYMin = *mmY.first;
-                            localYMax = *mmY.second;
+                            double maxVal = *std::max_element(csIt->second.begin(), csIt->second.end());
+                            localYMin = std::numeric_limits<double>::max();
+                            localYMax = std::numeric_limits<double>::lowest();
+                            for (double v : csIt->second) {
+                                double d = normalizeValue(v, maxVal, yScaleSelector);
+                                localYMin = std::min(localYMin, d);
+                                localYMax = std::max(localYMax, d);
+                            }
                         }
                         if (yMin >= yMax) {
                             yMin = localYMin; yMax = localYMax;
@@ -952,12 +988,18 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                 plotSpecs[i].LineWeight = 2.0f;
 
                 const double* plotData = spectrum.data();
-                if (yScaleSelector == 2 || detectorSensitivity > 0.0f) {
+                if (detectorSensitivity > 0.0f) {
                     static std::vector<double> dbBuffer;
                     dbBuffer.resize(spectrum.size());
                     for (std::size_t j = 0; j < spectrum.size(); ++j)
                         dbBuffer[j] = toDisplay(spectrum[j]);
                     plotData = dbBuffer.data();
+                } else {
+                    static std::vector<double> normBuffer;
+                    normBuffer.resize(spectrum.size());
+                    std::copy(spectrum.begin(), spectrum.end(), normBuffer.begin());
+                    normalizeBuffer(normBuffer, spectrum, yScaleSelector);
+                    plotData = normBuffer.data();
                 }
                 ImPlot::PlotLine(fileId.c_str(), frequencies.data(), plotData, spectrum.size(), plotSpecs[i]);
             }
@@ -1058,9 +1100,13 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                                  idx = (std::abs(mousePos.x - freqs[lo]) <= std::abs(freqs[hi] - mousePos.x)) ? lo : hi;
                              }
                          }
-                         signalY = specs[idx];
-                         if (yScaleSelector == 2 || detectorSensitivity > 0.0f)
-                             signalY = toDisplay(signalY);
+                          signalY = specs[idx];
+                          if (detectorSensitivity > 0.0f) {
+                              signalY = toDisplay(signalY);
+                          } else {
+                              double maxVal = *std::max_element(specs.begin(), specs.end());
+                              signalY = normalizeValue(signalY, maxVal, yScaleSelector);
+                          }
                      }
                  }
 
@@ -1083,7 +1129,9 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                  double thz = (unit == ST::THz)   ? mousePos.x : SpectralToolbox::convertXValue(mousePos.x, unit, ST::THz);
 
                  char txt[512];
-                 const char* yUnit = (yScaleSelector == 2 && detectorSensitivity > 0.0f) ? " dBm" : "";
+                  const char* yUnit = "";
+                  if (yScaleSelector == 2)
+                      yUnit = (detectorSensitivity > 0.0f) ? " dBm" : " dB";
                  std::snprintf(txt, sizeof(txt), "%s\n%.2f cm-1\n%.4f um\n%.4f THz\nY: %.4e%s", 
                                displayName.c_str(), cm1, um, thz, signalY, yUnit);
                  ImPlot::Annotation(mousePos.x, signalY, ImVec4(1, 1, 1, 1), ImVec2(10, -10), true, "%s", txt);

@@ -62,6 +62,7 @@ public:
     int prevYScaleSelector; // tracks last rendered yScaleSelector for change detection
     float refLaserTextbox; // Reference laser wavelength in um
     float detectorSensitivity; // Detector sensitivity in kV/W (0 = no conversion)
+    char  detectorSensitivityText[32] = "NA"; // Display text for the UI textbox
     int Kpadding; // Zero-pad factor (N = n*(K+1)); 0 disables padding
 
     // Apodization

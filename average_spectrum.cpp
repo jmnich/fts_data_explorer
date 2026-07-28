@@ -6,7 +6,30 @@
 #include <cmath>
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 #include <limits>
+
+// Normalize a display buffer so max = 1 (linear/log10) or max = 0 dB (dB mode).
+static void normalizeBuffer(std::vector<double>& buf,
+                            const std::vector<double>& raw,
+                            int yScaleSelector) {
+    double maxVal = *std::max_element(raw.begin(), raw.end());
+    if (maxVal > 0.0) {
+        if (yScaleSelector == 2)
+            for (size_t i = 0; i < buf.size(); ++i)
+                buf[i] = 10.0 * std::log10(std::max(buf[i] / maxVal, 1e-300));
+        else
+            for (size_t i = 0; i < buf.size(); ++i)
+                buf[i] /= maxVal;
+    }
+}
+
+static double normalizeValue(double val, double maxVal, int yScaleSelector) {
+    if (maxVal <= 0.0) return (yScaleSelector == 2) ? -300.0 : 0.0;
+    return (yScaleSelector == 2)
+        ? 10.0 * std::log10(std::max(val / maxVal, 1e-300))
+        : val / maxVal;
+}
 
 static void SetupAxisTicksLimited(ImAxis axis, double min, double max, int maxTicks = 12) {
     double range = max - min;
@@ -248,20 +271,21 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
         const char* xLabel = (xUnitSelector == 0) ? "Wavenumber (cm-1)"
                            : (xUnitSelector == 1) ? "Wavelength (\xC2\xB5" "m)"
                                                  : "Frequency (THz)";
-        const char* yLabel = (yScaleSelector == 2 && appState->spectrum.detectorSensitivity > 0.0f) ? "dBm" : "";
+        const char* yLabel = "";
+        if (yScaleSelector == 2)
+            yLabel = (appState->spectrum.detectorSensitivity > 0.0f) ? "dBm" : "dB";
         ImPlot::SetupAxes(xLabel, yLabel, x_flags, y_flags);
 
         if (yScaleSelector == 1)
             ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Log10);
 
+        // Helper: V→W conversion only. When sensitivity == 0, caller normalizes.
         auto toDisplay = [&](double raw) -> double {
-            if (yScaleSelector == 2) {
-                if (appState->spectrum.detectorSensitivity > 0.0f)
+            if (appState->spectrum.detectorSensitivity > 0.0f) {
+                if (yScaleSelector == 2)
                     return 10.0 * std::log10(std::max(raw / appState->spectrum.detectorSensitivity, 1e-300));
-                return 10.0 * std::log10(std::max(raw, 1e-300));
-            }
-            if (appState->spectrum.detectorSensitivity > 0.0f)
                 return raw / (appState->spectrum.detectorSensitivity * 1000.0);
+            }
             return raw;
         };
 
@@ -280,7 +304,7 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
             double xMax = std::max(cachedAverageX.front(), cachedAverageX.back());
 
             double yMin, yMax;
-            if (yScaleSelector == 2 || appState->spectrum.detectorSensitivity > 0.0f) {
+            if (appState->spectrum.detectorSensitivity > 0.0f) {
                 yMin = std::numeric_limits<double>::max();
                 yMax = std::numeric_limits<double>::lowest();
                 for (double v : cachedAverageY) {
@@ -289,9 +313,14 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
                     yMax = std::max(yMax, d);
                 }
             } else {
-                auto mmY = std::minmax_element(cachedAverageY.begin(), cachedAverageY.end());
-                yMin = *mmY.first;
-                yMax = *mmY.second;
+                double maxVal = *std::max_element(cachedAverageY.begin(), cachedAverageY.end());
+                yMin = std::numeric_limits<double>::max();
+                yMax = std::numeric_limits<double>::lowest();
+                for (double v : cachedAverageY) {
+                    double d = normalizeValue(v, maxVal, yScaleSelector);
+                    yMin = std::min(yMin, d);
+                    yMax = std::max(yMax, d);
+                }
             }
 
             if (xMin < xMax)
@@ -337,7 +366,7 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
             double yMin = savedYMin;
             double yMax = savedYMax;
             if (yMin >= yMax) {
-                if (yScaleSelector == 2 || appState->spectrum.detectorSensitivity > 0.0f) {
+                if (appState->spectrum.detectorSensitivity > 0.0f) {
                     yMin = std::numeric_limits<double>::max();
                     yMax = std::numeric_limits<double>::lowest();
                     for (double v : cachedAverageY) {
@@ -346,9 +375,14 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
                         yMax = std::max(yMax, d);
                     }
                 } else {
-                    auto mmY = std::minmax_element(cachedAverageY.begin(), cachedAverageY.end());
-                    yMin = *mmY.first;
-                    yMax = *mmY.second;
+                    double maxVal = *std::max_element(cachedAverageY.begin(), cachedAverageY.end());
+                    yMin = std::numeric_limits<double>::max();
+                    yMax = std::numeric_limits<double>::lowest();
+                    for (double v : cachedAverageY) {
+                        double d = normalizeValue(v, maxVal, yScaleSelector);
+                        yMin = std::min(yMin, d);
+                        yMax = std::max(yMax, d);
+                    }
                 }
             }
             if (xMin >= xMax) {
@@ -386,10 +420,15 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
         {
             const double* plotData = cachedAverageY.data();
             std::vector<double> displayBuf;
-            if (yScaleSelector == 2 || appState->spectrum.detectorSensitivity > 0.0f) {
+            if (appState->spectrum.detectorSensitivity > 0.0f) {
                 displayBuf.resize(cachedAverageY.size());
                 for (size_t i = 0; i < cachedAverageY.size(); ++i)
                     displayBuf[i] = toDisplay(cachedAverageY[i]);
+                plotData = displayBuf.data();
+            } else {
+                displayBuf.resize(cachedAverageY.size());
+                std::copy(cachedAverageY.begin(), cachedAverageY.end(), displayBuf.begin());
+                normalizeBuffer(displayBuf, cachedAverageY, yScaleSelector);
                 plotData = displayBuf.data();
             }
 
@@ -459,8 +498,12 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
                     }
                 }
                 signalY = specs[idx];
-                if (yScaleSelector == 2 || appState->spectrum.detectorSensitivity > 0.0f)
+                if (appState->spectrum.detectorSensitivity > 0.0f) {
                     signalY = toDisplay(signalY);
+                } else {
+                    double maxVal = *std::max_element(specs.begin(), specs.end());
+                    signalY = normalizeValue(signalY, maxVal, yScaleSelector);
+                }
             }
 
             double yAxisMin = ImPlot::GetPlotLimits().Y.Min;
@@ -482,7 +525,9 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
                          SpectralToolbox::convertXValue(mousePos.x, unit, ST::Um);
             double thz = (unit == ST::THz) ? mousePos.x :
                           SpectralToolbox::convertXValue(mousePos.x, unit, ST::THz);
-            const char* yUnit = (yScaleSelector == 2 && appState->spectrum.detectorSensitivity > 0.0f) ? " dBm" : "";
+            const char* yUnit = "";
+            if (yScaleSelector == 2)
+                yUnit = (appState->spectrum.detectorSensitivity > 0.0f) ? " dBm" : " dB";
             char txt[512];
             std::snprintf(txt, sizeof(txt), "Average\n%.2f cm-1\n%.4f um\n%.4f THz\nY: %.4e%s",
                           cm1, um, thz, signalY, yUnit);
