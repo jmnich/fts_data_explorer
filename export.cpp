@@ -144,8 +144,12 @@ void ExportPanel::render()
     }
 
     if (ImGui::BeginPopupModal("Export Complete", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::Text("Export completed successfully.");
-        if (ImGui::Button("OK")) ImGui::CloseCurrentPopup();
+        ImGui::Dummy(ImVec2(260, 1));
+        float avail = ImGui::GetContentRegionAvail().x;
+        float btnW = 120.0f;
+        ImGui::SetCursorPosX((avail - btnW) * 0.5f);
+        if (ImGui::Button("OK", ImVec2(btnW, 0)) || ImGui::IsKeyPressed(ImGuiKey_Enter))
+            ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
 
