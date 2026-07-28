@@ -10,6 +10,7 @@
 #include "version.h"
 
 #include "imgui.h"
+#include <GLFW/glfw3.h>
 #include <GL/gl.h>
 
 #include <filesystem>
@@ -397,7 +398,7 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
         ImGui::PopStyleColor(3);
 
         if (buttonClicked) {
-            std::string selectedDirectory = FileBrowser::showDirectorySelectionDialog();
+            std::string selectedDirectory = FileBrowser::showDirectorySelectionDialog(glfwGetCurrentContext());
             if (!selectedDirectory.empty()) {
                 std::string rawDataPath = selectedDirectory + "/raw_data";
                 if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {

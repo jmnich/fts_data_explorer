@@ -9,7 +9,8 @@
 #include "adapters/adapter_registry.h"
 
 #include "imgui.h"
-#include "tinyfiledialogs.h"
+#include "file_browser.h"
+#include <GLFW/glfw3.h>
 #include <fstream>
 #include <filesystem>
 #include <cmath>
@@ -86,7 +87,17 @@ void ExportPanel::render()
         ImGui::OpenPopup("Export Complete");
     }
 
-    refreshArtifacts();
+    // Skip clearing checkboxes while any calculation is in progress —
+    // artifacts become temporarily unavailable during recomputation.
+    bool anyCalcInProgress = false;
+    if (appState) {
+        anyCalcInProgress = appState->averageSpectrum.calcInProgress
+                         || appState->snrSpectrum.calcInProgress
+                         || appState->allanVariance.calcInProgress
+                         || appState->t100.calcStdInProgress;
+    }
+    if (!anyCalcInProgress)
+        refreshArtifacts();
 
     if (!appState || !appState->dataLoaded) {
         ImGui::Text("No data loaded.");
@@ -118,6 +129,7 @@ void ExportPanel::render()
 
     ImGui::Separator();
 
+    ImGui::BeginDisabled(anyCalcInProgress);
     if (ImGui::Button("Export", ImVec2(-1, 0))) {
         bool anySelected = false;
         for (size_t i = 0; i < artifactChecked.size(); i++) {
@@ -129,13 +141,14 @@ void ExportPanel::render()
         if (!anySelected) {
             ImGui::OpenPopup("Export Warning");
         } else {
-            const char* folder = tinyfd_selectFolderDialog("Select Export Directory", "");
-            if (folder) {
+            std::string folder = FileBrowser::pickFolder(glfwGetCurrentContext(), "Select Export Directory");
+            if (!folder.empty()) {
                 exportDir = folder;
                 exportPending = true;
             }
         }
     }
+    ImGui::EndDisabled();
 
     if (ImGui::BeginPopupModal("Export Warning", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::Text("No artifacts selected or available for export.");

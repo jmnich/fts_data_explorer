@@ -250,6 +250,9 @@ bool initializeApplication(AppConfig& config, GLFWwindow*& window) {
     glfwSetWindowPosCallback(window, [](GLFWwindow* w, int, int) {
         static_cast<AppState*>(glfwGetWindowUserPointer(w))->needsRedraw = true;
     });
+    glfwSetWindowCloseCallback(window, [](GLFWwindow* w) {
+        glfwSetWindowShouldClose(w, GLFW_TRUE);
+    });
 
     // Initialize ImGui
     IMGUI_CHECKVERSION();
@@ -1513,7 +1516,7 @@ int main(int argc, char* argv[]) {
                 {
                     if (ImGui::MenuItem("Set Working Directory")) {
                         // Implement proper directory selection dialog
-                        std::string selectedDirectory = FileBrowser::showDirectorySelectionDialog();
+                        std::string selectedDirectory = FileBrowser::showDirectorySelectionDialog(window);
                         if (!selectedDirectory.empty()) {
                             // Check if the selected directory has a raw_data subdirectory
                             std::string rawDataPath = selectedDirectory + "/raw_data";
