@@ -195,7 +195,13 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
 
         // Always use a fixed-height child region
         if (ImGui::BeginChild("RecentDatasetsChild", ImVec2(0, 500), true)) {
-            if (config.recentDatasets.empty()) {
+            int numExisting = 0;
+            for (const auto& entry : config.recentDatasets) {
+                if (std::filesystem::exists(entry.path))
+                    numExisting++;
+            }
+
+            if (numExisting == 0) {
                 float childHeight = ImGui::GetContentRegionAvail().y;
                 float textHeight = ImGui::GetTextLineHeightWithSpacing() * 3;
                 float offsetY = (childHeight - textHeight) * 0.5f;
@@ -208,15 +214,39 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                 if (selectedIdx >= (int)config.recentDatasets.size())
                     selectedIdx = config.recentDatasets.empty() ? 0 : (int)config.recentDatasets.size() - 1;
 
-                // Arrow key navigation (only through dataset name rows, not × or A buttons)
-                if (ImGui::IsKeyPressed(ImGuiKey_UpArrow) && selectedIdx > 0)
-                    selectedIdx--;
-                if (ImGui::IsKeyPressed(ImGuiKey_DownArrow) && selectedIdx < (int)config.recentDatasets.size() - 1)
-                    selectedIdx++;
+                // Clamp selectedIdx to nearest existing entry
+                if (!std::filesystem::exists(config.recentDatasets[selectedIdx].path)) {
+                    for (size_t ci = 0; ci < config.recentDatasets.size(); ci++) {
+                        if (std::filesystem::exists(config.recentDatasets[ci].path)) {
+                            selectedIdx = (int)ci;
+                            break;
+                        }
+                    }
+                }
+
+                // Arrow key navigation — only through existing entries
+                if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
+                    int next = selectedIdx - 1;
+                    while (next >= 0 && !std::filesystem::exists(config.recentDatasets[next].path))
+                        next--;
+                    if (next >= 0) selectedIdx = next;
+                }
+                if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
+                    int next = selectedIdx + 1;
+                    while (next < (int)config.recentDatasets.size() && !std::filesystem::exists(config.recentDatasets[next].path))
+                        next++;
+                    if (next < (int)config.recentDatasets.size()) selectedIdx = next;
+                }
 
                 for (size_t i = 0; i < config.recentDatasets.size(); ) {
                     const auto& entry = config.recentDatasets[i];
                     const auto& datasetPath = entry.path;
+
+                    if (!std::filesystem::exists(datasetPath)) {
+                        i++;
+                        continue;
+                    }
+
                     std::string displayName = datasetPath;
                     size_t last_slash = displayName.find_last_of("/\\");
                     if (last_slash != std::string::npos) {
