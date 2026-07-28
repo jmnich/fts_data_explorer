@@ -89,12 +89,16 @@ private:
                 }
                 task = std::move(tasks_.front());
                 tasks_.pop();
+                tasksRunning_++;
                 pthread_mutex_unlock(&queueMutex_);
             }
-            tasksRunning_++;
             task();
-            tasksRunning_--;
-            pthread_cond_broadcast(&condition_);
+            {
+                pthread_mutex_lock(&queueMutex_);
+                tasksRunning_--;
+                pthread_cond_broadcast(&condition_);
+                pthread_mutex_unlock(&queueMutex_);
+            }
         }
     }
 
