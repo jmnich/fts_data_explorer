@@ -1059,6 +1059,10 @@ int main(int argc, char* argv[]) {
 
     // No initialization needed for simple file dialog
     
+    // Scroll carry-over buckets for the rate-limiter below (persist across frames)
+    float scrollCarryOverY = 0.0f;
+    float scrollCarryOverX = 0.0f;
+    
     // Main loop
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
@@ -1465,6 +1469,38 @@ int main(int argc, char* argv[]) {
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
+
+        // Rate-limit mouse wheel to at most one notch per frame, with
+        // carry-over for excess. Prevents extreme zoom from batch-drained
+        // events without dropping input entirely.
+        {
+            ImGuiIO& io = ImGui::GetIO();
+
+            // Direction reversal: if carry-over and fresh events have opposite
+            // signs, the user changed scroll direction. Reset carry-over so
+            // zoom follows the new direction immediately.
+            if (scrollCarryOverY != 0.0f && io.MouseWheel != 0.0f &&
+                (scrollCarryOverY > 0.0f) != (io.MouseWheel > 0.0f))
+                scrollCarryOverY = 0.0f;
+            if (scrollCarryOverX != 0.0f && io.MouseWheelH != 0.0f &&
+                (scrollCarryOverX > 0.0f) != (io.MouseWheelH > 0.0f))
+                scrollCarryOverX = 0.0f;
+
+            float totalY = scrollCarryOverY + io.MouseWheel;
+            float totalX = scrollCarryOverX + io.MouseWheelH;
+
+            io.MouseWheel  = std::clamp(totalY, -1.0f, 1.0f);
+            io.MouseWheelH = std::clamp(totalX, -1.0f, 1.0f);
+
+            // Cap carry-over to ±60 (~1 s at 60 fps) so long freezes
+            // don't cause minutes of delayed zoom after input stops.
+            scrollCarryOverY = std::clamp(totalY - io.MouseWheel, -60.0f, 60.0f);
+            scrollCarryOverX = std::clamp(totalX - io.MouseWheelH, -60.0f, 60.0f);
+        }
+
+        // Keep rendering while carry-over drains
+        if (scrollCarryOverY != 0.0f || scrollCarryOverX != 0.0f)
+            appState.needsRedraw = true;
 
         // Conditionally disable anti-aliasing for large datasets (>50k points)
         if (appState.dataLoaded && appState.loadedData[0].dataSize() > 50000) {
