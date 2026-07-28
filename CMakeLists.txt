@@ -221,6 +221,7 @@ else()
         -D_DEFAULT_SOURCE
         -D_FORTIFY_SOURCE=0
         -U_FORTIFY_SOURCE
+        -march=x86-64-v3
         $<$<COMPILE_LANGUAGE:C>:-std=gnu11>
     )
 endif()
@@ -269,6 +270,16 @@ target_compile_definitions(fts_data_explorer PRIVATE
     IMGUI_IMPL_OPENGL_LOADER_GLAD=0
     IMGUI_USER_CONFIG="imconfig_custom.h"
 )
+
+# Strip .note.gnu.property to remove inherited x86-64-v4 ISA requirement from
+# system libraries (glibc/libstdc++ compiled with AVX-512), allowing the binary
+# to run on CPUs that only support up to x86-64-v3 (e.g. Zen 2).
+if(NOT WIN32)
+    add_custom_command(TARGET fts_data_explorer POST_BUILD
+        COMMAND objcopy -R .note.gnu.property "$<TARGET_FILE:fts_data_explorer>"
+        COMMENT "Stripping .note.gnu.property (x86 ISA requirements from system libs)"
+    )
+endif()
 
 # Install targets (optional)
 install(TARGETS fts_data_explorer DESTINATION bin)
