@@ -2745,15 +2745,23 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                                 if (appState.xAxisBase == 1 && !appState.selectedFilenames.empty()) {
                                     const auto& hilbX = appState.hilbertXCache[appState.selectedFilenames[0]];
                                     if (!hilbX.empty()) {
+                                        double ratio = static_cast<double>(hilbX.size()) / primDataOverlay.size();
+                                        std::vector<double> overlayX(window.size());
                                         if (appState.maxAtZero && !peakPositions.empty()) {
-                                            std::vector<double> shiftedHilbX(hilbX.size());
                                             double peakHilbX = hilbX[peakPositions[0]];
-                                            for (size_t j = 0; j < hilbX.size(); j++)
-                                                shiftedHilbX[j] = hilbX[j] - peakHilbX;
-                                            ImPlot::PlotLine("##ApodWindow", shiftedHilbX.data(), window.data(), static_cast<int>(window.size()), windowSpec);
+                                            for (size_t j = 0; j < window.size(); j++) {
+                                                size_t idx = static_cast<size_t>(j * ratio);
+                                                if (idx >= hilbX.size()) idx = hilbX.size() - 1;
+                                                overlayX[j] = hilbX[idx] - peakHilbX;
+                                            }
                                         } else {
-                                            ImPlot::PlotLine("##ApodWindow", hilbX.data(), window.data(), static_cast<int>(window.size()), windowSpec);
+                                            for (size_t j = 0; j < window.size(); j++) {
+                                                size_t idx = static_cast<size_t>(j * ratio);
+                                                if (idx >= hilbX.size()) idx = hilbX.size() - 1;
+                                                overlayX[j] = hilbX[idx];
+                                            }
                                         }
+                                        ImPlot::PlotLine("##ApodWindow", overlayX.data(), window.data(), static_cast<int>(window.size()), windowSpec);
                                     }
                                 } else if (appState.maxAtZero && !peakPositions.empty()) {
                                     std::vector<double> shiftedX(window.size());
