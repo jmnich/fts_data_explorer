@@ -607,7 +607,7 @@ static void handleProcess(const HeadlessConfig& cfg) {
                ot == "100% T lines for all files" ||
                ot == "100% T standard deviation") {
         // Pre-compute spectrum for the first file (needed by setReferenceFromCurrentSpectrum)
-        if (!appState.selectedFilenames.empty()) {
+        if (!appState.selectedFiles.empty()) {
             std::string fid0 = appState.selectedFilenames[0];
             if (appState.spectrum.cachedSpectra.find(fid0) == appState.spectrum.cachedSpectra.end()) {
                 computeSpectrumForFile(appState, appState.selectedFiles[0], fid0);

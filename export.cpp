@@ -600,7 +600,12 @@ void ExportPanel::writeT100AllTransCsv(const std::string& dir)
     }
     ofs << "\n";
 
-    const auto& masterX = allTransX[0];
+    const std::vector<double>* masterXPtr = nullptr;
+    for (size_t i = 0; i < allTransX.size(); i++) {
+        if (!allTransX[i].empty()) { masterXPtr = &allTransX[i]; break; }
+    }
+    if (!masterXPtr) { ofs.close(); return; }
+    const auto& masterX = *masterXPtr;
     size_t nRows = masterX.size();
     for (size_t r = 0; r < nRows; r++) {
         ofs << masterX[r];

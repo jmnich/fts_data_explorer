@@ -371,7 +371,9 @@ void applyAdapterSelection(const std::string& adapterName, const std::string& di
     appState.dataLoaded = false;
     appState.loadedData.clear();
     appState.rawDataCache.clear();
+    appState.hilbertXCache.clear();
     appState.peakPositionsCache.clear();
+    appState.hilbertCacheLaserWavelength = 0.0f;
     appState.selectedFiles.clear();
     appState.selectedFilenames.clear();
     appState.filesChanged = true;
@@ -551,6 +553,9 @@ static void performFileDeletion(AppState& appState, size_t index) {
     }
     if (appState.currentSortedFileIndex >= appState.sortedFiles.size())
         appState.currentSortedFileIndex = appState.sortedFiles.empty() ? 0 : appState.sortedFiles.size() - 1;
+
+    if (appState.loadedData.empty())
+        appState.dataLoaded = false;
 
     appState.needsRedraw = true;
 }
@@ -1165,17 +1170,17 @@ int main(int argc, char* argv[]) {
                         // Also update raw data cache - need to reload raw data
                         // IMPORTANT: We need to reload the ORIGINAL raw data, not the processed data
                         appState.rawDataCache.clear();
+                        size_t reloadedIdx = 0;
                         for (const auto& file : appState.selectedFiles) {
                             try {
-                                // Load the original raw data from file
                                 InterferogramData rawData = appState.currentAdapter->loadFile(file);
                                 appState.rawDataCache.push_back(rawData);
                             } catch (const std::exception& e) {
                                 std::cerr << "Error reloading raw data for spectrum: " << e.what() << std::endl;
-                                // If we can't reload raw data, use processed data as fallback
-                                // This ensures spectrum can still be computed
-                                appState.rawDataCache.push_back(reloadedData[&file - &appState.selectedFiles[0]]);
+                                if (reloadedIdx < reloadedData.size())
+                                    appState.rawDataCache.push_back(reloadedData[reloadedIdx]);
                             }
+                            reloadedIdx++;
                         }
                         // Force X-axis to show all data when downsampling is toggled (same behavior as menu)
                         appState.zoomRange = {0, 0};
@@ -2102,7 +2107,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             appState.shouldAutoscale = true; // Always force redraw with full range when ESC is pressed
         }
         
-        if (appState.dataLoaded) {
+        if (appState.dataLoaded && !appState.loadedData.empty()) {
             if (!appState.datasetInfo.hasInterferograms) {
                 ImGui::Text("Interferograms not available for this data type.");
             } else {
@@ -4218,14 +4223,17 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                         if (!reloadedData.empty()) {
                             appState.loadedData = reloadedData;
                             appState.rawDataCache.clear();
+                            size_t reloadedIdx = 0;
                             for (const auto& file : appState.selectedFiles) {
                                 try {
                                     InterferogramData rawData = appState.currentAdapter->loadFile(file);
                                     appState.rawDataCache.push_back(rawData);
                                 } catch (const std::exception& e) {
                                     std::cerr << "Error reloading raw data: " << e.what() << std::endl;
-                                    appState.rawDataCache.push_back(reloadedData[&file - &appState.selectedFiles[0]]);
+                                    if (reloadedIdx < reloadedData.size())
+                                        appState.rawDataCache.push_back(reloadedData[reloadedIdx]);
                                 }
+                                reloadedIdx++;
                             }
                             appState.zoomRange = {0, 0};
                             appState.shouldAutoscale = true;
@@ -4270,14 +4278,17 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                         if (!reloadedData.empty()) {
                             appState.loadedData = reloadedData;
                             appState.rawDataCache.clear();
+                            size_t reloadedIdx = 0;
                             for (const auto& file : appState.selectedFiles) {
                                 try {
                                     InterferogramData rawData = appState.currentAdapter->loadFile(file);
                                     appState.rawDataCache.push_back(rawData);
                                 } catch (const std::exception& e) {
                                     std::cerr << "Error reloading raw data: " << e.what() << std::endl;
-                                    appState.rawDataCache.push_back(reloadedData[&file - &appState.selectedFiles[0]]);
+                                    if (reloadedIdx < reloadedData.size())
+                                        appState.rawDataCache.push_back(reloadedData[reloadedIdx]);
                                 }
+                                reloadedIdx++;
                             }
                             appState.zoomRange = {0, 0};
                             appState.shouldAutoscale = true;
