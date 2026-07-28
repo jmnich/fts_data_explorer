@@ -999,6 +999,7 @@ int main(int argc, char* argv[]) {
     appState.spectrum.apodizationParams.kaiserBeta = config.apodKaiserBeta;
     appState.spectrum.apodizationParams.rectAsymMode = config.apodRectAsymMode;
     appState.spectrum.detectorSensitivity = config.spectrumDetectorSensitivity;
+    appState.spectrum.refLaserTextbox = config.spectrumRefLaser;
     
     // Set the appState pointer in the spectrum object for raw data access
     appState.spectrum.appState = &appState;
@@ -4668,6 +4669,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
     config.apodKaiserBeta       = appState.spectrum.apodizationParams.kaiserBeta;
     config.apodRectAsymMode     = appState.spectrum.apodizationParams.rectAsymMode;
     config.spectrumDetectorSensitivity = appState.spectrum.detectorSensitivity;
+    config.spectrumRefLaser = appState.spectrum.refLaserTextbox;
     
     // Save average window settings
     config.avgYAxisMode           = appState.averageSpectrum.yAxisMode;

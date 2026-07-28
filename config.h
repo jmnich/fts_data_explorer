@@ -62,6 +62,7 @@ struct AppConfig {
     float apodKaiserBeta = 6.0f; // Kaiser beta (0.5-12.0), higher = lower sidelobes
     bool apodRectAsymMode = true; // Rectangular window: true=asymmetric, false=symmetric
     float spectrumDetectorSensitivity = 0.0f; // Detector sensitivity in kV/W
+    float spectrumRefLaser = 1.550f; // Reference laser wavelength in um
 
     // Average window state (independent from SpectrumWindow, persisted subset)
     int avgYAxisMode = 0;
@@ -200,6 +201,7 @@ struct AppConfig {
             configFile << "apod_kaiser_beta=" << apodKaiserBeta << "\n";
             configFile << "apod_rect_asym_mode=" << (apodRectAsymMode ? "1" : "0") << "\n";
             configFile << "detector_sensitivity=" << spectrumDetectorSensitivity << "\n";
+            configFile << "ref_laser=" << spectrumRefLaser << "\n";
             
             // Write average window settings
             configFile << "\n[AverageWindow]\n";
@@ -371,6 +373,8 @@ struct AppConfig {
                             apodRectAsymMode = (value == "1");
                         } else if (key == "detector_sensitivity") {
                             spectrumDetectorSensitivity = std::stof(value);
+                        } else if (key == "ref_laser") {
+                            spectrumRefLaser = std::stof(value);
                         }
                     } else if (currentSection == "AverageWindow") {
                         if (key == "y_axis_mode") {
