@@ -229,8 +229,6 @@ endif()
 # Platform-specific linker options
 if(NOT WIN32)
     target_link_options(fts_data_explorer PRIVATE
-        -static-libgcc
-        -static-libstdc++
         ${GLIBCOMPAT_WRAP}
     )
 else()
