@@ -1,13 +1,18 @@
 #include "file_browser.h"
 #include <filesystem>
-#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+
+#ifdef _WIN32
+#include "tinyfiledialogs.h"
+#else
+#include <csignal>
 #include <unistd.h>
 #include <sys/wait.h>
 #include <sys/types.h>
 #include <GLFW/glfw3.h>
+#endif
 
 std::vector<std::string> FileBrowser::getCSVFilesInDirectory(const std::string& directoryPath) {
     std::vector<std::string> csvFiles;
@@ -29,6 +34,12 @@ std::vector<std::string> FileBrowser::getCSVFilesInDirectory(const std::string& 
     return csvFiles;
 }
 
+#ifdef _WIN32
+std::string FileBrowser::pickFolder(GLFWwindow* /*window*/, const std::string& title) {
+    const char* path = tinyfd_selectFolderDialog(title.c_str(), "");
+    return path ? std::string(path) : "";
+}
+#else
 std::string FileBrowser::pickFolder(GLFWwindow* window, const std::string& title) {
     if (window && glfwWindowShouldClose(window))
         return "";
@@ -117,6 +128,7 @@ std::string FileBrowser::pickFolder(GLFWwindow* window, const std::string& title
 
     return result;
 }
+#endif
 
 std::string FileBrowser::showDirectorySelectionDialog(GLFWwindow* window) {
     return pickFolder(window, "Select Dataset Directory");
