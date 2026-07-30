@@ -2214,7 +2214,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                 size_t rs = rawPrim.size();
                 size_t ls = appState.loadedData[i].primaryDetector.size();
                 if (rs <= ls || ls == 0) return peakPositions[i];
-                return peakPositions[i] * ls / rs;
+                return static_cast<size_t>(static_cast<double>(peakPositions[i]) * ls / rs + 0.5);
             };
             
             if (appState.loadedData.size() > 1) {
@@ -2942,6 +2942,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                 appState.spectrum.cachedFrequencies.clear();
                 appState.spectrum.lastPrimaryDetectors.clear();
                 appState.spectrum.lastSpectrumParams.clear();
+                appState.spectrum.pendingSpectra_.clear();
                 appState.needsRedraw = true;
             };
 
@@ -4593,11 +4594,13 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                             activeParam = static_cast<double>(appState.spectrum.apodizationParams.kaiserBeta);
                         appState.spectrum.lastSpectrumParams[fid] = {
                             static_cast<double>(appState.spectrum.Kpadding),
-                            static_cast<double>(appState.spectrum.xUnitSelector),
                             static_cast<double>(appState.spectrum.refLaserTextbox),
                             static_cast<double>(appState.spectrum.apodizationSelector),
                             activeParam,
-                            appState.spectrum.apodizationParams.rectAsymMode ? 1.0 : 0.0
+                            appState.spectrum.apodizationParams.rectAsymMode ? 1.0 : 0.0,
+                            static_cast<double>(appState.xCorrectionMethod),
+                            static_cast<double>(appState.peakProminenceThreshold),
+                            0.0
                         };
                     }
                 }

@@ -182,14 +182,14 @@ bool Spectrum::isSpectrumDirty(const std::string& fileId, const std::vector<doub
     else if (apodizationSelector == static_cast<int>(ApodizationWindow::Kaiser))
         activeParam = static_cast<double>(apodizationParams.kaiserBeta);
 
-    if (lp.size() < 6 ||
+    if (lp.size() < 8 ||
         lp[0] != static_cast<double>(Kpadding)               ||
-        /* lp[1] was xUnitSelector — removed from cache key (converted in-place) */
-        false                                                 ||
-        lp[2] != static_cast<double>(refLaserTextbox)        ||
-        lp[3] != static_cast<double>(apodizationSelector)    ||
-        lp[4] != activeParam                                  ||
-        lp[5] != (apodizationParams.rectAsymMode ? 1.0 : 0.0)) {
+        lp[1] != static_cast<double>(refLaserTextbox)        ||
+        lp[2] != static_cast<double>(apodizationSelector)    ||
+        lp[3] != activeParam                                  ||
+        lp[4] != (apodizationParams.rectAsymMode ? 1.0 : 0.0) ||
+        lp[5] != static_cast<double>(appState->xCorrectionMethod) ||
+        lp[6] != static_cast<double>(appState->peakProminenceThreshold)) {
         return true;
     }
 
@@ -234,11 +234,13 @@ void Spectrum::pollPendingSpectra() {
                 // Update primary detector cache to prevent re-computation
                 lastPrimaryDetectors[it->fileId] = it->primaryDetector;
                 lastSpectrumParams[it->fileId] = { static_cast<double>(Kpadding),
-                                                   static_cast<double>(xUnitSelector),
                                                    static_cast<double>(refLaserTextbox),
                                                    static_cast<double>(apodizationSelector),
                                                    activeParam,
-                                                   apodizationParams.rectAsymMode ? 1.0 : 0.0 };
+                                                   apodizationParams.rectAsymMode ? 1.0 : 0.0,
+                                                   static_cast<double>(appState->xCorrectionMethod),
+                                                   static_cast<double>(appState->peakProminenceThreshold),
+                                                   0.0 };
             } catch (const std::exception& e) {
                 fprintf(stderr, "WARNING: Spectrum computation failed for %s: %s\n",
                         it->fileId.c_str(), e.what());
@@ -303,11 +305,13 @@ bool Spectrum::computeAndCacheSpectrum(const std::string& filePath, const std::s
 
         lastSpectrumParams[fileId] = {
             static_cast<double>(Kpadding),
-            static_cast<double>(xUnitSelector),
             static_cast<double>(refLaserTextbox),
             static_cast<double>(apodizationSelector),
             activeParam,
-            apodizationParams.rectAsymMode ? 1.0 : 0.0
+            apodizationParams.rectAsymMode ? 1.0 : 0.0,
+            static_cast<double>(appState->xCorrectionMethod),
+            static_cast<double>(appState->peakProminenceThreshold),
+            0.0
         };
 
         return true;
@@ -494,11 +498,6 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                     for (double& x : freqs) {
                         x = SpectralToolbox::convertXValue(x, oldU, newU);
                     }
-                }
-                // Update cache params so isSpectrumDirty stays clean
-                for (auto& [fid, params] : lastSpectrumParams) {
-                    if (params.size() >= 2)
-                        params[1] = static_cast<double>(xUnitSelector);
                 }
                 // Discard in-flight async results (they would overwrite with old-unit data)
                 pendingSpectra_.clear();
@@ -742,9 +741,11 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                             cachedFrequencies[fileId] = std::move(freqs);
                             lastPrimaryDetectors[fileId] = rawData.primaryDetector;
                             lastSpectrumParams[fileId]   = { static_cast<double>(Kpadding),
-                                                             static_cast<double>(xUnitSelector),
                                                              static_cast<double>(refLaserTextbox),
                                                              static_cast<double>(apodizationSelector),
+                                                             0.0,
+                                                             0.0,
+                                                             0.0,
                                                              0.0,
                                                              0.0 };
                         } else {
@@ -782,11 +783,13 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
 
                         lastPrimaryDetectors[fileId] = rawData.primaryDetector;
                         lastSpectrumParams[fileId]   = { static_cast<double>(Kpadding),
-                                                         static_cast<double>(xUnitSelector),
                                                          static_cast<double>(refLaserTextbox),
                                                          static_cast<double>(apodizationSelector),
                                                          activeParam,
-                                                         apodizationParams.rectAsymMode ? 1.0 : 0.0 };
+                                                         apodizationParams.rectAsymMode ? 1.0 : 0.0,
+                                                         static_cast<double>(appState->xCorrectionMethod),
+                                                         static_cast<double>(appState->peakProminenceThreshold),
+                                                         0.0 };
                         }
                     } else {
                         // Stale cached data exists → submit async, old spectrum stays visible

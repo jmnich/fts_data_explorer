@@ -90,7 +90,7 @@ public:
 
     // Per-file last-seen spectrum computation parameters (for cache invalidation)
     // Stored as {K, xUnit, refLaser, apodizationSelector, activeParam}
-    std::map<std::string, std::array<double, 6>> lastSpectrumParams;
+    std::map<std::string, std::array<double, 8>> lastSpectrumParams;
 
     // Async spectrum pre-computation (Phase 5)
     struct PendingSpectrum {
