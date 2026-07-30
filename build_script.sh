@@ -137,8 +137,10 @@ check_cmd cmake    || true
 check_cmd g++      || check_cmd clang++ || true
 check_cmd make     || true
 
-if [[ $TARGET == "windows" ]] || [[ $IS_RELEASE -eq 1 ]]; then
+if [[ $TARGET == "windows" ]]; then
     check_cmd x86_64-w64-mingw32-g++ || true
+elif [[ $IS_RELEASE -eq 1 ]]; then
+    check_cmd x86_64-w64-mingw32-g++ || warn "MinGW not found — Windows artifact will be skipped."
 fi
 if [[ $TARGET != "windows" ]] && [[ $IS_RELEASE -eq 0 ]]; then
     check_cmd pkg-config || true
