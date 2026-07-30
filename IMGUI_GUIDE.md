@@ -466,3 +466,39 @@ ImGui::End();
 | FFTW planner not thread-safe | Serialize `fftw_plan_dft_1d` with a mutex |
 | Style stack imbalance | Every `Push*` must have a matching `Pop*` |
 | Window title changes break layout | Use `###id` suffix for stable internal ID |
+
+## 20. Scroll Wheel Zoom Rate Limiting
+
+ImGui's `ConfigInputTrickleEventQueue` blocks wheel events after any `MousePos` in the same frame, causing stale wheel events to accumulate and drain slowly — producing delayed "ghost" zoom after the user stops scrolling.
+
+**Rate limiter** (`main.cpp`, after `NewFrame()`, before any `BeginPlot()`):
+
+```cpp
+// Persistent locals
+float scrollCarryOverY = 0.0f, scrollCarryOverX = 0.0f;
+
+{
+    ImGuiIO& io = ImGui::GetIO();
+
+    if (!appState.scrollEventsThisPoll) {
+        // No GLFW scroll this frame — stale queue events. Zero immediately.
+        scrollCarryOverY = scrollCarryOverX = 0.0f;
+        io.MouseWheel = io.MouseWheelH = 0.0f;
+    } else {
+        float totalY = scrollCarryOverY + io.MouseWheel;
+        float totalX = scrollCarryOverX + io.MouseWheelH;
+        io.MouseWheel  = std::clamp(totalY, -1.0f, 1.0f);
+        io.MouseWheelH = std::clamp(totalX, -1.0f, 1.0f);
+        scrollCarryOverY = std::clamp(totalY - io.MouseWheel, -60.0f, 60.0f);
+        scrollCarryOverX = std::clamp(totalX - io.MouseWheelH, -60.0f, 60.0f);
+    }
+    appState.scrollEventsThisPoll = false;
+}
+
+if (scrollCarryOverY != 0.0f || scrollCarryOverX != 0.0f)
+    appState.needsRedraw = true;
+```
+
+`scrollEventsThisPoll` is `std::atomic<bool>` in `app_state.h`, set by the GLFW scroll callback alongside `needsRedraw`. It distinguishes active scrolling from stale ImGui-queued events.
+
+**Key points:** zero `io.MouseWheel` on stop (can't access internal queue, so zero what ImPlot reads); no forced redraw to drain stale queue (it's small, drains naturally); carry-over cap at ±60 (~1 s at 60 fps); direction reversal resets carry-over immediately.
