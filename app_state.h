@@ -85,6 +85,7 @@ struct AppState {
 
     // Idle rendering optimization
     std::atomic<bool> needsRedraw;
+    std::atomic<bool> scrollEventsThisPoll;
     
     // X-range selection state
     bool isSelectingXRange;

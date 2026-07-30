@@ -227,7 +227,9 @@ bool initializeApplication(AppConfig& config, GLFWwindow*& window) {
         static_cast<AppState*>(glfwGetWindowUserPointer(w))->needsRedraw = true;
     });
     glfwSetScrollCallback(window, [](GLFWwindow* w, double, double) {
-        static_cast<AppState*>(glfwGetWindowUserPointer(w))->needsRedraw = true;
+        auto* state = static_cast<AppState*>(glfwGetWindowUserPointer(w));
+        state->needsRedraw = true;
+        state->scrollEventsThisPoll = true;
     });
     glfwSetKeyCallback(window, [](GLFWwindow* w, int, int, int, int) {
         static_cast<AppState*>(glfwGetWindowUserPointer(w))->needsRedraw = true;
@@ -1473,32 +1475,42 @@ int main(int argc, char* argv[]) {
         // Rate-limit mouse wheel to at most one notch per frame, with
         // carry-over for excess. Prevents extreme zoom from batch-drained
         // events without dropping input entirely.
+        // When no new GLFW scroll events arrived this poll cycle, discard
+        // all carry-over and wheel input — any io.MouseWheel value came
+        // from stale ImGui-queued events that must not cause zoom.
         {
             ImGuiIO& io = ImGui::GetIO();
 
-            // Direction reversal: if carry-over and fresh events have opposite
-            // signs, the user changed scroll direction. Reset carry-over so
-            // zoom follows the new direction immediately.
-            if (scrollCarryOverY != 0.0f && io.MouseWheel != 0.0f &&
-                (scrollCarryOverY > 0.0f) != (io.MouseWheel > 0.0f))
+            if (!appState.scrollEventsThisPoll) {
                 scrollCarryOverY = 0.0f;
-            if (scrollCarryOverX != 0.0f && io.MouseWheelH != 0.0f &&
-                (scrollCarryOverX > 0.0f) != (io.MouseWheelH > 0.0f))
                 scrollCarryOverX = 0.0f;
+                io.MouseWheel  = 0.0f;
+                io.MouseWheelH = 0.0f;
+            } else {
+                // Direction reversal: if carry-over and fresh events have opposite
+                // signs, the user changed scroll direction. Reset carry-over so
+                // zoom follows the new direction immediately.
+                if (scrollCarryOverY != 0.0f && io.MouseWheel != 0.0f &&
+                    (scrollCarryOverY > 0.0f) != (io.MouseWheel > 0.0f))
+                    scrollCarryOverY = 0.0f;
+                if (scrollCarryOverX != 0.0f && io.MouseWheelH != 0.0f &&
+                    (scrollCarryOverX > 0.0f) != (io.MouseWheelH > 0.0f))
+                    scrollCarryOverX = 0.0f;
 
-            float totalY = scrollCarryOverY + io.MouseWheel;
-            float totalX = scrollCarryOverX + io.MouseWheelH;
+                float totalY = scrollCarryOverY + io.MouseWheel;
+                float totalX = scrollCarryOverX + io.MouseWheelH;
 
-            io.MouseWheel  = std::clamp(totalY, -1.0f, 1.0f);
-            io.MouseWheelH = std::clamp(totalX, -1.0f, 1.0f);
+                io.MouseWheel  = std::clamp(totalY, -1.0f, 1.0f);
+                io.MouseWheelH = std::clamp(totalX, -1.0f, 1.0f);
 
-            // Cap carry-over to ±60 (~1 s at 60 fps) so long freezes
-            // don't cause minutes of delayed zoom after input stops.
-            scrollCarryOverY = std::clamp(totalY - io.MouseWheel, -60.0f, 60.0f);
-            scrollCarryOverX = std::clamp(totalX - io.MouseWheelH, -60.0f, 60.0f);
+                scrollCarryOverY = std::clamp(totalY - io.MouseWheel, -60.0f, 60.0f);
+                scrollCarryOverX = std::clamp(totalX - io.MouseWheelH, -60.0f, 60.0f);
+            }
+
+            appState.scrollEventsThisPoll = false;
         }
 
-        // Keep rendering while carry-over drains
+        // Keep rendering while carry-over drains or scroll was processed
         if (scrollCarryOverY != 0.0f || scrollCarryOverX != 0.0f)
             appState.needsRedraw = true;
 
