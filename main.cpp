@@ -1580,37 +1580,38 @@ int main(int argc, char* argv[]) {
                     }
                     
                     // Recent datasets menu
-                    {
-                        bool anyExisting = false;
-                        for (const auto& entry : config.recentDatasets) {
-                            if (std::filesystem::exists(entry.path)) { anyExisting = true; break; }
-                        }
-                        if (anyExisting) {
-                            if (ImGui::BeginMenu("Recent Datasets")) {
-                                for (const auto& entry : config.recentDatasets) {
-                                    const auto& datasetPath = entry.path;
-                                    if (!std::filesystem::exists(datasetPath))
-                                        continue;
-                                    if (ImGui::MenuItem(datasetPath.c_str())) {
-                                    // Extract just the directory name for display
-                                    size_t last_slash = datasetPath.find_last_of("/\\");
-                                    std::string displayName = (last_slash != std::string::npos) 
-                                        ? datasetPath.substr(last_slash + 1) 
-                                        : datasetPath;
-                                    
-                                    if (std::filesystem::exists(datasetPath) && std::filesystem::is_directory(datasetPath)) {
-                                        // Check if there's a raw_data subdirectory
+                    if (config.recentDatasets.empty()) {
+                        // no recent datasets to show
+                    } else {
+                        if (ImGui::BeginMenu("Recent Datasets")) {
+                            for (const auto& entry : config.recentDatasets) {
+                                const auto& datasetPath = entry.path;
+                                bool exists = std::filesystem::exists(datasetPath)
+                                    || std::filesystem::is_directory(datasetPath);
+
+                                if (!exists) {
+                                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 0.4f, 0.4f, 1.0f));
+                                    ImGui::BeginDisabled(true);
+                                }
+
+                                bool clicked = ImGui::MenuItem(datasetPath.c_str());
+
+                                if (!exists) {
+                                    ImGui::EndDisabled();
+                                    ImGui::PopStyleColor();
+                                }
+
+                                if (clicked && exists) {
+                                    if (std::filesystem::is_directory(datasetPath)) {
                                         std::string rawDataPath = datasetPath + "/raw_data";
                                         if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {
-                                            appState.currentDirectory = rawDataPath; // Use the raw_data subdirectory
+                                            appState.currentDirectory = rawDataPath;
                                         } else {
-                                            appState.currentDirectory = datasetPath; // Fallback to the dataset directory itself
+                                            appState.currentDirectory = datasetPath;
                                         }
-                                        
-                                        // Update current dataset name
+
                                         appState.currentDatasetName = datasetPath.substr(datasetPath.find_last_of("/\\") + 1);
-                                        
-                                        // Use stored adapter if available, otherwise show selection popup
+
                                         if (!entry.adapterName.empty() && AdapterRegistry::instance().getAdapter(entry.adapterName)) {
                                             applyAdapterSelection(entry.adapterName, appState.currentDirectory);
                                         } else {
@@ -1624,7 +1625,6 @@ int main(int argc, char* argv[]) {
                             }
                             ImGui::EndMenu();
                         }
-                    }
                     }
                     
                     ImGui::EndMenu();

@@ -196,13 +196,7 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
 
         // Always use a fixed-height child region
         if (ImGui::BeginChild("RecentDatasetsChild", ImVec2(0, 500), true)) {
-            int numExisting = 0;
-            for (const auto& entry : config.recentDatasets) {
-                if (std::filesystem::exists(entry.path))
-                    numExisting++;
-            }
-
-            if (numExisting == 0) {
+            if (config.recentDatasets.empty()) {
                 float childHeight = ImGui::GetContentRegionAvail().y;
                 float textHeight = ImGui::GetTextLineHeightWithSpacing() * 3;
                 float offsetY = (childHeight - textHeight) * 0.5f;
@@ -215,38 +209,24 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                 if (selectedIdx >= (int)config.recentDatasets.size())
                     selectedIdx = config.recentDatasets.empty() ? 0 : (int)config.recentDatasets.size() - 1;
 
-                // Clamp selectedIdx to nearest existing entry
-                if (!std::filesystem::exists(config.recentDatasets[selectedIdx].path)) {
-                    for (size_t ci = 0; ci < config.recentDatasets.size(); ci++) {
-                        if (std::filesystem::exists(config.recentDatasets[ci].path)) {
-                            selectedIdx = (int)ci;
-                            break;
-                        }
-                    }
-                }
+                if (selectedIdx >= (int)config.recentDatasets.size())
+                    selectedIdx = config.recentDatasets.empty() ? 0 : (int)config.recentDatasets.size() - 1;
 
-                // Arrow key navigation — only through existing entries
+                // Arrow key navigation
                 if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
                     int next = selectedIdx - 1;
-                    while (next >= 0 && !std::filesystem::exists(config.recentDatasets[next].path))
-                        next--;
                     if (next >= 0) selectedIdx = next;
                 }
                 if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
                     int next = selectedIdx + 1;
-                    while (next < (int)config.recentDatasets.size() && !std::filesystem::exists(config.recentDatasets[next].path))
-                        next++;
                     if (next < (int)config.recentDatasets.size()) selectedIdx = next;
                 }
 
                 for (size_t i = 0; i < config.recentDatasets.size(); ) {
                     const auto& entry = config.recentDatasets[i];
                     const auto& datasetPath = entry.path;
-
-                    if (!std::filesystem::exists(datasetPath)) {
-                        i++;
-                        continue;
-                    }
+                    bool exists = std::filesystem::exists(datasetPath)
+                        || std::filesystem::is_directory(datasetPath);
 
                     std::string displayName = datasetPath;
                     size_t last_slash = displayName.find_last_of("/\\");
@@ -274,7 +254,7 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                             IM_COL32(80, 80, 200, 120));
                     }
 
-                    // Cross (×) button — delete from recent list
+                    // Cross (×) button — delete from recent list (always active)
                     if (ImGui::Button("×", ImVec2(btnH, btnH))) {
                         config.recentDatasets.erase(config.recentDatasets.begin() + i);
                         config.saveToFile(configFilePath);
@@ -283,6 +263,14 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                         continue;
                     }
                     ImGui::SameLine();
+
+                    if (!exists) {
+                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.15f, 0.15f, 0.5f));
+                        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.15f, 0.15f, 0.15f, 0.5f));
+                        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.15f, 0.15f, 0.15f, 0.5f));
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 0.4f, 0.4f, 1.0f));
+                        ImGui::BeginDisabled(true);
+                    }
 
                     // Adapter override (A) button — pick new adapter
                     if (ImGui::Button("A", ImVec2(btnH, btnH))) {
@@ -301,8 +289,10 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                             std::cout << "Opening adapter selector for: " << datasetPath << std::endl;
                         }
                     }
-                    if (ImGui::IsItemHovered()) {
-                        std::string tip = "Select adapter for " + datasetPath;
+                    if (ImGui::IsItemHovered(exists ? 0 : ImGuiHoveredFlags_AllowWhenDisabled)) {
+                        std::string tip = exists 
+                            ? ("Select adapter for " + datasetPath)
+                            : ("Path not reachable: " + datasetPath);
                         ImGui::SetTooltip("%s", tip.c_str());
                     }
                     ImGui::SameLine();
@@ -312,7 +302,7 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                     if (ImGui::Button(displayName.c_str(), ImVec2(-FLT_MIN, 0))) {
                         shouldOpen = true;
                     }
-                    if (!shouldOpen && (int)i == selectedIdx && ImGui::IsKeyPressed(ImGuiKey_Enter)) {
+                    if (!shouldOpen && exists && (int)i == selectedIdx && ImGui::IsKeyPressed(ImGuiKey_Enter)) {
                         shouldOpen = true;
                     }
                     if (shouldOpen) {
@@ -342,8 +332,19 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                         }
                     }
 
-                    if (ImGui::IsItemHovered()) {
-                        ImGui::SetTooltip("%s", datasetPath.c_str());
+                    if (!exists && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                        ImGui::SetTooltip("Path not reachable: %s", datasetPath.c_str());
+                    }
+
+                    if (!exists) {
+                        ImGui::EndDisabled();
+                        ImGui::PopStyleColor(4);
+                        ImGui::SameLine();
+                        ImGui::TextDisabled("(unreachable)");
+                    } else {
+                        if (ImGui::IsItemHovered()) {
+                            ImGui::SetTooltip("%s", datasetPath.c_str());
+                        }
                     }
 
                     ImGui::PopID();
