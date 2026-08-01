@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HDF5 Unified Spectral Data Container — Specification</title>
+<style>
+:root {
+  --bg: #fff; --fg: #1a1a1a; --muted: #555; --border: #ddd;
+  --code-bg: #f4f4f4; --tree-fg: #2d2d2d; --tree-bg: #fafafa;
+  --tree-border: #e0e0e0; --link: #0366d6; --th-bg: #f0f0f0;
+  --blockquote-bg: #f9f9f9; --blockquote-border: #999;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1e1e1e; --fg: #ddd; --muted: #999; --border: #444;
+    --code-bg: #2a2a2a; --tree-fg: #ccc; --tree-bg: #252525;
+    --tree-border: #444; --link: #58a6ff; --th-bg: #2a2a2a;
+    --blockquote-bg: #252525; --blockquote-border: #666;
+  }
+}
+[data-theme="light"] { --bg:#fff; --fg:#1a1a1a; --muted:#555; --border:#ddd; --code-bg:#f4f4f4; --tree-fg:#2d2d2d; --tree-bg:#fafafa; --tree-border:#e0e0e0; --link:#0366d6; --th-bg:#f0f0f0; --blockquote-bg:#f9f9f9; --blockquote-border:#999; }
+[data-theme="dark"]  { --bg:#1e1e1e; --fg:#ddd; --muted:#999; --border:#444; --code-bg:#2a2a2a; --tree-fg:#ccc; --tree-bg:#252525; --tree-border:#444; --link:#58a6ff; --th-bg:#2a2a2a; --blockquote-bg:#252525; --blockquote-border:#666; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--fg); line-height: 1.6; padding: 2rem; max-width: 1020px; margin: 0 auto; transition: background 0.2s, color 0.2s; }
+.theme-toggle { position: fixed; top: 1rem; right: 1rem; background: var(--code-bg); border: 1px solid var(--border); color: var(--fg); padding: 0.4rem 0.8rem; border-radius: 4px; cursor: pointer; font-size: 0.85rem; z-index: 10; }
+.theme-toggle:hover { opacity: 0.8; }
+h1 { font-size: 1.8rem; border-bottom: 2px solid var(--border); padding-bottom: 0.5rem; margin-bottom: 0.5rem; }
+h2 { font-size: 1.35rem; margin: 2rem 0 0.75rem; border-bottom: 1px solid var(--border); padding-bottom: 0.25rem; }
+h3 { font-size: 1.15rem; margin: 1.5rem 0 0.5rem; }
+h4 { font-size: 1rem; margin: 1.25rem 0 0.4rem; }
+p { margin: 0.5rem 0; }
+a { color: var(--link); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.meta { color: var(--muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
+table { width: 100%; border-collapse: collapse; margin: 0.75rem 0 1.25rem; font-size: 0.9rem; }
+th, td { text-align: left; padding: 0.4rem 0.6rem; border: 1px solid var(--border); }
+th { background: var(--th-bg); font-weight: 600; }
+td { background: var(--bg); }
+tr:nth-child(even) td { background: var(--tree-bg); }
+td code { font-size: 0.85em; }
+pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 4px; padding: 0.75rem 1rem; overflow-x: auto; margin: 0.75rem 0; font-size: 0.85rem; line-height: 1.4; }
+code { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 0.9em; }
+pre code { background: none; border: none; padding: 0; }
+blockquote { border-left: 3px solid var(--blockquote-border); background: var(--blockquote-bg); padding: 0.5rem 1rem; margin: 0.75rem 0; font-size: 0.9rem; color: var(--muted); }
+ul, ol { padding-left: 1.5rem; margin: 0.5rem 0; }
+li { margin: 0.2rem 0; }
+.tree { background: var(--tree-bg); border: 1px solid var(--tree-border); border-radius: 4px; padding: 1rem 1.25rem; font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 0.82rem; line-height: 1.45; overflow-x: auto; white-space: pre; color: var(--tree-fg); margin: 0.75rem 0; }
+.tree .c { color: var(--muted); }
+.tree .a { color: #b86e00; }
+.tree .t { color: #085; }
+@media (prefers-color-scheme: dark) { .tree .a { color: #e0b000; } .tree .t { color: #5dba7a; } }
+[data-theme="light"] .tree .a { color: #b86e00; } [data-theme="light"] .tree .t { color: #085; }
+[data-theme="dark"]  .tree .a { color: #e0b000; } [data-theme="dark"]  .tree .t { color: #5dba7a; }
+.nav-toc { background: var(--tree-bg); border: 1px solid var(--border); border-radius: 4px; padding: 1rem 1.25rem; margin: 1rem 0 2rem; }
+.nav-toc h3 { margin-top: 0; font-size: 1rem; }
+.nav-toc ul { columns: 2; list-style: none; padding-left: 0; }
+.nav-toc li { margin: 0.15rem 0; font-size: 0.9rem; break-inside: avoid; }
+.ds { background: var(--tree-bg); border: 1px solid var(--tree-border); border-radius: 4px; padding: 0.75rem 1rem; font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 0.82rem; line-height: 1.4; overflow-x: auto; white-space: pre; margin: 0.5rem 0; color: var(--tree-fg); }
+.ds .c { color: var(--muted); }
+hr { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
+.footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.8rem; }
+.new { background: var(--blockquote-bg); border-left: 3px solid #58a6ff; padding: 0.3rem 0.8rem; margin: 0.5rem 0; font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme">◐ Theme</button>
+
+<h1>HDF5 Unified Spectral Data Container</h1>
+<div class="meta">FTS Data Explorer &nbsp;|&nbsp; HDF5 (<code>.h5</code>) &nbsp;|&nbsp; Specification v.1 &nbsp;|&nbsp; 2026-08-02</div>
+
+<nav class="nav-toc">
+<h3>Contents</h3>
+<ul>
+  <li><a href="#overview">1. Overview</a></li>
+  <li><a href="#rules">1.2 Format rules</a></li>
+  <li><a href="#layout">2. Container layout</a></li>
+  <li><a href="#notation">2.1 Notation</a></li>
+  <li><a href="#root">2.2 Root attributes &amp; datasets</a></li>
+  <li><a href="#interferograms">2.3 Interferograms</a></li>
+  <li><a href="#spectra-layout">2.4 Spectrum member groups</a></li>
+  <li><a href="#derivatives">2.5 Derivative groups</a></li>
+  <li><a href="#member-ids">3. Member IDs &amp; references</a></li>
+  <li><a href="#kind">4. <code>kind</code> attribute</a></li>
+  <li><a href="#origin">5. <code>@origin</code> attribute</a></li>
+  <li><a href="#measurement">6. Measurement metadata</a></li>
+  <li><a href="#config">7. <code>@config</code> attribute</a></li>
+  <li><a href="#workspace">8. <code>workspace.json</code></a></li>
+</ul>
+</nav>
+
+<h2 id="overview">1. Overview</h2>
+<p>One HDF5 file holds the <strong>entire workspace</strong>: raw measurements, computed artifacts, and per-panel data-view settings.</p>
+
+
+
+<h3 id="rules">1.1 Format rules</h3>
+<table>
+<tr><th style="width:2rem">#</th><th>Rule</th></tr>
+<tr><td>1</td><td>Every dataset carries a <code>kind</code> attribute: <code>"original"</code> (as loaded) or <code>"derivative"</code> (computed). <code>kind = "original"</code> is written once, never overwritten.</td></tr>
+<tr><td>2</td><td>Every group carries <code>@origin</code> and <code>@config</code> attributes (JSON strings). Groups contain only datasets.</td></tr>
+<tr><td>3</td><td>No file versioning. A static root <code>@format</code> attribute identifies the layout.</td></tr>
+<tr><td>4</td><td>No host info: no hostnames, usernames, paths, or OS fingerprints. <code>@origin</code> records only application identity and timestamp.</td></tr>
+<tr><td>5</td><td>No images, opaque blobs, base64, executables, or scripts. The container stores only datasets, groups, and string metadata attributes.</td></tr>
+<tr><td>6</td><td>All numeric data is native HDF5 typed datasets (IEEE fp32/fp64, i32). Datatype <em>is</em> the format specifier; <code>@config</code> records units. Strings: VLEN UTF-8 (<code>H5T_C_S1 + H5T_VARIABLE</code>), shape <code>(1,)</code>. Shapes: C order, row-major. All 2-column datasets carry <code>columns</code> and <code>units</code> string attributes.</td></tr>
+<tr><td>7</td><td>Derivative datasets can be safely stripped: delete any group or dataset with <code>kind = "derivative"</code>. <code>igm_uncorrected_x/</code>, <code>igm_corrected_x/</code>, and original spectra are untouched. Apps must tolerate stripped files and recompute on demand.</td></tr>
+<tr><td>8</td><td>Root datasets: <code>workspace.json</code> (<a href="#workspace">§8</a>), <code>measurement_config.json</code> (<a href="#measurement-config">§6.1</a>), <code>measurement_comment.txt</code> (<a href="#comment">§6.2</a>), <code>tags</code> (<a href="#tags">§6.3</a>). All may be empty.</td></tr>
+<tr><td>9</td><td>Configuration is <strong>extensible</strong>: unknown keys are preserved verbatim on save.</td></tr>
+<tr><td>10</td><td>Derivative datasets reference their source data via <code>inputs</code> (absolute HDF5 paths in <code>@config</code>). Every referenced path must exist in the file — a saved file must never contain an <code>inputs</code> entry pointing to a deleted member.</td></tr>
+</table>
+
+<hr>
+
+<h2 id="layout">2. Container layout</h2>
+<p>Groups are organized <strong>by data type</strong>. All x/y-style data is stored as 2-column datasets with <code>columns</code> and <code>units</code> attributes. Original measurements may carry a <code>timestamp</code> attribute.</p>
+
+<div class="tree">
+<a href="#root">unified_spectral_data_container.h5</a>
+├── <span class="a">@format</span> = <span class="t">"unified-spectral-data-container"</span>
+├── <span class="a">@created</span> = <span class="t">"2026-08-01T12:34:56Z"</span>       <span class="c">(ISO-8601 UTC)</span>
+├── <a href="#workspace">workspace.json</a>                          <span class="c">(vlen str) — §8</span>
+├── <a href="#measurement-config">measurement_config.json</a>                 <span class="c">(vlen str) — §6.1</span>
+├── <a href="#comment">measurement_comment.txt</a>                 <span class="c">(vlen str) — §6.2</span>
+├── <a href="#tags">tags</a>                                    <span class="c">(vlen str) — §6.3</span>
+├── <a href="#igm-uncorrected">igm_uncorrected_x/</a>           <span class="a">@schema</span>=<span class="t">"interferogram"</span>
+│   │   <span class="a">attrs:</span> origin, config
+│   ├── record_0                   <span class="c">(fp32/fp64 [N,2])</span>
+│   │       <span class="a">attrs:</span> kind, columns, units, timestamp
+│   ├── record_1                   <span class="c">...</span>
+│   └── …
+├── <a href="#igm-corrected">igm_corrected_x/</a>              <span class="a">@schema</span>=<span class="t">"interferogram"</span>
+│   │   <span class="a">attrs:</span> origin, config
+│   ├── record_0                  <span class="c">(fp64 [N,2])</span>
+│   │       <span class="a">attrs:</span> kind, columns, units, timestamp
+│   ├── record_1                  <span class="c">...</span>
+│   └── …
+├── <a href="#spectra-layout">spectra/</a>                    <span class="a">@schema</span>=<span class="t">"spectrum/v1"</span>
+│   ├── &lt;id&gt;/                   <span class="c">(member group)</span>
+│   │   │   <span class="a">attrs:</span> kind, origin, config, timestamp
+│   │   └── data                <span class="c">(fp64 [M,2])</span>
+│   │           <span class="a">attrs:</span> columns, units
+│   └── …
+├── <a href="#average">average_spectra/</a>            <span class="a">@schema</span>=<span class="t">"average_spectrum/v1"</span>
+│   ├── &lt;id&gt;/                   <span class="c">(member group)</span>
+│   │   │   <span class="a">attrs:</span> kind, origin, config
+│   │   └── data                <span class="c">(fp64 [M,2])</span>
+│   │           <span class="a">attrs:</span> columns, units
+│   └── …
+├── <a href="#snr">snr_spectra/</a>                <span class="a">@schema</span>=<span class="t">"snr_spectrum/v1"</span>
+│   ├── &lt;id&gt;/                   <span class="c">(member group)</span>
+│   │   │   <span class="a">attrs:</span> kind, origin, config
+│   │   └── data                <span class="c">(fp64 [M,2])</span>
+│   │           <span class="a">attrs:</span> columns, units
+│   └── …
+├── <a href="#allan">allan_werle/</a>                <span class="a">@schema</span>=<span class="t">"allan_werle/v1"</span>
+│   ├── &lt;id&gt;/                   <span class="c">(member group)</span>
+│   │   │   <span class="a">attrs:</span> kind, origin, config
+│   │   ├── surface_data        <span class="c">(fp64 [T,W])</span>
+│   │   │       <span class="a">attrs:</span> columns
+│   │   ├── wavelengths         <span class="c">(fp64 [W])</span>
+│   │   │       <span class="a">attrs:</span> units
+│   │   └── taus               <span class="c">(fp64 [T])</span>
+│   │           <span class="a">attrs:</span> units
+│   └── …
+└── <a href="#t100">t100/</a>                       <span class="a">@schema</span>=<span class="t">"t100/v1"</span>
+    ├── &lt;id&gt;/                   <span class="c">(member group)</span>
+    │   │   <span class="a">attrs:</span> kind, origin, config
+    │   ├── reference            <span class="c">(fp64 [M,2])</span>
+    │   │       <span class="a">attrs:</span> columns, units
+    │   ├── stddev               <span class="c">(fp64 [M,2])</span>
+    │   │       <span class="a">attrs:</span> columns, units
+    │   └── transmittance/&lt;file_id&gt;/
+    │       └── data             <span class="c">(fp64 [M,2])</span>
+    │               <span class="a">attrs:</span> columns, units
+    └── …
+</div>
+
+<h3 id="notation">2.1 Notation</h3>
+<table>
+<tr><th>Symbol</th><th>Meaning</th></tr>
+<tr><td><code>name/</code></td><td>HDF5 group</td></tr>
+<tr><td><code>name</code></td><td>HDF5 dataset</td></tr>
+<tr><td><code>@name = value</code></td><td>HDF5 attribute</td></tr>
+<tr><td><code>(fp64 [N])</code></td><td>Dataset shape: <code>fp64</code> = IEEE double, <code>fp32</code> = float, <code>i32</code> = int32</td></tr>
+<tr><td><code>&lt;id&gt;</code></td><td>Member identifier (<a href="#member-ids">§3</a>)</td></tr>
+</table>
+<p>Shapes are C order, row-major. Scalars: shape <code>[1]</code>. VLEN strings: datasets of shape <code>(1,)</code> with <code>H5T_C_S1 + H5T_VARIABLE</code>.</p>
+
+<h3 id="root">2.2 Root attributes &amp; datasets</h3>
+<ul>
+  <li><strong><code>@format</code></strong> — static <code>"unified-spectral-data-container"</code>. Never changes.</li>
+  <li><strong><code>@created</code></strong> — ISO-8601 UTC timestamp, written at creation. Only reset on "Save As".</li>
+  <li>Root datasets are described in <a href="#workspace">§8</a> and <a href="#measurement">§6</a>.</li>
+</ul>
+
+<h3 id="interferograms">2.3 Interferograms</h3>
+<p>All interferograms are flat 2D datasets directly inside the type group. No per-scan sub-groups; <code>@origin</code>/<code>@config</code> are pool-level attributes on the group. Each original dataset may carry a <code>timestamp</code> attribute (ISO-8601 UTC).</p>
+
+<h4 id="igm-uncorrected">2.3.1 Uncorrected IFG — <code>igm_uncorrected_x/</code></h4>
+<div class="ds">
+igm_uncorrected_x/
+    <span class="a">attrs:</span> origin, config
+    record_0          <span class="c">(fp32/fp64 [N,2])</span>
+        <span class="a">attrs["kind"]</span>    = "original"
+        <span class="a">attrs["columns"]</span> = ["Reference detector", "Primary detector"]
+        <span class="a">attrs["units"]</span>   = ["V", "V"]
+</div>
+<p>No OPD axis — x-axis is sample indices. <code>axisCorrected</code> is <code>false</code>. Imported from WUST Mini FTS CSV raw measurements.</p>
+
+<h4 id="igm-corrected">2.3.2 Corrected IFG — <code>igm_corrected_x/</code></h4>
+<div class="ds">
+igm_corrected_x/
+    <span class="a">attrs:</span> origin, config
+    record_0         <span class="c">(fp64 [N,2])</span>
+        <span class="a">attrs["kind"]</span>    = "original" | "derivative"
+        <span class="a">attrs["columns"]</span> = ["Primary detector", "OPD axis"]
+        <span class="a">attrs["units"]</span>   = ["V", "um"]
+</div>
+<p>One channel per column. <code>axisCorrected</code> is <code>true</code>. Corrected single IFGs are imported from ArcOptix IGMs TXT measurements (<code>kind = "original"</code>). Derivative corrected IFGs may be produced by computation pipelines (e.g. phase correction).</p>
+
+<h3 id="spectra-layout">2.4 Spectrum member groups</h3>
+<p>Precomputed spectra (<code>kind = "original"</code>) come from measurement sources. FFT-computed spectra (<code>kind = "derivative"</code>) come from the app pipeline (<a href="#config-spectrum">§7.3</a>). Both use the same layout:</p>
+<div class="ds">
+spectra/&lt;id&gt;/                                <span class="c">(member group)</span>
+    <span class="a">attrs:</span> kind, origin, config
+    data                                     <span class="c">(fp64 [M,2])</span>
+        <span class="a">attrs["columns"]</span> = ["x", "y"]
+        <span class="a">attrs["units"]</span>   = ["cm-1", "V"]
+</div>
+<p>Column 0: x-axis (wavenumber, wavelength, or THz per <code>@config</code> <code>xUnit</code>). Column 1: spectrum magnitude. Units from <code>@config</code> <code>xUnit</code> and <code>yUnits</code>.</p>
+
+<h3 id="derivatives">2.5 Derivative member groups</h3>
+
+<h4 id="average">2.5.1 Average spectrum (<code>average_spectra/</code>)</h4>
+<p>Mean spectrum computed from N input interferograms. Same layout as <a href="#spectra-layout">§2.4</a>: <code>data</code> (fp64 [M,2]) with columns <code>["x", "y"]</code>.</p>
+
+<h4 id="snr">2.5.2 SNR spectrum (<code>snr_spectra/</code>)</h4>
+<p>Signal-to-noise ratio per wavelength bin, computed from ≥ 2 input interferograms. SNR = mean / standard deviation, calculated online across input files.</p>
+<div class="ds">
+snr_spectra/&lt;id&gt;/                           <span class="c">(member group)</span>
+    <span class="a">attrs:</span> kind, origin, config
+    data                                     <span class="c">(fp64 [M,2])</span>
+        <span class="a">attrs["columns"]</span> = ["x", "SNR"]
+        <span class="a">attrs["units"]</span>   = ["cm-1", ""]
+</div>
+
+<h4 id="allan">2.5.3 Allan-Werle plot (<code>allan_werle/</code>)</h4>
+<p>Allan-Werle variance: integration time vs. wavelength. Captures instrument stability characteristics.</p>
+<div class="ds">
+allan_werle/&lt;id&gt;/                           <span class="c">(member group)</span>
+    <span class="a">attrs:</span> kind, origin, config
+    surface_data                             <span class="c">(fp64 [T,W])</span>
+        <span class="a">attrs["columns"]</span> = ["1560", "1562", …]  <span class="c">— wavelength labels [nm]</span>
+    wavelengths                              <span class="c">(fp64 [W])</span>
+        <span class="a">attrs["units"]</span>     = "um"
+    taus                                     <span class="c">(fp64 [T])</span>
+        <span class="a">attrs["units"]</span>     = "s"
+</div>
+<p><code>surface_data</code> is T integration times × W wavelength bins. Each column labels one wavelength bin. <code>wavelengths</code> holds the numeric wavelength axis; <code>taus</code> holds the integration time axis.</p>
+
+<h4 id="t100">2.5.4 100% T curves (<code>t100/</code>)</h4>
+<p>Transmittance analysis: T% = (sample spectrum / reference spectrum) × 100 for each input file.</p>
+<div class="ds">
+t100/&lt;id&gt;/                                   <span class="c">(member group)</span>
+    <span class="a">attrs:</span> kind, origin, config
+    reference                                <span class="c">(fp64 [M,2])</span>
+        <span class="a">attrs["columns"]</span> = ["x", "y"]
+        <span class="a">attrs["units"]</span>   = ["cm-1", "a.u."]
+    stddev                                   <span class="c">(fp64 [M,2])</span>
+        <span class="a">attrs["columns"]</span> = ["x", "stddev"]
+        <span class="a">attrs["units"]</span>   = ["cm-1", "%"]
+    transmittance/&lt;file_id&gt;/
+        data                                 <span class="c">(fp64 [M,2])</span>
+            <span class="a">attrs["columns"]</span> = ["x", "T%"]
+            <span class="a">attrs["units"]</span>   = ["cm-1", "%"]
+</div>
+<p><code>reference</code>: reference spectrum (file or average). <code>stddev</code>: standard deviation of T% across all checked files at each x. <code>transmittance/&lt;file_id&gt;/</code>: one subgroup per input file.</p>
+
+<hr>
+
+<h2 id="member-ids">3. Member IDs &amp; references</h2>
+<ul>
+  <li><code>&lt;id&gt;</code> is a human-readable slug (sanitized source basename, e.g. <code>sample_0001</code>), unique within its type group, stable across saves.</li>
+  <li>On collision, append a numeric suffix (<code>sample_0001_2</code>).</li>
+  <li>Derivative IDs: <code>avg_of_3</code>, <code>snr_of_5</code>, <code>allan_wl5_tau30</code>.</li>
+  <li><code>inputs</code> in <code>@config</code> reference members by absolute HDF5 path: <code>["/igm_uncorrected_x/record_0"]</code>.</li>
+</ul>
+
+<h2 id="kind">4. The <code>kind</code> attribute</h2>
+<p>String attribute on each dataset. Type groups carry <code>@schema</code> describing member layout.</p>
+<table>
+<tr><th><code>kind</code></th><th>Meaning</th></tr>
+<tr><td><code>"original"</code></td><td>Data as loaded from a measurement source</td></tr>
+<tr><td><code>"derivative"</code></td><td>Produced by a computation pipeline</td></tr>
+</table>
+<table>
+<tr><th>Type group</th><th><code>@schema</code></th></tr>
+<tr><td><code>igm_uncorrected_x/</code>, <code>igm_corrected_x/</code></td><td><code>"interferogram"</code></td></tr>
+<tr><td><code>spectra/</code></td><td><code>"spectrum/v1"</code></td></tr>
+<tr><td><code>average_spectra/</code></td><td><code>"average_spectrum/v1"</code></td></tr>
+<tr><td><code>snr_spectra/</code></td><td><code>"snr_spectrum/v1"</code></td></tr>
+<tr><td><code>allan_werle/</code></td><td><code>"allan_werle/v1"</code></td></tr>
+<tr><td><code>t100/</code></td><td><code>"t100/v1"</code></td></tr>
+</table>
+
+<h2 id="origin">5. <code>@origin</code> attribute</h2>
+<p>JSON string attribute on every group. Written at creation, never silently rewritten. Application identity only — no host info.</p>
+<div class="ds">{"timestamp": "2026-08-01T12:34:56Z", "application": "FTS Data Explorer", "version": "26.08.3"}</div>
+<table>
+<tr><th>Key</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>timestamp</code></td><td>string</td><td>ISO-8601 UTC, second precision</td></tr>
+<tr><td><code>application</code></td><td>string</td><td>Producing application name</td></tr>
+<tr><td><code>version</code></td><td>string</td><td>Application version</td></tr>
+</table>
+<p>Additional keys permitted (e.g. <code>adapter</code>, <code>parser</code>) but no host-identifying info. For interferogram groups, one <code>@origin</code> serves all datasets in the group.</p>
+<p>Individual original datasets may carry a <code>timestamp</code> attribute (ISO-8601 UTC) recording the acquisition time of that measurement.</p>
+
+<hr>
+
+<h2 id="measurement">6. Measurement setup metadata (root)</h2>
+
+<h3 id="measurement-config">6.1 <code>measurement_config.json</code></h3>
+<p>JSON dataset for measurement setup settings. Extensible (unknown keys preserved).</p>
+<table>
+<tr><th>Key</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>instrument.model</code></td><td>string</td><td>e.g. <code>"ArcOptix FT"</code></td></tr>
+<tr><td><code>instrument.serial</code></td><td>string</td><td></td></tr>
+<tr><td><code>detector.type</code></td><td>string</td><td>e.g. <code>"InGaAs"</code>, <code>"MCT"</code></td></tr>
+<tr><td><code>detector.model</code></td><td>string</td><td>Detector model</td></tr>
+<tr><td><code>detector.responsivity</code></td><td>fp64</td><td>Detector responsivity</td></tr>
+<tr><td><code>detector.internalGain</code></td><td>fp64</td><td>Internal gain setting</td></tr>
+<tr><td><code>detector.externalGain</code></td><td>fp64</td><td>External amplifier gain</td></tr>
+<tr><td><code>detector.misc</code></td><td>string</td><td>Free-form additional detector info</td></tr>
+<tr><td><code>acquisitionCard.model</code></td><td>string</td><td>DAQ card model</td></tr>
+<tr><td><code>acquisitionCard.resolution</code></td><td>i32</td><td>ADC resolution [bits]</td></tr>
+<tr><td><code>acquisitionCard.gain</code></td><td>fp64</td><td>DAQ card gain</td></tr>
+<tr><td><code>acquisitionCard.misc</code></td><td>string</td><td>Free-form additional DAQ info</td></tr>
+<tr><td><code>laser.wavelengthUm</code></td><td>fp64</td><td>Reference laser wavelength [um]</td></tr>
+<tr><td><code>acquisition.integrationTimeS</code></td><td>fp64</td><td>Integration time per scan [s]</td></tr>
+<tr><td><code>acquisition.scans</code></td><td>i32</td><td>Co-added scans</td></tr>
+<tr><td><code>acquisition.resolutionCmInv</code></td><td>fp64</td><td>Target resolution [cm⁻¹]</td></tr>
+<tr><td><code>acquisition.delayLine</code></td><td>object</td><td>Delay-line scan params</td></tr>
+<tr><td><code>environment.ambient.temperatureC</code></td><td>fp64</td><td>Ambient temperature [°C]</td></tr>
+<tr><td><code>environment.ambient.humidityPct</code></td><td>fp64</td><td>Ambient relative humidity [%]</td></tr>
+<tr><td><code>environment.instrument.temperatureC</code></td><td>fp64</td><td>Instrument temperature [°C]</td></tr>
+<tr><td><code>environment.instrument.humidityPct</code></td><td>fp64</td><td>Instrument relative humidity [%]</td></tr>
+<tr><td><code>environment.instrument.purgingGas</code></td><td>string</td><td>e.g. <code>"N2"</code>, <code>"dry air"</code>, <code>""</code> for none</td></tr>
+</table>
+<p><code>acquisition.delayLine</code>: <code>minimumSpeed</code>, <code>maximumSpeed</code>, <code>configuredScanSpeed</code> (fp64, mm/s); <code>configuredScanStart</code>, <code>configuredScanLength</code>, <code>minimalScanLength</code> (i32, ticks); <code>comPort</code> (string); <code>speedSliderTicks</code> (i32).</p>
+<p>Non-standard keys → <code>measurement_config.json["legacy"]</code> as flat <code>{key: value}</code>. Preserved on save.</p>
+
+<h3 id="comment">6.2 <code>measurement_comment.txt</code></h3>
+<p>Free-form UTF-8 comment (vlen str). May be empty. Round-tripped verbatim.</p>
+
+<h3 id="tags">6.3 <code>tags</code></h3>
+<p>Comma-separated tags (vlen str), e.g. <code>"FTIR, sample-x"</code>. May be empty. Split on <code>,</code> and trim.</p>
+
+<hr>
+
+<h2 id="config">7. <code>@config</code> attribute</h2>
+<p>JSON string attribute on every group. Holds everything needed to reproduce the member from its inputs. Extensible. Display/view state belongs in <a href="#workspace"><code>workspace.json</code></a>.</p>
+
+<h3>7.1 Shared primitives</h3>
+<p><strong><code>xUnit</code></strong>: <code>"cm-1"</code> | <code>"um"</code> | <code>"thz"</code>.</p>
+<p><strong><code>apodization</code> object:</strong></p>
+<table>
+<tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>window</code></td><td>string</td><td><code>"rectangular"</code></td><td><code>rectangular</code>, <code>gauss</code>, <code>triangular</code>, <code>norton_beer</code>, <code>dolph_chebyshev</code>, <code>hamming</code>, <code>blackman_harris</code>, <code>hann</code>, <code>happ_genzel</code>, <code>kaiser</code></td></tr>
+<tr><td><code>gaussSigma</code></td><td>fp64</td><td>1.0</td><td>Gaussian sigma</td></tr>
+<tr><td><code>rectWidth</code></td><td>fp64</td><td>1.0</td><td></td></tr>
+<tr><td><code>rectAsymMode</code></td><td>bool</td><td>true</td><td><code>true</code> = asymmetric</td></tr>
+<tr><td><code>nortonBeerFwhm</code></td><td>fp64</td><td>1.5</td><td>1.0–2.0</td></tr>
+<tr><td><code>dolphChebyshevAtDb</code></td><td>fp64</td><td>60.0</td><td>Attenuation [dB] (50–160)</td></tr>
+<tr><td><code>hammingAlpha</code></td><td>fp64</td><td>0.54</td><td>0.36–1.0</td></tr>
+<tr><td><code>kaiserBeta</code></td><td>fp64</td><td>6.0</td><td>0.5–12.0</td></tr>
+</table>
+
+<h3 id="config-ifg">7.2 Interferogram config</h3>
+<table>
+<tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>sourceFormat</code></td><td>string</td><td>—</td><td><code>csv</code>, <code>txt</code></td></tr>
+<tr><td><code>adapterName</code></td><td>string</td><td>—</td><td>e.g. <code>"WUST Mini FTS"</code></td></tr>
+<tr><td><code>dataType</code></td><td>string</td><td>—</td><td><code>igm_uncorrected_x</code> | <code>igm_corrected_x</code></td></tr>
+<tr><td><code>axisCorrected</code></td><td>bool</td><td>false</td><td>OPD column present</td></tr>
+<tr><td><code>detectorUnits</code></td><td>string</td><td><code>"V"</code></td><td></td></tr>
+<tr><td><code>opdUnits</code></td><td>string</td><td><code>"um"</code></td><td></td></tr>
+<tr><td><code>channelOrder</code></td><td>string[]</td><td>—</td><td>e.g. <code>["Reference detector", "Primary detector"]</code></td></tr>
+<tr><td><code>fileCount</code></td><td>i32</td><td>—</td><td>Scans in group</td></tr>
+<tr><td><code>pointsPerFile</code></td><td>i32</td><td>—</td><td>Points per scan</td></tr>
+</table>
+
+<h3 id="config-spectrum">7.3 Spectrum config</h3>
+<table>
+<tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>inputs</code></td><td>string[]</td><td>—</td><td>IFG paths (<strong>required for <code>derivative</code>, omitted for <code>original</code></strong>)</td></tr>
+<tr><td><code>xUnit</code></td><td>string</td><td><code>"cm-1"</code></td><td></td></tr>
+<tr><td><code>yUnits</code></td><td>string</td><td><code>"V"</code></td><td>Must be linear: <code>a.u.</code>, <code>V</code>, <code>W</code>, etc. No dB.</td></tr>
+<tr><td><code>sourceFormat</code></td><td>string</td><td>—</td><td><code>csv</code>, <code>txt</code></td></tr>
+<tr><td><code>detectorUnits</code></td><td>string</td><td><code>"V"</code></td><td></td></tr>
+<tr><td><code>refLaserUm</code></td><td>fp64</td><td>1.550</td><td>Reference laser [um]</td></tr>
+<tr><td><code>zeroPadK</code></td><td>i32</td><td>0</td><td>N = n·(K+1); 0 = off</td></tr>
+<tr><td><code>xCorrectionMethod</code></td><td>string</td><td><code>"hilbert"</code></td><td><code>hilbert</code> | <code>peaks</code></td></tr>
+<tr><td><code>prominenceThreshold</code></td><td>fp64</td><td>0.02</td><td>Peak-finding fraction (0.0–0.5)</td></tr>
+<tr><td><code>detectorSensitivityKVPerW</code></td><td>fp64</td><td>0.0</td><td>0 = no conversion</td></tr>
+<tr><td><code>apodization</code></td><td>object</td><td>§7.1</td><td></td></tr>
+</table>
+
+<h3 id="config-average">7.4 Average spectrum</h3>
+<p>Same as <a href="#config-spectrum">§7.3</a>, plus <code>count</code> (i32, number of files averaged).</p>
+
+<h3 id="config-snr">7.5 SNR spectrum</h3>
+<p>Same as <a href="#config-average">§7.4</a>, plus <code>fileCount</code> (i32, ≥ 2). Data stores SNR per bin (mean/stddev online). Column 0: x-axis; column 1: SNR (dimensionless).</p>
+
+<h3 id="config-allan">7.6 Allan-Werle plot</h3>
+<table>
+<tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>inputs</code></td><td>string[]</td><td>—</td><td></td></tr>
+<tr><td><code>xUnit</code></td><td>string</td><td><code>"um"</code></td><td></td></tr>
+<tr><td><code>calcBase</code></td><td>string</td><td><code>"t100"</code></td><td><code>t100</code> | <code>spectrum</code></td></tr>
+<tr><td><code>xRangeMin</code>, <code>xRangeMax</code></td><td>fp64</td><td>1.0, 30.0</td><td>Wavelength slice range</td></tr>
+<tr><td><code>wavelengthDecimation</code></td><td>i32</td><td>5</td><td></td></tr>
+<tr><td><code>sliceIndex</code></td><td>i32</td><td>0</td><td></td></tr>
+<tr><td><code>refLaserUm</code></td><td>fp64</td><td>1.550</td><td></td></tr>
+<tr><td><code>apodization</code></td><td>object</td><td>§7.1</td><td></td></tr>
+</table>
+
+<h3 id="config-t100">7.7 100% T</h3>
+<table>
+<tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>inputs</code></td><td>string[]</td><td>—</td><td></td></tr>
+<tr><td><code>xUnit</code></td><td>string</td><td><code>"cm-1"</code></td><td></td></tr>
+<tr><td><code>reference.source</code></td><td>string</td><td>—</td><td><code>file</code> | <code>average</code></td></tr>
+<tr><td><code>reference.path</code></td><td>string</td><td>—</td><td>Absolute HDF5 path</td></tr>
+<tr><td><code>energyRatios</code></td><td>array</td><td><code>[]</code></td><td>Up to 3 <code>{"num":"800","den":"1000"}</code> pairs</td></tr>
+</table>
+<blockquote>Reference must be an HDF5 member. Import external CSV refs into <code>spectra/</code> first.</blockquote>
+
+<hr>
+
+<h2 id="workspace">8. <code>workspace.json</code> — data-view state</h2>
+<p>Root-level JSON dataset. Holds selections, axis ranges, zoom, units, y-scales, and processing parameters. App state is isolated under <code>applications.&lt;app-name&gt;</code>.</p>
+<p>Does <strong>not</strong> store UI chrome: no window geometry, docking layout, theme, fonts, thread pool.</p>
+<blockquote>Apps must tolerate empty <code>workspace.json</code> (<code>{}</code> or empty string).</blockquote>
+
+<h3>8.0 Layout</h3>
+<pre><code>{
+  "app": { "name": "FTS Data Explorer", "version": "26.08.3" },
+  "applications": {
+    "FTS Data Explorer": {
+      "plotDefaults": { "maxAtZero": false, "xAxisBase": 0, "xCorrectionMethod": 0, "peakProminence": 0.02 },
+      "selection": {
+        "sortedFiles": ["sample_0001.csv"],
+        "selectedFiles": ["sample_0001.csv"],
+        "filesSelectedForAveraging": [true],
+        "currentSortedFileIndex": 0
+      },
+      "interferogramView": {
+        "zoomRange": { "min": 0, "max": 100 },
+        "refY": { "min": -0.1, "max": 0.2 },
+        "primY": { "min": -0.1, "max": 0.2 }
+      },
+      "spectrumView": {
+        "xUnit": 0, "yScale": 0, "yAxisMode": 0,
+        "detectorSensitivityKVPerW": 0.0, "refLaserUm": 1.550, "zeroPadK": 0,
+        "apodization": { "window": "rectangular", "gaussSigma": 1.0 }
+      },
+      "averageView": { "xUnit": 0, "yScale": 0, "yAxisMode": 0 },
+      "snrView":     { "xUnit": 0, "yScale": 0, "yAxisMode": 0 },
+      "allanView":   { "xUnit": 1, "wavelengthDecimation": 5, "calcBase": 0 },
+      "t100View":    { "xUnit": 0, "yAxisMode": 0, "referenceSource": 0,
+                       "energyRatios": [{"num":"","den":""}] }
+    }
+  }
+}</code></pre>
+<p><code>applications</code> keys match the <code>app.name</code> string from <code>@origin</code>.</p>
+
+<h3>8.1 Key reference</h3>
+<table>
+<tr><th>Key</th><th>Type</th><th>Values</th></tr>
+<tr><td><code>app.name</code></td><td>string</td><td>Application name</td></tr>
+<tr><td><code>app.version</code></td><td>string</td><td>Application version</td></tr>
+<tr><td><code>applications</code></td><td>object</td><td>Map of app-name → state</td></tr>
+<tr><td><code>plotDefaults.maxAtZero</code></td><td>bool</td><td></td></tr>
+<tr><td><code>plotDefaults.xAxisBase</code></td><td>i32</td><td>0 = index, 1 = OPD</td></tr>
+<tr><td><code>plotDefaults.xCorrectionMethod</code></td><td>i32</td><td>0 = Hilbert, 1 = Peaks</td></tr>
+<tr><td><code>selection.sortedFiles</code></td><td>string[]</td><td>Display order</td></tr>
+<tr><td><code>selection.selectedFiles</code></td><td>string[]</td><td></td></tr>
+<tr><td><code>selection.filesSelectedForAveraging</code></td><td>bool[]</td><td>Checkbox state</td></tr>
+<tr><td><code>selection.currentSortedFileIndex</code></td><td>i32</td><td></td></tr>
+<tr><td><code>interferogramView.zoomRange</code></td><td>{min,max}</td><td></td></tr>
+<tr><td><code>interferogramView.refY</code>, <code>primY</code></td><td>{min,max}</td><td>Per-channel Y limits</td></tr>
+<tr><td><code>spectrumView.xUnit</code></td><td>i32</td><td>0 = cm⁻¹, 1 = um, 2 = THz</td></tr>
+<tr><td><code>spectrumView.yScale</code></td><td>i32</td><td>0 = linear, 1 = log10, 2 = dB</td></tr>
+<tr><td><code>spectrumView.yAxisMode</code></td><td>i32</td><td>0 = all, 1 = tight, 2 = force</td></tr>
+<tr><td><code>spectrumView.forcedYMin</code>, <code>forcedYMax</code></td><td>fp64</td><td></td></tr>
+<tr><td><code>spectrumView.detectorSensitivityKVPerW</code></td><td>fp64</td><td>0 = off</td></tr>
+<tr><td><code>spectrumView.refLaserUm</code></td><td>fp64</td><td></td></tr>
+<tr><td><code>spectrumView.zeroPadK</code></td><td>i32</td><td></td></tr>
+<tr><td><code>spectrumView.apodization</code></td><td>object</td><td>§7.1</td></tr>
+<tr><td><code>averageView.*</code>, <code>snrView.*</code></td><td>—</td><td>Same xUnit/yScale/yAxisMode/limits keys</td></tr>
+<tr><td><code>allanView.calcBase</code></td><td>i32</td><td>0 = 100% T, 1 = spectrum</td></tr>
+<tr><td><code>allanView.wavelengthDecimation</code>, <code>sliceIndex</code>, <code>xRangeMin</code>, <code>xRangeMax</code></td><td>—</td><td>Allan-Werle controls</td></tr>
+<tr><td><code>t100View.referenceSource</code></td><td>i32</td><td>0 = file, 1 = average</td></tr>
+<tr><td><code>t100View.energyRatios</code></td><td>array</td><td>Up to 3 {num,den} pairs</td></tr>
+</table>
+
+<h3>8.2 Not persisted</h3>
+<p>Window geometry, UI theme, docking layout, thread config, filesystem paths, host identity, transient state, derivable booleans — live in <code>~/.fts_data_explorer_config</code>.</p>
+
+<hr>
+
+<div class="footer">FTS Data Explorer — HDF5 Unified Spectral Data Container — Draft v3, 2026-08-02</div>
+
+<script>
+function toggleTheme() {
+  const c = document.documentElement.getAttribute('data-theme');
+  const n = c === 'dark' ? 'light' : (c === 'light' ? null : 'dark');
+  if (n) document.documentElement.setAttribute('data-theme', n);
+  else document.documentElement.removeAttribute('data-theme');
+}
+</script>
+</body>
+</html>
