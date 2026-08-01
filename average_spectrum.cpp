@@ -640,6 +640,10 @@ bool AverageSpectrum::tickCalculation() {
         if (fut.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
             try {
                 auto ps = fut.get();
+                if (ps.spectrumX.empty() || ps.spectrumY.empty()) {
+                    completedCount_++;
+                    continue;
+                }
                 if (calcFirstFile) {
                     calcCommonX = ps.spectrumX;
                     calcNumBins = calcCommonX.size();

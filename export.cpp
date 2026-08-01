@@ -216,19 +216,30 @@ void ExportPanel::writeCorrectedIFGCsv(const std::string& dir)
     for (size_t i = 0; i < appState->selectedFiles.size(); i++) {
         if (i >= appState->rawDataCache.size()) continue;
         const auto& raw = appState->rawDataCache[i];
-        if (raw.referenceDetector.empty() || raw.primaryDetector.empty()) continue;
 
-        std::vector<double> hilbX;
-        if (appState->xCorrectionMethod == 1) {
-            SpectralToolbox::xAxisFromPeaks(
-                raw.referenceDetector, appState->spectrum.refLaserTextbox,
-                appState->peakProminenceThreshold, hilbX);
+        std::vector<double> opdX;
+        if (appState->datasetInfo.axisIsCorrected) {
+            // Axis already corrected: opdAxis is OPD; convert to um (m -> um).
+            if (raw.opdAxis.empty() || raw.primaryDetector.empty()) continue;
+            opdX.resize(raw.opdAxis.size());
+            for (size_t j = 0; j < raw.opdAxis.size(); j++)
+                opdX[j] = raw.opdAxis[j] * 1e6;
         } else {
-            SpectralToolbox::xAxisFromHilbert(raw.referenceDetector,
-                                              appState->spectrum.refLaserTextbox,
-                                              hilbX);
+            if (raw.referenceDetector.empty() || raw.primaryDetector.empty()) continue;
+            // Reference-based axis is mirror displacement; double to round-trip OPD
+            // (matches spectral_toolbox.cpp processSpectrum: OPD = 2.0 * maxOPD).
+            if (appState->xCorrectionMethod == 1) {
+                SpectralToolbox::xAxisFromPeaks(
+                    raw.referenceDetector, appState->spectrum.refLaserTextbox,
+                    appState->peakProminenceThreshold, opdX);
+            } else {
+                SpectralToolbox::xAxisFromHilbert(raw.referenceDetector,
+                                                  appState->spectrum.refLaserTextbox,
+                                                  opdX);
+            }
+            if (opdX.empty()) continue;
+            for (double& v : opdX) v *= 2.0;
         }
-        if (hilbX.empty()) continue;
 
         std::string fname = appState->selectedFilenames[i];
         size_t dot = fname.rfind('.');
@@ -239,9 +250,9 @@ void ExportPanel::writeCorrectedIFGCsv(const std::string& dir)
         std::ofstream ofs(path);
         if (!ofs.is_open()) continue;
         ofs << "OPD [um],Primary Detector [V]\n";
-        size_t n = std::min(hilbX.size(), raw.primaryDetector.size());
+        size_t n = std::min(opdX.size(), raw.primaryDetector.size());
         for (size_t j = 0; j < n; j++) {
-            ofs << hilbX[j] << "," << raw.primaryDetector[j] << "\n";
+            ofs << opdX[j] << "," << raw.primaryDetector[j] << "\n";
         }
     ofs.close();
     }

@@ -94,21 +94,21 @@ static bool naturalSortCompare(const std::string& a, const std::string& b) {
             }
             i++; j++;
         } else {
-            // Compare numeric sequences
+            // Compare numeric sequences by length then lexicographically.
+            // Throw-free: std::stoi would throw std::out_of_range for digit runs
+            // longer than INT_MAX, and a throwing sort comparator is UB.
             size_t numStartA = i;
             size_t numStartB = j;
             while (i < a.size() && isdigit(a[i])) i++;
             while (j < b.size() && isdigit(b[j])) j++;
-            
-            std::string numStrA = a.substr(numStartA, i - numStartA);
-            std::string numStrB = b.substr(numStartB, j - numStartB);
-            
-            // Convert to numbers and compare
-            int numA = std::stoi(numStrA);
-            int numB = std::stoi(numStrB);
-            
-            if (numA != numB) {
-                return numA < numB;
+            size_t lenA = i - numStartA;
+            size_t lenB = j - numStartB;
+            if (lenA != lenB) {
+                return lenA < lenB;
+            }
+            int cmp = a.compare(numStartA, lenA, b, numStartB, lenB);
+            if (cmp != 0) {
+                return cmp < 0;
             }
         }
     }
@@ -2384,6 +2384,9 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                                 SpectralToolbox::xAxisFromHilbert(refDet, appState.hilbertCacheLaserWavelength, hilbX);
                             }
                             if (!hilbX.empty()) {
+                                // Axis from Hilbert/peaks is mirror displacement;
+                                // double to round-trip OPD (matches processSpectrum).
+                                for (double& v : hilbX) v *= 2.0;
                                 appState.hilbertXCache[fileId] = std::move(hilbX);
                             }
                         }

@@ -385,13 +385,22 @@ static bool naturalSortCompare(const std::string& a, const std::string& b) {
             if (a[i] != b[j]) return a[i] < b[j];
             i++; j++;
         } else {
+            // Compare numeric sequences by length then lexicographically.
+            // Throw-free: std::stoi would throw std::out_of_range for digit runs
+            // longer than INT_MAX, and a throwing sort comparator is UB.
             size_t numStartA = i;
             size_t numStartB = j;
             while (i < a.size() && std::isdigit(a[i])) i++;
             while (j < b.size() && std::isdigit(b[j])) j++;
-            int numA = std::stoi(a.substr(numStartA, i - numStartA));
-            int numB = std::stoi(b.substr(numStartB, j - numStartB));
-            if (numA != numB) return numA < numB;
+            size_t lenA = i - numStartA;
+            size_t lenB = j - numStartB;
+            if (lenA != lenB) {
+                return lenA < lenB;
+            }
+            int cmp = a.compare(numStartA, lenA, b, numStartB, lenB);
+            if (cmp != 0) {
+                return cmp < 0;
+            }
         }
     }
     return a.size() < b.size();
