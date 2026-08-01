@@ -82,7 +82,7 @@ Entry: "Select Dataset" / "Set Working Directory" / recent dataset. All call `se
 
 # AppState & idle rendering
 
-Key fields (`app_state.h`): file list, loaded data, axis limits, per-panel state structs, `filesSelectedForAveraging`, `computationPool`. `needsRedraw` (`std::atomic<bool>`) -- GLFW callbacks set it, main loop skips frame + sleeps 10ms when false. `scrollEventsThisPoll` (`std::atomic<bool>`) for scroll rate-limiting (see IMGUI_GUIDE.md 20).
+Key fields (`app_state.h`): file list, loaded data, axis limits, per-panel state structs, `filesSelectedForAveraging`, `computationPool`. `needsRedraw` (`std::atomic<bool>`) -- GLFW callbacks set it, main loop skips frame + sleeps 10ms when false. `scrollAccumX`/`scrollAccumY` (float) -- raw GLFW wheel deltas accumulated in the scroll callback and drained at one notch/frame by the rate limiter; `lastScrollEventTime` gates the drain (~80 ms grace) so zoom stops promptly after the wheel stops (see IMGUI_GUIDE.md 20).
 
 Config stored at `~/.fts_data_explorer_config`.
 

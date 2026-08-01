@@ -85,7 +85,13 @@ struct AppState {
 
     // Idle rendering optimization
     std::atomic<bool> needsRedraw;
-    std::atomic<bool> scrollEventsThisPoll;
+    // Raw scroll deltas accumulated from the GLFW callback (main-thread only),
+    // drained at one wheel notch per frame by the rate limiter in main.cpp.
+    // lastScrollEventTime gates the drain: excess is discarded once no fresh
+    // wheel event arrives for a short grace period, so zoom stops promptly.
+    float scrollAccumX = 0.0f;
+    float scrollAccumY = 0.0f;
+    double lastScrollEventTime = 0.0;
     
     // X-range selection state
     bool isSelectingXRange;

@@ -226,10 +226,12 @@ bool initializeApplication(AppConfig& config, GLFWwindow*& window) {
     glfwSetMouseButtonCallback(window, [](GLFWwindow* w, int, int, int) {
         static_cast<AppState*>(glfwGetWindowUserPointer(w))->needsRedraw = true;
     });
-    glfwSetScrollCallback(window, [](GLFWwindow* w, double, double) {
+    glfwSetScrollCallback(window, [](GLFWwindow* w, double xoffset, double yoffset) {
         auto* state = static_cast<AppState*>(glfwGetWindowUserPointer(w));
+        state->scrollAccumX += static_cast<float>(xoffset);
+        state->scrollAccumY += static_cast<float>(yoffset);
+        state->lastScrollEventTime = glfwGetTime();
         state->needsRedraw = true;
-        state->scrollEventsThisPoll = true;
     });
     glfwSetKeyCallback(window, [](GLFWwindow* w, int, int, int, int) {
         static_cast<AppState*>(glfwGetWindowUserPointer(w))->needsRedraw = true;
@@ -1066,10 +1068,6 @@ int main(int argc, char* argv[]) {
 
     // No initialization needed for simple file dialog
     
-    // Scroll carry-over buckets for the rate-limiter below (persist across frames)
-    float scrollCarryOverY = 0.0f;
-    float scrollCarryOverX = 0.0f;
-    
     // Main loop
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
@@ -1477,46 +1475,38 @@ int main(int argc, char* argv[]) {
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        // Rate-limit mouse wheel to at most one notch per frame, with
-        // carry-over for excess. Prevents extreme zoom from batch-drained
-        // events without dropping input entirely.
-        // When no new GLFW scroll events arrived this poll cycle, discard
-        // all carry-over and wheel input — any io.MouseWheel value came
-        // from stale ImGui-queued events that must not cause zoom.
+        // Rate-limit mouse wheel to at most one notch per frame, with carry-over
+        // for excess. Raw deltas are accumulated in the GLFW scroll callback
+        // (before ImGui's input queue), so stale queued wheel events can never
+        // reach ImPlot. The accumulator drains here at 1 notch/frame — but only
+        // while scroll input is fresh; once no new wheel event has arrived for a
+        // short grace period the excess is discarded so zoom stops promptly
+        // instead of ghosting on after the wheel stops.
         {
             ImGuiIO& io = ImGui::GetIO();
 
-            if (!appState.scrollEventsThisPoll) {
-                scrollCarryOverY = 0.0f;
-                scrollCarryOverX = 0.0f;
+            const double now = glfwGetTime();
+            if (now - appState.lastScrollEventTime > 0.08) {
+                appState.scrollAccumX = 0.0f;
+                appState.scrollAccumY = 0.0f;
                 io.MouseWheel  = 0.0f;
                 io.MouseWheelH = 0.0f;
             } else {
-                // Direction reversal: if carry-over and fresh events have opposite
-                // signs, the user changed scroll direction. Reset carry-over so
-                // zoom follows the new direction immediately.
-                if (scrollCarryOverY != 0.0f && io.MouseWheel != 0.0f &&
-                    (scrollCarryOverY > 0.0f) != (io.MouseWheel > 0.0f))
-                    scrollCarryOverY = 0.0f;
-                if (scrollCarryOverX != 0.0f && io.MouseWheelH != 0.0f &&
-                    (scrollCarryOverX > 0.0f) != (io.MouseWheelH > 0.0f))
-                    scrollCarryOverX = 0.0f;
-
-                float totalY = scrollCarryOverY + io.MouseWheel;
-                float totalX = scrollCarryOverX + io.MouseWheelH;
+                float totalY = appState.scrollAccumY;
+                appState.scrollAccumY = 0.0f;
+                float totalX = appState.scrollAccumX;
+                appState.scrollAccumX = 0.0f;
 
                 io.MouseWheel  = std::clamp(totalY, -1.0f, 1.0f);
                 io.MouseWheelH = std::clamp(totalX, -1.0f, 1.0f);
 
-                scrollCarryOverY = std::clamp(totalY - io.MouseWheel, -60.0f, 60.0f);
-                scrollCarryOverX = std::clamp(totalX - io.MouseWheelH, -60.0f, 60.0f);
+                appState.scrollAccumY += std::clamp(totalY - io.MouseWheel, -60.0f, 60.0f);
+                appState.scrollAccumX += std::clamp(totalX - io.MouseWheelH, -60.0f, 60.0f);
             }
-
-            appState.scrollEventsThisPoll = false;
         }
 
-        // Keep rendering while carry-over drains or scroll was processed
-        if (scrollCarryOverY != 0.0f || scrollCarryOverX != 0.0f)
+        // Keep rendering while the scroll accumulator drains
+        if (appState.scrollAccumY != 0.0f || appState.scrollAccumX != 0.0f)
             appState.needsRedraw = true;
 
         // Conditionally disable anti-aliasing for large datasets (>50k points)

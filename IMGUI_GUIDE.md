@@ -469,36 +469,48 @@ ImGui::End();
 
 ## 20. Scroll Wheel Zoom Rate Limiting
 
-ImGui's `ConfigInputTrickleEventQueue` blocks wheel events after any `MousePos` in the same frame, causing stale wheel events to accumulate and drain slowly — producing delayed "ghost" zoom after the user stops scrolling.
+ImGui's `ConfigInputTrickleEventQueue` blocks wheel events after any `MousePos` in the same frame, causing wheel events to sit in ImGui's internal queue and drain unpredictably — producing delayed "ghost" zoom, or silently dropped input (rate-limited to `io.MouseWheel = 0` on frames without a fresh GLFW scroll event).
 
-**Rate limiter** (`main.cpp`, after `NewFrame()`, before any `BeginPlot()`):
+**Fix: bypass ImGui's input queue for the wheel.** The GLFW scroll callback (which ImGui_ImplGlfw chains and runs *before* `io.AddMouseWheelEvent`) accumulates the raw deltas; the main loop drains them at one notch per frame.
 
+`app_state.h`:
 ```cpp
-// Persistent locals
-float scrollCarryOverY = 0.0f, scrollCarryOverX = 0.0f;
+float scrollAccumX = 0.0f;
+float scrollAccumY = 0.0f;
+double lastScrollEventTime = 0.0;
+```
 
+GLFW scroll callback:
+```cpp
+glfwSetScrollCallback(window, [](GLFWwindow* w, double xoffset, double yoffset) {
+    auto* state = static_cast<AppState*>(glfwGetWindowUserPointer(w));
+    state->scrollAccumX += static_cast<float>(xoffset);
+    state->scrollAccumY += static_cast<float>(yoffset);
+    state->lastScrollEventTime = glfwGetTime();
+    state->needsRedraw = true;
+});
+```
+
+Rate limiter (`main.cpp`, after `NewFrame()`, before any `BeginPlot()`):
+```cpp
 {
     ImGuiIO& io = ImGui::GetIO();
-
-    if (!appState.scrollEventsThisPoll) {
-        // No GLFW scroll this frame — stale queue events. Zero immediately.
-        scrollCarryOverY = scrollCarryOverX = 0.0f;
+    const double now = glfwGetTime();
+    if (now - appState.lastScrollEventTime > 0.08) {   // ~80 ms grace
+        appState.scrollAccumX = appState.scrollAccumY = 0.0f;
         io.MouseWheel = io.MouseWheelH = 0.0f;
     } else {
-        float totalY = scrollCarryOverY + io.MouseWheel;
-        float totalX = scrollCarryOverX + io.MouseWheelH;
+        float totalY = appState.scrollAccumY; appState.scrollAccumY = 0.0f;
+        float totalX = appState.scrollAccumX; appState.scrollAccumX = 0.0f;
         io.MouseWheel  = std::clamp(totalY, -1.0f, 1.0f);
         io.MouseWheelH = std::clamp(totalX, -1.0f, 1.0f);
-        scrollCarryOverY = std::clamp(totalY - io.MouseWheel, -60.0f, 60.0f);
-        scrollCarryOverX = std::clamp(totalX - io.MouseWheelH, -60.0f, 60.0f);
+        appState.scrollAccumY += std::clamp(totalY - io.MouseWheel, -60.0f, 60.0f);
+        appState.scrollAccumX += std::clamp(totalX - io.MouseWheelH, -60.0f, 60.0f);
     }
-    appState.scrollEventsThisPoll = false;
 }
 
-if (scrollCarryOverY != 0.0f || scrollCarryOverX != 0.0f)
+if (appState.scrollAccumY != 0.0f || appState.scrollAccumX != 0.0f)
     appState.needsRedraw = true;
 ```
 
-`scrollEventsThisPoll` is `std::atomic<bool>` in `app_state.h`, set by the GLFW scroll callback alongside `needsRedraw`. It distinguishes active scrolling from stale ImGui-queued events.
-
-**Key points:** zero `io.MouseWheel` on stop (can't access internal queue, so zero what ImPlot reads); no forced redraw to drain stale queue (it's small, drains naturally); carry-over cap at ±60 (~1 s at 60 fps); direction reversal resets carry-over immediately.
+**Key points:** every real GLFW wheel delta is accumulated in the callback (pre-trickle) and rate-limited to 1 notch/frame; excess drains while scroll input stays fresh, but is discarded once no new event arrives for ~80 ms so zoom stops promptly (no ghost zoom after the wheel stops, and no input loss from ImGui's trickle queue). `needsRedraw` stays true while the accumulator drains, then the loop idles.
