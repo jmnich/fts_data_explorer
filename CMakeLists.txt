@@ -48,6 +48,11 @@ set(GLIBCOMPAT_WRAP
     # Safety net for C23 functions from dependencies
     -Wl,--wrap,__isoc23_sscanf
     -Wl,--wrap,__isoc23_strtoul
+    # Re-versioned math (GLIBC_2.44) and C++ runtime (GLIBCXX_3.4.32/CXXABI_1.3.15)
+    # that would raise the minimum glibc/libstdc++ above Ubuntu 22.04
+    -Wl,--wrap,cosh
+    -Wl,--wrap,sinh
+    -Wl,--wrap,__cxa_call_terminate
 )
 
 # Download and include Dear ImGui

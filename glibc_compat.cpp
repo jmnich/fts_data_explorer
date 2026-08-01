@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <exception>
 
 // ---- __libc_single_threaded (GLIBC_2.32) ----
 
@@ -75,6 +76,24 @@ WRAP_MATH_D1(exp)
 WRAP_MATH_D1(log)
 WRAP_MATH_D1(log2)
 WRAP_MATH_D2(pow)
+WRAP_MATH_D1(cosh)
+WRAP_MATH_D1(sinh)
+
+// ---- std::ios_base_library_init (GLIBCXX_3.4.32, GCC 13+) ----
+// Referenced by objects compiled with GCC 16's <iostream> but absent from
+// GCC 11's libstdc++ (Ubuntu 22.04). It is an empty init anchor, so a strong
+// definition here satisfies all references without a version requirement.
+
+namespace std { void ios_base_library_init() {} }
+
+// ---- __cxa_call_terminate (CXXABI_1.3.15, GCC 13+) ----
+// Emitted by GCC 16 on noexcept-violation paths; wrapped to the equivalent
+// direct call (the real function only ever leads to std::terminate).
+
+extern "C" void __wrap___cxa_call_terminate(void*)
+{
+    std::terminate();
+}
 
 // ---- getentropy @ GLIBC_2.2.5 instead of GLIBC_2.25 ----
 // Use the getrandom syscall directly, wrapped in our own implementation.
