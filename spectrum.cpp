@@ -228,8 +228,14 @@ void Spectrum::pollPendingSpectra() {
                     activeParam = static_cast<double>(apodizationParams.gaussSigma);
                 else if (apodizationSelector == static_cast<int>(ApodizationWindow::Rectangular))
                     activeParam = static_cast<double>(apodizationParams.rectWidth);
+                else if (apodizationSelector == static_cast<int>(ApodizationWindow::NortonBeer))
+                    activeParam = static_cast<double>(apodizationParams.nortonBeerFwhm);
                 else if (apodizationSelector == static_cast<int>(ApodizationWindow::DolphChebyshev))
                     activeParam = static_cast<double>(apodizationParams.dolphChebyshevAt);
+                else if (apodizationSelector == static_cast<int>(ApodizationWindow::Hamming))
+                    activeParam = static_cast<double>(apodizationParams.hammingAlpha);
+                else if (apodizationSelector == static_cast<int>(ApodizationWindow::Kaiser))
+                    activeParam = static_cast<double>(apodizationParams.kaiserBeta);
 
                 // Update primary detector cache to prevent re-computation
                 lastPrimaryDetectors[it->fileId] = it->primaryDetector;
@@ -302,6 +308,10 @@ bool Spectrum::computeAndCacheSpectrum(const std::string& filePath, const std::s
             activeParam = apodizationParams.nortonBeerFwhm;
         else if (apodSel == ApodizationWindow::DolphChebyshev)
             activeParam = apodizationParams.dolphChebyshevAt;
+        else if (apodSel == ApodizationWindow::Hamming)
+            activeParam = apodizationParams.hammingAlpha;
+        else if (apodSel == ApodizationWindow::Kaiser)
+            activeParam = apodizationParams.kaiserBeta;
 
         lastSpectrumParams[fileId] = {
             static_cast<double>(Kpadding),
@@ -778,8 +788,14 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                             activeParam = static_cast<double>(apodizationParams.gaussSigma);
                         else if (apodizationSelector == static_cast<int>(ApodizationWindow::Rectangular))
                             activeParam = static_cast<double>(apodizationParams.rectWidth);
+                        else if (apodizationSelector == static_cast<int>(ApodizationWindow::NortonBeer))
+                            activeParam = static_cast<double>(apodizationParams.nortonBeerFwhm);
                         else if (apodizationSelector == static_cast<int>(ApodizationWindow::DolphChebyshev))
                             activeParam = static_cast<double>(apodizationParams.dolphChebyshevAt);
+                        else if (apodizationSelector == static_cast<int>(ApodizationWindow::Hamming))
+                            activeParam = static_cast<double>(apodizationParams.hammingAlpha);
+                        else if (apodizationSelector == static_cast<int>(ApodizationWindow::Kaiser))
+                            activeParam = static_cast<double>(apodizationParams.kaiserBeta);
 
                         lastPrimaryDetectors[fileId] = rawData.primaryDetector;
                         lastSpectrumParams[fileId]   = { static_cast<double>(Kpadding),

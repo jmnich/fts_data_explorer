@@ -866,27 +866,21 @@ bool AllanVariance::tickPhase2_AllanVariance() {
             return true;
         }
 
-        // Compute reference tau from first wavelength
-        int firstBin = validBinIndices[0];
-        std::vector<double> firstSignal(M_raw);
-        for (int f = 0; f < M_raw; ++f) {
-            firstSignal[f] = calcState.transmittanceCurves[f][firstBin];
-        }
-        std::vector<double> refTau;
-        std::vector<double> refAvar;
-        computeAllanVariance(firstSignal, refTau, refAvar);
-        cachedSurfaceTaus = refTau;
-        numSurfaceTaus = static_cast<int>(cachedSurfaceTaus.size());
-        int N_taus = numSurfaceTaus;
+        // Tau grid is deterministic: computeAllanVariance emits outTau[k-1] = k
+        // for k = 1..n/2 (n = M_raw, guaranteed >= 2 here). Building it without
+        // the O(n^3) compute keeps the reference grid off the main thread.
+        int N_taus = M_raw / 2;
+        cachedSurfaceTaus.resize(N_taus);
+        for (int k = 1; k <= N_taus; ++k) cachedSurfaceTaus[k - 1] = static_cast<double>(k);
+        numSurfaceTaus = N_taus;
 
-        // Batch submit: one task per wavelength bin
+        // Batch submit: one task per wavelength bin (all on the pool — the
+        // O(n^3) computeAllanVariance must never run on the main thread).
         calcState.batchAllanActive = true;
         calcState.completedAllanCount = 0;
         calcState.totalAllanSubmitted = 0;
         calcState.pendingAllanFutures.clear();
         cachedSurfaceAllanVar.assign(M * N_taus, 0.0);
-
-        bool useParallel = (M > 20); // threshold: parallelize only when many bins
 
         for (int wi = 0; wi < M; ++wi) {
             int binIdx = validBinIndices[wi];
@@ -895,43 +889,21 @@ bool AllanVariance::tickPhase2_AllanVariance() {
                 signal[f] = calcState.transmittanceCurves[f][binIdx];
             }
 
-            if (useParallel) {
-                auto fut = appState->computationPool->enqueue([signal = std::move(signal), N_taus]() {
-                    std::vector<double> tau, avar;
-                    AllanVariance::computeAllanVariance(signal, tau, avar);
-                    // Pad to N_taus if needed
-                    if ((int)avar.size() < N_taus) {
-                        avar.resize(N_taus, 0.0);
-                    }
-                    return avar;
-                });
-                calcState.pendingAllanFutures.push_back(std::move(fut));
-                calcState.totalAllanSubmitted++;
-            } else {
-                // Single-threaded path for small datasets
+            auto fut = appState->computationPool->enqueue([signal = std::move(signal), N_taus]() {
                 std::vector<double> tau, avar;
-                computeAllanVariance(signal, tau, avar);
-                for (int ti = 0; ti < N_taus && ti < (int)avar.size(); ++ti) {
-                    cachedSurfaceAllanVar[wi * N_taus + ti] = avar[ti];
+                AllanVariance::computeAllanVariance(signal, tau, avar);
+                // Pad to N_taus if needed
+                if ((int)avar.size() < N_taus) {
+                    avar.resize(N_taus, 0.0);
                 }
-            }
+                return avar;
+            });
+            calcState.pendingAllanFutures.push_back(std::move(fut));
+            calcState.totalAllanSubmitted++;
         }
 
-        if (useParallel) {
-            calcState.progressTotal = calcState.totalAllanSubmitted;
-            if (calcState.totalAllanSubmitted == 0) {
-                calcState.batchAllanActive = false;
-                numSurfaceWavelengths = M;
-                fileCount = M_raw;
-                allanAvailable = (numSurfaceWavelengths > 0 && numSurfaceTaus > 0);
-                if (selectedSliceIndex >= numSurfaceWavelengths)
-                    selectedSliceIndex = (numSurfaceWavelengths > 0) ? numSurfaceWavelengths - 1 : 0;
-                calcInProgress = false;
-                return true;
-            }
-            // Fall through to polling
-        } else {
-            // Single-threaded path: done immediately
+        calcState.progressTotal = calcState.totalAllanSubmitted;
+        if (calcState.totalAllanSubmitted == 0) {
             calcState.batchAllanActive = false;
             numSurfaceWavelengths = M;
             fileCount = M_raw;
@@ -941,9 +913,10 @@ bool AllanVariance::tickPhase2_AllanVariance() {
             calcInProgress = false;
             return true;
         }
+        // Fall through to polling
     }
 
-    // Phase 2b: Poll futures (only reached for parallel path)
+    // Phase 2b: Poll futures
     int N_taus = numSurfaceTaus;
     for (size_t wi = 0; wi < calcState.pendingAllanFutures.size(); ++wi) {
         auto& fut = calcState.pendingAllanFutures[wi];

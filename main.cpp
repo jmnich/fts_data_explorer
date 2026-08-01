@@ -379,6 +379,11 @@ void applyAdapterSelection(const std::string& adapterName, const std::string& di
     appState.hilbertXCache.clear();
     appState.peakPositionsCache.clear();
     appState.hilbertCacheLaserWavelength = 0.0f;
+    appState.spectrum.cachedSpectra.clear();
+    appState.spectrum.cachedFrequencies.clear();
+    appState.spectrum.lastPrimaryDetectors.clear();
+    appState.spectrum.lastSpectrumParams.clear();
+    appState.spectrum.pendingSpectra_.clear();
     appState.selectedFiles.clear();
     appState.selectedFilenames.clear();
     appState.filesChanged = true;
