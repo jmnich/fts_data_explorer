@@ -145,6 +145,7 @@ Format: `<YY>.<MM>.<minor>` from `VERSION` file. `./build_script.sh` shows last 
 | `computeTransmittanceForFile` no cache | Must fall back to synchronous CSV load + compute |
 | `waitAll()` before pool reconfigure | Destructor joins workers directly (stop flag); call `waitAll()` first |
 | `SetKeyboardFocusHere` | Not used -- activates ImGui nav, conflicts with manual arrow-key handling |
+| `std::stod`/`std::strtod` in data-parse loops | Windows CRT `strtod` is globally locked: more worker threads = slower parsing. Use `parseDoubleFromChars()` (adapters/csv_adapter.h, `std::from_chars`-based, exact `stod` semantics). Do NOT "simplify" it back to `std::stod` |
 
 # Testing
 

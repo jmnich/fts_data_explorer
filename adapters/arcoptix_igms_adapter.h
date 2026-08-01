@@ -45,12 +45,15 @@ public:
             std::istringstream iss(line);
             std::string opdStr, igmStr;
             if (std::getline(iss, opdStr, '\t') && std::getline(iss, igmStr, '\t')) {
-                try {
-                    data.opdAxis.push_back(std::stod(opdStr));
-                    data.primaryDetector.push_back(std::stod(igmStr));
-                } catch (const std::exception& e) {
+                // parseDoubleFromChars, NOT std::stod: Windows CRT strtod is globally
+                // locked, so std::stod makes parallel parsing slower with more threads.
+                double opd = 0.0, igm = 0.0;
+                if (parseDoubleFromChars(opdStr, opd) && parseDoubleFromChars(igmStr, igm)) {
+                    data.opdAxis.push_back(opd);
+                    data.primaryDetector.push_back(igm);
+                } else {
                     std::cerr << "Warning: Error parsing line '" << line
-                              << "' in file " << filePath << " - " << e.what() << std::endl;
+                              << "' in file " << filePath << std::endl;
                 }
             }
         }

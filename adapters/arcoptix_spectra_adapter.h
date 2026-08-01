@@ -47,12 +47,15 @@ public:
             if (std::getline(iss, wavenumberStr, '\t') &&
                 std::getline(iss, wavelengthStr, '\t') &&
                 std::getline(iss, spectrumStr, '\t')) {
-                try {
-                    data.referenceDetector.push_back(std::stod(wavenumberStr));
-                    data.primaryDetector.push_back(std::stod(spectrumStr));
-                } catch (const std::exception& e) {
+                // parseDoubleFromChars, NOT std::stod: Windows CRT strtod is globally
+                // locked, so std::stod makes parallel parsing slower with more threads.
+                double wn = 0.0, spec = 0.0;
+                if (parseDoubleFromChars(wavenumberStr, wn) && parseDoubleFromChars(spectrumStr, spec)) {
+                    data.referenceDetector.push_back(wn);
+                    data.primaryDetector.push_back(spec);
+                } else {
                     std::cerr << "Warning: Error parsing line '" << line
-                              << "' in file " << filePath << " - " << e.what() << std::endl;
+                              << "' in file " << filePath << std::endl;
                 }
             }
         }

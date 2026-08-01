@@ -32,12 +32,15 @@ public:
             std::string refValue, primaryValue;
 
             if (std::getline(iss, refValue, ',') && std::getline(iss, primaryValue, ',')) {
-                try {
-                    data.referenceDetector.push_back(std::stod(refValue));
-                    data.primaryDetector.push_back(std::stod(primaryValue));
-                } catch (const std::exception& e) {
+                // parseDoubleFromChars, NOT std::stod: Windows CRT strtod is globally
+                // locked, so std::stod makes parallel parsing slower with more threads.
+                double ref = 0.0, prim = 0.0;
+                if (parseDoubleFromChars(refValue, ref) && parseDoubleFromChars(primaryValue, prim)) {
+                    data.referenceDetector.push_back(ref);
+                    data.primaryDetector.push_back(prim);
+                } else {
                     std::cerr << "Warning: Error parsing line '" << line
-                              << "' in file " << filePath << " - " << e.what() << std::endl;
+                              << "' in file " << filePath << std::endl;
                 }
             }
         }

@@ -207,13 +207,12 @@ void T100Spectrum::setReferenceFromCSV(const std::string& path) {
         std::string xStr, yStr;
         if (!std::getline(iss, xStr, ',')) continue;
         if (!std::getline(iss, yStr, ',')) continue;
-        try {
-            double x = std::stod(xStr);
-            double y = std::stod(yStr);
+        // parseDoubleFromChars, NOT std::stod: Windows CRT strtod is globally
+        // locked; from_chars keeps parsing fast (and lock-free) on all platforms.
+        double x = 0.0, y = 0.0;
+        if (parseDoubleFromChars(xStr, x) && parseDoubleFromChars(yStr, y)) {
             rawX.push_back(x);
             rawY.push_back(y);
-        } catch (...) {
-            continue;
         }
     }
     ifs.close();
