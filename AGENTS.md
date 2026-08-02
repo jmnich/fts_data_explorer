@@ -15,9 +15,10 @@ FTS Data Explorer is a scientific GUI for rapid exploration of raw fourier spect
 
 # Toolchain
 
-- C++17, CMake 3.10+, GLFW/OpenGL3
+- C++17, CMake 3.18+ (HDF5 1.14.3 requires 3.18), GLFW/OpenGL3
 - ImGui (docking branch), ImPlot (master), ImPlot3D (main)
 - FFTW3 for FFT, pthread for thread pool and FFTW plan mutex
+- HDF5 1.14.3 (FetchContent, static C lib) for the `fts_hdf` exchange layer (`hdf/`); disable with `-DFTS_BUILD_HDF5=OFF`
 
 # Layout & interaction
 
@@ -119,7 +120,29 @@ Fails -> "Error: <msg>" to stderr, non-zero exit.
 ```
 ./build_script.sh [-c] [-j N] [-t Release|Debug]
 ```
-Output: `build/fts_data_explorer`. Fetches deps (ImGui/ImPlot/ImPlot3D/GLFW/FFTW3), configures CMake, builds. `-c`: clean rebuild. `-j N`: jobs (default: nproc).
+Output: `build/fts_data_explorer`. Fetches deps (ImGui/ImPlot/ImPlot3D/GLFW/FFTW3/HDF5), configures CMake, builds. `-c`: clean rebuild. `-j N`: jobs (default: nproc).
+
+## MinGW cross-build with HDF5
+
+`./build_script.sh -w` (or `-r` for release) cross-compiles with the `windows-mingw`
+preset. HDF5 builds fine under MinGW, but its CMake needs three nudges that are
+already baked into the root `CMakeLists.txt` — do not remove them:
+
+- **try_run overrides.** HDF5's configure runs helper executables; cross-compiling
+  can't run them, so CMake aborts. The `windows-mingw` block in `CMakeLists.txt`
+  pre-seeds the x86-64-safe results for `H5_*_LDOUBLE*_RUN`/`HAVE_IOEO_EXITCODE`
+  (both `<var>_RUN` and `<var>_RUN__TRYRUN_OUTPUT` must be set).
+- **`-D_GNU_SOURCE` C flag.** HDF5 detects `vasprintf` at link time but MinGW's
+  headers only declare it under `_GNU_SOURCE`; without it the build fails with
+  "implicit declaration of function 'vasprintf'". Scoped to the HDF5 fetch only.
+- **Global var hygiene.** HDF5's CMake force-caches the generic `BUILD_SHARED_LIBS`
+  and `CMAKE_*_OUTPUT_DIRECTORY` to its own build tree. The root CMakeLists pins
+  `BUILD_SHARED_LIBS=OFF`/`BUILD_STATIC_LIBS=ON` before the fetch (else FFTW/GLFW
+  silently build as DLLs and the app link breaks with undefined `fftw_*` symbols)
+  and restores the output dirs to `CMAKE_BINARY_DIR` afterwards.
+
+Build both targets fresh to be sure (a pre-existing `build/windows-mingw` cache can
+hide ordering bugs): `rm -rf build/windows-mingw && cmake --preset windows-mingw`.
 
 # Coding style
 

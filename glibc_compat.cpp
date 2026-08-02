@@ -182,6 +182,30 @@ extern "C" unsigned long __wrap___isoc23_strtoul(const char *nptr, char **endptr
     return strtoul_old(nptr, endptr, base);
 }
 
+extern "C" long strtol_old(const char *nptr, char **endptr, int base);
+__asm__(".symver strtol_old, strtol@GLIBC_2.2.5");
+
+extern "C" long __wrap___isoc23_strtol(const char *nptr, char **endptr, int base)
+{
+    return strtol_old(nptr, endptr, base);
+}
+
+extern "C" long long strtoll_old(const char *nptr, char **endptr, int base);
+__asm__(".symver strtoll_old, strtoll@GLIBC_2.2.5");
+
+extern "C" long long __wrap___isoc23_strtoll(const char *nptr, char **endptr, int base)
+{
+    return strtoll_old(nptr, endptr, base);
+}
+
+extern "C" unsigned long long strtoull_old(const char *nptr, char **endptr, int base);
+__asm__(".symver strtoull_old, strtoull@GLIBC_2.2.5");
+
+extern "C" unsigned long long __wrap___isoc23_strtoull(const char *nptr, char **endptr, int base)
+{
+    return strtoull_old(nptr, endptr, base);
+}
+
 // ---- stat/lstat/fstat @ GLIBC_2.2.5 (via __xstat64) instead of GLIBC_2.33 ----
 
 #include <sys/stat.h>
