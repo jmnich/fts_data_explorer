@@ -232,7 +232,7 @@ void h5WriteFp64Vector(hid_t loc, const char* name, const std::vector<double>& d
                                  H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT));
     if (ds.id < 0) fail("h5WriteFp64Vector: H5Dcreate2");
     if (H5Dwrite(ds.id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT,
-                 const_cast<double*>(data.data())) < 0)
+                 data.data()) < 0)
         fail("h5WriteFp64Vector: H5Dwrite");
 }
 
@@ -261,6 +261,6 @@ void h5Write2DRaw(hid_t loc, const char* name, const std::vector<double>& data,
                                  H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT));
     if (ds.id < 0) fail("h5Write2DRaw: H5Dcreate2");
     if (H5Dwrite(ds.id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT,
-                 const_cast<double*>(data.data())) < 0)
+                 data.data()) < 0)
         fail("h5Write2DRaw: H5Dwrite");
 }

@@ -165,6 +165,8 @@ MemberGroup<AllanMember> loadAllanSub(hid_t file, const char* path, const char* 
     H5GroupGuard group(H5Gopen2(file, path, H5P_DEFAULT));
     if (group.id < 0) fail("loadAllanSub: H5Gopen2 " + std::string(path));
     g.schema = readSchemaAttr(group.id, schema);
+    g.origin = h5HasAttr(group.id, "origin") ? h5ReadAttrString(group.id, "origin") : "";
+    g.config = h5HasAttr(group.id, "config") ? h5ReadAttrString(group.id, "config") : "";
     for (const auto& name : listChildren(group.id)) {
         if (linkType(group.id, name.c_str()) != H5O_TYPE_GROUP) continue;
         H5GroupGuard mg(H5Gopen2(group.id, name.c_str(), H5P_DEFAULT));
@@ -193,6 +195,8 @@ MemberGroup<T100Member> loadT100Sub(hid_t file, const char* path, const char* sc
     H5GroupGuard group(H5Gopen2(file, path, H5P_DEFAULT));
     if (group.id < 0) fail("loadT100Sub: H5Gopen2 " + std::string(path));
     g.schema = readSchemaAttr(group.id, schema);
+    g.origin = h5HasAttr(group.id, "origin") ? h5ReadAttrString(group.id, "origin") : "";
+    g.config = h5HasAttr(group.id, "config") ? h5ReadAttrString(group.id, "config") : "";
     for (const auto& name : listChildren(group.id)) {
         if (linkType(group.id, name.c_str()) != H5O_TYPE_GROUP) continue;
         H5GroupGuard mg(H5Gopen2(group.id, name.c_str(), H5P_DEFAULT));
@@ -253,6 +257,8 @@ void writeTwoColSub(hid_t file, const char* path, const char* schema,
     H5GroupGuard group(H5Gcreate2(file, path, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT));
     if (group.id < 0) fail(std::string("writeTwoColSub: H5Gcreate2 ") + path);
     h5WriteAttrString(group.id, "schema", schema);
+    if (!g.origin.empty()) h5WriteAttrString(group.id, "origin", g.origin);
+    if (!g.config.empty()) h5WriteAttrString(group.id, "config", g.config);
     for (const auto& m : g.members) {
         H5GroupGuard mg(H5Gcreate2(group.id, m.id.c_str(), H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT));
         if (mg.id < 0) fail("writeTwoColSub: H5Gcreate2 member");
@@ -267,6 +273,8 @@ void writeAllanSub(hid_t file, const char* path, const char* schema,
     H5GroupGuard group(H5Gcreate2(file, path, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT));
     if (group.id < 0) fail("writeAllanSub: H5Gcreate2 " + std::string(path));
     h5WriteAttrString(group.id, "schema", schema);
+    if (!g.origin.empty()) h5WriteAttrString(group.id, "origin", g.origin);
+    if (!g.config.empty()) h5WriteAttrString(group.id, "config", g.config);
     for (const auto& m : g.members) {
         H5GroupGuard mg(H5Gcreate2(group.id, m.id.c_str(), H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT));
         if (mg.id < 0) fail("writeAllanSub: H5Gcreate2 member");
@@ -292,6 +300,8 @@ void writeT100Sub(hid_t file, const char* path, const char* schema,
     H5GroupGuard group(H5Gcreate2(file, path, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT));
     if (group.id < 0) fail("writeT100Sub: H5Gcreate2 " + std::string(path));
     h5WriteAttrString(group.id, "schema", schema);
+    if (!g.origin.empty()) h5WriteAttrString(group.id, "origin", g.origin);
+    if (!g.config.empty()) h5WriteAttrString(group.id, "config", g.config);
     for (const auto& m : g.members) {
         H5GroupGuard mg(H5Gcreate2(group.id, m.id.c_str(), H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT));
         if (mg.id < 0) fail("writeT100Sub: H5Gcreate2 member");
