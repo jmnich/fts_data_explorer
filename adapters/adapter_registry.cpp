@@ -1,4 +1,11 @@
 #include "adapter_registry.h"
+#if FTS_BUILD_HDF5
+#include "workspace_reader.h"
+#endif
+
+#if FTS_BUILD_HDF5
+Workspace* AdapterRegistry::s_workspace = nullptr;
+#endif
 
 AdapterRegistry& AdapterRegistry::instance() {
     static AdapterRegistry registry;
@@ -33,6 +40,13 @@ const std::vector<std::unique_ptr<DataAdapter>>& AdapterRegistry::getAll() const
 }
 
 InterferogramData AdapterRegistry::loadFileStatic(const std::string& adapterName, const std::string& filePath) const {
+#if FTS_BUILD_HDF5
+    if (adapterName == kHdfWorkspaceAdapter) {
+        if (!s_workspace)
+            throw std::runtime_error("No workspace open");
+        return workspaceRead(*s_workspace, filePath);
+    }
+#endif
     auto* adapter = getAdapter(adapterName);
     if (!adapter) {
         throw std::runtime_error("No adapter found: " + adapterName);

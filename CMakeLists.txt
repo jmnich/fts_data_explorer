@@ -282,6 +282,13 @@ add_executable(fts_data_explorer
     ${EXTRA_SOURCES}
 )
 
+# fts_hdf integration (only when HDF5 support is enabled)
+if(FTS_BUILD_HDF5)
+    target_sources(fts_data_explorer PRIVATE workspace_reader.cpp)
+    target_link_libraries(fts_data_explorer fts_hdf)
+    target_compile_definitions(fts_data_explorer PRIVATE FTS_BUILD_HDF5=1)
+endif()
+
 # Platform-specific compile options
 if(WIN32)
     target_compile_options(fts_data_explorer PRIVATE

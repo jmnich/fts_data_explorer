@@ -227,6 +227,9 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                     const auto& datasetPath = entry.path;
                     bool exists = std::filesystem::exists(datasetPath)
                         || std::filesystem::is_directory(datasetPath);
+#if FTS_BUILD_HDF5
+                    bool isH5 = std::filesystem::path(datasetPath).extension() == ".h5";
+#endif
 
                     std::string displayName = datasetPath;
                     size_t last_slash = displayName.find_last_of("/\\");
@@ -272,7 +275,10 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                         ImGui::BeginDisabled(true);
                     }
 
-                    // Adapter override (A) button — pick new adapter
+                    // Adapter override (A) button — pick new adapter (hidden for .h5)
+#if FTS_BUILD_HDF5
+                    if (!isH5) {
+#endif
                     if (ImGui::Button("A", ImVec2(btnH, btnH))) {
                         if (std::filesystem::exists(datasetPath) && std::filesystem::is_directory(datasetPath)) {
                             std::string rawDataPath = datasetPath + "/raw_data";
@@ -295,6 +301,9 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                             : ("Path not reachable: " + datasetPath);
                         ImGui::SetTooltip("%s", tip.c_str());
                     }
+#if FTS_BUILD_HDF5
+                    }
+#endif
                     ImGui::SameLine();
 
                     // Dataset name button (mouse click or Enter on selected row)
@@ -306,6 +315,19 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                         shouldOpen = true;
                     }
                     if (shouldOpen) {
+#if FTS_BUILD_HDF5
+                        if (isH5) {
+                            try {
+                                openWorkspace(appState, datasetPath);
+                                appState.needsRedraw = true;
+                                std::cout << "Opened recent dataset: " << datasetPath << std::endl;
+                                ImGui::CloseCurrentPopup();
+                            } catch (const std::exception& e) {
+                                appState.adapterErrorMsg = std::string("Failed to open workspace:\n") + e.what();
+                                appState.showAdapterErrorPopup = true;
+                            }
+                        } else
+#endif
                         if (std::filesystem::exists(datasetPath) && std::filesystem::is_directory(datasetPath)) {
                             std::string rawDataPath = datasetPath + "/raw_data";
                             if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {
@@ -416,6 +438,27 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                 ImGui::CloseCurrentPopup();
             }
         }
+
+#if FTS_BUILD_HDF5
+        ImGui::Spacing();
+        if (ImGui::Button("Open HDF5 File...", ImVec2(-FLT_MIN, 0))) {
+            std::string defaultFolder;
+            if (std::filesystem::is_directory(config.lastWorkingDirectory))
+                defaultFolder = config.lastWorkingDirectory;
+            std::string path = FileBrowser::showFileOpenDialog(
+                "Open HDF5 Workspace", "HDF5 files", "*.h5",
+                glfwGetCurrentContext(), defaultFolder);
+            if (!path.empty()) {
+                try {
+                    openWorkspace(appState, path);
+                    ImGui::CloseCurrentPopup();
+                } catch (const std::exception& e) {
+                    appState.adapterErrorMsg = std::string("Failed to open workspace:\n") + e.what();
+                    appState.showAdapterErrorPopup = true;
+                }
+            }
+        }
+#endif
 
         ImGui::EndPopup();
 

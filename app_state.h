@@ -15,17 +15,30 @@
 #include "adapters/csv_adapter.h"
 #include "adapters/dataset_info.h"
 #include "adapters/data_adapter.h"
+#if FTS_BUILD_HDF5
+#include "hdf/workspace.h"
+#endif
 
 // Use InterferogramData from csv_adapter.h
 
+struct AppState;
+
 void selectAdapterForDirectory(const std::string& directoryPath);
 void applyAdapterSelection(const std::string& adapterName, const std::string& directoryPath);
+#if FTS_BUILD_HDF5
+void openWorkspace(AppState& s, const std::string& path);
+void closeWorkspace(AppState& s);
+#endif
 
 // Application state structure
 struct AppState {
     // Data adapter state
     DatasetInfo datasetInfo;
     std::unique_ptr<DataAdapter> currentAdapter;
+#if FTS_BUILD_HDF5
+    Workspace workspace;      // in-memory HDF5 workspace (read-only in Phase 1)
+    std::string workspacePath; // empty = no workspace open
+#endif
     bool showAdapterSelectionPopup = false;
     bool showAdapterErrorPopup = false;
     std::string adapterErrorMsg;
@@ -201,6 +214,13 @@ struct AppState {
     int configuredWorkerCount = -1;   // -1 = AUTO
 
     void reconfigurePool(int count);
+
+#if FTS_BUILD_HDF5
+    bool hasWorkspace() const { return !workspacePath.empty(); }
+#else
+    bool hasWorkspace() const { return false; }
+#endif
+    bool dataSourceReady() const { return currentAdapter || hasWorkspace(); }
 };
 
 // Global application state instance

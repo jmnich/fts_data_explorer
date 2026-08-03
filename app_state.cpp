@@ -129,6 +129,10 @@ void AppState::reset() {
     filesSelectedForAveraging.clear();
     datasetInfo = DatasetInfo();
     currentAdapter.reset();
+#if FTS_BUILD_HDF5
+    workspace = Workspace{};
+    workspacePath.clear();
+#endif
     showAdapterSelectionPopup = false;
     showIncompatibleAdapterPopup = false;
     pendingAdapterName.clear();

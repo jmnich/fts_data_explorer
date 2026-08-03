@@ -36,6 +36,10 @@
 #include "theme.h"
 #include "headless.h"
 #include "version.h"
+#if FTS_BUILD_HDF5
+#include "workspace_reader.h"
+#include "hdf/h5_store.h"
+#endif
 
 // Include imgui and other dependencies
 #include "imgui.h"
@@ -408,6 +412,102 @@ void applyAdapterSelection(const std::string& adapterName, const std::string& di
     std::cout << "Adapter selected: " << adapterName << " for " << directoryPath << std::endl;
 }
 
+// Single read path for all engine loads: workspace (HDF5) or legacy adapter.
+static InterferogramData loadInterferogram(AppState& s, const std::string& id) {
+#if FTS_BUILD_HDF5
+    if (s.hasWorkspace()) return workspaceRead(s.workspace, id);
+#endif
+    if (s.currentAdapter) return s.currentAdapter->loadFile(id);
+    throw std::runtime_error("no data source");
+}
+
+#if FTS_BUILD_HDF5
+void openWorkspace(AppState& s, const std::string& path) {
+    s.workspace = H5Store::load(path);   // throws H5Error on failure
+    s.workspacePath = path;
+
+    // Point the worker-path dispatcher at the new workspace. Must happen before
+    // any worker runs; the workspace is immutable after open (Phase 1).
+    AdapterRegistry::s_workspace = &s.workspace;
+
+    // Clear legacy adapter state
+    s.currentAdapter.reset();
+
+    // Populate engine state (mirrors applyAdapterSelection)
+    s.datasetInfo = workspaceDatasetInfo(s.workspace);
+    s.csvFiles = workspaceFileList(s.workspace);
+
+    // Feature gate
+    if (s.datasetInfo.axisIsCorrected)
+        s.xAxisBase = 1; // Force OPD mode
+
+    // Clear all caches
+    s.clearAverageSpectrum();
+    s.clearSnrSpectrum();
+    s.clearAllanVariance();
+    s.clearT100Spectrum();
+    s.showWelcomeScreen = false;
+    s.welcomeScreenInitialized = true;
+    s.dataLoaded = false;
+    s.loadedData.clear();
+    s.rawDataCache.clear();
+    s.hilbertXCache.clear();
+    s.peakPositionsCache.clear();
+    s.hilbertCacheLaserWavelength = 0.0f;
+    s.spectrum.cachedSpectra.clear();
+    s.spectrum.cachedFrequencies.clear();
+    s.spectrum.lastPrimaryDetectors.clear();
+    s.spectrum.lastSpectrumParams.clear();
+    s.spectrum.pendingSpectra_.clear();
+    s.selectedFiles.clear();
+    s.selectedFilenames.clear();
+    s.filesChanged = true;
+    s.currentSortedFileIndex = 0;
+    s.isFirstDataLoad = true;
+    s.needsRedraw = true;
+
+    // Dataset display name
+    s.currentDatasetName = std::filesystem::path(path).stem().string();
+    s.currentDirectory = "";
+
+    // Recent datasets (configPtr is set at startup; guard for robustness)
+    if (s.configPtr)
+        addToRecentDatasets(*s.configPtr, s.configFilePath, path, kHdfWorkspaceAdapter);
+}
+
+void closeWorkspace(AppState& s) {
+    AdapterRegistry::s_workspace = nullptr;
+    s.workspace = Workspace{};
+    s.workspacePath.clear();
+    s.currentAdapter.reset();
+
+    // Return to welcome screen (mirror Ctrl+H reset)
+    s.showWelcomeScreen = true;
+    s.welcomeScreenInitialized = false;
+    s.csvFiles.clear();
+    s.sortedFiles.clear();
+    s.loadedData.clear();
+    s.rawDataCache.clear();
+    s.hilbertXCache.clear();
+    s.hilbertCacheLaserWavelength = 0.0f;
+    s.peakPositionsCache.clear();
+    s.spectrum.cachedSpectra.clear();
+    s.spectrum.cachedFrequencies.clear();
+    s.spectrum.lastPrimaryDetectors.clear();
+    s.spectrum.lastSpectrumParams.clear();
+    s.spectrum.pendingSpectra_.clear();
+    s.clearAverageSpectrum();
+    s.clearSnrSpectrum();
+    s.clearAllanVariance();
+    s.clearT100Spectrum();
+    s.selectedFiles.clear();
+    s.selectedFilenames.clear();
+    s.filesChanged = false;
+    s.dataLoaded = false;
+    s.needsRedraw = true;
+}
+#endif // FTS_BUILD_HDF5
+
 static std::string shortenFilename(const std::string& filename) {
     const size_t maxLen = 38;
     if (filename.length() <= maxLen) return filename;
@@ -694,11 +794,11 @@ void handleKeyboardNavigation(const std::vector<std::string>& csvFiles,
                 if (it == selectedFiles.end()) {
                     // File not already selected, add it
                     try {
-                        if (!appState.currentAdapter) {
+                        if (!appState.dataSourceReady()) {
                             filesChanged = false;
                             return;
                         }
-                        InterferogramData data = appState.currentAdapter->loadFile(fullPath);
+                        InterferogramData data = loadInterferogram(appState, fullPath);
                         InterferogramData rawData = data; // Store raw data before any processing
                         
                         // Apply downsampling
@@ -1163,7 +1263,7 @@ int main(int argc, char* argv[]) {
                     std::vector<InterferogramData> reloadedData;
                     for (const auto& filePath : appState.selectedFiles) {
                         try {
-                            InterferogramData data = appState.currentAdapter->loadFile(filePath);
+                            InterferogramData data = loadInterferogram(appState, filePath);
                             
                             // Apply downsampling if enabled and dataset is large
                             if (appState.enableDownsampling && data.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
@@ -1193,7 +1293,7 @@ int main(int argc, char* argv[]) {
                         size_t reloadedIdx = 0;
                         for (const auto& file : appState.selectedFiles) {
                             try {
-                                InterferogramData rawData = appState.currentAdapter->loadFile(file);
+                                InterferogramData rawData = loadInterferogram(appState, file);
                                 appState.rawDataCache.push_back(rawData);
                             } catch (const std::exception& e) {
                                 std::cerr << "Error reloading raw data for spectrum: " << e.what() << std::endl;
@@ -1284,9 +1384,10 @@ int main(int argc, char* argv[]) {
         
         // Handle Delete key to remove currently navigated file
         // (OpenPopup is deferred to the Files panel, after NewFrame)
+        // No-op in workspace mode — HDF originals are never deleted (Phase 1).
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) &&
             ImGui::IsKeyPressed(ImGuiKey_Delete) &&
-            !appState.sortedFiles.empty()) {
+            !appState.sortedFiles.empty() && !appState.hasWorkspace()) {
             if (appState.skipDeleteConfirm) {
                 performFileDeletion(appState, appState.currentSortedFileIndex);
             } else {
@@ -1358,10 +1459,10 @@ int main(int argc, char* argv[]) {
         }
 
         // Load file if navigation changed
-        if (appState.filesChanged && !appState.csvFiles.empty() && appState.currentAdapter) {
+        if (appState.filesChanged && !appState.csvFiles.empty() && appState.dataSourceReady()) {
             try {
                 // Load the currently selected file
-                InterferogramData data = appState.currentAdapter->loadFile(appState.sortedFiles[appState.currentSortedFileIndex]);
+                InterferogramData data = loadInterferogram(appState, appState.sortedFiles[appState.currentSortedFileIndex]);
                 
 
                 
@@ -1585,6 +1686,32 @@ int main(int argc, char* argv[]) {
                             std::cout << "Working directory set to: " << appState.currentDirectory << std::endl;
                         }
                     }
+#if FTS_BUILD_HDF5
+                    if (ImGui::MenuItem("Open HDF5 File...")) {
+                        std::string defaultFolder = appState.currentDirectory;
+#if FTS_BUILD_HDF5
+                        if (appState.hasWorkspace())
+                            defaultFolder = std::filesystem::path(appState.workspacePath).parent_path().string();
+#endif
+                        if (!std::filesystem::is_directory(defaultFolder))
+                            defaultFolder = std::filesystem::is_directory(config.lastWorkingDirectory)
+                                ? config.lastWorkingDirectory : "";
+                        std::string path = FileBrowser::showFileOpenDialog(
+                            "Open HDF5 Workspace", "HDF5 files", "*.h5",
+                            window, defaultFolder);
+                        if (!path.empty()) {
+                            try {
+                                openWorkspace(appState, path);
+                            } catch (const std::exception& e) {
+                                appState.adapterErrorMsg = std::string("Failed to open workspace:\n") + e.what();
+                                appState.showAdapterErrorPopup = true;
+                            }
+                        }
+                    }
+                    if (ImGui::MenuItem("Close Workspace", nullptr, false, appState.hasWorkspace())) {
+                        closeWorkspace(appState);
+                    }
+#endif
                     
                     // Recent datasets menu
                     if (config.recentDatasets.empty()) {
@@ -1609,6 +1736,16 @@ int main(int argc, char* argv[]) {
                                 }
 
                                 if (clicked && exists) {
+#if FTS_BUILD_HDF5
+                                    if (std::filesystem::path(datasetPath).extension() == ".h5") {
+                                        try {
+                                            openWorkspace(appState, datasetPath);
+                                        } catch (const std::exception& e) {
+                                            appState.adapterErrorMsg = std::string("Failed to open workspace:\n") + e.what();
+                                            appState.showAdapterErrorPopup = true;
+                                        }
+                                    } else
+#endif
                                     if (std::filesystem::is_directory(datasetPath)) {
                                         std::string rawDataPath = datasetPath + "/raw_data";
                                         if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {
@@ -1852,6 +1989,13 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             }
 
             ImGui::Separator();
+#if FTS_BUILD_HDF5
+        // In workspace mode the entries are member IDs, not disk paths.
+        if (appState.hasWorkspace()) {
+            ImGui::TextWrapped("Workspace: %s", appState.workspacePath.c_str());
+            ImGui::Separator();
+        }
+#endif
         ImGui::BeginChild("##FileList", ImVec2(0, 0), ImGuiChildFlags_None,
                           ImGuiWindowFlags_AlwaysVerticalScrollbar);
 
@@ -1878,20 +2022,22 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             std::string fullFilename = filename;
             filename = shortenFilename(filename);
             
-            // Delete button (left) — unique label per row avoids needing PushID
+            // Delete button (left) — unique label per row avoids needing PushID.
+            // Hidden in workspace mode: HDF originals are never deleted (Phase 1).
             float btnH = ImGui::GetFrameHeight();
-            std::string delBtnId = "×##del" + std::to_string(i);
-            if (ImGui::Button(delBtnId.c_str(), ImVec2(btnH, btnH))) {
-                if (appState.skipDeleteConfirm) {
-                    performFileDeletion(appState, i);
-                    continue;
-                } else {
-                    appState.deleteConfirmIndex = i;
-                    appState.showDeleteConfirmPopup = true;
+            if (!appState.hasWorkspace()) {
+                std::string delBtnId = "×##del" + std::to_string(i);
+                if (ImGui::Button(delBtnId.c_str(), ImVec2(btnH, btnH))) {
+                    if (appState.skipDeleteConfirm) {
+                        performFileDeletion(appState, i);
+                        continue;
+                    } else {
+                        appState.deleteConfirmIndex = i;
+                        appState.showDeleteConfirmPopup = true;
+                    }
                 }
+                ImGui::SameLine();
             }
-            
-            ImGui::SameLine();
             
             ImGui::PushID(static_cast<int>(i));
             
@@ -1954,7 +2100,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                         // Check if we would exceed the limit
                         if (appState.selectedFiles.size() < appState.MAX_SELECTABLE_FILES) {
                             try {
-                                InterferogramData data = appState.currentAdapter->loadFile(fullPath);
+                                InterferogramData data = loadInterferogram(appState, fullPath);
         
                                 
                                 // Store raw data in cache before downsampling
@@ -1977,7 +2123,10 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                                 appState.loadedData.push_back(data);
                                 appState.rawDataCache.push_back(rawData); // Store raw data for spectrum computation
                                 appState.selectedFiles.push_back(fullPath);
-                                appState.selectedFilenames.push_back(filename);
+                                std::string idName = fullPath;
+                                size_t idSlash = idName.find_last_of("/\\");
+                                if (idSlash != std::string::npos) idName = idName.substr(idSlash + 1);
+                                appState.selectedFilenames.push_back(idName);
                             } catch (const std::exception& e) {
                                 std::cerr << "Error loading file: " << e.what() << std::endl;
                             }
@@ -2004,7 +2153,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                         
                         try {
                             std::string fullPath = appState.sortedFiles[j];
-                            InterferogramData data = appState.currentAdapter->loadFile(fullPath);
+                            InterferogramData data = loadInterferogram(appState, fullPath);
                             
                             // Store raw data in cache before downsampling
                             InterferogramData rawData = data;
@@ -4321,7 +4470,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                         std::vector<InterferogramData> reloadedData;
                         for (const auto& filePath : appState.selectedFiles) {
                             try {
-                                InterferogramData data = appState.currentAdapter->loadFile(filePath);
+                                InterferogramData data = loadInterferogram(appState, filePath);
                                 if (appState.enableDownsampling && data.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
                                     size_t localDownsampleFactor = data.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
                                     std::vector<double> downsampledRef, downsampledPrim;
@@ -4343,7 +4492,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                             size_t reloadedIdx = 0;
                             for (const auto& file : appState.selectedFiles) {
                                 try {
-                                    InterferogramData rawData = appState.currentAdapter->loadFile(file);
+                                    InterferogramData rawData = loadInterferogram(appState, file);
                                     appState.rawDataCache.push_back(rawData);
                                 } catch (const std::exception& e) {
                                     std::cerr << "Error reloading raw data: " << e.what() << std::endl;
@@ -4376,7 +4525,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                         std::vector<InterferogramData> reloadedData;
                         for (const auto& filePath : appState.selectedFiles) {
                             try {
-                                InterferogramData data = appState.currentAdapter->loadFile(filePath);
+                                InterferogramData data = loadInterferogram(appState, filePath);
                                 if (appState.enableDownsampling && data.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
                                     size_t localDownsampleFactor = data.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
                                     std::vector<double> downsampledRef, downsampledPrim;
@@ -4398,7 +4547,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                             size_t reloadedIdx = 0;
                             for (const auto& file : appState.selectedFiles) {
                                 try {
-                                    InterferogramData rawData = appState.currentAdapter->loadFile(file);
+                                    InterferogramData rawData = loadInterferogram(appState, file);
                                     appState.rawDataCache.push_back(rawData);
                                 } catch (const std::exception& e) {
                                     std::cerr << "Error reloading raw data: " << e.what() << std::endl;
@@ -4537,6 +4686,26 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             ImGui::Text("Adapter: %s", appState.datasetInfo.adapterName.c_str());
             
             // Display comments if comments.txt exists (WUST format)
+#if FTS_BUILD_HDF5
+            if (appState.hasWorkspace()) {
+                ImGui::Separator();
+                ImGui::TextWrapped("Comment: %s",
+                    appState.workspace.measurementComment.empty()
+                        ? "<none>" : appState.workspace.measurementComment.c_str());
+                if (!appState.workspace.tags.empty())
+                    ImGui::TextWrapped("Tags: %s", appState.workspace.tags.c_str());
+                if (!appState.workspace.created.empty())
+                    ImGui::TextWrapped("@created: %s", appState.workspace.created.c_str());
+                if (!appState.workspace.format.empty())
+                    ImGui::TextWrapped("@format: %s", appState.workspace.format.c_str());
+                if (!appState.workspace.measurementConfig.empty()) {
+                    if (ImGui::TreeNode("Measurement Config")) {
+                        ImGui::TextWrapped("%s", appState.workspace.measurementConfig.dump(2).c_str());
+                        ImGui::TreePop();
+                    }
+                }
+            } else
+#endif
             if (appState.datasetInfo.hasMetadataFile) {
                 ImGui::Separator();
                 ImGui::Text("Comments:");

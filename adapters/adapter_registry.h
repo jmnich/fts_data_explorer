@@ -6,6 +6,10 @@
 #include <memory>
 #include <algorithm>
 
+#if FTS_BUILD_HDF5
+struct Workspace;
+#endif
+
 class AdapterRegistry {
 public:
     static AdapterRegistry& instance();
@@ -15,6 +19,12 @@ public:
     DataAdapter* getAdapter(const std::string& name) const;
     InterferogramData loadFileStatic(const std::string& adapterName, const std::string& filePath) const;
     const std::vector<std::unique_ptr<DataAdapter>>& getAll() const;
+
+#if FTS_BUILD_HDF5
+    // Points at the open Workspace (set by openWorkspace, cleared by closeWorkspace).
+    // Read-only during batch computation; currentAdapter is null in workspace mode.
+    static Workspace* s_workspace;
+#endif
 
 private:
     AdapterRegistry() = default;
