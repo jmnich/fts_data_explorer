@@ -465,6 +465,10 @@ void openWorkspace(AppState& s, const std::string& path) {
     s.clearSnrSpectrum();
     s.clearAllanVariance();
     s.clearT100Spectrum();
+    // Spectrum panel is not reset by the clears above; reset its zoom/param
+    // state too so a fresh workspace starts autoscaled (applyViewState below
+    // restores the saved subset when present).
+    s.spectrum.resetSpectrumWindow();
     s.showWelcomeScreen = false;
     s.welcomeScreenInitialized = true;
     s.dataLoaded = false;
@@ -499,8 +503,11 @@ void openWorkspace(AppState& s, const std::string& path) {
     // params match the saved member configs (no spurious staleness).
     applyViewState(s);
 
-    // Re-baseline the dirty latch: opening never dirties the workspace.
-    s.viewStateBaseline = viewStateJson(s);
+    // Re-baseline the dirty latch: opening never dirties the workspace. The
+    // baseline is finalized at the end of the FIRST rendered frame (first-load
+    // autoscale finalizes zoom ranges mid-frame).
+    s.viewStateBaseline = nlohmann::json::object();
+    s.viewStateBaselinePending = true;
 
     // Fill the editable comment/tags buffers from the loaded workspace.
     snprintf(s.metadataCommentBuffer, sizeof(s.metadataCommentBuffer), "%s",
@@ -554,6 +561,7 @@ void closeWorkspace(AppState& s) {
     // no stale state survives into the next workspace. AppState view fields
     // keep their last values (legacy mode is dormant).
     s.viewStateBaseline = nlohmann::json::object();
+    s.viewStateBaselinePending = true;
     s.metadataCommentBuffer[0] = '\0';
     s.metadataTagsBuffer[0] = '\0';
     s.needsRedraw = true;
@@ -648,6 +656,7 @@ void doSaveWorkspace(AppState& s, const std::string& asPath) {
     // Phase 3: re-baseline the latch against the just-saved state so the frame
     // loop does not immediately re-dirty a clean workspace (decision 5).
     s.viewStateBaseline = viewStateJson(s);
+    s.viewStateBaselinePending = false;
     s.needsRedraw = true;
 }
 
@@ -2068,11 +2077,12 @@ int main(int argc, char* argv[]) {
 
 #if FTS_BUILD_HDF5
         // Phase 3 view-state dirty latch: diff the managed view-state JSON
-        // against the open/post-save snapshot. Latching (no baseline update on
-        // diff) matches the coarse-dirty model; the JSON is tiny and evaluated
-        // only on redraw frames. The transient selectedFiles set is excluded
-        // (decision 3) so the first-load selection never false-dirties.
-        if (appState.hasWorkspace() && !appState.workspace.dirty) {
+        // against the baseline. The baseline is finalized at the end of the
+        // first rendered frame (see the post-render block), so the first-load
+        // autoscale of the zoom ranges can never false-dirty a fresh open.
+        // Latching (no baseline update on diff) matches the coarse-dirty model.
+        if (appState.hasWorkspace() && !appState.workspace.dirty &&
+            !appState.viewStateBaselinePending) {
             if (viewStateJson(appState) != appState.viewStateBaseline)
                 appState.workspace.dirty = true;
         }
@@ -5440,6 +5450,17 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                 IM_COL32(30, 30, 50, 230), 8.0f);
             dl->AddText(pos, IM_COL32(255, 255, 255, 255), msg);
         }
+
+        // Phase 3: finalize the view-state baseline at the end of the first
+        // rendered frame, AFTER the panels have rendered and the first-load
+        // autoscale has written the final zoom ranges. Latch compares from the
+        // next frame.
+#if FTS_BUILD_HDF5
+        if (appState.hasWorkspace() && appState.viewStateBaselinePending) {
+            appState.viewStateBaseline = viewStateJson(appState);
+            appState.viewStateBaselinePending = false;
+        }
+#endif
 
         // Rendering
         ImGui::Render();

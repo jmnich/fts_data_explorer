@@ -141,6 +141,7 @@ void AppState::reset() {
     pendingSaveAsPath.clear();
     showStaleDropPrompt = false;
     viewStateBaseline = nlohmann::json::object();
+    viewStateBaselinePending = true;
     metadataCommentBuffer[0] = '\0';
     metadataTagsBuffer[0] = '\0';
 #endif

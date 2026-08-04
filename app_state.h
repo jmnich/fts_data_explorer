@@ -60,7 +60,11 @@ struct AppState {
     bool showStaleDropPrompt = false;
 
     // Phase 3: view-state dirty latch + editable metadata buffers.
-    nlohmann::json viewStateBaseline;   // viewStateJson() snapshot (open / post-save)
+    // Baseline is captured at the end of the FIRST rendered frame after open
+    // (not at open time): first-load autoscale finalizes the per-panel zoom
+    // ranges mid-frame, so capturing earlier would false-dirty every fresh open.
+    nlohmann::json viewStateBaseline;
+    bool viewStateBaselinePending = true;
     // ponytail: fixed-cap free-text comment; acceptable for a comment field,
     // bump the array size if a real need appears.
     char metadataCommentBuffer[4096];

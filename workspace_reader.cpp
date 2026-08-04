@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <limits>
 #include <map>
 #include <stdexcept>
 
@@ -300,6 +301,25 @@ bool viewBool(const nlohmann::json& vs, const char* sub, const char* key, bool f
     return it != s->end() && it->is_boolean() ? it->get<bool>() : fallback;
 }
 
+// Restore the per-panel X zoom from the saved view state. On open the panels
+// are reset (manualX = 0, shouldAutoscale = true); a saved range re-arms
+// pendingNext so the first rendered frame applies it before ImPlot's default
+// autofit (which would otherwise stretch the axis to all data). Missing keys
+// (no saved zoom) leave the reset state so first-load autoscale fires.
+void restorePanelZoom(const nlohmann::json& vs, const char* sub,
+                      double& min, double& max,
+                      double& pendingMin, double& pendingMax, bool& autoscale) {
+    double lo = viewDouble(vs, sub, "manualXMin", std::numeric_limits<double>::lowest());
+    double hi = viewDouble(vs, sub, "manualXMax", std::numeric_limits<double>::lowest());
+    if (lo < hi) {
+        min = lo;
+        max = hi;
+        pendingMin = lo;
+        pendingMax = hi;
+        autoscale = false;
+    }
+}
+
 void applyPanelViewState(AppState& s, const nlohmann::json& vs) {
     s.spectrum.xUnitSelector = viewInt(vs, "spectrumView", "xUnit", s.spectrum.xUnitSelector);
     s.spectrum.yScaleSelector = viewInt(vs, "spectrumView", "yScale", s.spectrum.yScaleSelector);
@@ -378,6 +398,21 @@ void applyPanelViewState(AppState& s, const nlohmann::json& vs) {
             }
         }
     }
+
+    // X zoom restore (decision: saved units + ranges get restored on reopen).
+    restorePanelZoom(vs, "spectrumView", s.spectrum.manualXMin, s.spectrum.manualXMax,
+                     s.spectrum.pendingNextXMin, s.spectrum.pendingNextXMax, s.spectrum.shouldAutoscale);
+    restorePanelZoom(vs, "averageView", s.averageSpectrum.manualXMin, s.averageSpectrum.manualXMax,
+                     s.averageSpectrum.pendingNextXMin, s.averageSpectrum.pendingNextXMax,
+                     s.averageSpectrum.shouldAutoscale);
+    restorePanelZoom(vs, "snrView", s.snrSpectrum.manualXMin, s.snrSpectrum.manualXMax,
+                     s.snrSpectrum.pendingNextXMin, s.snrSpectrum.pendingNextXMax,
+                     s.snrSpectrum.shouldAutoscale);
+    restorePanelZoom(vs, "allanView", s.allanVariance.manualXMin, s.allanVariance.manualXMax,
+                     s.allanVariance.pendingNextXMin, s.allanVariance.pendingNextXMax,
+                     s.allanVariance.shouldAutoscale);
+    restorePanelZoom(vs, "t100View", s.t100.manualXMin, s.t100.manualXMax,
+                     s.t100.pendingNextXMin, s.t100.pendingNextXMax, s.t100.shouldAutoscale);
 }
 
 } // namespace
@@ -403,6 +438,8 @@ nlohmann::json viewStateJson(const AppState& s) {
         {"yAxisMode", s.spectrum.yAxisMode},
         {"forcedYMin", s.spectrum.forcedYMin},
         {"forcedYMax", s.spectrum.forcedYMax},
+        {"manualXMin", s.spectrum.manualXMin},
+        {"manualXMax", s.spectrum.manualXMax},
         {"detectorSensitivityKVPerW", s.spectrum.detectorSensitivity},
         {"refLaserUm", s.spectrum.refLaserTextbox},
         {"zeroPadK", s.spectrum.Kpadding},
@@ -414,14 +451,18 @@ nlohmann::json viewStateJson(const AppState& s) {
         {"yScale", s.averageSpectrum.yScaleSelector},
         {"yAxisMode", s.averageSpectrum.yAxisMode},
         {"forcedYMin", s.averageSpectrum.forcedYMin},
-        {"forcedYMax", s.averageSpectrum.forcedYMax}
+        {"forcedYMax", s.averageSpectrum.forcedYMax},
+        {"manualXMin", s.averageSpectrum.manualXMin},
+        {"manualXMax", s.averageSpectrum.manualXMax}
     };
     j["snrView"] = {
         {"xUnit", s.snrSpectrum.xUnitSelector},
         {"yScale", s.snrSpectrum.yScaleSelector},
         {"yAxisMode", s.snrSpectrum.yAxisMode},
         {"forcedYMin", s.snrSpectrum.forcedYMin},
-        {"forcedYMax", s.snrSpectrum.forcedYMax}
+        {"forcedYMax", s.snrSpectrum.forcedYMax},
+        {"manualXMin", s.snrSpectrum.manualXMin},
+        {"manualXMax", s.snrSpectrum.manualXMax}
     };
     j["allanView"] = {
         {"xUnit", s.allanVariance.xUnitSelector},
@@ -429,7 +470,9 @@ nlohmann::json viewStateJson(const AppState& s) {
         {"sliceIndex", s.allanVariance.selectedSliceIndex},
         {"xRangeMin", s.allanVariance.xRangeMin},
         {"xRangeMax", s.allanVariance.xRangeMax},
-        {"calcBase", s.allanVariance.calcBaseSelector}
+        {"calcBase", s.allanVariance.calcBaseSelector},
+        {"manualXMin", s.allanVariance.manualXMin},
+        {"manualXMax", s.allanVariance.manualXMax}
     };
     j["t100View"] = {
         {"xUnit", s.t100.xUnitSelector},
@@ -437,6 +480,8 @@ nlohmann::json viewStateJson(const AppState& s) {
         {"forcedYMin", s.t100.forcedYMin},
         {"forcedYMax", s.t100.forcedYMax},
         {"referenceSource", s.t100.referenceSource},
+        {"manualXMin", s.t100.manualXMin},
+        {"manualXMax", s.t100.manualXMax},
         {"energyRatios", nlohmann::json::array({
             {{"num", std::string(s.t100.energyRatioNumA)}, {"den", std::string(s.t100.energyRatioDenA)}},
             {{"num", std::string(s.t100.energyRatioNumB)}, {"den", std::string(s.t100.energyRatioDenB)}},
