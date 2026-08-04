@@ -83,7 +83,8 @@ void markConfigStale(Workspace& ws, const AppState& s);
 
 // Per-panel staleness banners: true when the fixed-id member exists but is
 // stale (params mismatch OR inputs mismatch OR missing reference).
-bool spectrumOutdated(const AppState& s, const std::string& ifgId);
+// (No spectrumOutdated: the Spectrum panel auto-recomputes and mirrors, so a
+// stale saved spectrum is self-healing — no banner.)
 bool averageOutdated(const AppState& s);
 bool snrOutdated(const AppState& s);
 bool allanOutdated(const AppState& s);

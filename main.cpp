@@ -970,8 +970,9 @@ static void renderStaleDropPromptModal() {
         if (ImGui::Button("Cancel", ImVec2(150, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
             appState.pendingSaveAsPath.clear();
             appState.showStaleDropPrompt = false;
-            appState.pendingWorkspaceAction = PendingWorkspaceAction::None;
-            appState.pendingWorkspacePath.clear();
+            // Keep pendingWorkspaceAction: if the save was chained from the
+            // Unsaved Changes modal, "Don't Save" must still dispatch it. Only
+            // the Unsaved modal's own Cancel aborts the pending action.
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();

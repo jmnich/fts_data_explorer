@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include <algorithm>
+
 #include "h5_store.h"
 #include "hdf5_util.h"
 #include "workspace.h"
@@ -434,6 +436,49 @@ void test11_timestampHelpers() {
     printf("roundtrip: timestamp helpers OK\n");
 }
 
+void test12_specMemberFixedId() {
+    // Regression: wsUpsertSpectrum must erase-then-push the FIXED id
+    // spec_<ifgId> on recompute. makeUniqueId would produce a suffixed twin
+    // (spec_<ifgId>_2), leaving the old member behind — then
+    // findSpectrumMember (exact spec_<ifgId>) keeps seeing the stale one and
+    // ifgIdFromSpectrumMember parses the twin's id wrong, so every recompute
+    // looks stale and gets pruned at Save (spectra never persisted).
+    Workspace ws = buildDerivativeWorkspace();   // one spec_record_0
+    assert(ws.spectra.members.size() == 1);
+
+    // Recompute: replace spec_record_0 with a fresh member of the SAME id.
+    ws.spectra.members.erase(
+        std::remove_if(ws.spectra.members.begin(), ws.spectra.members.end(),
+                       [](const TwoColumnMember& m) { return m.id == "spec_record_0"; }),
+        ws.spectra.members.end());
+    TwoColumnMember fresh;
+    fresh.id = "spec_record_0";
+    fresh.kind = MemberKind::Derivative;
+    fresh.x = {1.0, 2.0};
+    fresh.y = {3.0, 4.0};
+    fresh.columns = {"x", "y"};
+    fresh.units = {"cm-1", "V"};
+    fresh.config = R"({"inputs":["/igm_uncorrected_x/record_0"]})";
+    ws.spectra.members.push_back(fresh);
+
+    assert(ws.spectra.members.size() == 1);
+    assert(ws.spectra.members[0].id == "spec_record_0");
+    // The bridge's ifgId derivation (substr after "spec_") round-trips.
+    assert(ws.spectra.members[0].id.substr(5) == "record_0");
+    // Document the old bug: a unique-id generator would have made a twin.
+    assert(makeUniqueId("spec_record_0", {"spec_record_0"}) == "spec_record_0_2");
+
+    // The fixed-id member persists and reloads losslessly.
+    const char* tmpFile = "/tmp/fts_hdf_roundtrip_specid.h5";
+    H5Store::save(tmpFile, ws);
+    Workspace back = H5Store::load(tmpFile);
+    assert(back.spectra.members.size() == 1);
+    assert(back.spectra.members[0].id == "spec_record_0");
+    assert(back.inputsAreValid());
+    std::remove(tmpFile);
+    printf("roundtrip: spectrum fixed-id upsert OK\n");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -447,6 +492,7 @@ int main(int argc, char** argv) {
         test9_pruneStale();
         test10_markDependentsStaleCascade();
         test11_timestampHelpers();
+        test12_specMemberFixedId();
 
         if (argc > 1) {
             test2_pythonExampleRoundTrip(argv[1]);

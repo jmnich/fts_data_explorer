@@ -345,22 +345,6 @@ bool Spectrum::computeAndCacheSpectrum(const std::string& filePath, const std::s
 void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, std::vector<double>>>& primaryDetectors,
                                      const std::vector<InterferogramData>& rawDataCache) {
 
-#if FTS_BUILD_HDF5
-        // Staleness banner (§4.2): the saved per-file spectrum no longer matches
-        // the current settings/inputs and would be dropped at Save unless recomputed.
-        if (appState && appState->hasWorkspace()) {
-            for (const auto& fd : primaryDetectors) {
-                if (spectrumOutdated(*appState, fd.first)) {
-                    ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
-                        "Saved result is stale - press Calculate to recompute.");
-                    break;
-                }
-            }
-        }
-#endif
-
-
-        
         // Create plot specifications with matching colors (needed for legend)
         std::vector<ImPlotSpec> plotSpecs(primaryDetectors.size());
         

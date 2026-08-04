@@ -599,12 +599,12 @@ nlohmann::json spectrumParamsJson(const AppState& s) {
 void wsUpsertSpectrum(Workspace& ws, const std::string& ifgId,
                       const std::vector<double>& x, const std::vector<double>& y,
                       const nlohmann::json& cfg) {
+    // Fixed id (decision 6): each recompute REPLACES spec_<ifgId>. Do NOT use
+    // makeUniqueId here — a suffixed twin (spec_<ifgId>_2) leaves the old member
+    // behind, and ifgIdFromSpectrumMember/findSpectrumMember then can never
+    // match it, so every recompute looks stale and gets pruned at Save.
     TwoColumnMember m;
-    m.id = makeUniqueId("spec_" + ifgId, [](const auto& members) {
-        std::vector<std::string> ids;
-        for (const auto& mm : members) ids.push_back(mm.id);
-        return ids;
-    }(ws.spectra.members));
+    m.id = "spec_" + ifgId;
     m.kind = MemberKind::Derivative;
     m.columns = {"x", "y"};
     m.units = {configXUnit(cfg), "a.u."};
@@ -785,11 +785,6 @@ void markConfigStale(Workspace& ws, const AppState& s) {
         m.stale = !t100MemberFresh(ws, s, m) || !configInputsEqual(parseConfig(m.config), checked);
 }
 
-bool spectrumOutdated(const AppState& s, const std::string& ifgId) {
-    if (!s.hasWorkspace()) return false;
-    const TwoColumnMember* m = findSpectrumMember(s.workspace, ifgId);
-    return m && !spectrumMemberFresh(s.workspace, s, *m);
-}
 
 bool averageOutdated(const AppState& s) {
     if (!s.hasWorkspace()) return false;
