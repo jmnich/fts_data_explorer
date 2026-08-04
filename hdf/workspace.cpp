@@ -1,6 +1,7 @@
 #include "workspace.h"
 
 #include <algorithm>
+#include <cctype>
 
 #include "hdf5_util.h"
 
@@ -287,4 +288,39 @@ nlohmann::json makeOriginJson(const std::string& appName, const std::string& ver
         {"application", appName},
         {"version", version},
     };
+}
+
+std::string timestampHMS(const std::string& iso) {
+    // ponytail: naive — substring after 'T', then validate HH:MM:SS. No date
+    // library; the display-only use (UI labels) doesn't need timezone math.
+    size_t t = iso.find('T');
+    if (t == std::string::npos || iso.size() < t + 9) return "";
+    const std::string sub = iso.substr(t + 1, 8);
+    for (size_t i = 0; i < 8; ++i) {
+        if (i == 2 || i == 5) {
+            if (sub[i] != ':') return "";
+        } else if (!std::isdigit(static_cast<unsigned char>(sub[i]))) {
+            return "";
+        }
+    }
+    return sub;
+}
+
+std::string memberTimestampHMS(const Workspace& ws, const std::string& id) {
+    const MemberBase* found = nullptr;
+    for (const auto& m : ws.uncorrectedIfg.members)
+        if (m.id == id && m.kind == MemberKind::Original) { found = &m; break; }
+    if (!found)
+        for (const auto& m : ws.correctedIfg.members)
+            if (m.id == id && m.kind == MemberKind::Original) { found = &m; break; }
+    if (!found)
+        for (const auto& m : ws.spectra.members)
+            if (m.id == id && m.kind == MemberKind::Original) { found = &m; break; }
+    return found ? timestampHMS(found->timestamp) : "";
+}
+
+bool isOriginalSpectraMember(const Workspace& ws, const std::string& id) {
+    for (const auto& m : ws.spectra.members)
+        if (m.id == id && m.kind == MemberKind::Original) return true;
+    return false;
 }

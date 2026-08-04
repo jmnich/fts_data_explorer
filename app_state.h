@@ -58,6 +58,13 @@ struct AppState {
     // pendingSaveAsPath empty = plain Save, non-empty = Save As target.
     std::string pendingSaveAsPath;
     bool showStaleDropPrompt = false;
+
+    // Phase 3: view-state dirty latch + editable metadata buffers.
+    nlohmann::json viewStateBaseline;   // viewStateJson() snapshot (open / post-save)
+    // ponytail: fixed-cap free-text comment; acceptable for a comment field,
+    // bump the array size if a real need appears.
+    char metadataCommentBuffer[4096];
+    char metadataTagsBuffer[128];
 #endif
     bool showAdapterSelectionPopup = false;
     bool showAdapterErrorPopup = false;
@@ -112,6 +119,9 @@ struct AppState {
     
     // FPS counter state
     bool showFPS;
+    // "Show timestamps" ribbon toggle (UI chrome; persisted in config). Effect
+    // gated on hasWorkspace() — display-only, never written to the .h5.
+    bool showTimestamps = false;
     float gridAlpha; // Grid opacity (0.0 = invisible, 1.0 = full)
     float fps;
     int frameCount;

@@ -140,6 +140,9 @@ void AppState::reset() {
     showUnsavedPrompt = false;
     pendingSaveAsPath.clear();
     showStaleDropPrompt = false;
+    viewStateBaseline = nlohmann::json::object();
+    metadataCommentBuffer[0] = '\0';
+    metadataTagsBuffer[0] = '\0';
 #endif
     showAdapterSelectionPopup = false;
     showIncompatibleAdapterPopup = false;

@@ -3,6 +3,9 @@
 #include "workspace_reader.h"
 
 #include <algorithm>
+#include <cctype>
+#include <cstdio>
+#include <map>
 #include <stdexcept>
 
 #include "app_state.h"
@@ -223,7 +226,284 @@ std::string memberOriginJson() {
     return makeOriginJson(kAppName, APP_VERSION).dump();
 }
 
+// Mirror of main.cpp's naturalSortCompare (basename + digit-run aware), used to
+// rebuild sortedFiles in applyViewState so the restored checkbox id-match aligns
+// with the frame-loop list order.
+bool naturalBasenameLess(const std::string& a, const std::string& b) {
+    std::string nameA = a, nameB = b;
+    size_t slashA = nameA.find_last_of("/\\");
+    size_t slashB = nameB.find_last_of("/\\");
+    if (slashA != std::string::npos) nameA = nameA.substr(slashA + 1);
+    if (slashB != std::string::npos) nameB = nameB.substr(slashB + 1);
+    size_t i = 0, j = 0;
+    while (i < nameA.size() && j < nameB.size()) {
+        if (!std::isdigit(static_cast<unsigned char>(nameA[i])) ||
+            !std::isdigit(static_cast<unsigned char>(nameB[j]))) {
+            if (nameA[i] != nameB[j]) return nameA[i] < nameB[j];
+            i++; j++;
+        } else {
+            size_t na = i, nb = j;
+            while (i < nameA.size() && std::isdigit(static_cast<unsigned char>(nameA[i]))) i++;
+            while (j < nameB.size() && std::isdigit(static_cast<unsigned char>(nameB[j]))) j++;
+            size_t lenA = i - na, lenB = j - nb;
+            if (lenA != lenB) return lenA < lenB;
+            int cmp = nameA.compare(na, lenA, nameB, nb, lenB);
+            if (cmp != 0) return cmp < 0;
+        }
+    }
+    return nameA.size() < nameB.size();
+}
+
+// Inverse of makeApodizationJson: apply a stored apodization object to the
+// Spectrum-panel selectors/params. Missing keys keep current values.
+void applyApodizationFromJson(const nlohmann::json& a, Spectrum& spec) {
+    if (!a.is_object()) return;
+    auto w = a.find("window");
+    if (w != a.end() && w->is_string()) {
+        const std::string& name = w->get<std::string>();
+        for (int i = 0; i < APODIZATION_WINDOW_COUNT; ++i) {
+            if (apodWindowName(i) == name) { spec.apodizationSelector = i; break; }
+        }
+    }
+    auto num = [&](const char* key, float& out) {
+        auto it = a.find(key);
+        if (it != a.end() && it->is_number()) out = it->get<float>();
+    };
+    num("gaussSigma", spec.apodizationParams.gaussSigma);
+    num("rectWidth", spec.apodizationParams.rectWidth);
+    num("nortonBeerFwhm", spec.apodizationParams.nortonBeerFwhm);
+    num("dolphChebyshevAt", spec.apodizationParams.dolphChebyshevAt);
+    num("hammingAlpha", spec.apodizationParams.hammingAlpha);
+    num("kaiserBeta", spec.apodizationParams.kaiserBeta);
+    auto b = a.find("rectAsymMode");
+    if (b != a.end() && b->is_boolean()) spec.apodizationParams.rectAsymMode = b->get<bool>();
+}
+
+// Read a subsection of the saved view-state with a fallback (defensive against
+// workspace.json written by other tools / older versions).
+int viewInt(const nlohmann::json& vs, const char* sub, const char* key, int fallback) {
+    auto s = vs.find(sub);
+    if (s == vs.end() || !s->is_object()) return fallback;
+    auto it = s->find(key);
+    return it != s->end() && it->is_number() ? it->get<int>() : fallback;
+}
+double viewDouble(const nlohmann::json& vs, const char* sub, const char* key, double fallback) {
+    auto s = vs.find(sub);
+    if (s == vs.end() || !s->is_object()) return fallback;
+    auto it = s->find(key);
+    return it != s->end() && it->is_number() ? it->get<double>() : fallback;
+}
+bool viewBool(const nlohmann::json& vs, const char* sub, const char* key, bool fallback) {
+    auto s = vs.find(sub);
+    if (s == vs.end() || !s->is_object()) return fallback;
+    auto it = s->find(key);
+    return it != s->end() && it->is_boolean() ? it->get<bool>() : fallback;
+}
+
+void applyPanelViewState(AppState& s, const nlohmann::json& vs) {
+    s.spectrum.xUnitSelector = viewInt(vs, "spectrumView", "xUnit", s.spectrum.xUnitSelector);
+    s.spectrum.yScaleSelector = viewInt(vs, "spectrumView", "yScale", s.spectrum.yScaleSelector);
+    s.spectrum.yAxisMode = viewInt(vs, "spectrumView", "yAxisMode", s.spectrum.yAxisMode);
+    s.spectrum.forcedYMin = viewDouble(vs, "spectrumView", "forcedYMin", s.spectrum.forcedYMin);
+    s.spectrum.forcedYMax = viewDouble(vs, "spectrumView", "forcedYMax", s.spectrum.forcedYMax);
+    s.spectrum.detectorSensitivity = static_cast<float>(viewDouble(vs, "spectrumView",
+        "detectorSensitivityKVPerW", s.spectrum.detectorSensitivity));
+    if (s.spectrum.detectorSensitivity == 0.0f)
+        snprintf(s.spectrum.detectorSensitivityText,
+                 sizeof(s.spectrum.detectorSensitivityText), "NA");
+    else
+        snprintf(s.spectrum.detectorSensitivityText,
+                 sizeof(s.spectrum.detectorSensitivityText), "%.4f",
+                 s.spectrum.detectorSensitivity);
+    s.spectrum.refLaserTextbox = static_cast<float>(viewDouble(vs, "spectrumView",
+        "refLaserUm", s.spectrum.refLaserTextbox));
+    s.spectrum.Kpadding = viewInt(vs, "spectrumView", "zeroPadK", s.spectrum.Kpadding);
+    auto a = vs.find("spectrumView");
+    if (a != vs.end() && a->is_object()) {
+        auto ap = a->find("apodization");
+        if (ap != a->end()) applyApodizationFromJson(*ap, s.spectrum);
+    }
+    s.spectrum.prevXUnitSelector = s.spectrum.xUnitSelector;
+    s.spectrum.prevYScaleSelector = s.spectrum.yScaleSelector;
+    s.spectrum.prevYAxisMode = s.spectrum.yAxisMode;
+
+    s.averageSpectrum.xUnitSelector = viewInt(vs, "averageView", "xUnit", s.averageSpectrum.xUnitSelector);
+    s.averageSpectrum.yScaleSelector = viewInt(vs, "averageView", "yScale", s.averageSpectrum.yScaleSelector);
+    s.averageSpectrum.yAxisMode = viewInt(vs, "averageView", "yAxisMode", s.averageSpectrum.yAxisMode);
+    s.averageSpectrum.forcedYMin = viewDouble(vs, "averageView", "forcedYMin", s.averageSpectrum.forcedYMin);
+    s.averageSpectrum.forcedYMax = viewDouble(vs, "averageView", "forcedYMax", s.averageSpectrum.forcedYMax);
+    s.averageSpectrum.prevXUnitSelector = s.averageSpectrum.xUnitSelector;
+    s.averageSpectrum.prevYScaleSelector = s.averageSpectrum.yScaleSelector;
+    s.averageSpectrum.prevYAxisMode = s.averageSpectrum.yAxisMode;
+
+    s.snrSpectrum.xUnitSelector = viewInt(vs, "snrView", "xUnit", s.snrSpectrum.xUnitSelector);
+    s.snrSpectrum.yScaleSelector = viewInt(vs, "snrView", "yScale", s.snrSpectrum.yScaleSelector);
+    s.snrSpectrum.yAxisMode = viewInt(vs, "snrView", "yAxisMode", s.snrSpectrum.yAxisMode);
+    s.snrSpectrum.forcedYMin = viewDouble(vs, "snrView", "forcedYMin", s.snrSpectrum.forcedYMin);
+    s.snrSpectrum.forcedYMax = viewDouble(vs, "snrView", "forcedYMax", s.snrSpectrum.forcedYMax);
+    s.snrSpectrum.prevXUnitSelector = s.snrSpectrum.xUnitSelector;
+    s.snrSpectrum.prevYScaleSelector = s.snrSpectrum.yScaleSelector;
+    s.snrSpectrum.prevYAxisMode = s.snrSpectrum.yAxisMode;
+
+    s.allanVariance.xUnitSelector = viewInt(vs, "allanView", "xUnit", s.allanVariance.xUnitSelector);
+    s.allanVariance.wavelengthDecimation = viewInt(vs, "allanView", "wavelengthDecimation", s.allanVariance.wavelengthDecimation);
+    s.allanVariance.selectedSliceIndex = viewInt(vs, "allanView", "sliceIndex", s.allanVariance.selectedSliceIndex);
+    s.allanVariance.xRangeMin = viewDouble(vs, "allanView", "xRangeMin", s.allanVariance.xRangeMin);
+    s.allanVariance.xRangeMax = viewDouble(vs, "allanView", "xRangeMax", s.allanVariance.xRangeMax);
+    s.allanVariance.calcBaseSelector = viewInt(vs, "allanView", "calcBase", s.allanVariance.calcBaseSelector);
+
+    s.t100.xUnitSelector = viewInt(vs, "t100View", "xUnit", s.t100.xUnitSelector);
+    s.t100.yAxisMode = viewInt(vs, "t100View", "yAxisMode", s.t100.yAxisMode);
+    s.t100.forcedYMin = viewDouble(vs, "t100View", "forcedYMin", s.t100.forcedYMin);
+    s.t100.forcedYMax = viewDouble(vs, "t100View", "forcedYMax", s.t100.forcedYMax);
+    s.t100.referenceSource = viewInt(vs, "t100View", "referenceSource", s.t100.referenceSource);
+    s.t100.prevXUnitSelector = s.t100.xUnitSelector;
+    s.t100.prevYAxisMode = s.t100.yAxisMode;
+
+    auto t = vs.find("t100View");
+    if (t != vs.end() && t->is_object()) {
+        auto ratios = t->find("energyRatios");
+        if (ratios != t->end() && ratios->is_array() && ratios->size() >= 3) {
+            auto copyStr = [](const nlohmann::json& r, const char* key, char* dst, size_t dstSize) {
+                auto it = r.find(key);
+                if (it != r.end() && it->is_string())
+                    snprintf(dst, dstSize, "%s", it->get<std::string>().c_str());
+            };
+            for (size_t k = 0; k < 3; ++k) {
+                if (!(*ratios)[k].is_object()) continue;
+                char* num = k == 0 ? s.t100.energyRatioNumA : k == 1 ? s.t100.energyRatioNumB : s.t100.energyRatioNumC;
+                char* den = k == 0 ? s.t100.energyRatioDenA : k == 1 ? s.t100.energyRatioDenB : s.t100.energyRatioDenC;
+                copyStr((*ratios)[k], "num", num, 32);
+                copyStr((*ratios)[k], "den", den, 32);
+            }
+        }
+    }
+}
+
 } // namespace
+
+// ---- Phase 3: view-state persistence (workspace.json §8) ----
+
+nlohmann::json viewStateJson(const AppState& s) {
+    nlohmann::json j;
+    j["plotDefaults"] = {
+        {"maxAtZero", s.maxAtZero},
+        {"xAxisBase", s.xAxisBase},
+        {"xCorrectionMethod", s.xCorrectionMethod},
+        {"peakProminence", s.peakProminenceThreshold}
+    };
+    j["selection"] = {
+        {"sortedFiles", s.sortedFiles},
+        {"filesSelectedForAveraging", s.filesSelectedForAveraging},
+        {"currentSortedFileIndex", s.currentSortedFileIndex}
+    };
+    j["spectrumView"] = {
+        {"xUnit", s.spectrum.xUnitSelector},
+        {"yScale", s.spectrum.yScaleSelector},
+        {"yAxisMode", s.spectrum.yAxisMode},
+        {"forcedYMin", s.spectrum.forcedYMin},
+        {"forcedYMax", s.spectrum.forcedYMax},
+        {"detectorSensitivityKVPerW", s.spectrum.detectorSensitivity},
+        {"refLaserUm", s.spectrum.refLaserTextbox},
+        {"zeroPadK", s.spectrum.Kpadding},
+        {"apodization", makeApodizationJson(s.spectrum.apodizationSelector,
+                                            s.spectrum.apodizationParams)}
+    };
+    j["averageView"] = {
+        {"xUnit", s.averageSpectrum.xUnitSelector},
+        {"yScale", s.averageSpectrum.yScaleSelector},
+        {"yAxisMode", s.averageSpectrum.yAxisMode},
+        {"forcedYMin", s.averageSpectrum.forcedYMin},
+        {"forcedYMax", s.averageSpectrum.forcedYMax}
+    };
+    j["snrView"] = {
+        {"xUnit", s.snrSpectrum.xUnitSelector},
+        {"yScale", s.snrSpectrum.yScaleSelector},
+        {"yAxisMode", s.snrSpectrum.yAxisMode},
+        {"forcedYMin", s.snrSpectrum.forcedYMin},
+        {"forcedYMax", s.snrSpectrum.forcedYMax}
+    };
+    j["allanView"] = {
+        {"xUnit", s.allanVariance.xUnitSelector},
+        {"wavelengthDecimation", s.allanVariance.wavelengthDecimation},
+        {"sliceIndex", s.allanVariance.selectedSliceIndex},
+        {"xRangeMin", s.allanVariance.xRangeMin},
+        {"xRangeMax", s.allanVariance.xRangeMax},
+        {"calcBase", s.allanVariance.calcBaseSelector}
+    };
+    j["t100View"] = {
+        {"xUnit", s.t100.xUnitSelector},
+        {"yAxisMode", s.t100.yAxisMode},
+        {"forcedYMin", s.t100.forcedYMin},
+        {"forcedYMax", s.t100.forcedYMax},
+        {"referenceSource", s.t100.referenceSource},
+        {"energyRatios", nlohmann::json::array({
+            {{"num", std::string(s.t100.energyRatioNumA)}, {"den", std::string(s.t100.energyRatioDenA)}},
+            {{"num", std::string(s.t100.energyRatioNumB)}, {"den", std::string(s.t100.energyRatioDenB)}},
+            {{"num", std::string(s.t100.energyRatioNumC)}, {"den", std::string(s.t100.energyRatioDenC)}}
+        })}
+    };
+    return j;
+}
+
+void captureViewState(AppState& s) {
+    nlohmann::json& j = s.workspace.workspaceJson;
+    j["applications"][kAppName] = viewStateJson(s);
+    // Transient plotted set: written to the file (decision 3 preserves it) but
+    // deliberately absent from viewStateJson so the frame-loop latch never
+    // false-dirties on first-load selection.
+    j["applications"][kAppName]["selection"]["selectedFiles"] = s.selectedFiles;
+    j["app"] = {{"name", kAppName}, {"version", APP_VERSION}};
+}
+
+void applyViewState(AppState& s) {
+    if (!s.hasWorkspace()) return;
+    const nlohmann::json& j = s.workspace.workspaceJson;
+    auto apps = j.find("applications");
+    if (apps == j.end() || !apps->is_object()) return;
+    auto vsIt = apps->find(kAppName);
+    if (vsIt == apps->end() || !vsIt->is_object()) return;
+    const nlohmann::json& vs = *vsIt;
+
+    s.maxAtZero = viewBool(vs, "plotDefaults", "maxAtZero", s.maxAtZero);
+    s.xAxisBase = viewInt(vs, "plotDefaults", "xAxisBase", s.xAxisBase);
+    s.xCorrectionMethod = viewInt(vs, "plotDefaults", "xCorrectionMethod", s.xCorrectionMethod);
+    s.peakProminenceThreshold = static_cast<float>(
+        viewDouble(vs, "plotDefaults", "peakProminence", s.peakProminenceThreshold));
+    applyPanelViewState(s, vs);
+
+    // Rebuild sortedFiles (natural order — mirrors the frame loop) so the
+    // id-matched checkbox set and clamped focus index align with the list the
+    // UI actually renders.
+    if (s.sortedFiles.empty() && !s.csvFiles.empty()) {
+        s.sortedFiles = s.csvFiles;
+        std::sort(s.sortedFiles.begin(), s.sortedFiles.end(), naturalBasenameLess);
+    }
+    auto sel = vs.find("selection");
+    if (sel != vs.end() && sel->is_object()) {
+        auto storedFiles = sel->find("sortedFiles");
+        auto storedChk = sel->find("filesSelectedForAveraging");
+        if (storedFiles != sel->end() && storedFiles->is_array() &&
+            storedChk != sel->end() && storedChk->is_array()) {
+            std::map<std::string, bool> checked;
+            size_t n = std::min(storedFiles->size(), storedChk->size());
+            for (size_t i = 0; i < n; ++i)
+                if ((*storedFiles)[i].is_string() && (*storedChk)[i].is_boolean())
+                    checked[(*storedFiles)[i].get<std::string>()] = (*storedChk)[i].get<bool>();
+            s.filesSelectedForAveraging.assign(s.sortedFiles.size(), true);
+            for (size_t i = 0; i < s.sortedFiles.size(); ++i) {
+                auto it = checked.find(s.sortedFiles[i]);
+                if (it != checked.end()) s.filesSelectedForAveraging[i] = it->second;
+            }
+        }
+        auto idx = sel->find("currentSortedFileIndex");
+        if (idx != sel->end() && idx->is_number() && !s.sortedFiles.empty()) {
+            long v = idx->get<long>();
+            s.currentSortedFileIndex = static_cast<size_t>(std::clamp<long>(
+                v, 0, static_cast<long>(s.sortedFiles.size() - 1)));
+        }
+    }
+}
 
 DatasetInfo workspaceDatasetInfo(const Workspace& ws) {
     DatasetInfo info;

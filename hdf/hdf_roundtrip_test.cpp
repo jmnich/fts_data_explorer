@@ -384,6 +384,56 @@ void test10_markDependentsStaleCascade() {
     printf("roundtrip: markDependentsStale cascade OK\n");
 }
 
+void test11_timestampHelpers() {
+    assert(timestampHMS("2026-08-01T12:34:56Z") == "12:34:56");
+    assert(timestampHMS("") == "");
+    assert(timestampHMS("no-time") == "");
+    assert(timestampHMS("2026-08-01") == "");
+    assert(timestampHMS("2026-08-01T12:34:56+02:00") == "12:34:56");
+
+    Workspace ws;
+    InterferogramMember orig;
+    orig.id = "record_0";
+    orig.kind = MemberKind::Original;
+    orig.timestamp = "2026-08-01T12:34:56Z";
+    ws.uncorrectedIfg.members.push_back(orig);
+
+    InterferogramMember noTs;
+    noTs.id = "record_1";
+    noTs.kind = MemberKind::Original;   // original but empty timestamp
+    ws.uncorrectedIfg.members.push_back(noTs);
+
+    InterferogramMember der;
+    der.id = "record_2";
+    der.kind = MemberKind::Derivative;  // derivative (timestamp ignored)
+    der.timestamp = "2026-08-01T09:00:00Z";
+    ws.uncorrectedIfg.members.push_back(der);
+
+    TwoColumnMember specOrig;
+    specOrig.id = "orig_spectrum";
+    specOrig.kind = MemberKind::Original;
+    specOrig.timestamp = "2026-08-02T01:02:03Z";
+    ws.spectra.members.push_back(specOrig);
+
+    TwoColumnMember specDeriv;
+    specDeriv.id = "spec_record_0";
+    specDeriv.kind = MemberKind::Derivative;
+    specDeriv.timestamp = "2026-08-02T04:05:06Z";
+    ws.spectra.members.push_back(specDeriv);
+
+    assert(memberTimestampHMS(ws, "record_0") == "12:34:56");
+    assert(memberTimestampHMS(ws, "record_1") == "");        // empty timestamp
+    assert(memberTimestampHMS(ws, "record_2") == "");        // derivative
+    assert(memberTimestampHMS(ws, "missing") == "");         // absent id
+    assert(memberTimestampHMS(ws, "orig_spectrum") == "01:02:03");
+    assert(memberTimestampHMS(ws, "spec_record_0") == "");   // derivative
+
+    assert(isOriginalSpectraMember(ws, "orig_spectrum"));
+    assert(!isOriginalSpectraMember(ws, "spec_record_0"));   // derivative
+    assert(!isOriginalSpectraMember(ws, "record_0"));        // IFG id, not spectra
+    printf("roundtrip: timestamp helpers OK\n");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -396,6 +446,7 @@ int main(int argc, char** argv) {
         test8_danglingT100RefPath();
         test9_pruneStale();
         test10_markDependentsStaleCascade();
+        test11_timestampHelpers();
 
         if (argc > 1) {
             test2_pythonExampleRoundTrip(argv[1]);

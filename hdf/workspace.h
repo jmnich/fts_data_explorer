@@ -139,3 +139,14 @@ std::vector<std::string> markDependentsStale(Workspace& ws, const std::string& p
 
 // Group-level provenance (spec §5) — application identity only, no host info.
 nlohmann::json makeOriginJson(const std::string& appName, const std::string& version);
+
+// "hh:mm:ss" from an ISO-8601 UTC timestamp ("2026-08-01T12:34:56Z"), "" if no
+// parseable HH:MM:SS part (naive: substring after 'T', digits/colons validated).
+std::string timestampHMS(const std::string& iso);
+
+// timestampHMS(m.timestamp) for the ORIGINAL member `id` across the igm groups
+// and the spectra group; "" when absent / derivative / empty timestamp.
+std::string memberTimestampHMS(const Workspace& ws, const std::string& id);
+
+// True if `id` is an Original member of the spectra/ group (precomputed spectra).
+bool isOriginalSpectraMember(const Workspace& ws, const std::string& id);

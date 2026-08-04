@@ -493,6 +493,21 @@ void openWorkspace(AppState& s, const std::string& path) {
     if (s.configPtr)
         addToRecentDatasets(*s.configPtr, s.configFilePath, path, kHdfWorkspaceAdapter);
 
+    // Phase 3: restore saved view state (decision 3). Runs after the
+    // axisIsCorrected -> xAxisBase gate (a default for fresh files, not a hard
+    // constraint) and before seedPanelsFromWorkspace so the restored spectrum
+    // params match the saved member configs (no spurious staleness).
+    applyViewState(s);
+
+    // Re-baseline the dirty latch: opening never dirties the workspace.
+    s.viewStateBaseline = viewStateJson(s);
+
+    // Fill the editable comment/tags buffers from the loaded workspace.
+    snprintf(s.metadataCommentBuffer, sizeof(s.metadataCommentBuffer), "%s",
+             s.workspace.measurementComment.c_str());
+    snprintf(s.metadataTagsBuffer, sizeof(s.metadataTagsBuffer), "%s",
+             s.workspace.tags.c_str());
+
     // Restore-on-open: fill panel caches from matching saved members.
     seedPanelsFromWorkspace(s);
 }
@@ -535,6 +550,12 @@ void closeWorkspace(AppState& s) {
     s.selectedFilenames.clear();
     s.filesChanged = false;
     s.dataLoaded = false;
+    // Phase 3: clear the dirty-latch baseline and the metadata edit buffers so
+    // no stale state survives into the next workspace. AppState view fields
+    // keep their last values (legacy mode is dormant).
+    s.viewStateBaseline = nlohmann::json::object();
+    s.metadataCommentBuffer[0] = '\0';
+    s.metadataTagsBuffer[0] = '\0';
     s.needsRedraw = true;
 }
 #endif // FTS_BUILD_HDF5
@@ -603,6 +624,9 @@ static void clearPanelDerivedResults(AppState& s) {
 // Save. Stale derivatives are never dropped silently: when any stale category
 // exists, the actual H5Store::save is deferred behind the §1.5 confirmation.
 void doSaveWorkspace(AppState& s, const std::string& asPath) {
+    // Phase 3: merge the current view state into workspace.json BEFORE the
+    // pruneStale copy, so Save As copies the captured view state too.
+    captureViewState(s);
     const Workspace* toSave = &s.workspace;
     Workspace copy;
     if (!asPath.empty()) {
@@ -621,6 +645,9 @@ void doSaveWorkspace(AppState& s, const std::string& asPath) {
             addToRecentDatasets(*s.configPtr, s.configFilePath, asPath, kHdfWorkspaceAdapter);
     }
     s.workspace.dirty = false;
+    // Phase 3: re-baseline the latch against the just-saved state so the frame
+    // loop does not immediately re-dirty a clean workspace (decision 5).
+    s.viewStateBaseline = viewStateJson(s);
     s.needsRedraw = true;
 }
 
@@ -812,6 +839,80 @@ static void stripWorkspaceDerivatives(AppState& s) {
     clearPanelDerivedResults(s);
     s.workspace.dirty = true;
     s.needsRedraw = true;
+}
+
+// ── Metadata: grouped measurement_config.json renderer (Phase 3) ────────────
+
+// Text form for a scalar config value: strings verbatim, everything else via
+// JSON dump (numbers, bools, null).
+static std::string configValueText(const nlohmann::json& v) {
+    if (v.is_string()) return v.get<std::string>();
+    if (v.is_null()) return "null";
+    return v.dump();
+}
+
+// Recursive "key: value" rows for an object; nested objects/arrays become
+// collapsible TreeNodes. ##-suffixed + PushID labels keep IDs unique per path
+// (IMGUI_GUIDE §3).
+static void renderConfigRows(const nlohmann::json& obj) {
+    for (auto it = obj.begin(); it != obj.end(); ++it) {
+        const std::string& key = it.key();
+        const nlohmann::json& v = it.value();
+        ImGui::PushID(key.c_str());
+        if (v.is_object()) {
+            if (ImGui::TreeNode(key.c_str())) {
+                renderConfigRows(v);
+                ImGui::TreePop();
+            }
+        } else if (v.is_array()) {
+            if (ImGui::TreeNode(key.c_str())) {
+                int idx = 0;
+                for (const auto& el : v) {
+                    ImGui::PushID(idx++);
+                    if (el.is_object()) renderConfigRows(el);
+                    else ImGui::Text("%s", configValueText(el).c_str());
+                    ImGui::PopID();
+                }
+                ImGui::TreePop();
+            }
+        } else {
+            ImGui::Text("%s", key.c_str());
+            ImGui::SameLine();
+            ImGui::TextDisabled(": %s", configValueText(v).c_str());
+        }
+        ImGui::PopID();
+    }
+}
+
+// Top level in fixed order (decision 7): instrument, detector, acquisitionCard,
+// acquisition, laser, environment, then legacy (flat passthrough), then any
+// remaining unknown keys as their own collapsible section.
+static void renderMeasurementConfig(const nlohmann::json& cfg) {
+    static const char* kOrder[] = {"instrument", "detector", "acquisitionCard",
+                                   "acquisition", "laser", "environment", "legacy"};
+    for (const char* key : kOrder) {
+        auto it = cfg.find(key);
+        if (it == cfg.end()) continue;
+        ImGui::PushID(key);
+        if (ImGui::TreeNode(key)) {
+            renderConfigRows(*it);
+            ImGui::TreePop();
+        }
+        ImGui::PopID();
+    }
+    for (auto it = cfg.begin(); it != cfg.end(); ++it) {
+        const std::string& key = it.key();
+        bool known = false;
+        for (const char* k : kOrder)
+            if (key == k) { known = true; break; }
+        if (known) continue;
+        ImGui::PushID(key.c_str());
+        if (ImGui::TreeNode(key.c_str())) {
+            renderConfigRows(it.value());
+            ImGui::TreePop();
+        }
+        ImGui::PopID();
+    }
 }
 
 // ── Unsaved-changes + stale-drop modals ─────────────────────────────────────
@@ -1455,14 +1556,13 @@ int main(int argc, char* argv[]) {
         appState.currentDirectory = "";
     }
     
-    appState.maxAtZero = config.maxAtZero; // Use config setting for peak alignment
+    // View-state (panels, plotDefaults, selection) lives in workspace.json now
+    // (Phase 3); the AppConfig fields above are session defaults only.
     appState.autoFitYAxis = config.autoFitYAxis; // Load from config
     appState.enableDownsampling = config.enableDownsampling; // Load from config
-    appState.xAxisBase = config.xAxisBase; // Load from config
     appState.showFPS = config.showFPS; // Load from config
+    appState.showTimestamps = config.showTimestamps; // Load from config
     appState.gridAlpha = config.gridAlpha; // Load from config
-    appState.xCorrectionMethod = config.xCorrectionMethod;
-    appState.peakProminenceThreshold = config.peakProminence;
     appState.showPeakIndicators = config.showPeakIndicators;
     appState.currentAccentColor = config.accentColor; // Load accent color from config
 
@@ -1475,33 +1575,6 @@ int main(int argc, char* argv[]) {
         appState.defaultLayoutApplied = false;
     }
     
-    // Load spectrum window settings from config
-    appState.spectrum.yAxisMode           = config.spectrumYAxisMode;
-    appState.spectrum.prevYAxisMode       = config.spectrumYAxisMode;
-    appState.spectrum.xUnitSelector       = config.spectrumXUnitSelector;
-    appState.spectrum.yScaleSelector  = config.spectrumYScaleSelector;
-    appState.spectrum.prevXUnitSelector = config.spectrumXUnitSelector;
-    appState.spectrum.prevYScaleSelector = config.spectrumYScaleSelector;
-    appState.spectrum.forcedYMin      = config.spectrumForcedYMin;
-    appState.spectrum.forcedYMax    = config.spectrumForcedYMax;
-    appState.spectrum.apodizationSelector = config.apodizationSelector;
-    appState.spectrum.apodizationParams.gaussSigma = config.apodGaussSigma;
-    appState.spectrum.apodizationParams.rectWidth  = config.apodRectWidth;
-    appState.spectrum.apodizationParams.nortonBeerFwhm = config.apodNortonBeerFwhm;
-    appState.spectrum.apodizationParams.dolphChebyshevAt = config.apodDolphChebyshevAt;
-    appState.spectrum.apodizationParams.hammingAlpha = config.apodHammingAlpha;
-    appState.spectrum.apodizationParams.kaiserBeta = config.apodKaiserBeta;
-    appState.spectrum.apodizationParams.rectAsymMode = config.apodRectAsymMode;
-    appState.spectrum.detectorSensitivity = config.spectrumDetectorSensitivity;
-    if (config.spectrumDetectorSensitivity == 0.0f)
-        snprintf(appState.spectrum.detectorSensitivityText,
-                 sizeof(appState.spectrum.detectorSensitivityText), "NA");
-    else
-        snprintf(appState.spectrum.detectorSensitivityText,
-                 sizeof(appState.spectrum.detectorSensitivityText), "%.4f",
-                 config.spectrumDetectorSensitivity);
-    appState.spectrum.refLaserTextbox = config.spectrumRefLaser;
-    
     // Set the appState pointer in the spectrum object for raw data access
     appState.spectrum.appState = &appState;
     appState.averageSpectrum.appState = &appState;
@@ -1509,47 +1582,6 @@ int main(int argc, char* argv[]) {
     appState.allanVariance.appState = &appState;
     appState.t100.appState = &appState;
     appState.exportPanel.appState = &appState;
-    
-    // Load average window settings from config
-    appState.averageSpectrum.yAxisMode           = config.avgYAxisMode;
-    appState.averageSpectrum.prevYAxisMode       = config.avgYAxisMode;
-    appState.averageSpectrum.xUnitSelector       = config.avgXUnitSelector;
-    appState.averageSpectrum.yScaleSelector      = config.avgYScaleSelector;
-    appState.averageSpectrum.prevXUnitSelector   = config.avgXUnitSelector;
-    appState.averageSpectrum.prevYScaleSelector  = config.avgYScaleSelector;
-    appState.averageSpectrum.forcedYMin          = config.avgForcedYMin;
-    appState.averageSpectrum.forcedYMax          = config.avgForcedYMax;
-
-    // Load SNR window settings from config
-    appState.snrSpectrum.yAxisMode           = config.snrYAxisMode;
-    appState.snrSpectrum.prevYAxisMode       = config.snrYAxisMode;
-    appState.snrSpectrum.xUnitSelector       = config.snrXUnitSelector;
-    appState.snrSpectrum.yScaleSelector      = config.snrYScaleSelector;
-    appState.snrSpectrum.prevXUnitSelector   = config.snrXUnitSelector;
-    appState.snrSpectrum.prevYScaleSelector  = config.snrYScaleSelector;
-    appState.snrSpectrum.forcedYMin          = config.snrForcedYMin;
-    appState.snrSpectrum.forcedYMax          = config.snrForcedYMax;
-
-    appState.allanVariance.xUnitSelector        = config.allanXUnitSelector;
-    appState.allanVariance.wavelengthDecimation  = config.allanWavelengthDecimation;
-    appState.allanVariance.selectedSliceIndex    = config.allanSliceIndex;
-    appState.allanVariance.xRangeMin             = config.allanXRangeMin;
-    appState.allanVariance.xRangeMax             = config.allanXRangeMax;
-    appState.allanVariance.calcBaseSelector      = config.allanCalcBaseSelector;
-
-    // Load 100% T window settings from config
-    appState.t100.yAxisMode           = config.t100YAxisMode;
-    appState.t100.prevYAxisMode       = config.t100YAxisMode;
-    appState.t100.xUnitSelector       = config.t100XUnitSelector;
-    appState.t100.prevXUnitSelector   = config.t100XUnitSelector;
-    appState.t100.forcedYMin          = config.t100ForcedYMin;
-    appState.t100.forcedYMax          = config.t100ForcedYMax;
-    strncpy(appState.t100.energyRatioNumA, config.t100EnergyRatioNumA, 31);
-    strncpy(appState.t100.energyRatioDenA, config.t100EnergyRatioDenA, 31);
-    strncpy(appState.t100.energyRatioNumB, config.t100EnergyRatioNumB, 31);
-    strncpy(appState.t100.energyRatioDenB, config.t100EnergyRatioDenB, 31);
-    strncpy(appState.t100.energyRatioNumC, config.t100EnergyRatioNumC, 31);
-    strncpy(appState.t100.energyRatioDenC, config.t100EnergyRatioDenC, 31);
 
     // No initialization needed for simple file dialog
     
@@ -2033,6 +2065,18 @@ int main(int argc, char* argv[]) {
         if (appState.scrollAccumY != 0.0f || appState.scrollAccumX != 0.0f)
             appState.needsRedraw = true;
 
+#if FTS_BUILD_HDF5
+        // Phase 3 view-state dirty latch: diff the managed view-state JSON
+        // against the open/post-save snapshot. Latching (no baseline update on
+        // diff) matches the coarse-dirty model; the JSON is tiny and evaluated
+        // only on redraw frames. The transient selectedFiles set is excluded
+        // (decision 3) so the first-load selection never false-dirties.
+        if (appState.hasWorkspace() && !appState.workspace.dirty) {
+            if (viewStateJson(appState) != appState.viewStateBaseline)
+                appState.workspace.dirty = true;
+        }
+#endif
+
         // Conditionally disable anti-aliasing for large datasets (>50k points)
         if (appState.dataLoaded && appState.loadedData[0].dataSize() > 50000) {
             ImGui::GetStyle().AntiAliasedLines = false;
@@ -2194,6 +2238,7 @@ int main(int argc, char* argv[]) {
                 {
                     // Display FPS toggle
                     ImGui::MenuItem("Display fps", NULL, &appState.showFPS);
+                    ImGui::MenuItem("Show timestamps", NULL, &appState.showTimestamps);
                     ImGui::Text("Grid opacity");
                     ImGui::SameLine();
                     float gridPct = appState.gridAlpha * 100.0f;
@@ -2514,8 +2559,19 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             // Compute widths: delete button already placed, then filename, then checkbox
             float chkWidth = ImGui::GetFrameHeight();
             float btnWidth = ImGui::GetContentRegionAvail().x - chkWidth - ImGui::GetStyle().ItemSpacing.x;
-            
-            if (ImGui::Button(filename.c_str(), ImVec2(btnWidth, 0))) {
+
+            // "Show timestamps" ribbon: append the member's hh:mm:ss to the row
+            // label (original records only — memberTimestampHMS returns "" for
+            // derivatives / empty timestamps). Rows are under PushID(i), so the
+            // label text change never shifts widget IDs (IMGUI_GUIDE §3).
+            std::string rowLabel = filename;
+#if FTS_BUILD_HDF5
+            if (appState.hasWorkspace() && appState.showTimestamps) {
+                std::string ts = memberTimestampHMS(appState.workspace, file);
+                if (!ts.empty()) rowLabel += " [" + ts + "]";
+            }
+#endif
+            if (ImGui::Button(rowLabel.c_str(), ImVec2(btnWidth, 0))) {
                 // Handle multi-select with Ctrl key
                 if (appState.multiSelectMode) {
                     // Toggle selection for this file
@@ -2908,7 +2964,15 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                     // Move cursor forward and add text
                     ImGui::Dummy(square_size);
                     ImGui::SameLine();
-                    ImGui::Text("%s", appState.selectedFilenames[i].c_str());
+                    std::string legendLabel = appState.selectedFilenames[i];
+#if FTS_BUILD_HDF5
+                    // "Show timestamps": append hh:mm:ss for original members.
+                    if (appState.hasWorkspace() && appState.showTimestamps) {
+                        std::string ts = memberTimestampHMS(appState.workspace, appState.selectedFiles[i]);
+                        if (!ts.empty()) legendLabel += " [" + ts + "]";
+                    }
+#endif
+                    ImGui::Text("%s", legendLabel.c_str());
                     if (i < appState.loadedData.size() - 1) {
                         ImGui::SameLine();
                         ImGui::Text("  "); // Add some spacing between items
@@ -5195,18 +5259,33 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
 #if FTS_BUILD_HDF5
             if (appState.hasWorkspace()) {
                 ImGui::Separator();
-                ImGui::TextWrapped("Comment: %s",
-                    appState.workspace.measurementComment.empty()
-                        ? "<none>" : appState.workspace.measurementComment.c_str());
-                if (!appState.workspace.tags.empty())
-                    ImGui::TextWrapped("Tags: %s", appState.workspace.tags.c_str());
+
+                // Editable comment (multi-line) + tags (single line). Each
+                // change mirrors into the workspace and marks it dirty.
+                ImGui::Text("Comment:");
+                if (ImGui::InputTextMultiline("##metadataComment",
+                        appState.metadataCommentBuffer,
+                        sizeof(appState.metadataCommentBuffer),
+                        ImVec2(-FLT_MIN, 4 * ImGui::GetTextLineHeightWithSpacing()))) {
+                    appState.workspace.measurementComment = appState.metadataCommentBuffer;
+                    appState.workspace.dirty = true;
+                    appState.needsRedraw = true;
+                }
+                ImGui::Text("Tags:");
+                if (ImGui::InputText("##metadataTags", appState.metadataTagsBuffer,
+                                     sizeof(appState.metadataTagsBuffer))) {
+                    appState.workspace.tags = appState.metadataTagsBuffer;
+                    appState.workspace.dirty = true;
+                    appState.needsRedraw = true;
+                }
+
                 if (!appState.workspace.created.empty())
                     ImGui::TextWrapped("@created: %s", appState.workspace.created.c_str());
                 if (!appState.workspace.format.empty())
                     ImGui::TextWrapped("@format: %s", appState.workspace.format.c_str());
                 if (!appState.workspace.measurementConfig.empty()) {
                     if (ImGui::TreeNode("Measurement Config")) {
-                        ImGui::TextWrapped("%s", appState.workspace.measurementConfig.dump(2).c_str());
+                        renderMeasurementConfig(appState.workspace.measurementConfig);
                         ImGui::TreePop();
                     }
                 }
@@ -5394,72 +5473,19 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
     destroyWelcomeBackground();
     cleanupApplication(window);
     
-    // Save configuration before exiting
-    config.maxAtZero = appState.maxAtZero;
+    // Save configuration before exiting. View-state (panels, plotDefaults,
+    // selection) is persisted in workspace.json (Phase 3), not here.
     config.autoFitYAxis = appState.autoFitYAxis;
     config.enableDownsampling = appState.enableDownsampling;
-    config.xAxisBase = appState.xAxisBase;
     config.lastWorkingDirectory = appState.currentDirectory;
     config.uiSize = appState.currentUiSize;
 
     // Update config with current FPS setting before saving
     config.showFPS = appState.showFPS;
+    config.showTimestamps = appState.showTimestamps;
     config.gridAlpha = appState.gridAlpha;
-    config.xCorrectionMethod = appState.xCorrectionMethod;
-    config.peakProminence = appState.peakProminenceThreshold;
     config.showPeakIndicators = appState.showPeakIndicators;
     config.accentColor = appState.currentAccentColor;
-    
-    // Save spectrum window settings
-    config.spectrumYAxisMode           = appState.spectrum.yAxisMode;
-    config.spectrumXUnitSelector       = appState.spectrum.xUnitSelector;
-    config.spectrumYScaleSelector      = appState.spectrum.yScaleSelector;
-    config.spectrumForcedYMin          = appState.spectrum.forcedYMin;
-    config.spectrumForcedYMax   = appState.spectrum.forcedYMax;
-    config.apodizationSelector  = appState.spectrum.apodizationSelector;
-    config.apodGaussSigma       = appState.spectrum.apodizationParams.gaussSigma;
-    config.apodRectWidth        = appState.spectrum.apodizationParams.rectWidth;
-    config.apodNortonBeerFwhm  = appState.spectrum.apodizationParams.nortonBeerFwhm;
-    config.apodDolphChebyshevAt = appState.spectrum.apodizationParams.dolphChebyshevAt;
-    config.apodHammingAlpha     = appState.spectrum.apodizationParams.hammingAlpha;
-    config.apodKaiserBeta       = appState.spectrum.apodizationParams.kaiserBeta;
-    config.apodRectAsymMode     = appState.spectrum.apodizationParams.rectAsymMode;
-    config.spectrumDetectorSensitivity = appState.spectrum.detectorSensitivity;
-    config.spectrumRefLaser = appState.spectrum.refLaserTextbox;
-    
-    // Save average window settings
-    config.avgYAxisMode           = appState.averageSpectrum.yAxisMode;
-    config.avgXUnitSelector       = appState.averageSpectrum.xUnitSelector;
-    config.avgYScaleSelector      = appState.averageSpectrum.yScaleSelector;
-    config.avgForcedYMin          = appState.averageSpectrum.forcedYMin;
-    config.avgForcedYMax          = appState.averageSpectrum.forcedYMax;
-
-    // Save SNR window settings
-    config.snrYAxisMode           = appState.snrSpectrum.yAxisMode;
-    config.snrXUnitSelector       = appState.snrSpectrum.xUnitSelector;
-    config.snrYScaleSelector      = appState.snrSpectrum.yScaleSelector;
-    config.snrForcedYMin          = appState.snrSpectrum.forcedYMin;
-    config.snrForcedYMax          = appState.snrSpectrum.forcedYMax;
-
-    // Save Allan window settings
-    config.allanXUnitSelector        = appState.allanVariance.xUnitSelector;
-    config.allanWavelengthDecimation = appState.allanVariance.wavelengthDecimation;
-    config.allanSliceIndex           = appState.allanVariance.selectedSliceIndex;
-    config.allanXRangeMin            = appState.allanVariance.xRangeMin;
-    config.allanXRangeMax            = appState.allanVariance.xRangeMax;
-    config.allanCalcBaseSelector     = appState.allanVariance.calcBaseSelector;
-
-    // Save 100% T window settings
-    config.t100YAxisMode      = appState.t100.yAxisMode;
-    config.t100XUnitSelector  = appState.t100.xUnitSelector;
-    config.t100ForcedYMin     = appState.t100.forcedYMin;
-    config.t100ForcedYMax     = appState.t100.forcedYMax;
-    strncpy(config.t100EnergyRatioNumA, appState.t100.energyRatioNumA, 31);
-    strncpy(config.t100EnergyRatioDenA, appState.t100.energyRatioDenA, 31);
-    strncpy(config.t100EnergyRatioNumB, appState.t100.energyRatioNumB, 31);
-    strncpy(config.t100EnergyRatioDenB, appState.t100.energyRatioDenB, 31);
-    strncpy(config.t100EnergyRatioNumC, appState.t100.energyRatioNumC, 31);
-    strncpy(config.t100EnergyRatioDenC, appState.t100.energyRatioDenC, 31);
 
     // Save accent color
     config.accentColor = appState.currentAccentColor;

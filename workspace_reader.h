@@ -93,4 +93,25 @@ bool t100Outdated(const AppState& s);
 // Called at the end of openWorkspace; pure read, does not set dirty.
 void seedPanelsFromWorkspace(AppState& s);
 
+// §8.1 view-state subtree for the FTS Data Explorer app from current AppState.
+// Pure read; the single source of truth for capture, the dirty latch, and the
+// open-time / post-save baseline. The transient plotted set (selectedFiles) is
+// intentionally absent — the latch must not false-dirty on first load (decision
+// 3); captureViewState adds it to the file only.
+nlohmann::json viewStateJson(const AppState& s);
+
+// Merge viewStateJson() into workspace.workspaceJson under
+// applications["FTS Data Explorer"] (+ the transient selectedFiles set), write
+// the top-level app block {name, version} (§8.0), and preserve unknown keys
+// (spec rule 9) and other apps' subtrees. Does NOT set dirty. Called at Save/
+// Save As before the pruneStale copy.
+void captureViewState(AppState& s);
+
+// Apply the restore subset (decision 3) from workspace.workspaceJson to
+// AppState. Pure AppState write; does NOT set dirty. Resizes
+// filesSelectedForAveraging to the (id-matched) checkbox set. Must run BEFORE
+// seedPanelsFromWorkspace in openWorkspace so restored spectrum params match the
+// saved member configs (no spurious staleness).
+void applyViewState(AppState& s);
+
 #endif // FTS_BUILD_HDF5

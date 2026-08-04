@@ -405,7 +405,17 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                 // Move cursor forward and add text
                 ImGui::Dummy(square_size);
                 ImGui::SameLine();
-                ImGui::Text("%s", displayName.c_str());
+                std::string legendLabel = displayName;
+#if FTS_BUILD_HDF5
+                // "Show timestamps": precomputed-spectrum originals only; derived
+                // spectra (spec_*) never get a timestamp (plan §4, site 3).
+                if (appState && appState->hasWorkspace() && appState->showTimestamps &&
+                    isOriginalSpectraMember(appState->workspace, fileData.first)) {
+                    std::string ts = memberTimestampHMS(appState->workspace, fileData.first);
+                    if (!ts.empty()) legendLabel += " [" + ts + "]";
+                }
+#endif
+                ImGui::Text("%s", legendLabel.c_str());
                 
                 if (i < primaryDetectors.size() - 1) {
                     ImGui::SameLine();
