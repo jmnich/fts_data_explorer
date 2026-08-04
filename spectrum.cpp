@@ -2,6 +2,9 @@
 #include "spectral_toolbox.h"
 #include "adapters/csv_adapter.h"
 #include "adapters/adapter_registry.h"
+#if FTS_BUILD_HDF5
+#include "workspace_reader.h"
+#endif
 #include <cmath>
 #include <algorithm>
 #include <cstdio>
@@ -221,6 +224,10 @@ void Spectrum::pollPendingSpectra() {
                 auto ps = it->future.get();
                 cachedSpectra[it->fileId] = std::move(ps.spectrumY);
                 cachedFrequencies[it->fileId] = std::move(ps.spectrumX);
+#if FTS_BUILD_HDF5
+                wsMirrorSpectrum(*appState, it->fileId,
+                                 cachedFrequencies[it->fileId], cachedSpectra[it->fileId]);
+#endif
 
                 // Update lastSpectrumParams so isSpectrumDirty returns false next time
                 double activeParam = 0.0;
@@ -298,6 +305,10 @@ bool Spectrum::computeAndCacheSpectrum(const std::string& filePath, const std::s
             lastPrimaryDetectors[fileId] = raw.primaryDetector;
         }
 
+#if FTS_BUILD_HDF5
+        wsMirrorSpectrum(*appState, fileId, cachedFrequencies[fileId], cachedSpectra[fileId]);
+#endif
+
         double activeParam = 0.0;
         auto apodSel = static_cast<ApodizationWindow>(apodizationSelector);
         if (apodSel == ApodizationWindow::Gauss)
@@ -333,6 +344,20 @@ bool Spectrum::computeAndCacheSpectrum(const std::string& filePath, const std::s
 
 void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, std::vector<double>>>& primaryDetectors,
                                      const std::vector<InterferogramData>& rawDataCache) {
+
+#if FTS_BUILD_HDF5
+        // Staleness banner (§4.2): the saved per-file spectrum no longer matches
+        // the current settings/inputs and would be dropped at Save unless recomputed.
+        if (appState && appState->hasWorkspace()) {
+            for (const auto& fd : primaryDetectors) {
+                if (spectrumOutdated(*appState, fd.first)) {
+                    ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
+                        "Saved result is stale - press Calculate to recompute.");
+                    break;
+                }
+            }
+        }
+#endif
 
 
         
@@ -782,6 +807,10 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
 
                         cachedSpectra[fileId]     = std::move(ps.spectrumY);
                         cachedFrequencies[fileId] = std::move(ps.spectrumX);
+#if FTS_BUILD_HDF5
+                        wsMirrorSpectrum(*appState, fileId,
+                                         cachedFrequencies[fileId], cachedSpectra[fileId]);
+#endif
 
                         double activeParam = 0.0;
                         if (apodizationSelector == static_cast<int>(ApodizationWindow::Gauss))

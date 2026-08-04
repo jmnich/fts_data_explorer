@@ -2,6 +2,9 @@
 #include "spectral_toolbox.h"
 #include "adapters/csv_adapter.h"
 #include "adapters/adapter_registry.h"
+#if FTS_BUILD_HDF5
+#include "workspace_reader.h"
+#endif
 #include "app_state.h"
 #include <cmath>
 #include <algorithm>
@@ -107,6 +110,14 @@ void SnrSpectrum::reset() {
 }
 
 void SnrSpectrum::renderSnrContents(bool showTrackingCursor) {
+#if FTS_BUILD_HDF5
+    // Staleness banner (§4.2).
+    if (appState && snrOutdated(*appState)) {
+        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
+            "Saved result is stale - press Calculate to recompute.");
+        ImGui::Spacing();
+    }
+#endif
     if (!snrAvailable || cachedSnrX.empty() || cachedSnrY.empty()) {
         ImVec2 avail = ImGui::GetContentRegionAvail();
         ImVec2 textSize = ImGui::CalcTextSize("No SNR spectrum available");
@@ -623,6 +634,14 @@ bool SnrSpectrum::tickCalculation() {
             cachedSnrX = calcCommonX;
             fileCount = calcValidFiles;
             snrAvailable = true;
+#if FTS_BUILD_HDF5
+            if (appState && appState->hasWorkspace() && snrAvailable) {
+                auto inputs = checkedInputPaths(*appState);
+                wsUpsertSnr(appState->workspace, inputs, fileCount,
+                            cachedSnrX, cachedSnrY,
+                            makeSnrConfig(*appState, inputs, fileCount));
+            }
+#endif
         } else {
             snrAvailable = false;
             fileCount = 0;

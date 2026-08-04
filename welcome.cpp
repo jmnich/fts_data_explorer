@@ -317,18 +317,22 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                     if (shouldOpen) {
 #if FTS_BUILD_HDF5
                         if (isH5) {
-                            try {
-                                openWorkspace(appState, datasetPath);
-                                appState.needsRedraw = true;
-                                std::cout << "Opened recent dataset: " << datasetPath << std::endl;
+                            requestWorkspaceDiscard(appState, PendingWorkspaceAction::OpenPath, datasetPath);
+                            if (!appState.showUnsavedPrompt && !appState.showStaleDropPrompt) {
                                 ImGui::CloseCurrentPopup();
-                            } catch (const std::exception& e) {
-                                appState.adapterErrorMsg = std::string("Failed to open workspace:\n") + e.what();
-                                appState.showAdapterErrorPopup = true;
+                                appState.needsRedraw = true;
                             }
                         } else
 #endif
                         if (std::filesystem::exists(datasetPath) && std::filesystem::is_directory(datasetPath)) {
+#if FTS_BUILD_HDF5
+                            appState.pendingWorkspaceAdapterName = entry.adapterName;
+                            requestWorkspaceDiscard(appState, PendingWorkspaceAction::SetDirectory, datasetPath);
+                            if (!appState.showUnsavedPrompt && !appState.showStaleDropPrompt) {
+                                ImGui::CloseCurrentPopup();
+                                appState.needsRedraw = true;
+                            }
+#else
                             std::string rawDataPath = datasetPath + "/raw_data";
                             if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {
                                 appState.currentDirectory = rawDataPath;
@@ -349,6 +353,7 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                             appState.needsRedraw = true;
                             std::cout << "Opened recent dataset: " << datasetPath << std::endl;
                             ImGui::CloseCurrentPopup();
+#endif
                         } else {
                             std::cerr << "Recent dataset path no longer exists: " << datasetPath << std::endl;
                         }
@@ -423,6 +428,14 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
         if (buttonClicked) {
             std::string selectedDirectory = FileBrowser::showDirectorySelectionDialog(glfwGetCurrentContext());
             if (!selectedDirectory.empty()) {
+#if FTS_BUILD_HDF5
+                appState.pendingWorkspaceAdapterName.clear();
+                requestWorkspaceDiscard(appState, PendingWorkspaceAction::SetDirectory, selectedDirectory);
+                if (!appState.showUnsavedPrompt && !appState.showStaleDropPrompt) {
+                    ImGui::CloseCurrentPopup();
+                    appState.needsRedraw = true;
+                }
+#else
                 std::string rawDataPath = selectedDirectory + "/raw_data";
                 if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {
                     appState.currentDirectory = rawDataPath;
@@ -436,6 +449,7 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                 addToRecentDatasets(config, configFilePath, selectedDirectory);
                 std::cout << "Working directory set to: " << appState.currentDirectory << std::endl;
                 ImGui::CloseCurrentPopup();
+#endif
             }
         }
 
@@ -449,12 +463,10 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                 "Open HDF5 Workspace", "HDF5 files", "*.h5",
                 glfwGetCurrentContext(), defaultFolder);
             if (!path.empty()) {
-                try {
-                    openWorkspace(appState, path);
+                requestWorkspaceDiscard(appState, PendingWorkspaceAction::OpenPath, path);
+                if (!appState.showUnsavedPrompt && !appState.showStaleDropPrompt) {
                     ImGui::CloseCurrentPopup();
-                } catch (const std::exception& e) {
-                    appState.adapterErrorMsg = std::string("Failed to open workspace:\n") + e.what();
-                    appState.showAdapterErrorPopup = true;
+                    appState.needsRedraw = true;
                 }
             }
         }

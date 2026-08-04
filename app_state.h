@@ -23,11 +23,19 @@
 
 struct AppState;
 
+#if FTS_BUILD_HDF5
+enum class PendingWorkspaceAction { None, CloseWorkspace, OpenPath, SetDirectory, Exit };
+#endif
+
 void selectAdapterForDirectory(const std::string& directoryPath);
 void applyAdapterSelection(const std::string& adapterName, const std::string& directoryPath);
 #if FTS_BUILD_HDF5
 void openWorkspace(AppState& s, const std::string& path);
 void closeWorkspace(AppState& s);
+// All workspace-discarding entry points route through this; the unsaved-changes
+// modal runs in the frame and dispatches the stashed action on resolution.
+void requestWorkspaceDiscard(AppState& s, PendingWorkspaceAction action, const std::string& path);
+void dispatchPendingAction(AppState& s);
 #endif
 
 // Application state structure
@@ -36,8 +44,20 @@ struct AppState {
     DatasetInfo datasetInfo;
     std::unique_ptr<DataAdapter> currentAdapter;
 #if FTS_BUILD_HDF5
-    Workspace workspace;      // in-memory HDF5 workspace (read-only in Phase 1)
+    Workspace workspace;      // in-memory HDF5 workspace
     std::string workspacePath; // empty = no workspace open
+
+    // Pending workspace-discarding action stashed while the unsaved-changes
+    // modal runs; dispatched by dispatchPendingAction on resolution.
+    PendingWorkspaceAction pendingWorkspaceAction = PendingWorkspaceAction::None;
+    std::string pendingWorkspacePath;
+    std::string pendingWorkspaceAdapterName;   // SetDirectory: adapter override (recent dirs)
+    bool showUnsavedPrompt = false;
+
+    // Stale-drop confirmation state (§1.5): stashed save target + modal flag.
+    // pendingSaveAsPath empty = plain Save, non-empty = Save As target.
+    std::string pendingSaveAsPath;
+    bool showStaleDropPrompt = false;
 #endif
     bool showAdapterSelectionPopup = false;
     bool showAdapterErrorPopup = false;
@@ -79,6 +99,7 @@ struct AppState {
     bool aKeyPressedLastFrame;
     bool dKeyPressedLastFrame;
     bool qKeyPressedLastFrame;
+    bool sKeyPressedLastFrame;
     
     // Performance optimization
     bool enableDownsampling;
@@ -209,6 +230,10 @@ struct AppState {
     size_t deleteConfirmIndex = 0;
     bool skipDeleteConfirm = false; // "Don't ask again" flag — survives dataset changes, not config
 
+    // Workspace member deletion confirmation (decision 1: originals always confirm).
+    bool showWorkspaceDeleteConfirmPopup = false;
+    std::string pendingWorkspaceDeletionPath;
+
     // Thread pool for parallel computation
     std::unique_ptr<ThreadPool> computationPool;
     int configuredWorkerCount = -1;   // -1 = AUTO
@@ -217,8 +242,10 @@ struct AppState {
 
 #if FTS_BUILD_HDF5
     bool hasWorkspace() const { return !workspacePath.empty(); }
+    bool workspaceDirty() const { return workspace.dirty; }
 #else
     bool hasWorkspace() const { return false; }
+    bool workspaceDirty() const { return false; }
 #endif
     bool dataSourceReady() const { return currentAdapter || hasWorkspace(); }
 };

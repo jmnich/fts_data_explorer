@@ -2,6 +2,9 @@
 #include "spectral_toolbox.h"
 #include "adapters/csv_adapter.h"
 #include "adapters/adapter_registry.h"
+#if FTS_BUILD_HDF5
+#include "workspace_reader.h"
+#endif
 #include "app_state.h"
 #include <cmath>
 #include <algorithm>
@@ -128,6 +131,15 @@ void AverageSpectrum::reset() {
 }
 
 void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
+#if FTS_BUILD_HDF5
+    // Staleness banner (§4.2): saved average no longer matches current
+    // settings/inputs and would be dropped at Save unless recomputed.
+    if (appState && averageOutdated(*appState)) {
+        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
+            "Saved result is stale - press Calculate to recompute.");
+        ImGui::Spacing();
+    }
+#endif
     // ---- 1. Placeholder when no average data available ----
     if (!averageAvailable || cachedAverageX.empty() || cachedAverageY.empty()) {
         ImVec2 avail = ImGui::GetContentRegionAvail();
@@ -706,6 +718,14 @@ bool AverageSpectrum::tickCalculation() {
             cachedAverageX = calcCommonX;
             averageCount = calcValidFiles;
             averageAvailable = true;
+#if FTS_BUILD_HDF5
+            if (appState && appState->hasWorkspace() && averageAvailable) {
+                auto inputs = checkedInputPaths(*appState);
+                wsUpsertAverage(appState->workspace, inputs, averageCount,
+                                cachedAverageX, cachedAverageY,
+                                makeAverageConfig(*appState, inputs, averageCount));
+            }
+#endif
         } else {
             averageAvailable = false;
             averageCount = 0;

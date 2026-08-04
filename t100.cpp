@@ -2,6 +2,9 @@
 #include "spectral_toolbox.h"
 #include "adapters/csv_adapter.h"
 #include "adapters/adapter_registry.h"
+#if FTS_BUILD_HDF5
+#include "workspace_reader.h"
+#endif
 #include "app_state.h"
 #include "average_spectrum.h"
 #include <cmath>
@@ -181,6 +184,9 @@ void T100Spectrum::setReferenceFromCurrentSpectrum() {
     firstLoadCompleted = false;
     needsRecompute = true;
     clearStdDev();
+#if FTS_BUILD_HDF5
+    wsUpsertT100FromPanel(*appState);
+#endif
 }
 
 static int detectXUnitFromHeader(const std::string& header) {
@@ -245,6 +251,9 @@ void T100Spectrum::setReferenceFromCSV(const std::string& path) {
     firstLoadCompleted = false;
     needsRecompute = true;
     clearStdDev();
+#if FTS_BUILD_HDF5
+    wsUpsertT100FromPanel(*appState);
+#endif
 }
 
 void T100Spectrum::setReferenceFromAverage() {
@@ -284,6 +293,9 @@ void T100Spectrum::setReferenceFromAverage() {
     firstLoadCompleted = false;
     needsRecompute = true;
     clearStdDev();
+#if FTS_BUILD_HDF5
+    wsUpsertT100FromPanel(*appState);
+#endif
 }
 
 bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
@@ -451,6 +463,10 @@ bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
     cachedTransX[fileId] = std::move(newX);
     cachedTransY[fileId] = std::move(newY);
     transmittanceAvailable = true;
+#if FTS_BUILD_HDF5
+    if (appState)
+        wsUpsertT100FromPanel(*appState);
+#endif
     return true;
 }
 
@@ -782,6 +798,10 @@ bool T100Spectrum::tickStdCalculation() {
             computeStats(calcRatioC, ratioAvgC, ratioSpreadC, ratioStdDevC);
             ratioStatsAvailable = true;
         }
+#if FTS_BUILD_HDF5
+        if (appState)
+            wsUpsertT100FromPanel(*appState);
+#endif
         batchActive_ = false;
         calcStdInProgress = false;
         return true;
@@ -930,6 +950,14 @@ static void formatEnergyRatio(char* buf, size_t bufSize, double val) {
 }
 
 void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
+#if FTS_BUILD_HDF5
+    // Staleness banner (§4.2).
+    if (appState && appState->hasWorkspace() && t100Outdated(*appState)) {
+        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
+            "Saved result is stale - press Calculate to recompute.");
+        ImGui::Spacing();
+    }
+#endif
     // Detect file selection changes
     {
         std::vector<std::string> currentSelection(appState->selectedFilenames.begin(),

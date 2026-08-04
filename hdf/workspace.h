@@ -22,6 +22,8 @@ struct MemberBase {
     std::vector<std::string> units;
     std::string origin;                      // per-member @origin JSON (spectra/, average_spectra/, etc.)
     std::string config;                      // per-member @config JSON (spectra/, average_spectra/, etc.)
+    bool stale = false;                      // RAM-only; never serialized. Set by the deletion
+                                             // cascade or the app-side markConfigStale.
 };
 
 // igm_uncorrected_x/ and igm_corrected_x/ — flat [N,2] datasets.
@@ -89,6 +91,11 @@ struct Workspace {
 
     bool dirty = false;
 
+    // RAM-only; authorized original deletions (absolute /group/id paths).
+    // Never serialized. Original members removed from the model are re-created
+    // as absences on disk; the H5Store protection skips them.
+    std::vector<std::string> deletedOriginalPaths;
+
     // Availability flags for the engine (mirrors current DatasetInfo).
     bool hasInterferograms() const;
     bool hasReferenceChannel() const;
@@ -98,6 +105,18 @@ struct Workspace {
     // inputs bookkeeping (spec rule 10).
     bool inputsAreValid() const;
     std::vector<std::string> danglingInputs() const;
+
+    // Copy minus stale *derivative* members (all 7 groups). Originals are never
+    // pruned. Used by Save to drop stale derivatives without touching the RAM
+    // model (decision 4).
+    Workspace pruneStale() const;
+
+    // Members whose config.inputs arrays or t100 reference.path reference `path`.
+    std::vector<std::string> dependentsOf(const std::string& path) const;
+
+    // Present-only stale categories in fixed display order. Categories, never
+    // individual members (per-file FFT spectra collapse into one "Spectra" row).
+    std::vector<std::string> staleCategories() const;
 };
 
 // Slug + collision suffix, unique within a group: "sample_0001", "avg_of_3".
@@ -105,6 +124,18 @@ std::string makeUniqueId(const std::string& base, const std::vector<std::string>
 
 // Absolute-path lookup used by inputs integrity: "/igm_uncorrected_x/record_0".
 std::optional<std::string> findMemberPath(const Workspace& ws, const std::string& id);
+
+// True if `/group/id` names an existing member (used for t100 reference.path checks).
+bool memberPathExists(const Workspace& ws, const std::string& path);
+
+// Stale flag of the member at `/group/id` (false if absent). Used so a
+// derivative whose reference is itself stale is also treated as stale.
+bool memberPathIsStale(const Workspace& ws, const std::string& path);
+
+// BFS cascade: mark `path`'s dependents (and their dependents, transitively)
+// stale. Returns the absolute paths that were newly marked. Deleting a member
+// feeds this; `stale` is then pruned at Save (decisions 4/7).
+std::vector<std::string> markDependentsStale(Workspace& ws, const std::string& path);
 
 // Group-level provenance (spec §5) — application identity only, no host info.
 nlohmann::json makeOriginJson(const std::string& appName, const std::string& version);

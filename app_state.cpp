@@ -23,6 +23,7 @@ AppState::AppState()
       aKeyPressedLastFrame(false),
       dKeyPressedLastFrame(false),
       qKeyPressedLastFrame(false),
+      sKeyPressedLastFrame(false),
       enableDownsampling(true),
       zoomRange({0, 0}),
       shouldAutoscale(false),
@@ -86,6 +87,7 @@ void AppState::reset() {
     aKeyPressedLastFrame = false;
     dKeyPressedLastFrame = false;
     qKeyPressedLastFrame = false;
+    sKeyPressedLastFrame = false;
     enableDownsampling = true;
     zoomRange = {0, 0};
     shouldAutoscale = false;
@@ -132,6 +134,12 @@ void AppState::reset() {
 #if FTS_BUILD_HDF5
     workspace = Workspace{};
     workspacePath.clear();
+    pendingWorkspaceAction = PendingWorkspaceAction::None;
+    pendingWorkspacePath.clear();
+    pendingWorkspaceAdapterName.clear();
+    showUnsavedPrompt = false;
+    pendingSaveAsPath.clear();
+    showStaleDropPrompt = false;
 #endif
     showAdapterSelectionPopup = false;
     showIncompatibleAdapterPopup = false;
@@ -140,6 +148,8 @@ void AppState::reset() {
     compatibleAdapters.clear();
     showDeleteConfirmPopup = false;
     deleteConfirmIndex = 0;
+    showWorkspaceDeleteConfirmPopup = false;
+    pendingWorkspaceDeletionPath.clear();
     // skipDeleteConfirm intentionally NOT reset — it's a session-level flag
     hilbertXCache.clear();
     peakPositionsCache.clear();

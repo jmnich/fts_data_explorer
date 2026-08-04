@@ -353,6 +353,16 @@ void applyAdapterSelection(const std::string& adapterName, const std::string& di
     if (!adapter) return;
 
     appState.currentAdapter.reset();
+#if FTS_BUILD_HDF5
+    // Clear any pending workspace modal state (switching to a legacy dataset).
+    appState.pendingWorkspaceAction = PendingWorkspaceAction::None;
+    appState.pendingWorkspacePath.clear();
+    appState.showUnsavedPrompt = false;
+    appState.pendingSaveAsPath.clear();
+    appState.showStaleDropPrompt = false;
+    appState.showWorkspaceDeleteConfirmPopup = false;
+    appState.pendingWorkspaceDeletionPath.clear();
+#endif
     // Create appropriate concrete adapter based on name
     if (adapterName == "WUST Mini FTS Raw")
         appState.currentAdapter = std::make_unique<WustMiniFtsAdapter>();
@@ -427,8 +437,17 @@ void openWorkspace(AppState& s, const std::string& path) {
     s.workspacePath = path;
 
     // Point the worker-path dispatcher at the new workspace. Must happen before
-    // any worker runs; the workspace is immutable after open (Phase 1).
+    // any worker runs.
     AdapterRegistry::s_workspace = &s.workspace;
+
+    // Clear any pending discard/save modal state from a previous flow.
+    s.pendingWorkspaceAction = PendingWorkspaceAction::None;
+    s.pendingWorkspacePath.clear();
+    s.showUnsavedPrompt = false;
+    s.pendingSaveAsPath.clear();
+    s.showStaleDropPrompt = false;
+    s.showWorkspaceDeleteConfirmPopup = false;
+    s.pendingWorkspaceDeletionPath.clear();
 
     // Clear legacy adapter state
     s.currentAdapter.reset();
@@ -473,6 +492,9 @@ void openWorkspace(AppState& s, const std::string& path) {
     // Recent datasets (configPtr is set at startup; guard for robustness)
     if (s.configPtr)
         addToRecentDatasets(*s.configPtr, s.configFilePath, path, kHdfWorkspaceAdapter);
+
+    // Restore-on-open: fill panel caches from matching saved members.
+    seedPanelsFromWorkspace(s);
 }
 
 void closeWorkspace(AppState& s) {
@@ -480,6 +502,15 @@ void closeWorkspace(AppState& s) {
     s.workspace = Workspace{};
     s.workspacePath.clear();
     s.currentAdapter.reset();
+
+    // Clear pending discard/save modal state.
+    s.pendingWorkspaceAction = PendingWorkspaceAction::None;
+    s.pendingWorkspacePath.clear();
+    s.showUnsavedPrompt = false;
+    s.pendingSaveAsPath.clear();
+    s.showStaleDropPrompt = false;
+    s.showWorkspaceDeleteConfirmPopup = false;
+    s.pendingWorkspaceDeletionPath.clear();
 
     // Return to welcome screen (mirror Ctrl+H reset)
     s.showWelcomeScreen = true;
@@ -506,6 +537,360 @@ void closeWorkspace(AppState& s) {
     s.dataLoaded = false;
     s.needsRedraw = true;
 }
+#endif // FTS_BUILD_HDF5
+
+// Open a legacy (directory/adapter) dataset. Shared by Set Working Directory,
+// recent-directory entries, and the SetDirectory pending action. Kept out of
+// the FTS_BUILD_HDF5 guard: the FTS_BUILD_HDF5=OFF build uses it directly.
+static void openDatasetDirectory(AppState& s, const std::string& directoryPath,
+                                 const std::string& adapterName) {
+    std::string rawDataPath = directoryPath + "/raw_data";
+    if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath))
+        s.currentDirectory = rawDataPath;
+    else
+        s.currentDirectory = directoryPath;
+    s.currentDatasetName = directoryPath.substr(directoryPath.find_last_of("/\\") + 1);
+
+    if (!adapterName.empty() && AdapterRegistry::instance().getAdapter(adapterName))
+        applyAdapterSelection(adapterName, s.currentDirectory);
+    else
+        selectAdapterForDirectory(s.currentDirectory);
+    if (s.configPtr)
+        addToRecentDatasets(*s.configPtr, s.configFilePath, directoryPath, adapterName);
+    std::cout << "Opened dataset: " << directoryPath << std::endl;
+}
+
+#if FTS_BUILD_HDF5
+
+// ── Save / Save As + dirty-close routing (Phase 2) ─────────────────────────
+
+// Clear panel caches + selection (applyAdapterSelection-style block).
+static void clearPanelCaches(AppState& s) {
+    s.clearAverageSpectrum();
+    s.clearSnrSpectrum();
+    s.clearAllanVariance();
+    s.clearT100Spectrum();
+    s.loadedData.clear();
+    s.rawDataCache.clear();
+    s.hilbertXCache.clear();
+    s.peakPositionsCache.clear();
+    s.hilbertCacheLaserWavelength = 0.0f;
+    s.spectrum.cachedSpectra.clear();
+    s.spectrum.cachedFrequencies.clear();
+    s.spectrum.lastPrimaryDetectors.clear();
+    s.spectrum.lastSpectrumParams.clear();
+    s.spectrum.pendingSpectra_.clear();
+    s.selectedFiles.clear();
+    s.selectedFilenames.clear();
+}
+
+// Clear only derived results (keep file selection / interferogram view).
+static void clearPanelDerivedResults(AppState& s) {
+    s.clearAverageSpectrum();
+    s.clearSnrSpectrum();
+    s.clearAllanVariance();
+    s.clearT100Spectrum();
+    s.spectrum.cachedSpectra.clear();
+    s.spectrum.cachedFrequencies.clear();
+    s.spectrum.lastPrimaryDetectors.clear();
+    s.spectrum.lastSpectrumParams.clear();
+    s.spectrum.pendingSpectra_.clear();
+    s.t100.cachedTransX.clear();
+    s.t100.cachedTransY.clear();
+    s.t100.needsRecompute = true;
+}
+
+// Save. Stale derivatives are never dropped silently: when any stale category
+// exists, the actual H5Store::save is deferred behind the §1.5 confirmation.
+void doSaveWorkspace(AppState& s, const std::string& asPath) {
+    const Workspace* toSave = &s.workspace;
+    Workspace copy;
+    if (!asPath.empty()) {
+        copy = s.workspace.pruneStale();
+        copy.created.clear();                // reset @created (spec §2.2)
+        toSave = &copy;
+    } else if (!s.workspace.staleCategories().empty()) {
+        copy = s.workspace.pruneStale();     // §1.5 confirmed: drop stale
+        toSave = &copy;
+    }
+    H5Store::save(asPath.empty() ? s.workspacePath : asPath, *toSave);   // throws H5Error
+    if (!asPath.empty()) {
+        s.workspacePath = asPath;
+        s.currentDatasetName = std::filesystem::path(asPath).stem().string();
+        if (s.configPtr)
+            addToRecentDatasets(*s.configPtr, s.configFilePath, asPath, kHdfWorkspaceAdapter);
+    }
+    s.workspace.dirty = false;
+    s.needsRedraw = true;
+}
+
+void requestSaveWorkspace(AppState& s, const std::string& asPath) {
+    markConfigStale(s.workspace, s);
+    if (s.workspace.staleCategories().empty()) {
+        doSaveWorkspace(s, asPath);
+        return;
+    }
+    s.pendingSaveAsPath = asPath;
+    s.showStaleDropPrompt = true;
+    s.needsRedraw = true;
+}
+
+void saveWorkspaceAs(AppState& s, GLFWwindow* window) {
+    std::string defaultFolder = s.workspacePath.empty()
+        ? (std::filesystem::is_directory(s.currentDirectory) ? s.currentDirectory : "")
+        : std::filesystem::path(s.workspacePath).parent_path().string();
+    std::string displayName = s.workspacePath.empty()
+        ? "workspace.h5" : std::filesystem::path(s.workspacePath).filename().string();
+    std::string path = FileBrowser::showFileSaveDialog(
+        "Save Workspace As", displayName, "*.h5", defaultFolder, window);
+    if (path.empty()) return;
+    requestSaveWorkspace(s, path);
+}
+
+// Single choke point for every workspace-discarding entry point. Stashes the
+// action; if the workspace is clean (or absent) it dispatches immediately.
+void requestWorkspaceDiscard(AppState& s, PendingWorkspaceAction action, const std::string& path) {
+    if (action != PendingWorkspaceAction::None) {
+        s.pendingWorkspaceAction = action;
+        s.pendingWorkspacePath = path;
+    }
+    if (!s.hasWorkspace() || !s.workspace.dirty) {
+        dispatchPendingAction(s);
+        return;
+    }
+    s.showUnsavedPrompt = true;
+    s.needsRedraw = true;
+}
+
+void dispatchPendingAction(AppState& s) {
+    if (s.pendingWorkspaceAction == PendingWorkspaceAction::None) return;
+    PendingWorkspaceAction action = s.pendingWorkspaceAction;
+    std::string path = s.pendingWorkspacePath;
+    std::string adapterName = s.pendingWorkspaceAdapterName;
+    s.pendingWorkspaceAction = PendingWorkspaceAction::None;
+    s.pendingWorkspacePath.clear();
+    s.pendingWorkspaceAdapterName.clear();
+    s.showUnsavedPrompt = false;
+    s.showStaleDropPrompt = false;
+    s.pendingSaveAsPath.clear();
+    s.needsRedraw = true;
+
+    switch (action) {
+        case PendingWorkspaceAction::CloseWorkspace:
+            closeWorkspace(s);
+            break;
+        case PendingWorkspaceAction::OpenPath:
+            try {
+                openWorkspace(s, path);
+            } catch (const std::exception& e) {
+                s.adapterErrorMsg = std::string("Failed to open workspace:\n") + e.what();
+                s.showAdapterErrorPopup = true;
+            }
+            break;
+        case PendingWorkspaceAction::SetDirectory:
+            // Switching to a legacy dataset: discard the current workspace.
+            if (s.hasWorkspace()) closeWorkspace(s);
+            try {
+                openDatasetDirectory(s, path, adapterName);
+            } catch (const std::exception& e) {
+                s.adapterErrorMsg = std::string("Failed to open dataset:\n") + e.what();
+                s.showAdapterErrorPopup = true;
+            }
+            break;
+        case PendingWorkspaceAction::Exit:
+            s.workspace.dirty = false;   // discarding: keep the close-intercept from re-firing
+            glfwSetWindowShouldClose(glfwGetCurrentContext(), GLFW_TRUE);
+            break;
+        case PendingWorkspaceAction::None:
+            break;
+    }
+}
+
+// ── Cascading member deletion (Phase 2) ────────────────────────────────────
+
+static bool workspaceMemberIsOriginal(const Workspace& ws, const std::string& path) {
+    auto slash = path.find('/', 1);
+    if (path.empty() || path[0] != '/' || slash == std::string::npos) return false;
+    std::string group = path.substr(1, slash - 1);
+    std::string id = path.substr(slash + 1);
+    auto isOrig = [&](const auto& members) {
+        for (const auto& m : members)
+            if (m.id == id) return m.kind == MemberKind::Original;
+        return false;
+    };
+    if (group == "igm_uncorrected_x") return isOrig(ws.uncorrectedIfg.members);
+    if (group == "igm_corrected_x")   return isOrig(ws.correctedIfg.members);
+    if (group == "spectra")           return isOrig(ws.spectra.members);
+    return false;
+}
+
+static void workspaceEraseMember(Workspace& ws, const std::string& path) {
+    auto slash = path.find('/', 1);
+    if (path.empty() || path[0] != '/' || slash == std::string::npos) return;
+    std::string group = path.substr(1, slash - 1);
+    std::string id = path.substr(slash + 1);
+    auto eraseById = [&](auto& members) {
+        members.erase(std::remove_if(members.begin(), members.end(),
+            [&](const auto& m) { return m.id == id; }), members.end());
+    };
+    if (group == "igm_uncorrected_x") eraseById(ws.uncorrectedIfg.members);
+    else if (group == "igm_corrected_x") eraseById(ws.correctedIfg.members);
+    else if (group == "spectra") eraseById(ws.spectra.members);
+    else if (group == "average_spectra") eraseById(ws.averageSpectra.members);
+    else if (group == "snr_spectra") eraseById(ws.snrSpectra.members);
+    else if (group == "allan_werle") eraseById(ws.allanWerle.members);
+    else if (group == "t100") eraseById(ws.t100.members);
+}
+
+// Remove a file/member id from all engine containers referencing it.
+static void removeFileFromEngine(AppState& s, const std::string& id) {
+    s.csvFiles.erase(std::remove(s.csvFiles.begin(), s.csvFiles.end(), id), s.csvFiles.end());
+    s.sortedFiles.erase(std::remove(s.sortedFiles.begin(), s.sortedFiles.end(), id), s.sortedFiles.end());
+    for (size_t i = 0; i < s.selectedFiles.size();) {
+        if (s.selectedFiles[i] == id) {
+            s.selectedFiles.erase(s.selectedFiles.begin() + i);
+            if (i < s.selectedFilenames.size()) s.selectedFilenames.erase(s.selectedFilenames.begin() + i);
+            if (i < s.loadedData.size()) s.loadedData.erase(s.loadedData.begin() + i);
+            if (i < s.rawDataCache.size()) s.rawDataCache.erase(s.rawDataCache.begin() + i);
+        } else {
+            ++i;
+        }
+    }
+    s.spectrum.cachedSpectra.erase(id);
+    s.spectrum.cachedFrequencies.erase(id);
+    s.spectrum.lastPrimaryDetectors.erase(id);
+    s.spectrum.lastSpectrumParams.erase(id);
+    s.hilbertXCache.erase(id);
+    s.peakPositionsCache.erase(id);
+    s.t100.cachedTransX.erase(id);
+    s.t100.cachedTransY.erase(id);
+}
+
+void performWorkspaceMemberDeletion(AppState& s, const std::string& absPath) {
+    const std::string id = absPath.substr(absPath.find_last_of('/') + 1);
+    const bool isOriginal = workspaceMemberIsOriginal(s.workspace, absPath);
+
+    // 1. Remove the member from its group.
+    workspaceEraseMember(s.workspace, absPath);
+    if (isOriginal)
+        s.workspace.deletedOriginalPaths.push_back(absPath);
+
+    // 2. Cascade: downstream derivatives (and their dependents) go stale.
+    markDependentsStale(s.workspace, absPath);
+
+    // 3. Clear engine state referencing the removed member.
+    removeFileFromEngine(s, id);
+
+    // 4. Original removed from the active group → re-derive datasetInfo +
+    //    csvFiles (active-group priority may shift) and clear panel caches.
+    if (isOriginal) {
+        s.datasetInfo = workspaceDatasetInfo(s.workspace);
+        s.csvFiles = workspaceFileList(s.workspace);
+        clearPanelCaches(s);
+        s.filesChanged = true;
+    }
+
+    s.workspace.dirty = true;
+    s.needsRedraw = true;
+}
+
+// "Strip derivatives": reset the file to originals. All derivative members are
+// removed from all groups; panel results are cleared; selection is kept.
+static void stripWorkspaceDerivatives(AppState& s) {
+    auto clearDerivs = [](auto& members) {
+        members.erase(std::remove_if(members.begin(), members.end(),
+            [](const auto& m) { return m.kind == MemberKind::Derivative; }),
+            members.end());
+    };
+    clearDerivs(s.workspace.uncorrectedIfg.members);
+    clearDerivs(s.workspace.correctedIfg.members);
+    clearDerivs(s.workspace.spectra.members);
+    s.workspace.averageSpectra.members.clear();
+    s.workspace.snrSpectra.members.clear();
+    s.workspace.allanWerle.members.clear();
+    s.workspace.t100.members.clear();
+    clearPanelDerivedResults(s);
+    s.workspace.dirty = true;
+    s.needsRedraw = true;
+}
+
+// ── Unsaved-changes + stale-drop modals ─────────────────────────────────────
+
+static void renderUnsavedPromptModal() {
+    if (!appState.showUnsavedPrompt) return;
+    ImGui::OpenPopup("Unsaved Changes##confirm");
+    if (ImGui::BeginPopupModal("Unsaved Changes##confirm", nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextWrapped("Save changes to \"%s\" before continuing?",
+                           appState.currentDatasetName.c_str());
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::Button("Save", ImVec2(120, 0)) || ImGui::IsKeyPressed(ImGuiKey_Enter)) {
+            try {
+                requestSaveWorkspace(appState, "");
+                if (!appState.showStaleDropPrompt)
+                    dispatchPendingAction(appState);
+            } catch (const std::exception& e) {
+                appState.adapterErrorMsg = std::string("Save failed:\n") + e.what();
+                appState.showAdapterErrorPopup = true;
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Don't Save", ImVec2(120, 0))) {
+            dispatchPendingAction(appState);   // discard RAM workspace
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            appState.pendingWorkspaceAction = PendingWorkspaceAction::None;
+            appState.pendingWorkspacePath.clear();
+            appState.showUnsavedPrompt = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+}
+
+static void renderStaleDropPromptModal() {
+    if (!appState.showStaleDropPrompt) return;
+    ImGui::OpenPopup("Stale Data Will Be Dropped##confirm");
+    if (ImGui::BeginPopupModal("Stale Data Will Be Dropped##confirm", nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextWrapped("Some results no longer match the current inputs or settings "
+                           "and will not be saved:");
+        ImGui::Spacing();
+        for (const auto& cat : appState.workspace.staleCategories())
+            ImGui::BulletText("%s", cat.c_str());
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::Button("Cancel", ImVec2(150, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            appState.pendingSaveAsPath.clear();
+            appState.showStaleDropPrompt = false;
+            appState.pendingWorkspaceAction = PendingWorkspaceAction::None;
+            appState.pendingWorkspacePath.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Drop Stale Data", ImVec2(150, 0)) || ImGui::IsKeyPressed(ImGuiKey_Enter)) {
+            try {
+                doSaveWorkspace(appState, appState.pendingSaveAsPath);
+                appState.pendingSaveAsPath.clear();
+                appState.showStaleDropPrompt = false;
+                if (appState.pendingWorkspaceAction != PendingWorkspaceAction::None)
+                    dispatchPendingAction(appState);
+                ImGui::CloseCurrentPopup();
+            } catch (const std::exception& e) {
+                appState.adapterErrorMsg = std::string("Save failed:\n") + e.what();
+                appState.showAdapterErrorPopup = true;
+            }
+        }
+        ImGui::EndPopup();
+    }
+}
+
 #endif // FTS_BUILD_HDF5
 
 static std::string shortenFilename(const std::string& filename) {
@@ -1172,6 +1557,16 @@ int main(int argc, char* argv[]) {
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
+#if FTS_BUILD_HDF5
+        // Window-close / exit intercept: defer closing while the workspace is
+        // dirty so the Unsaved Changes modal can run (resolution sets the flag).
+        if (glfwWindowShouldClose(window) && appState.hasWorkspace() &&
+            appState.workspace.dirty && appState.pendingWorkspaceAction == PendingWorkspaceAction::None) {
+            requestWorkspaceDiscard(appState, PendingWorkspaceAction::Exit, "");
+            glfwSetWindowShouldClose(window, GLFW_FALSE);   // defer
+        }
+#endif
+
         // Poll pending async spectrum computations
         if (!appState.spectrum.pendingSpectra_.empty()) {
             appState.needsRedraw = true;
@@ -1232,6 +1627,7 @@ int main(int argc, char* argv[]) {
             bool aKeyPressed = glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
             bool dKeyPressed = glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
             bool qKeyPressed = glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
+            bool sKeyPressed = glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
             
             // 'Ctrl+Y' - Toggle auto-fit Y-axis (only on initial press)
             if (yKeyPressed && !appState.yKeyPressedLastFrame) {
@@ -1318,16 +1714,34 @@ int main(int argc, char* argv[]) {
                 appState.needsRedraw = true;
             }
 
+#if FTS_BUILD_HDF5
+            // 'Ctrl+S' - Save workspace; 'Ctrl+Shift+S' - Save As (workspace mode only)
+            if (sKeyPressed && !appState.sKeyPressedLastFrame && appState.hasWorkspace()) {
+                try {
+                    if (ImGui::GetIO().KeyShift)
+                        saveWorkspaceAs(appState, window);
+                    else
+                        requestSaveWorkspace(appState, "");
+                } catch (const std::exception& e) {
+                    appState.adapterErrorMsg = std::string("Save failed:\n") + e.what();
+                    appState.showAdapterErrorPopup = true;
+                }
+                appState.needsRedraw = true;
+            }
+#endif
+
             // Update key state tracking for next frame
             appState.yKeyPressedLastFrame = yKeyPressed;
             appState.aKeyPressedLastFrame = aKeyPressed;
             appState.dKeyPressedLastFrame = dKeyPressed;
             appState.qKeyPressedLastFrame = qKeyPressed;
+            appState.sKeyPressedLastFrame = sKeyPressed;
         } else {
             // Reset key states when keyboard is captured (e.g., typing in text field)
             appState.yKeyPressedLastFrame = false;
             appState.aKeyPressedLastFrame = false;
             appState.qKeyPressedLastFrame = false;
+            appState.sKeyPressedLastFrame = false;
         }
 
         // Reapply UI scaling if size changed
@@ -1384,10 +1798,19 @@ int main(int argc, char* argv[]) {
         
         // Handle Delete key to remove currently navigated file
         // (OpenPopup is deferred to the Files panel, after NewFrame)
-        // No-op in workspace mode — HDF originals are never deleted (Phase 1).
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) &&
             ImGui::IsKeyPressed(ImGuiKey_Delete) &&
-            !appState.sortedFiles.empty() && !appState.hasWorkspace()) {
+            !appState.sortedFiles.empty()) {
+#if FTS_BUILD_HDF5
+            if (appState.hasWorkspace()) {
+                appState.pendingWorkspaceDeletionPath =
+                    memberPathOf(appState.workspace, appState.sortedFiles[appState.currentSortedFileIndex]);
+                if (!appState.pendingWorkspaceDeletionPath.empty()) {
+                    appState.showWorkspaceDeleteConfirmPopup = true;
+                    appState.needsRedraw = true;
+                }
+            } else
+#endif
             if (appState.skipDeleteConfirm) {
                 performFileDeletion(appState, appState.currentSortedFileIndex);
             } else {
@@ -1650,6 +2073,12 @@ int main(int argc, char* argv[]) {
             }
             ImGui::EndPopup();
         }
+
+#if FTS_BUILD_HDF5
+        // Phase 2 modals: unsaved-changes + stale-drop confirmation.
+        renderUnsavedPromptModal();
+        renderStaleDropPromptModal();
+#endif
         
         // Only render main docking interface if welcome screen is not active
         if (appState.welcomeScreenInitialized) {
@@ -1667,49 +2096,49 @@ int main(int argc, char* argv[]) {
                 if (ImGui::BeginMenu("File"))
                 {
                     if (ImGui::MenuItem("Set Working Directory")) {
-                        // Implement proper directory selection dialog
                         std::string selectedDirectory = FileBrowser::showDirectorySelectionDialog(window);
                         if (!selectedDirectory.empty()) {
-                            // Check if the selected directory has a raw_data subdirectory
-                            std::string rawDataPath = selectedDirectory + "/raw_data";
-                            if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {
-                                appState.currentDirectory = rawDataPath; // Use the raw_data subdirectory
-                                // Update dataset name from parent directory
-                                appState.currentDatasetName = selectedDirectory.substr(selectedDirectory.find_last_of("/\\") + 1);
-                            } else {
-                                appState.currentDirectory = selectedDirectory; // Fallback to selected directory
-                                // Update dataset name from selected directory
-                                appState.currentDatasetName = selectedDirectory.substr(selectedDirectory.find_last_of("/\\") + 1);
-                            }
-                            selectAdapterForDirectory(appState.currentDirectory);
-                            addToRecentDatasets(config, configFilePath, selectedDirectory);
-                            std::cout << "Working directory set to: " << appState.currentDirectory << std::endl;
+#if FTS_BUILD_HDF5
+                            appState.pendingWorkspaceAdapterName.clear();
+                            requestWorkspaceDiscard(appState, PendingWorkspaceAction::SetDirectory, selectedDirectory);
+#else
+                            openDatasetDirectory(appState, selectedDirectory, "");
+#endif
                         }
                     }
 #if FTS_BUILD_HDF5
                     if (ImGui::MenuItem("Open HDF5 File...")) {
                         std::string defaultFolder = appState.currentDirectory;
-#if FTS_BUILD_HDF5
                         if (appState.hasWorkspace())
                             defaultFolder = std::filesystem::path(appState.workspacePath).parent_path().string();
-#endif
                         if (!std::filesystem::is_directory(defaultFolder))
                             defaultFolder = std::filesystem::is_directory(config.lastWorkingDirectory)
                                 ? config.lastWorkingDirectory : "";
                         std::string path = FileBrowser::showFileOpenDialog(
                             "Open HDF5 Workspace", "HDF5 files", "*.h5",
                             window, defaultFolder);
-                        if (!path.empty()) {
-                            try {
-                                openWorkspace(appState, path);
-                            } catch (const std::exception& e) {
-                                appState.adapterErrorMsg = std::string("Failed to open workspace:\n") + e.what();
-                                appState.showAdapterErrorPopup = true;
-                            }
-                        }
+                        if (!path.empty())
+                            requestWorkspaceDiscard(appState, PendingWorkspaceAction::OpenPath, path);
                     }
                     if (ImGui::MenuItem("Close Workspace", nullptr, false, appState.hasWorkspace())) {
-                        closeWorkspace(appState);
+                        requestWorkspaceDiscard(appState, PendingWorkspaceAction::CloseWorkspace, "");
+                    }
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("Save", "Ctrl+S", false, appState.hasWorkspace())) {
+                        try {
+                            requestSaveWorkspace(appState, "");
+                        } catch (const std::exception& e) {
+                            appState.adapterErrorMsg = std::string("Save failed:\n") + e.what();
+                            appState.showAdapterErrorPopup = true;
+                        }
+                    }
+                    if (ImGui::MenuItem("Save As...", "Ctrl+Shift+S", false, appState.hasWorkspace())) {
+                        try {
+                            saveWorkspaceAs(appState, window);
+                        } catch (const std::exception& e) {
+                            appState.adapterErrorMsg = std::string("Save failed:\n") + e.what();
+                            appState.showAdapterErrorPopup = true;
+                        }
                     }
 #endif
                     
@@ -1738,30 +2167,16 @@ int main(int argc, char* argv[]) {
                                 if (clicked && exists) {
 #if FTS_BUILD_HDF5
                                     if (std::filesystem::path(datasetPath).extension() == ".h5") {
-                                        try {
-                                            openWorkspace(appState, datasetPath);
-                                        } catch (const std::exception& e) {
-                                            appState.adapterErrorMsg = std::string("Failed to open workspace:\n") + e.what();
-                                            appState.showAdapterErrorPopup = true;
-                                        }
+                                        requestWorkspaceDiscard(appState, PendingWorkspaceAction::OpenPath, datasetPath);
                                     } else
 #endif
                                     if (std::filesystem::is_directory(datasetPath)) {
-                                        std::string rawDataPath = datasetPath + "/raw_data";
-                                        if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {
-                                            appState.currentDirectory = rawDataPath;
-                                        } else {
-                                            appState.currentDirectory = datasetPath;
-                                        }
-
-                                        appState.currentDatasetName = datasetPath.substr(datasetPath.find_last_of("/\\") + 1);
-
-                                        if (!entry.adapterName.empty() && AdapterRegistry::instance().getAdapter(entry.adapterName)) {
-                                            applyAdapterSelection(entry.adapterName, appState.currentDirectory);
-                                        } else {
-                                            selectAdapterForDirectory(appState.currentDirectory);
-                                        }
-                                        std::cout << "Opened recent dataset: " << datasetPath << std::endl;
+#if FTS_BUILD_HDF5
+                                        appState.pendingWorkspaceAdapterName = entry.adapterName;
+                                        requestWorkspaceDiscard(appState, PendingWorkspaceAction::SetDirectory, datasetPath);
+#else
+                                        openDatasetDirectory(appState, datasetPath, entry.adapterName);
+#endif
                                     } else {
                                         std::cerr << "Recent dataset path no longer exists: " << datasetPath << std::endl;
                                     }
@@ -1993,6 +2408,9 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
         // In workspace mode the entries are member IDs, not disk paths.
         if (appState.hasWorkspace()) {
             ImGui::TextWrapped("Workspace: %s", appState.workspacePath.c_str());
+            if (ImGui::Button("Strip derivatives", ImVec2(-FLT_MIN, 0))) {
+                stripWorkspaceDerivatives(appState);
+            }
             ImGui::Separator();
         }
 #endif
@@ -2023,9 +2441,23 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             filename = shortenFilename(filename);
             
             // Delete button (left) — unique label per row avoids needing PushID.
-            // Hidden in workspace mode: HDF originals are never deleted (Phase 1).
+            // Workspace mode: member delete (always confirms, decision 1).
+            // Legacy mode: file delete from disk (confirm, or skip-flag).
             float btnH = ImGui::GetFrameHeight();
-            if (!appState.hasWorkspace()) {
+#if FTS_BUILD_HDF5
+            if (appState.hasWorkspace()) {
+                std::string delBtnId = "×##del" + std::to_string(i);
+                if (ImGui::Button(delBtnId.c_str(), ImVec2(btnH, btnH))) {
+                    appState.pendingWorkspaceDeletionPath = memberPathOf(appState.workspace, file);
+                    if (!appState.pendingWorkspaceDeletionPath.empty()) {
+                        appState.showWorkspaceDeleteConfirmPopup = true;
+                        appState.needsRedraw = true;
+                    }
+                }
+                ImGui::SameLine();
+            } else
+#endif
+            {
                 std::string delBtnId = "×##del" + std::to_string(i);
                 if (ImGui::Button(delBtnId.c_str(), ImVec2(btnH, btnH))) {
                     if (appState.skipDeleteConfirm) {
@@ -2234,6 +2666,80 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             i++;
         }
         ImGui::EndChild();
+
+#if FTS_BUILD_HDF5
+        // Derived products section (workspace mode only): derivative members,
+        // each deletable immediately (no confirm — recomputable, spec rule 7).
+        if (appState.hasWorkspace()) {
+            ImGui::Separator();
+            if (ImGui::CollapsingHeader("Derived products")) {
+                bool any = false;
+                auto listGroup = [&](const char* groupName, const auto& members) {
+                    for (const auto& m : members) {
+                        if (m.kind != MemberKind::Derivative) continue;
+                        any = true;
+                        std::string path = std::string("/") + groupName + "/" + m.id;
+                        if (ImGui::Button(("×##delderv" + path).c_str(),
+                                          ImVec2(ImGui::GetFrameHeight(), ImGui::GetFrameHeight()))) {
+                            performWorkspaceMemberDeletion(appState, path);
+                            appState.needsRedraw = true;
+                        }
+                        ImGui::SameLine();
+                        ImGui::Text("%s/%s", groupName, m.id.c_str());
+                        if (m.stale) {
+                            ImGui::SameLine();
+                            ImGui::TextDisabled("(stale)");
+                        }
+                    }
+                };
+                listGroup("spectra", appState.workspace.spectra.members);
+                listGroup("average_spectra", appState.workspace.averageSpectra.members);
+                listGroup("snr_spectra", appState.workspace.snrSpectra.members);
+                listGroup("allan_werle", appState.workspace.allanWerle.members);
+                listGroup("t100", appState.workspace.t100.members);
+                if (!any) ImGui::TextDisabled("(none)");
+            }
+        }
+
+        // Workspace member delete confirmation (decision 1: always confirm).
+        {
+            static bool prevWPopupOpen = false;
+            if (!appState.showWorkspaceDeleteConfirmPopup)
+                prevWPopupOpen = false;
+            if (appState.showWorkspaceDeleteConfirmPopup) {
+                ImGui::OpenPopup("Delete Member##confirm");
+            }
+            if (ImGui::BeginPopupModal("Delete Member##confirm", NULL,
+                                       ImGuiWindowFlags_AlwaysAutoResize)) {
+                const std::string& delPath = appState.pendingWorkspaceDeletionPath;
+                size_t dependentCount = appState.workspace.dependentsOf(delPath).size();
+                ImGui::Text("Delete member?");
+                ImGui::TextWrapped("%s", delPath.c_str());
+                ImGui::Spacing();
+                if (dependentCount > 0)
+                    ImGui::TextWrapped("Some derived results may be marked stale.");
+                ImGui::Separator();
+                ImGui::Spacing();
+
+                bool enterPressed = ImGui::IsKeyPressed(ImGuiKey_Enter);
+                if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+                    appState.showWorkspaceDeleteConfirmPopup = false;
+                    appState.pendingWorkspaceDeletionPath.clear();
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Delete") || (enterPressed && prevWPopupOpen)) {
+                    if (!appState.pendingWorkspaceDeletionPath.empty())
+                        performWorkspaceMemberDeletion(appState, appState.pendingWorkspaceDeletionPath);
+                    appState.showWorkspaceDeleteConfirmPopup = false;
+                    appState.pendingWorkspaceDeletionPath.clear();
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::EndPopup();
+                prevWPopupOpen = true;
+            }
+        }
+#endif
 
         // Show selection limit popup if needed
         if (ImGui::BeginPopupModal("Selection Limit", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {

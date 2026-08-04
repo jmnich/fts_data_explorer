@@ -337,16 +337,23 @@ bool curveEqual(const T100Member::Curve& a, const T100Member::Curve& b, double t
 }
 
 // For every kind="original" member in `existing` (the current file on disk),
-// the same member must exist in `ws` with equal data (spec rule 1).
+// the same member must exist in `ws` with equal data (spec rule 1). Deletions
+// are only allowed for paths in `deletedOriginalPaths` (workspace-authorized).
 template <typename T, typename F>
 void checkOriginalGroup(const MemberGroup<T>& existing, const MemberGroup<T>& ws,
-                        const std::string& groupName, double tol, F dataEqual) {
+                        const std::string& groupName, double tol, F dataEqual,
+                        const std::vector<std::string>& deletedOriginalPaths) {
     for (const auto& e : existing.members) {
         if (e.kind != MemberKind::Original) continue;
         auto it = std::find_if(ws.members.begin(), ws.members.end(),
                                [&](const T& m) { return m.id == e.id; });
-        if (it == ws.members.end())
+        if (it == ws.members.end()) {
+            const std::string path = "/" + groupName + "/" + e.id;
+            if (std::find(deletedOriginalPaths.begin(), deletedOriginalPaths.end(), path)
+                    != deletedOriginalPaths.end())
+                continue;  // authorized selective deletion
             throw H5Error("save: original-data protected: deleted /" + groupName + "/" + e.id);
+        }
         if (it->kind != MemberKind::Original)
             throw H5Error("save: original-data protected: kind changed /" + groupName + "/" + e.id);
         if (!dataEqual(e, *it, tol))
@@ -358,20 +365,20 @@ void verifyOriginalsUnchanged(const Workspace& existing, const Workspace& ws) {
     checkOriginalGroup(existing.uncorrectedIfg, ws.uncorrectedIfg, "igm_uncorrected_x", kTolFp32,
         [](const InterferogramMember& a, const InterferogramMember& b, double t) {
             return vecEqual(a.col0, b.col0, t) && vecEqual(a.col1, b.col1, t);
-        });
+        }, ws.deletedOriginalPaths);
     checkOriginalGroup(existing.correctedIfg, ws.correctedIfg, "igm_corrected_x", kTolFp64,
         [](const InterferogramMember& a, const InterferogramMember& b, double t) {
             return vecEqual(a.col0, b.col0, t) && vecEqual(a.col1, b.col1, t);
-        });
+        }, ws.deletedOriginalPaths);
     checkOriginalGroup(existing.spectra, ws.spectra, "spectra", kTolFp64,
         [](const TwoColumnMember& a, const TwoColumnMember& b, double t) {
             return vecEqual(a.x, b.x, t) && vecEqual(a.y, b.y, t);
-        });
+        }, ws.deletedOriginalPaths);
     checkOriginalGroup(existing.allanWerle, ws.allanWerle, "allan_werle", kTolFp64,
         [](const AllanMember& a, const AllanMember& b, double t) {
             return vecEqual(a.taus, b.taus, t) && vecEqual(a.wavelengths, b.wavelengths, t) &&
                    vecEqual(a.surface, b.surface, t);
-        });
+        }, ws.deletedOriginalPaths);
     checkOriginalGroup(existing.t100, ws.t100, "t100", kTolFp64,
         [](const T100Member& a, const T100Member& b, double t) {
             bool ref = vecEqual(a.reference.x, b.reference.x, t) &&
@@ -382,7 +389,7 @@ void verifyOriginalsUnchanged(const Workspace& existing, const Workspace& ws) {
             for (size_t i = 0; i < a.curves.size(); ++i)
                 if (!curveEqual(a.curves[i], b.curves[i], t)) return false;
             return ref && sd;
-        });
+        }, ws.deletedOriginalPaths);
 }
 
 std::string joinDangling(const std::vector<std::string>& dangling) {

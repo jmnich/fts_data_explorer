@@ -17,4 +17,10 @@ public:
                                           const std::string& globPattern,
                                           GLFWwindow* window = nullptr,
                                           const std::string& defaultFolder = "");
+    // Save dialog: same no-embedded-NUL discipline as showFileOpenDialog.
+    static std::string showFileSaveDialog(const std::string& title,
+                                          const std::string& displayName,
+                                          const std::string& globPattern,
+                                          const std::string& defaultFolder,
+                                          GLFWwindow* window = nullptr);
 };
