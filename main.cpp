@@ -30,6 +30,7 @@
 #include "welcome.h"
 #include "about.h"
 #include "theme.h"
+#include "popup_utils.h"
 #include "headless.h"
 #include "version.h"
 #if FTS_BUILD_HDF5
@@ -771,18 +772,20 @@ static void renderMeasurementConfig(const nlohmann::json& cfg) {
 
 // ── Unsaved-changes + stale-drop modals ─────────────────────────────────────
 
-// Center the next modal over the main viewport. Without an explicit position,
-// AlwaysAutoResize modals can open at the top of the screen; every modal in
-// the app is centered this way (IMGUI_GUIDE §14).
-static void centerNextPopup() {
-    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-    ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+// Accent color used by the modal frames + focused buttons.
+static ImVec4 modalAccent() {
+    return GetAccentBase(StringToAccentColor(appState.currentAccentColor));
 }
 
 static void renderUnsavedPromptModal() {
-    if (!appState.showUnsavedPrompt) return;
+    static int focus = 0;
+    static bool wasOpen = false;
+    if (!appState.showUnsavedPrompt) {
+        wasOpen = false;
+        return;
+    }
     ImGui::OpenPopup("Unsaved Changes##confirm");
-    centerNextPopup();
+    setupModalWindow(520.0f);
     if (ImGui::BeginPopupModal("Unsaved Changes##confirm", nullptr,
                                ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::TextWrapped("Save changes to \"%s\" before continuing?",
@@ -791,9 +794,9 @@ static void renderUnsavedPromptModal() {
         ImGui::Separator();
         ImGui::Spacing();
 
-        // Auto-sized buttons: fixed widths clip longer labels at large UI
-        // scales (uiScale up to 1.8x), so sizing follows the text.
-        if (ImGui::Button("Save") || ImGui::IsKeyPressed(ImGuiKey_Enter)) {
+        int pressed = modalButtonRow({"Save", "Don't Save", "Cancel"},
+                                     focus, wasOpen, modalAccent());
+        if (pressed == 0) {
             try {
                 requestSaveWorkspace(appState, "");
                 if (!appState.showStaleDropPrompt)
@@ -802,26 +805,33 @@ static void renderUnsavedPromptModal() {
                 appState.adapterErrorMsg = std::string("Save failed:\n") + e.what();
                 appState.showAdapterErrorPopup = true;
             }
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Don't Save")) {
+        } else if (pressed == 1) {
             dispatchPendingAction(appState);   // discard RAM workspace
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        } else if (pressed == 2 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
             appState.pendingWorkspaceAction = PendingWorkspaceAction::None;
             appState.pendingWorkspacePath.clear();
             appState.showUnsavedPrompt = false;
             ImGui::CloseCurrentPopup();
         }
+        drawModalAccentFrame(modalAccent());
         ImGui::EndPopup();
+        wasOpen = true;
+    } else {
+        wasOpen = false;
     }
 }
 
 static void renderStaleDropPromptModal() {
-    if (!appState.showStaleDropPrompt) return;
+    static int focus = 0;
+    static bool wasOpen = false;
+    if (!appState.showStaleDropPrompt) {
+        wasOpen = false;
+        return;
+    }
     ImGui::OpenPopup("Stale Data Will Be Dropped##confirm");
-    centerNextPopup();
+    // Fixed width ~1.6x the old autosized width: the wrapped header text
+    // never clips and the category list gets breathing room.
+    setupModalWindow(560.0f);
     if (ImGui::BeginPopupModal("Stale Data Will Be Dropped##confirm", nullptr,
                                ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::TextWrapped("Some results no longer match the current inputs or settings "
@@ -833,18 +843,16 @@ static void renderStaleDropPromptModal() {
         ImGui::Separator();
         ImGui::Spacing();
 
-        // Auto-sized buttons: a fixed width would clip "Drop Stale Data" at
-        // large UI scales (uiScale up to 1.8x).
-        if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        int pressed = modalButtonRow({"Cancel", "Drop Stale Data"},
+                                     focus, wasOpen, modalAccent());
+        if (pressed == 0 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
             appState.pendingSaveAsPath.clear();
             appState.showStaleDropPrompt = false;
             // Keep pendingWorkspaceAction: if the save was chained from the
             // Unsaved Changes modal, "Don't Save" must still dispatch it. Only
             // the Unsaved modal's own Cancel aborts the pending action.
             ImGui::CloseCurrentPopup();
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Drop Stale Data") || ImGui::IsKeyPressed(ImGuiKey_Enter)) {
+        } else if (pressed == 1) {
             try {
                 doSaveWorkspace(appState, appState.pendingSaveAsPath);
                 appState.pendingSaveAsPath.clear();
@@ -857,7 +865,11 @@ static void renderStaleDropPromptModal() {
                 appState.showAdapterErrorPopup = true;
             }
         }
+        drawModalAccentFrame(modalAccent());
         ImGui::EndPopup();
+        wasOpen = true;
+    } else {
+        wasOpen = false;
     }
 }
 
@@ -1154,6 +1166,7 @@ int main(int argc, char* argv[]) {
     // Phase 5: best-effort background pull of the converter repo (never a
     // first clone at boot; silent when git is absent or no clone exists).
     startupConverterRefresh(config);
+
 
     // UI size settings
     appState.currentUiSize = config.uiSize;
@@ -1787,16 +1800,22 @@ int main(int argc, char* argv[]) {
             ImGui::OpenPopup("Adapter Error##adapterError");
             appState.needsRedraw = true;
         }
-        centerNextPopup();
+        setupModalWindow(520.0f);
         if (ImGui::BeginPopupModal("Adapter Error##adapterError", &appState.showAdapterErrorPopup,
-                                   ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
                                    ImGuiWindowFlags_AlwaysAutoResize)) {
-            ImGui::Text("%s", appState.adapterErrorMsg.c_str());
+            ImGui::TextWrapped("%s", appState.adapterErrorMsg.c_str());
             ImGui::Spacing();
-            if (ImGui::Button("OK", ImVec2(120, 0)) || ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            ImGui::Separator();
+            ImGui::Spacing();
+            static int errFocus = 0;
+            static bool errWasOpen = false;
+            if (modalButtonRow({"OK"}, errFocus, errWasOpen, modalAccent()) == 0 ||
+                ImGui::IsKeyPressed(ImGuiKey_Escape)) {
                 appState.showAdapterErrorPopup = false;
                 ImGui::CloseCurrentPopup();
             }
+            errWasOpen = true;
+            drawModalAccentFrame(modalAccent());
             ImGui::EndPopup();
         }
 
@@ -2430,18 +2449,21 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
 
         // Workspace member delete confirmation (decision 1: always confirm).
         {
+            static int delFocus = 0;
             static bool prevWPopupOpen = false;
-            if (!appState.showWorkspaceDeleteConfirmPopup)
+            if (!appState.showWorkspaceDeleteConfirmPopup) {
                 prevWPopupOpen = false;
+            }
             if (appState.showWorkspaceDeleteConfirmPopup) {
                 ImGui::OpenPopup("Delete Member##confirm");
             }
-            centerNextPopup();
+            setupModalWindow(480.0f);
             if (ImGui::BeginPopupModal("Delete Member##confirm", NULL,
                                        ImGuiWindowFlags_AlwaysAutoResize)) {
                 const std::string& delPath = appState.pendingWorkspaceDeletionPath;
                 size_t dependentCount = appState.workspace.dependentsOf(delPath).size();
                 ImGui::Text("Delete member?");
+                ImGui::Spacing();
                 ImGui::TextWrapped("%s", delPath.c_str());
                 ImGui::Spacing();
                 if (dependentCount > 0)
@@ -2449,20 +2471,20 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                 ImGui::Separator();
                 ImGui::Spacing();
 
-                bool enterPressed = ImGui::IsKeyPressed(ImGuiKey_Enter);
-                if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+                int pressed = modalButtonRow({"Cancel", "Delete"},
+                                             delFocus, prevWPopupOpen, modalAccent());
+                if (pressed == 0 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
                     appState.showWorkspaceDeleteConfirmPopup = false;
                     appState.pendingWorkspaceDeletionPath.clear();
                     ImGui::CloseCurrentPopup();
-                }
-                ImGui::SameLine();
-                if (ImGui::Button("Delete") || (enterPressed && prevWPopupOpen)) {
+                } else if (pressed == 1) {
                     if (!appState.pendingWorkspaceDeletionPath.empty())
                         performWorkspaceMemberDeletion(appState, appState.pendingWorkspaceDeletionPath);
                     appState.showWorkspaceDeleteConfirmPopup = false;
                     appState.pendingWorkspaceDeletionPath.clear();
                     ImGui::CloseCurrentPopup();
                 }
+                drawModalAccentFrame(modalAccent());
                 ImGui::EndPopup();
                 prevWPopupOpen = true;
             }
@@ -2470,16 +2492,28 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
 #endif
 
         // Show selection limit popup if needed
-        centerNextPopup();
-        if (ImGui::BeginPopupModal("Selection Limit", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
-            ImGui::Text("Maximum of %zu files can be selected at once.", appState.MAX_SELECTABLE_FILES);
-            ImGui::Text("Please deselect some files first.");
-            
-            if (ImGui::Button("OK")) {
-                ImGui::CloseCurrentPopup();
+        {
+            static int selFocus = 0;
+            static bool prevSelPopupOpen = false;
+            if (!ImGui::IsPopupOpen("Selection Limit"))
+                prevSelPopupOpen = false;
+            setupModalWindow(440.0f);
+            if (ImGui::BeginPopupModal("Selection Limit", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
+                ImGui::TextWrapped("Maximum of %zu files can be selected at once.",
+                                   appState.MAX_SELECTABLE_FILES);
+                ImGui::TextWrapped("Please deselect some files first.");
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+
+                if (modalButtonRow({"OK"}, selFocus, prevSelPopupOpen, modalAccent()) == 0 ||
+                    ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+                    ImGui::CloseCurrentPopup();
+                }
+                drawModalAccentFrame(modalAccent());
+                ImGui::EndPopup();
+                prevSelPopupOpen = true;
             }
-            
-            ImGui::EndPopup();
         }
 
         // Delete confirmation popup
@@ -2489,7 +2523,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             if (!appState.showDeleteConfirmPopup)
                 prevPopupOpen = false;
 
-            centerNextPopup();
+            setupModalWindow(480.0f);
             if (ImGui::BeginPopupModal("Delete File##confirm", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
                 size_t idx = appState.deleteConfirmIndex;
                 std::string fname = idx < appState.sortedFiles.size()
@@ -2497,61 +2531,32 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                     : "";
 
                 ImGui::Text("Are you sure you want to delete?");
+                ImGui::Spacing();
                 ImGui::TextWrapped("%s", fname.c_str());
                 ImGui::Spacing();
                 ImGui::Separator();
                 ImGui::Spacing();
 
-                bool enterPressed = ImGui::IsKeyPressed(ImGuiKey_Enter);
-
-                if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) && focusIdx > 0)
-                    focusIdx--;
-                if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) && focusIdx < 2)
-                    focusIdx++;
-
-                // Cancel
-                if (focusIdx == 0)
-                    ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-                if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape) ||
-                    (enterPressed && prevPopupOpen && focusIdx == 0)) {
-                    if (focusIdx == 0) ImGui::PopStyleColor();
+                int pressed = modalButtonRow(
+                    {"Cancel", "Yes", "Yes, don't ask again"},
+                    focusIdx, prevPopupOpen, modalAccent());
+                if (pressed == 0 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
                     appState.showDeleteConfirmPopup = false;
                     ImGui::CloseCurrentPopup();
-                } else if (focusIdx == 0) {
-                    ImGui::PopStyleColor();
-                }
-                ImGui::SameLine();
-
-                // Yes
-                if (focusIdx == 1)
-                    ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-                if (ImGui::Button("Yes") ||
-                    (enterPressed && prevPopupOpen && focusIdx == 1)) {
-                    if (focusIdx == 1) ImGui::PopStyleColor();
+                } else if (pressed == 1) {
                     if (idx < appState.sortedFiles.size())
                         performFileDeletion(appState, idx);
                     appState.showDeleteConfirmPopup = false;
                     ImGui::CloseCurrentPopup();
-                } else if (focusIdx == 1) {
-                    ImGui::PopStyleColor();
-                }
-                ImGui::SameLine();
-
-                // Yes, don't ask again
-                if (focusIdx == 2)
-                    ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-                if (ImGui::Button("Yes, don't ask again") ||
-                    (enterPressed && prevPopupOpen && focusIdx == 2)) {
-                    if (focusIdx == 2) ImGui::PopStyleColor();
+                } else if (pressed == 2) {
                     appState.skipDeleteConfirm = true;
                     if (idx < appState.sortedFiles.size())
                         performFileDeletion(appState, idx);
                     appState.showDeleteConfirmPopup = false;
                     ImGui::CloseCurrentPopup();
-                } else if (focusIdx == 2) {
-                    ImGui::PopStyleColor();
                 }
 
+                drawModalAccentFrame(modalAccent());
                 ImGui::EndPopup();
                 prevPopupOpen = true;
             }

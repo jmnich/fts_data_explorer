@@ -1,6 +1,9 @@
 #include "about.h"
 #include "imgui.h"
 #include "version.h"
+#include "app_state.h"
+#include "theme.h"
+#include "popup_utils.h"
 
 static bool s_showAbout = false;
 
@@ -89,11 +92,15 @@ void renderAboutPopup() {
 
     // ── Close button ───────────────────────────────────────────────────────
     ImGui::Separator();
-    float closeBtnWidth = 120.0f;
-    ImGui::SetCursorPosX((ImGui::GetWindowWidth() - closeBtnWidth) * 0.5f);
-    if (ImGui::Button("Close", ImVec2(closeBtnWidth, 0))) {
+    static int closeFocus = 0;
+    static bool wasOpen = false;
+    ImVec4 accent = GetAccentBase(StringToAccentColor(appState.currentAccentColor));
+    if (modalButtonRow({"Close"}, closeFocus, wasOpen, accent) == 0 ||
+        ImGui::IsKeyPressed(ImGuiKey_Escape)) {
         ImGui::CloseCurrentPopup();
     }
+    wasOpen = true;
 
+    drawModalAccentFrame(accent);
     ImGui::EndPopup();
 }

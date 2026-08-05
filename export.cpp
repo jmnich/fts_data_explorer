@@ -1,5 +1,7 @@
 #include "export.h"
 #include "app_state.h"
+#include "theme.h"
+#include "popup_utils.h"
 #include "spectrum.h"
 #include "average_spectrum.h"
 #include "allan_variance.h"
@@ -150,22 +152,37 @@ void ExportPanel::render()
     }
     ImGui::EndDisabled();
 
-    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-    ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImVec4 accent = GetAccentBase(StringToAccentColor(appState->currentAccentColor));
+
+    setupModalWindow(440.0f);
     if (ImGui::BeginPopupModal("Export Warning", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::Text("No artifacts selected or available for export.");
-        if (ImGui::Button("OK")) ImGui::CloseCurrentPopup();
+        ImGui::TextWrapped("No artifacts selected or available for export.");
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+        static int warnFocus = 0;
+        static bool warnWasOpen = false;
+        if (modalButtonRow({"OK"}, warnFocus, warnWasOpen, accent) == 0 ||
+            ImGui::IsKeyPressed(ImGuiKey_Escape))
+            ImGui::CloseCurrentPopup();
+        warnWasOpen = true;
+        drawModalAccentFrame(accent);
         ImGui::EndPopup();
     }
 
-    ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    setupModalWindow(440.0f);
     if (ImGui::BeginPopupModal("Export Complete", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::Dummy(ImVec2(260, 1));
-        float avail = ImGui::GetContentRegionAvail().x;
-        float btnW = 120.0f;
-        ImGui::SetCursorPosX((avail - btnW) * 0.5f);
-        if (ImGui::Button("OK", ImVec2(btnW, 0)) || ImGui::IsKeyPressed(ImGuiKey_Enter))
+        ImGui::TextWrapped("Export complete.");
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+        static int doneFocus = 0;
+        static bool doneWasOpen = false;
+        if (modalButtonRow({"OK"}, doneFocus, doneWasOpen, accent) == 0 ||
+            ImGui::IsKeyPressed(ImGuiKey_Escape))
             ImGui::CloseCurrentPopup();
+        doneWasOpen = true;
+        drawModalAccentFrame(accent);
         ImGui::EndPopup();
     }
 

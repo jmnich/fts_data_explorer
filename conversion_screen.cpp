@@ -12,6 +12,8 @@
 #include "config.h"
 #include "app_dirs.h"
 #include "file_browser.h"
+#include "theme.h"
+#include "popup_utils.h"
 #if FTS_BUILD_HDF5
 #include "hdf/h5_store.h"
 #endif
@@ -481,6 +483,8 @@ void renderConversionScreen(AppState& s) {
             ImGui::TextUnformatted(lastLogLines(st.job, 20).c_str());
             ImGui::EndChild();
         }
+
+        drawModalAccentFrame(GetAccentBase(StringToAccentColor(s.currentAccentColor)));
 
         ImGui::EndPopup();
     }
