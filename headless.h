@@ -10,6 +10,7 @@ struct HeadlessConfig {
         List,
         OpenGUI,
         Process,
+        Workspace,
         Reset,
         Template
     };

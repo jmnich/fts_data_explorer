@@ -174,6 +174,8 @@ Format: `<YY>.<MM>.<minor>` from `VERSION` file. `./build_script.sh` shows last 
 
 Manual via `example_datasets/`. Visual plot verification. Python harness: `python3 playground/test_artifacts.py` (outputs -> `playground/outputs/`, log -> `playground/log.txt`).
 
+HDF5 conformance: `python3 playground/tests/hdf_conformance/run_conformance.py` (regenerates the golden from the parser, validates Python- and C++-written `.h5` files via `validate_h5.py`, runs `fts_hdf_roundtrip` and a headless `-w` pass). Needs h5py/numpy. Manual like the other playground scripts.
+
 # Working with the codebase
 
 1. Adapter code: check both `main.cpp` and `adapters/`.

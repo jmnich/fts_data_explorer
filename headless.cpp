@@ -21,6 +21,11 @@
 #include "apodization.h"
 #include "spectral_toolbox.h"
 
+#if FTS_BUILD_HDF5
+#include "hdf/h5_store.h"
+#include "workspace_reader.h"
+#endif
+
 using json = nlohmann::json;
 
 // ---------------------------------------------------------------------------
@@ -48,6 +53,13 @@ static void handleHelp() {
               << "                 Open GUI with dataset at <path> using <adapter>.\n"
               << "  -p <path> <adapter> <config> <output type> <output dir>\n"
               << "                 Process data in headless mode and export results.\n"
+#if FTS_BUILD_HDF5
+              << "  -w <workspace.h5> <output type> <output dir> [<config.json>]\n"
+              << "                 Open workspace, compute <output type> into it, save in\n"
+              << "                 place and export. Config optional (saved view state\n"
+              << "                 otherwise); processing.workerThreads from config only,\n"
+              << "                 pool defaults to hardware_concurrency otherwise.\n"
+#endif
               << "  -t             Generate template.json with all config settings.\n"
               << "  -r             Reset config by deleting config file and imgui.ini.\n"
               << std::endl;
@@ -426,124 +438,12 @@ static void pollUntilDone(T& panel) {
 }
 
 // ---------------------------------------------------------------------------
-// Process (-p)
+// Shared compute + export tail for -p and -w.
+// Verbatim move of handleProcess steps 8-9 (output-type switch + setupT100Reference
+// + pollUntilDone + computeSpectrumForFile + exportArtifact). Reads everything it
+// needs from appState (loading differs between the two commands).
 // ---------------------------------------------------------------------------
-static void handleProcess(const HeadlessConfig& cfg) {
-    // Validate output directory
-    if (!std::filesystem::exists(cfg.outputDir)) {
-        std::cerr << "Error: Directory '" << cfg.outputDir << "' does not exist" << std::endl;
-        exit(1);
-    }
-
-    // 1. Load existing config for worker thread setting
-    std::string configFilePath = getConfigFilePath();
-    AppConfig config;
-    if (std::filesystem::exists(configFilePath)) {
-        config.loadFromFile(configFilePath);
-    }
-
-    // 2. Register adapters
-    AdapterRegistry::instance().registerAdapter(std::make_unique<WustMiniFtsAdapter>());
-    AdapterRegistry::instance().registerAdapter(std::make_unique<ArcoptixIgmsAdapter>());
-    AdapterRegistry::instance().registerAdapter(std::make_unique<ArcoptixSpectraAdapter>());
-
-    if (!AdapterRegistry::instance().getAdapter(cfg.adapter)) {
-        std::cerr << "Error: Unknown adapter '" << cfg.adapter << "'" << std::endl;
-        exit(1);
-    }
-
-    // 3. Set appState cross-references
-    appState.spectrum.appState = &appState;
-    appState.averageSpectrum.appState = &appState;
-    appState.snrSpectrum.appState = &appState;
-    appState.allanVariance.appState = &appState;
-    appState.t100.appState = &appState;
-    appState.exportPanel.appState = &appState;
-
-    // 4. Configure thread pool
-    appState.reconfigurePool(config.workerThreads);
-
-    // 5. Apply adapter selection (this populates csvFiles, sets datasetInfo, etc.)
-    appState.currentDirectory = cfg.path;
-    applyAdapterSelection(cfg.adapter, cfg.path);
-
-    if (appState.csvFiles.empty()) {
-        std::cerr << "Error: No files found in dataset at '" << cfg.path << "'" << std::endl;
-        exit(1);
-    }
-
-    // 6. Sort files and load
-    appState.sortedFiles = appState.csvFiles;
-    std::sort(appState.sortedFiles.begin(), appState.sortedFiles.end(), naturalSortCompare);
-
-    // Set dataset name from directory
-    std::string dirPath = cfg.path;
-    size_t lastSlash = dirPath.find_last_of("/\\");
-    if (lastSlash != std::string::npos) {
-        appState.currentDatasetName = dirPath.substr(lastSlash + 1);
-    } else {
-        appState.currentDatasetName = dirPath;
-    }
-
-    // Load all files as selected (no limit in headless mode)
-    size_t maxSel = appState.sortedFiles.size();
-    for (size_t i = 0; i < appState.sortedFiles.size() && i < maxSel; i++) {
-        try {
-            const auto& filePath = appState.sortedFiles[i];
-            InterferogramData data = appState.currentAdapter->loadFile(filePath);
-            appState.rawDataCache.push_back(data);
-
-            InterferogramData processed = data;
-            if (appState.enableDownsampling && processed.dataSize() > appState.maxPointsBeforeDownsampling) {
-                size_t factor = processed.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
-                std::vector<double> downRef, downPrim;
-                for (size_t j = 0; j < processed.referenceDetector.size(); j += factor) {
-                    downRef.push_back(processed.referenceDetector[j]);
-                    downPrim.push_back(processed.primaryDetector[j]);
-                }
-                processed.referenceDetector = downRef;
-                processed.primaryDetector = downPrim;
-            }
-
-            appState.loadedData.push_back(processed);
-            appState.selectedFiles.push_back(filePath);
-            std::string fname = filePath;
-            size_t ls = fname.find_last_of("/\\");
-            if (ls != std::string::npos) fname = fname.substr(ls + 1);
-            appState.selectedFilenames.push_back(fname);
-        } catch (const std::exception& e) {
-            std::cerr << "Warning: Failed to load " << appState.sortedFiles[i] << ": " << e.what() << std::endl;
-            continue;
-        }
-    }
-
-    if (appState.selectedFiles.empty()) {
-        std::cerr << "Error: Failed to load any files from dataset" << std::endl;
-        exit(1);
-    }
-
-    appState.dataLoaded = true;
-
-    // Mark all files as checked for averaging
-    appState.filesSelectedForAveraging.clear();
-    appState.filesSelectedForAveraging.resize(appState.sortedFiles.size(), true);
-
-    // 7. Parse and apply JSON config
-    json j;
-    try {
-        std::ifstream ifs(cfg.configPath);
-        if (!ifs.is_open()) {
-            std::cerr << "Error: Config file '" << cfg.configPath << "' not found" << std::endl;
-            exit(1);
-        }
-        ifs >> j;
-    } catch (const std::exception& e) {
-        std::cerr << "Error: Invalid JSON in config file '" << cfg.configPath << "': " << e.what() << std::endl;
-        exit(1);
-    }
-
-    applyJsonConfig(appState, j);
-
+static bool computeAndExport(const HeadlessConfig& cfg) {
     // 8. Compute requested output
     std::string ot = cfg.outputType;
     bool computedOk = false;
@@ -679,7 +579,262 @@ static void handleProcess(const HeadlessConfig& cfg) {
     // 9. Export
     appState.exportPanel.exportArtifact(ot, cfg.outputDir);
     std::cout << "Exported '" << ot << "' to " << cfg.outputDir << std::endl;
+    return true;
 }
+
+// ---------------------------------------------------------------------------
+// Process (-p)
+// ---------------------------------------------------------------------------
+static void handleProcess(const HeadlessConfig& cfg) {
+    // Validate output directory
+    if (!std::filesystem::exists(cfg.outputDir)) {
+        std::cerr << "Error: Directory '" << cfg.outputDir << "' does not exist" << std::endl;
+        exit(1);
+    }
+
+    // 1. Load existing config for worker thread setting
+    std::string configFilePath = getConfigFilePath();
+    AppConfig config;
+    if (std::filesystem::exists(configFilePath)) {
+        config.loadFromFile(configFilePath);
+    }
+
+    // 2. Register adapters
+    AdapterRegistry::instance().registerAdapter(std::make_unique<WustMiniFtsAdapter>());
+    AdapterRegistry::instance().registerAdapter(std::make_unique<ArcoptixIgmsAdapter>());
+    AdapterRegistry::instance().registerAdapter(std::make_unique<ArcoptixSpectraAdapter>());
+
+    if (!AdapterRegistry::instance().getAdapter(cfg.adapter)) {
+        std::cerr << "Error: Unknown adapter '" << cfg.adapter << "'" << std::endl;
+        exit(1);
+    }
+
+    // 3. Set appState cross-references
+    appState.spectrum.appState = &appState;
+    appState.averageSpectrum.appState = &appState;
+    appState.snrSpectrum.appState = &appState;
+    appState.allanVariance.appState = &appState;
+    appState.t100.appState = &appState;
+    appState.exportPanel.appState = &appState;
+
+    // 4. Configure thread pool
+    appState.reconfigurePool(config.workerThreads);
+
+    // 5. Apply adapter selection (this populates csvFiles, sets datasetInfo, etc.)
+    appState.currentDirectory = cfg.path;
+    applyAdapterSelection(cfg.adapter, cfg.path);
+
+    if (appState.csvFiles.empty()) {
+        std::cerr << "Error: No files found in dataset at '" << cfg.path << "'" << std::endl;
+        exit(1);
+    }
+
+    // 6. Sort files and load
+    appState.sortedFiles = appState.csvFiles;
+    std::sort(appState.sortedFiles.begin(), appState.sortedFiles.end(), naturalSortCompare);
+
+    // Set dataset name from directory
+    std::string dirPath = cfg.path;
+    size_t lastSlash = dirPath.find_last_of("/\\");
+    if (lastSlash != std::string::npos) {
+        appState.currentDatasetName = dirPath.substr(lastSlash + 1);
+    } else {
+        appState.currentDatasetName = dirPath;
+    }
+
+    // Load all files as selected (no limit in headless mode)
+    size_t maxSel = appState.sortedFiles.size();
+    for (size_t i = 0; i < appState.sortedFiles.size() && i < maxSel; i++) {
+        try {
+            const auto& filePath = appState.sortedFiles[i];
+            InterferogramData data = appState.currentAdapter->loadFile(filePath);
+            appState.rawDataCache.push_back(data);
+
+            InterferogramData processed = data;
+            if (appState.enableDownsampling && processed.dataSize() > appState.maxPointsBeforeDownsampling) {
+                size_t factor = processed.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
+                std::vector<double> downRef, downPrim;
+                for (size_t j = 0; j < processed.referenceDetector.size(); j += factor) {
+                    downRef.push_back(processed.referenceDetector[j]);
+                    downPrim.push_back(processed.primaryDetector[j]);
+                }
+                processed.referenceDetector = downRef;
+                processed.primaryDetector = downPrim;
+            }
+
+            appState.loadedData.push_back(processed);
+            appState.selectedFiles.push_back(filePath);
+            std::string fname = filePath;
+            size_t ls = fname.find_last_of("/\\");
+            if (ls != std::string::npos) fname = fname.substr(ls + 1);
+            appState.selectedFilenames.push_back(fname);
+        } catch (const std::exception& e) {
+            std::cerr << "Warning: Failed to load " << appState.sortedFiles[i] << ": " << e.what() << std::endl;
+            continue;
+        }
+    }
+
+    if (appState.selectedFiles.empty()) {
+        std::cerr << "Error: Failed to load any files from dataset" << std::endl;
+        exit(1);
+    }
+
+    appState.dataLoaded = true;
+
+    // Mark all files as checked for averaging
+    appState.filesSelectedForAveraging.clear();
+    appState.filesSelectedForAveraging.resize(appState.sortedFiles.size(), true);
+
+    // 7. Parse and apply JSON config
+    json j;
+    try {
+        std::ifstream ifs(cfg.configPath);
+        if (!ifs.is_open()) {
+            std::cerr << "Error: Config file '" << cfg.configPath << "' not found" << std::endl;
+            exit(1);
+        }
+        ifs >> j;
+    } catch (const std::exception& e) {
+        std::cerr << "Error: Invalid JSON in config file '" << cfg.configPath << "': " << e.what() << std::endl;
+        exit(1);
+    }
+
+    applyJsonConfig(appState, j);
+
+    // 8-9. Shared compute + export tail (steps 8-9, moved to computeAndExport)
+    computeAndExport(cfg);
+}
+
+// ---------------------------------------------------------------------------
+// Workspace (-w): open a .h5 workspace, compute the requested artifact into it
+// (the panels mirror derivatives into Workspace when hasWorkspace()), save in
+// place (atomic temp+rename), then export. Mirrors GUI Save minus the prompt:
+// captureViewState -> markConfigStale -> pruneStale -> H5Store::save.
+// ---------------------------------------------------------------------------
+#if FTS_BUILD_HDF5
+static void handleWorkspace(const HeadlessConfig& cfg) {
+    // 1. Validate output directory and input file
+    if (!std::filesystem::exists(cfg.outputDir)) {
+        std::cerr << "Error: Directory '" << cfg.outputDir << "' does not exist" << std::endl;
+        exit(1);
+    }
+    if (!std::filesystem::is_regular_file(cfg.path)) {
+        std::cerr << "Error: Workspace file '" << cfg.path << "' not found" << std::endl;
+        exit(1);
+    }
+
+    // 2. Set appState cross-references (same as handleProcess; needed for the
+    //    panels' workspace mirrors)
+    appState.spectrum.appState = &appState;
+    appState.averageSpectrum.appState = &appState;
+    appState.snrSpectrum.appState = &appState;
+    appState.allanVariance.appState = &appState;
+    appState.t100.appState = &appState;
+    appState.exportPanel.appState = &appState;
+
+    // 3. Open workspace (loads, sets datasetInfo/csvFiles, applyViewState,
+    //    seedPanels, AdapterRegistry::s_workspace, currentDatasetName)
+    try {
+        openWorkspace(appState, cfg.path);
+    } catch (const std::exception& e) {
+        std::cerr << "Error: Failed to open workspace '" << cfg.path << "': " << e.what() << std::endl;
+        exit(1);
+    }
+
+    if (appState.csvFiles.empty()) {
+        std::cerr << "Error: No members found in workspace '" << cfg.path << "'" << std::endl;
+        exit(1);
+    }
+
+    // 4. Optional config override (overrides saved view state when given)
+    json j;
+    if (!cfg.configPath.empty()) {
+        try {
+            std::ifstream ifs(cfg.configPath);
+            if (!ifs.is_open()) {
+                std::cerr << "Error: Config file '" << cfg.configPath << "' not found" << std::endl;
+                exit(1);
+            }
+            ifs >> j;
+        } catch (const std::exception& e) {
+            std::cerr << "Error: Invalid JSON in config file '" << cfg.configPath << "': " << e.what() << std::endl;
+            exit(1);
+        }
+        applyJsonConfig(appState, j);
+    }
+
+    // 5. Natural-sort the member list. workspaceFileList is lexicographic
+    //    (std::sort on member ids) — for >9 members raw_10 would sort before
+    //    raw_2. The GUI frame loop and applyViewState natural-sort; re-sorting
+    //    is idempotent (applyViewState already built a natural-sorted list).
+    appState.sortedFiles = appState.csvFiles;
+    std::sort(appState.sortedFiles.begin(), appState.sortedFiles.end(), naturalSortCompare);
+
+    // 6. Load EVERY member (no GUI limit in headless mode): rawDataCache feeds
+    //    the IFG CSV writers. loadFileStatic routes the "HDF5 Workspace"
+    //    sentinel to workspaceRead (adapter_registry.cpp). Mirrors
+    //    handleProcess step 6, incl. the downsampling pass.
+    for (size_t i = 0; i < appState.sortedFiles.size(); i++) {
+        try {
+            const auto& filePath = appState.sortedFiles[i];
+            InterferogramData data = AdapterRegistry::instance().loadFileStatic(
+                appState.datasetInfo.adapterName, filePath);
+            appState.rawDataCache.push_back(data);
+
+            InterferogramData processed = data;
+            if (appState.enableDownsampling && processed.dataSize() > appState.maxPointsBeforeDownsampling) {
+                size_t factor = processed.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
+                std::vector<double> downRef, downPrim;
+                for (size_t j = 0; j < processed.referenceDetector.size(); j += factor) {
+                    downRef.push_back(processed.referenceDetector[j]);
+                    downPrim.push_back(processed.primaryDetector[j]);
+                }
+                processed.referenceDetector = downRef;
+                processed.primaryDetector = downPrim;
+            }
+
+            appState.loadedData.push_back(processed);
+            appState.selectedFiles.push_back(filePath);
+            std::string fname = filePath;
+            size_t ls = fname.find_last_of("/\\");
+            if (ls != std::string::npos) fname = fname.substr(ls + 1);
+            appState.selectedFilenames.push_back(fname);
+        } catch (const std::exception& e) {
+            std::cerr << "Warning: Failed to load " << appState.sortedFiles[i] << ": " << e.what() << std::endl;
+            continue;
+        }
+    }
+
+    if (appState.selectedFiles.empty()) {
+        std::cerr << "Error: Failed to load any members from workspace" << std::endl;
+        exit(1);
+    }
+
+    appState.dataLoaded = true;
+
+    // Mark all files as checked for averaging
+    appState.filesSelectedForAveraging.clear();
+    appState.filesSelectedForAveraging.resize(appState.sortedFiles.size(), true);
+
+    // 7. Shared compute + export tail (writes derivatives into the Workspace)
+    computeAndExport(cfg);
+
+    // 8. Save in place. markConfigStale is the GUI save's first step — without
+    //    it pruneStale drops nothing (stale is RAM-only), so a config that
+    //    changed params would leave mismatched members behind.
+    captureViewState(appState);
+    markConfigStale(appState.workspace, appState);
+    try {
+        H5Store::save(cfg.path, appState.workspace.pruneStale());
+    } catch (const std::exception& e) {
+        std::cerr << "Error: Failed to save workspace '" << cfg.path << "': " << e.what() << std::endl;
+        exit(1);
+    }
+    appState.workspace.dirty = false;
+
+    std::cout << "Saved " << cfg.path << std::endl;
+}
+#endif // FTS_BUILD_HDF5
 
 // ---------------------------------------------------------------------------
 // Public interface
@@ -747,6 +902,20 @@ bool parseHeadlessArgs(int argc, char* argv[], HeadlessConfig& cfg) {
         return false;
     }
 
+    if (flag == "-w") {
+        if (argc < 5 || argc > 6) {
+            std::cerr << "Error: -w requires <workspace.h5> <output type> <output dir> [<config>]"
+                      << std::endl;
+            return true;
+        }
+        cfg.command = HeadlessConfig::Command::Workspace;
+        cfg.path = argv[2];
+        cfg.outputType = argv[3];
+        cfg.outputDir = argv[4];
+        if (argc == 6) cfg.configPath = argv[5];
+        return false;
+    }
+
     if (flag == "-t") {
         if (argc != 2) {
             std::cerr << "Error: -t takes no arguments" << std::endl;
@@ -788,6 +957,15 @@ bool runHeadlessCommand(const HeadlessConfig& cfg) {
             return true;
         case HeadlessConfig::Command::Process:
             handleProcess(cfg);
+            return true;
+        case HeadlessConfig::Command::Workspace:
+#if FTS_BUILD_HDF5
+            handleWorkspace(cfg);
+#else
+            std::cerr << "Error: -w requires an HDF5 build (reconfigure with "
+                         "FTS_BUILD_HDF5=ON)" << std::endl;
+            exit(1);
+#endif
             return true;
         case HeadlessConfig::Command::OpenGUI:
         case HeadlessConfig::Command::None:
