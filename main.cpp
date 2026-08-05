@@ -22,11 +22,7 @@
 #include "snr_spectrum.h"
 #include "allan_variance.h"
 #include "spectral_toolbox.h"
-#include "adapters/csv_adapter.h"
-#include "adapters/adapter_registry.h"
-#include "adapters/wust_mini_fts_adapter.h"
-#include "adapters/arcoptix_igms_adapter.h"
-#include "adapters/arcoptix_spectra_adapter.h"
+#include "conversion_screen.h"
 #include "tinyfiledialogs.h"
 #include "icon.h"
 #include "stb_image.h"
@@ -316,119 +312,9 @@ void handleWindowEvents(GLFWwindow* window, AppConfig& config) {
     config.windowMaximized = glfwGetWindowAttrib(window, GLFW_MAXIMIZED);
 }
 
-void applyAdapterSelection(const std::string& adapterName, const std::string& directoryPath);
-
-void selectAdapterForDirectory(const std::string& directoryPath) {
-    // Clear any stale incompatible-adapter state from previous interactions
-    appState.showIncompatibleAdapterPopup = false;
-    appState.pendingAdapterName.clear();
-    appState.pendingAdapterDirectory.clear();
-
-    // Commented out: auto-filtering of adapters based on directory contents.
-    // For now, always show all registered adapters so user can pick.
-    // auto adapters = AdapterRegistry::instance().findAdaptersForDirectory(directoryPath);
-    const auto& allAdapters = AdapterRegistry::instance().getAll();
-    std::vector<DataAdapter*> adapters;
-    for (const auto& a : allAdapters) adapters.push_back(a.get());
-
-    if (adapters.empty()) {
-        appState.adapterErrorMsg = "No compatible data format found in:\n" + directoryPath;
-        appState.showAdapterErrorPopup = true;
-        appState.showWelcomeScreen = true;
-        appState.welcomeScreenInitialized = false;
-        appState.csvFiles.clear();
-    } else {
-        // Always show popup — user picks adapter each time
-        appState.compatibleAdapters = adapters;
-        appState.showAdapterSelectionPopup = true;
-        // Keep welcome screen active so popup shows on top of it
-        appState.showWelcomeScreen = true;
-        appState.welcomeScreenInitialized = false;
-        appState.csvFiles.clear();
-    }
-}
-
-void applyAdapterSelection(const std::string& adapterName, const std::string& directoryPath) {
-    auto* adapter = AdapterRegistry::instance().getAdapter(adapterName);
-    if (!adapter) return;
-
-    appState.currentAdapter.reset();
-#if FTS_BUILD_HDF5
-    // Clear any pending workspace modal state (switching to a legacy dataset).
-    appState.pendingWorkspaceAction = PendingWorkspaceAction::None;
-    appState.pendingWorkspacePath.clear();
-    appState.showUnsavedPrompt = false;
-    appState.pendingSaveAsPath.clear();
-    appState.showStaleDropPrompt = false;
-    appState.showWorkspaceDeleteConfirmPopup = false;
-    appState.pendingWorkspaceDeletionPath.clear();
-#endif
-    // Create appropriate concrete adapter based on name
-    if (adapterName == "WUST Mini FTS Raw")
-        appState.currentAdapter = std::make_unique<WustMiniFtsAdapter>();
-    else if (adapterName == "ArcOptix raw IGMs")
-        appState.currentAdapter = std::make_unique<ArcoptixIgmsAdapter>();
-    else if (adapterName == "ArcOptix Spectra Sequence")
-        appState.currentAdapter = std::make_unique<ArcoptixSpectraAdapter>();
-    else return;
-
-    appState.datasetInfo = adapter->getDatasetInfo();
-    appState.csvFiles = adapter->listFiles(directoryPath);
-    appState.showAdapterSelectionPopup = false;
-    appState.showIncompatibleAdapterPopup = false;
-    appState.pendingAdapterName.clear();
-    appState.pendingAdapterDirectory.clear();
-
-    // Apply feature gates based on dataset info
-    if (appState.datasetInfo.axisIsCorrected) {
-        appState.xAxisBase = 1; // Force OPD mode
-    }
-    appState.clearAverageSpectrum();
-    appState.clearSnrSpectrum();
-    appState.clearAllanVariance();
-    appState.clearT100Spectrum();
-    appState.showWelcomeScreen = false;
-    appState.welcomeScreenInitialized = true;
-    appState.dataLoaded = false;
-    appState.loadedData.clear();
-    appState.rawDataCache.clear();
-    appState.hilbertXCache.clear();
-    appState.peakPositionsCache.clear();
-    appState.hilbertCacheLaserWavelength = 0.0f;
-    appState.spectrum.cachedSpectra.clear();
-    appState.spectrum.cachedFrequencies.clear();
-    appState.spectrum.lastPrimaryDetectors.clear();
-    appState.spectrum.lastSpectrumParams.clear();
-    appState.spectrum.pendingSpectra_.clear();
-    appState.selectedFiles.clear();
-    appState.selectedFilenames.clear();
-    appState.filesChanged = true;
-    appState.currentSortedFileIndex = 0;
-    appState.isFirstDataLoad = true;
-    appState.needsRedraw = true;
-
-    // Save adapter to recent datasets if pendingRecentDatasetAdapterSave is set
-    if (appState.configPtr && !appState.pendingRecentDatasetAdapterSave.empty()) {
-        for (auto& entry : appState.configPtr->recentDatasets) {
-            if (entry.path == appState.pendingRecentDatasetAdapterSave) {
-                entry.adapterName = adapterName;
-                break;
-            }
-        }
-        appState.configPtr->saveToFile(appState.configFilePath);
-        appState.pendingRecentDatasetAdapterSave.clear();
-    }
-
-    std::cout << "Adapter selected: " << adapterName << " for " << directoryPath << std::endl;
-}
-
-// Single read path for all engine loads: workspace (HDF5) or legacy adapter.
+// Single read path for all engine loads: the workspace.
 static InterferogramData loadInterferogram(AppState& s, const std::string& id) {
-#if FTS_BUILD_HDF5
-    if (s.hasWorkspace()) return workspaceRead(s.workspace, id);
-#endif
-    if (s.currentAdapter) return s.currentAdapter->loadFile(id);
-    throw std::runtime_error("no data source");
+    return workspaceRead(s.workspace, id);
 }
 
 #if FTS_BUILD_HDF5
@@ -436,9 +322,6 @@ void openWorkspace(AppState& s, const std::string& path) {
     s.workspace = H5Store::load(path);   // throws H5Error on failure
     s.workspacePath = path;
 
-    // Point the worker-path dispatcher at the new workspace. Must happen before
-    // any worker runs.
-    AdapterRegistry::s_workspace = &s.workspace;
 
     // Clear any pending discard/save modal state from a previous flow.
     s.pendingWorkspaceAction = PendingWorkspaceAction::None;
@@ -449,10 +332,7 @@ void openWorkspace(AppState& s, const std::string& path) {
     s.showWorkspaceDeleteConfirmPopup = false;
     s.pendingWorkspaceDeletionPath.clear();
 
-    // Clear legacy adapter state
-    s.currentAdapter.reset();
-
-    // Populate engine state (mirrors applyAdapterSelection)
+    // Populate engine state
     s.datasetInfo = workspaceDatasetInfo(s.workspace);
     s.csvFiles = workspaceFileList(s.workspace);
 
@@ -495,7 +375,7 @@ void openWorkspace(AppState& s, const std::string& path) {
 
     // Recent datasets (configPtr is set at startup; guard for robustness)
     if (s.configPtr)
-        addToRecentDatasets(*s.configPtr, s.configFilePath, path, kHdfWorkspaceAdapter);
+        addToRecentDatasets(*s.configPtr, s.configFilePath, path);
 
     // Phase 3: restore saved view state (decision 3). Runs after the
     // axisIsCorrected -> xAxisBase gate (a default for fresh files, not a hard
@@ -520,10 +400,8 @@ void openWorkspace(AppState& s, const std::string& path) {
 }
 
 void closeWorkspace(AppState& s) {
-    AdapterRegistry::s_workspace = nullptr;
     s.workspace = Workspace{};
     s.workspacePath.clear();
-    s.currentAdapter.reset();
 
     // Clear pending discard/save modal state.
     s.pendingWorkspaceAction = PendingWorkspaceAction::None;
@@ -567,27 +445,6 @@ void closeWorkspace(AppState& s) {
     s.needsRedraw = true;
 }
 #endif // FTS_BUILD_HDF5
-
-// Open a legacy (directory/adapter) dataset. Shared by Set Working Directory,
-// recent-directory entries, and the SetDirectory pending action. Kept out of
-// the FTS_BUILD_HDF5 guard: the FTS_BUILD_HDF5=OFF build uses it directly.
-static void openDatasetDirectory(AppState& s, const std::string& directoryPath,
-                                 const std::string& adapterName) {
-    std::string rawDataPath = directoryPath + "/raw_data";
-    if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath))
-        s.currentDirectory = rawDataPath;
-    else
-        s.currentDirectory = directoryPath;
-    s.currentDatasetName = directoryPath.substr(directoryPath.find_last_of("/\\") + 1);
-
-    if (!adapterName.empty() && AdapterRegistry::instance().getAdapter(adapterName))
-        applyAdapterSelection(adapterName, s.currentDirectory);
-    else
-        selectAdapterForDirectory(s.currentDirectory);
-    if (s.configPtr)
-        addToRecentDatasets(*s.configPtr, s.configFilePath, directoryPath, adapterName);
-    std::cout << "Opened dataset: " << directoryPath << std::endl;
-}
 
 #if FTS_BUILD_HDF5
 
@@ -650,7 +507,7 @@ void doSaveWorkspace(AppState& s, const std::string& asPath) {
         s.workspacePath = asPath;
         s.currentDatasetName = std::filesystem::path(asPath).stem().string();
         if (s.configPtr)
-            addToRecentDatasets(*s.configPtr, s.configFilePath, asPath, kHdfWorkspaceAdapter);
+            addToRecentDatasets(*s.configPtr, s.configFilePath, asPath);
     }
     s.workspace.dirty = false;
     // Phase 3: re-baseline the latch against the just-saved state so the frame
@@ -702,10 +559,8 @@ void dispatchPendingAction(AppState& s) {
     if (s.pendingWorkspaceAction == PendingWorkspaceAction::None) return;
     PendingWorkspaceAction action = s.pendingWorkspaceAction;
     std::string path = s.pendingWorkspacePath;
-    std::string adapterName = s.pendingWorkspaceAdapterName;
     s.pendingWorkspaceAction = PendingWorkspaceAction::None;
     s.pendingWorkspacePath.clear();
-    s.pendingWorkspaceAdapterName.clear();
     s.showUnsavedPrompt = false;
     s.showStaleDropPrompt = false;
     s.pendingSaveAsPath.clear();
@@ -720,16 +575,6 @@ void dispatchPendingAction(AppState& s) {
                 openWorkspace(s, path);
             } catch (const std::exception& e) {
                 s.adapterErrorMsg = std::string("Failed to open workspace:\n") + e.what();
-                s.showAdapterErrorPopup = true;
-            }
-            break;
-        case PendingWorkspaceAction::SetDirectory:
-            // Switching to a legacy dataset: discard the current workspace.
-            if (s.hasWorkspace()) closeWorkspace(s);
-            try {
-                openDatasetDirectory(s, path, adapterName);
-            } catch (const std::exception& e) {
-                s.adapterErrorMsg = std::string("Failed to open dataset:\n") + e.what();
                 s.showAdapterErrorPopup = true;
             }
             break;
@@ -926,9 +771,18 @@ static void renderMeasurementConfig(const nlohmann::json& cfg) {
 
 // ── Unsaved-changes + stale-drop modals ─────────────────────────────────────
 
+// Center the next modal over the main viewport. Without an explicit position,
+// AlwaysAutoResize modals can open at the top of the screen; every modal in
+// the app is centered this way (IMGUI_GUIDE §14).
+static void centerNextPopup() {
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+}
+
 static void renderUnsavedPromptModal() {
     if (!appState.showUnsavedPrompt) return;
     ImGui::OpenPopup("Unsaved Changes##confirm");
+    centerNextPopup();
     if (ImGui::BeginPopupModal("Unsaved Changes##confirm", nullptr,
                                ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::TextWrapped("Save changes to \"%s\" before continuing?",
@@ -937,7 +791,9 @@ static void renderUnsavedPromptModal() {
         ImGui::Separator();
         ImGui::Spacing();
 
-        if (ImGui::Button("Save", ImVec2(120, 0)) || ImGui::IsKeyPressed(ImGuiKey_Enter)) {
+        // Auto-sized buttons: fixed widths clip longer labels at large UI
+        // scales (uiScale up to 1.8x), so sizing follows the text.
+        if (ImGui::Button("Save") || ImGui::IsKeyPressed(ImGuiKey_Enter)) {
             try {
                 requestSaveWorkspace(appState, "");
                 if (!appState.showStaleDropPrompt)
@@ -948,11 +804,11 @@ static void renderUnsavedPromptModal() {
             }
         }
         ImGui::SameLine();
-        if (ImGui::Button("Don't Save", ImVec2(120, 0))) {
+        if (ImGui::Button("Don't Save")) {
             dispatchPendingAction(appState);   // discard RAM workspace
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
             appState.pendingWorkspaceAction = PendingWorkspaceAction::None;
             appState.pendingWorkspacePath.clear();
             appState.showUnsavedPrompt = false;
@@ -965,6 +821,7 @@ static void renderUnsavedPromptModal() {
 static void renderStaleDropPromptModal() {
     if (!appState.showStaleDropPrompt) return;
     ImGui::OpenPopup("Stale Data Will Be Dropped##confirm");
+    centerNextPopup();
     if (ImGui::BeginPopupModal("Stale Data Will Be Dropped##confirm", nullptr,
                                ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::TextWrapped("Some results no longer match the current inputs or settings "
@@ -976,7 +833,9 @@ static void renderStaleDropPromptModal() {
         ImGui::Separator();
         ImGui::Spacing();
 
-        if (ImGui::Button("Cancel", ImVec2(150, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        // Auto-sized buttons: a fixed width would clip "Drop Stale Data" at
+        // large UI scales (uiScale up to 1.8x).
+        if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
             appState.pendingSaveAsPath.clear();
             appState.showStaleDropPrompt = false;
             // Keep pendingWorkspaceAction: if the save was chained from the
@@ -985,7 +844,7 @@ static void renderStaleDropPromptModal() {
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Drop Stale Data", ImVec2(150, 0)) || ImGui::IsKeyPressed(ImGuiKey_Enter)) {
+        if (ImGui::Button("Drop Stale Data") || ImGui::IsKeyPressed(ImGuiKey_Enter)) {
             try {
                 doSaveWorkspace(appState, appState.pendingSaveAsPath);
                 appState.pendingSaveAsPath.clear();
@@ -1010,111 +869,6 @@ static std::string shortenFilename(const std::string& filename) {
     const size_t keepStart = 8;
     const size_t keepEnd = 24;
     return filename.substr(0, keepStart) + "..." + filename.substr(filename.length() - keepEnd);
-}
-
-static void renderAdapterSelectionPopup() {
-    if (!appState.showAdapterSelectionPopup) return;
-
-    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-    ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(800, 250), ImGuiCond_Always);
-
-    ImGui::PushStyleColor(ImGuiCol_ModalWindowDimBg, ImVec4(0.0f, 0.0f, 0.0f, 0.7f));
-
-    if (ImGui::BeginPopupModal("Select Data Adapter##adapterSelect", &appState.showAdapterSelectionPopup,
-                               ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove)) {
-        ImGui::TextWrapped("Dataset: %s", appState.currentDirectory.c_str());
-        ImGui::Separator();
-        ImGui::Spacing();
-
-        static int selectedIdx = 0;
-        if (selectedIdx >= static_cast<int>(appState.compatibleAdapters.size()))
-            selectedIdx = 0;
-
-        for (size_t i = 0; i < appState.compatibleAdapters.size(); i++) {
-            auto* adapter = appState.compatibleAdapters[i];
-            bool compatible = adapter->canLoadDirectory(appState.currentDirectory);
-            std::string label = std::string("- ") + adapter->getName() + " (" + adapter->getFileExtension() + ")";
-
-            if (!compatible)
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.5f, 0.5f, 0.5f));
-
-            if (ImGui::Selectable(label.c_str(), static_cast<int>(i) == selectedIdx)) {
-                if (compatible) {
-                    applyAdapterSelection(adapter->getName(), appState.currentDirectory);
-                } else {
-                    appState.pendingAdapterName = adapter->getName();
-                    appState.pendingAdapterDirectory = appState.currentDirectory;
-                    appState.showIncompatibleAdapterPopup = true;
-                    appState.showAdapterSelectionPopup = false;
-                    appState.compatibleAdapters.clear();
-                }
-                selectedIdx = 0;
-                if (!compatible)
-                    ImGui::PopStyleColor(); // pop text color
-                ImGui::PopStyleColor(); // pop dim bg
-                ImGui::EndPopup();
-                return;
-            }
-
-            if (!compatible) {
-                ImVec2 textMin = ImGui::GetItemRectMin();
-                ImVec2 textMax = ImGui::GetItemRectMax();
-                float lineY = (textMin.y + textMax.y) * 0.5f;
-                ImGui::GetWindowDrawList()->AddLine(
-                    ImVec2(textMin.x, lineY),
-                    ImVec2(textMax.x, lineY),
-                    IM_COL32(128, 128, 128, 128), 1.0f);
-                ImGui::PopStyleColor();
-            }
-        }
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-
-        // Keyboard navigation
-        if (ImGui::IsKeyPressed(ImGuiKey_UpArrow) && selectedIdx > 0)
-            selectedIdx--;
-        if (ImGui::IsKeyPressed(ImGuiKey_DownArrow) && selectedIdx < static_cast<int>(appState.compatibleAdapters.size()) - 1)
-            selectedIdx++;
-        if (ImGui::IsKeyPressed(ImGuiKey_Enter) && selectedIdx >= 0 && selectedIdx < static_cast<int>(appState.compatibleAdapters.size())) {
-            auto* adapter = appState.compatibleAdapters[selectedIdx];
-            bool enterCompatible = adapter->canLoadDirectory(appState.currentDirectory);
-            if (enterCompatible) {
-                applyAdapterSelection(adapter->getName(), appState.currentDirectory);
-            } else {
-                appState.pendingAdapterName = adapter->getName();
-                appState.pendingAdapterDirectory = appState.currentDirectory;
-                appState.showIncompatibleAdapterPopup = true;
-                appState.showAdapterSelectionPopup = false;
-                appState.compatibleAdapters.clear();
-            }
-            selectedIdx = 0;
-            ImGui::PopStyleColor(); // pop dim bg
-            ImGui::EndPopup();
-            return;
-        }
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-            appState.showAdapterSelectionPopup = false;
-            appState.compatibleAdapters.clear();
-            appState.currentDirectory = "";
-            selectedIdx = 0;
-            ImGui::PopStyleColor();
-            ImGui::EndPopup();
-            return;
-        }
-
-        if (ImGui::Button("Cancel", ImVec2(120, 0))) {
-            appState.showAdapterSelectionPopup = false;
-            appState.compatibleAdapters.clear();
-            appState.currentDirectory = "";
-            selectedIdx = 0;
-        }
-
-        ImGui::EndPopup();
-    }
-    ImGui::PopStyleColor();
 }
 
 static void performFileDeletion(AppState& appState, size_t index) {
@@ -1166,75 +920,6 @@ static void performFileDeletion(AppState& appState, size_t index) {
         appState.dataLoaded = false;
 
     appState.needsRedraw = true;
-}
-
-static void renderIncompatibleAdapterPopup() {
-    static int focusIdx = 0;
-    static bool prevPopupOpen = false;
-    if (!appState.showIncompatibleAdapterPopup) {
-        prevPopupOpen = false;
-        return;
-    }
-
-    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-    ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(450, 160), ImGuiCond_Always);
-
-    ImGui::PushStyleColor(ImGuiCol_ModalWindowDimBg, ImVec4(0.0f, 0.0f, 0.0f, 0.7f));
-
-    bool popupOpened = ImGui::BeginPopupModal("Incompatible##incompatAdapter", nullptr,
-                               ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
-    if (popupOpened) {
-        ImGui::TextWrapped("Incompatible data adapter. Continue anyway?");
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-
-        bool enterPressed = ImGui::IsKeyPressed(ImGuiKey_Enter);
-        if (popupOpened && !prevPopupOpen)
-            focusIdx = 0;
-        if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow))
-            focusIdx = 0;
-        if (ImGui::IsKeyPressed(ImGuiKey_RightArrow))
-            focusIdx = 1;
-
-        // Highlight focused button with accent color
-        if (focusIdx == 0)
-            ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-        if (ImGui::Button("Back", ImVec2(120, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape) ||
-            (enterPressed && prevPopupOpen && focusIdx == 0)) {
-            if (focusIdx == 0) ImGui::PopStyleColor();
-            const auto& allAdapters = AdapterRegistry::instance().getAll();
-            std::vector<DataAdapter*> adapters;
-            for (const auto& a : allAdapters) adapters.push_back(a.get());
-            appState.compatibleAdapters = adapters;
-            appState.showAdapterSelectionPopup = true;
-            appState.showIncompatibleAdapterPopup = false;
-            appState.pendingAdapterName.clear();
-            appState.pendingAdapterDirectory.clear();
-            ImGui::CloseCurrentPopup();
-        } else if (focusIdx == 0) {
-            ImGui::PopStyleColor();
-        }
-        ImGui::SameLine();
-        if (focusIdx == 1)
-            ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-        if (ImGui::Button("Yes", ImVec2(120, 0)) ||
-            (enterPressed && prevPopupOpen && focusIdx == 1)) {
-            if (focusIdx == 1) ImGui::PopStyleColor();
-            applyAdapterSelection(appState.pendingAdapterName, appState.pendingAdapterDirectory);
-            appState.showIncompatibleAdapterPopup = false;
-            appState.pendingAdapterName.clear();
-            appState.pendingAdapterDirectory.clear();
-            ImGui::CloseCurrentPopup();
-        } else if (focusIdx == 1) {
-            ImGui::PopStyleColor();
-        }
-
-        ImGui::EndPopup();
-    }
-    prevPopupOpen = popupOpened;
-    ImGui::PopStyleColor();
 }
 
 /**
@@ -1466,23 +1151,14 @@ int main(int argc, char* argv[]) {
     appState.configPtr = &config;
     appState.configFilePath = configFilePath;
 
+    // Phase 5: best-effort background pull of the converter repo (never a
+    // first clone at boot; silent when git is absent or no clone exists).
+    startupConverterRefresh(config);
+
     // UI size settings
     appState.currentUiSize = config.uiSize;
     appState.currentAccentColor = config.accentColor;
     appState.reconfigurePool(config.workerThreads);
-
-    // Register data adapters
-    AdapterRegistry::instance().registerAdapter(std::make_unique<WustMiniFtsAdapter>());
-    AdapterRegistry::instance().registerAdapter(std::make_unique<ArcoptixIgmsAdapter>());
-    AdapterRegistry::instance().registerAdapter(std::make_unique<ArcoptixSpectraAdapter>());
-
-    // Handle -o flag: auto-apply adapter (skips welcome screen) before GUI init
-    if (headlessCfg.command == HeadlessConfig::Command::OpenGUI) {
-        std::cout << "Auto-selecting adapter: " << headlessCfg.adapter
-                  << " for " << headlessCfg.path << std::endl;
-        appState.currentDirectory = headlessCfg.path;
-        applyAdapterSelection(headlessCfg.adapter, headlessCfg.path);
-    }
 
     // Initialize application
     GLFWwindow* window = nullptr;
@@ -2025,7 +1701,7 @@ int main(int argc, char* argv[]) {
                             parentDir.substr(raw_data_pos + 1) == "raw_data") {
                             parentDir = parentDir.substr(0, raw_data_pos);
                         }
-                        addToRecentDatasets(config, configFilePath, parentDir, appState.currentAdapter ? appState.currentAdapter->getName() : "");
+                        addToRecentDatasets(config, configFilePath, parentDir);
                     }
                 }
                 
@@ -2095,28 +1771,23 @@ int main(int argc, char* argv[]) {
         
         // Show welcome screen if no data is loaded and we haven't initialized yet
         if (appState.showWelcomeScreen && !appState.welcomeScreenInitialized) {
-            bool showPopup = !appState.showAdapterSelectionPopup && !appState.showAdapterErrorPopup && !appState.showIncompatibleAdapterPopup;
+            bool showPopup = !appState.showAdapterErrorPopup && !appState.conversionScreen.open;
             renderWelcomeScreen(appState, config, configFilePath, showPopup);
         }
 
-        // Render adapter selection popup on top of welcome screen or main interface
-        if (appState.showAdapterSelectionPopup) {
-            ImGui::OpenPopup("Select Data Adapter##adapterSelect");
+        // Phase 5: dataset conversion screen (foreign formats -> .h5)
+        if (appState.conversionScreen.open) {
+            ImGui::OpenPopup("Convert Dataset##conversion");
             appState.needsRedraw = true;
         }
-        renderAdapterSelectionPopup();
-
-        if (appState.showIncompatibleAdapterPopup) {
-            ImGui::OpenPopup("Incompatible##incompatAdapter");
-            appState.needsRedraw = true;
-        }
-        renderIncompatibleAdapterPopup();
+        renderConversionScreen(appState);
 
         // Render adapter error popup
         if (appState.showAdapterErrorPopup) {
             ImGui::OpenPopup("Adapter Error##adapterError");
             appState.needsRedraw = true;
         }
+        centerNextPopup();
         if (ImGui::BeginPopupModal("Adapter Error##adapterError", &appState.showAdapterErrorPopup,
                                    ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
                                    ImGuiWindowFlags_AlwaysAutoResize)) {
@@ -2150,19 +1821,11 @@ int main(int argc, char* argv[]) {
                 // File menu
                 if (ImGui::BeginMenu("File"))
                 {
-                    if (ImGui::MenuItem("Set Working Directory")) {
-                        std::string selectedDirectory = FileBrowser::showDirectorySelectionDialog(window);
-                        if (!selectedDirectory.empty()) {
-#if FTS_BUILD_HDF5
-                            appState.pendingWorkspaceAdapterName.clear();
-                            requestWorkspaceDiscard(appState, PendingWorkspaceAction::SetDirectory, selectedDirectory);
-#else
-                            openDatasetDirectory(appState, selectedDirectory, "");
-#endif
-                        }
+                    if (ImGui::MenuItem("Convert Dataset...")) {
+                        openConversionScreen(appState);
                     }
 #if FTS_BUILD_HDF5
-                    if (ImGui::MenuItem("Open HDF5 File...")) {
+                    if (ImGui::MenuItem("Open Workspace (.h5)...")) {
                         std::string defaultFolder = appState.currentDirectory;
                         if (appState.hasWorkspace())
                             defaultFolder = std::filesystem::path(appState.workspacePath).parent_path().string();
@@ -2226,12 +1889,9 @@ int main(int argc, char* argv[]) {
                                     } else
 #endif
                                     if (std::filesystem::is_directory(datasetPath)) {
-#if FTS_BUILD_HDF5
-                                        appState.pendingWorkspaceAdapterName = entry.adapterName;
-                                        requestWorkspaceDiscard(appState, PendingWorkspaceAction::SetDirectory, datasetPath);
-#else
-                                        openDatasetDirectory(appState, datasetPath, entry.adapterName);
-#endif
+                                        // Legacy dataset: route through the Conversion screen
+                                        // pre-filled with the path (phase5 decision 6).
+                                        openConversionScreen(appState, datasetPath);
                                     } else {
                                         std::cerr << "Recent dataset path no longer exists: " << datasetPath << std::endl;
                                     }
@@ -2776,6 +2436,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             if (appState.showWorkspaceDeleteConfirmPopup) {
                 ImGui::OpenPopup("Delete Member##confirm");
             }
+            centerNextPopup();
             if (ImGui::BeginPopupModal("Delete Member##confirm", NULL,
                                        ImGuiWindowFlags_AlwaysAutoResize)) {
                 const std::string& delPath = appState.pendingWorkspaceDeletionPath;
@@ -2809,6 +2470,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
 #endif
 
         // Show selection limit popup if needed
+        centerNextPopup();
         if (ImGui::BeginPopupModal("Selection Limit", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
             ImGui::Text("Maximum of %zu files can be selected at once.", appState.MAX_SELECTABLE_FILES);
             ImGui::Text("Please deselect some files first.");
@@ -2827,6 +2489,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             if (!appState.showDeleteConfirmPopup)
                 prevPopupOpen = false;
 
+            centerNextPopup();
             if (ImGui::BeginPopupModal("Delete File##confirm", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
                 size_t idx = appState.deleteConfirmIndex;
                 std::string fname = idx < appState.sortedFiles.size()
@@ -5264,7 +4927,11 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
         if (appState.dataLoaded) {
             ImGui::Text("File: %s", appState.csvFiles.empty() ? "None" : appState.csvFiles[0].c_str());
             ImGui::Text("Samples: %zu", appState.loadedData.empty() ? 0 : appState.loadedData[0].dataSize());
-            ImGui::Text("Adapter: %s", appState.datasetInfo.adapterName.c_str());
+            const char* dataTypeName = appState.datasetInfo.hasPrecomputedSpectra
+                ? "Precomputed spectra"
+                : (appState.datasetInfo.axisIsCorrected ? "Corrected single IFG"
+                                                        : "Uncorrected dual IFG");
+            ImGui::Text("Data type: %s", dataTypeName);
             
             // Display comments if comments.txt exists (WUST format)
 #if FTS_BUILD_HDF5

@@ -8,9 +8,9 @@ struct HeadlessConfig {
         Help,
         Version,
         List,
-        OpenGUI,
-        Process,
         Workspace,
+        Convert,
+        SyncConverters,
         Reset,
         Template
     };
@@ -18,7 +18,7 @@ struct HeadlessConfig {
     Command command = Command::None;
     std::string listType;
     std::string path;
-    std::string adapter;
+    std::string converter; // -c: converter id or direct .py path
     std::string configPath;
     std::string outputType;
     std::string outputDir;

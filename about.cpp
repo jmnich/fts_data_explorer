@@ -14,6 +14,9 @@ void renderAboutPopup() {
         s_showAbout = false;
     }
 
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+
     if (!ImGui::BeginPopupModal("About FTS Data Explorer", NULL,
         ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse)) {
         return;

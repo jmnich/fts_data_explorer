@@ -1,7 +1,6 @@
 #include "spectrum.h"
 #include "spectral_toolbox.h"
-#include "adapters/csv_adapter.h"
-#include "adapters/adapter_registry.h"
+#include "interferogram_data.h"
 #if FTS_BUILD_HDF5
 #include "workspace_reader.h"
 #endif
@@ -268,7 +267,7 @@ void Spectrum::pollPendingSpectra() {
 bool Spectrum::computeAndCacheSpectrum(const std::string& filePath, const std::string& fileId) {
     if (!appState) return false;
     try {
-        auto raw = AdapterRegistry::instance().loadFileStatic(appState->datasetInfo.adapterName, filePath);
+        auto raw = workspaceRead(appState->workspace, filePath);
 
         auto targetUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
 

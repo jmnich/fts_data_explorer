@@ -12,9 +12,8 @@
 #include "allan_variance.h"
 #include "t100.h"
 #include "export.h"
-#include "adapters/csv_adapter.h"
-#include "adapters/dataset_info.h"
-#include "adapters/data_adapter.h"
+#include "interferogram_data.h"
+#include "conversion_screen.h"
 #if FTS_BUILD_HDF5
 #include "hdf/workspace.h"
 #endif
@@ -24,11 +23,9 @@
 struct AppState;
 
 #if FTS_BUILD_HDF5
-enum class PendingWorkspaceAction { None, CloseWorkspace, OpenPath, SetDirectory, Exit };
+enum class PendingWorkspaceAction { None, CloseWorkspace, OpenPath, Exit };
 #endif
 
-void selectAdapterForDirectory(const std::string& directoryPath);
-void applyAdapterSelection(const std::string& adapterName, const std::string& directoryPath);
 #if FTS_BUILD_HDF5
 void openWorkspace(AppState& s, const std::string& path);
 void closeWorkspace(AppState& s);
@@ -42,7 +39,6 @@ void dispatchPendingAction(AppState& s);
 struct AppState {
     // Data adapter state
     DatasetInfo datasetInfo;
-    std::unique_ptr<DataAdapter> currentAdapter;
 #if FTS_BUILD_HDF5
     Workspace workspace;      // in-memory HDF5 workspace
     std::string workspacePath; // empty = no workspace open
@@ -51,7 +47,6 @@ struct AppState {
     // modal runs; dispatched by dispatchPendingAction on resolution.
     PendingWorkspaceAction pendingWorkspaceAction = PendingWorkspaceAction::None;
     std::string pendingWorkspacePath;
-    std::string pendingWorkspaceAdapterName;   // SetDirectory: adapter override (recent dirs)
     bool showUnsavedPrompt = false;
 
     // Stale-drop confirmation state (§1.5): stashed save target + modal flag.
@@ -70,14 +65,8 @@ struct AppState {
     char metadataCommentBuffer[4096];
     char metadataTagsBuffer[128];
 #endif
-    bool showAdapterSelectionPopup = false;
     bool showAdapterErrorPopup = false;
     std::string adapterErrorMsg;
-    bool showIncompatibleAdapterPopup = false;
-    std::string pendingAdapterName;
-    std::string pendingAdapterDirectory;
-    std::vector<DataAdapter*> compatibleAdapters;
-    std::string pendingRecentDatasetAdapterSave; // Path to save adapter for in recent datasets
     AppConfig* configPtr = nullptr;
     std::string configFilePath;
     // UI state
@@ -248,6 +237,9 @@ struct AppState {
     bool showWorkspaceDeleteConfirmPopup = false;
     std::string pendingWorkspaceDeletionPath;
 
+    // Phase 5: dataset conversion screen (foreign formats -> .h5)
+    ConversionScreenState conversionScreen;
+
     // Thread pool for parallel computation
     std::unique_ptr<ThreadPool> computationPool;
     int configuredWorkerCount = -1;   // -1 = AUTO
@@ -261,7 +253,7 @@ struct AppState {
     bool hasWorkspace() const { return false; }
     bool workspaceDirty() const { return false; }
 #endif
-    bool dataSourceReady() const { return currentAdapter || hasWorkspace(); }
+    bool dataSourceReady() const { return hasWorkspace(); }
 };
 
 // Global application state instance

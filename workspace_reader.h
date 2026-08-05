@@ -5,16 +5,10 @@
 #include <string>
 #include <vector>
 
-#include "adapters/csv_adapter.h"
-#include "adapters/dataset_info.h"
+#include "interferogram_data.h"
 #include "hdf/workspace.h"
 
 struct AppState;
-
-// Sentinel adapter name used by the engine to route reads through the
-// Workspace instead of a DataAdapter. AdapterRegistry::loadFileStatic branches
-// on it; datasetInfo.adapterName carries it in workspace mode.
-constexpr const char* kHdfWorkspaceAdapter = "HDF5 Workspace";
 
 // Map Workspace availability flags 1:1 onto DatasetInfo so the engine's
 // feature gating (axisIsCorrected, hasPrecomputedSpectra, ...) works unchanged.

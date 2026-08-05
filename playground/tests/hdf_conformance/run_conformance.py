@@ -23,7 +23,9 @@ Steps:
                          selected files" cpp_out [config.json]  (copy of the
                          golden; -w saves in place)
   5. validate result:    validate_h5.py cpp_written.h5    (C++ wrote it)
-  6. print PASS/FAIL
+  6. ArcOptix converters: -c arcoptix_igms / arcoptix_spectra on the sample
+                         files, validate both outputs
+  7. C++ engine opens the corrected-IFG workspace (-w, IFG export)
 """
 
 import argparse
@@ -38,7 +40,7 @@ HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[2]
 PY = sys.executable
 VALIDATOR = HERE / "validate_h5.py"
-PARSER = REPO_ROOT / "hdf" / "python_parse" / "legacy_fts_to_h5_parser.py"
+PARSER = REPO_ROOT / "converters" / "wust_mini_fts.py"
 # Candidate build dirs, in priority order: the CMake presets used by
 # build_script.sh (linux-release is the default dev build, linux-debug comes
 # from -t Debug) plus the legacy AGENTS.md path. A missing binary is a clean
@@ -51,6 +53,9 @@ BIN_DIR_CANDIDATES = (
 )
 DATASET_DIR = (REPO_ROOT / "playground" / "test_data"
                / "2024-06-10_11-38-54_newconfig_zabercurr0.6A_his25000direct_prno2_1mm_1.5mms_avg100")
+ARCOPTIX_DIR = REPO_ROOT / "playground" / "test_data" / "arcoptix_samples"
+IGM_SAMPLE = ARCOPTIX_DIR / "igm_sample_001.txt"
+SPECTRA_SAMPLE = ARCOPTIX_DIR / "spectrum_sample_001.txt"
 OUTPUT_DIR = REPO_ROOT / "playground" / "outputs" / "hdf_conformance"
 GOLDEN = OUTPUT_DIR / "example.h5"
 CPP_OUT = OUTPUT_DIR / "cpp_out"
@@ -73,9 +78,23 @@ def find_binary(name, flag, override=None):
              f"or ./build_script.sh -t Debug). Searched: {searched}")
 
 
-def run(cmd, step):
+def converter_env():
+    """Hermetic HOME so -c resolves converter ids + the interpreter (the venv
+    python running this harness has h5py)."""
+    import tempfile
+    home = Path(tempfile.mkdtemp(prefix="fts_conformance_"))
+    (home / ".fts_data_explorer_config").write_text(
+        f"[Converters]\ninterpreter={sys.executable}\n"
+        f"path={REPO_ROOT / 'converters'}\n")
+    env = dict(os.environ)
+    env["HOME"] = str(home)
+    return env
+
+
+def run(cmd, step, env=None):
     print(f"[{step}] Running: {' '.join(str(c) for c in cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800,
+                            env=env)
     if result.stdout:
         print("  " + result.stdout.strip().replace("\n", "\n  "))
     if result.stderr:
@@ -138,8 +157,31 @@ def main(argv=None):
     run([PY, str(VALIDATOR), str(work)], "5")
 
     print()
+    print("=" * 60)
+    print("Step 6 — ArcOptix converters via -c (igm_corrected_x + spectra)")
+    print("=" * 60)
+    env = converter_env()
+    igm_out = OUTPUT_DIR / "arcoptix_igm.h5"
+    run([str(binary), "-c", "arcoptix_igms", str(IGM_SAMPLE), str(igm_out)],
+        "6", env=env)
+    run([PY, str(VALIDATOR), str(igm_out)], "6")
+    spec_out = OUTPUT_DIR / "arcoptix_spectra.h5"
+    run([str(binary), "-c", "arcoptix_spectra", str(SPECTRA_SAMPLE),
+         str(spec_out)], "6", env=env)
+    run([PY, str(VALIDATOR), str(spec_out)], "6")
+
+    print()
+    print("=" * 60)
+    print("Step 7 — C++ engine opens the corrected-IFG workspace (-w)")
+    print("=" * 60)
+    igm_work = OUTPUT_DIR / "arcoptix_igm_work.h5"
+    shutil.copy(igm_out, igm_work)
+    run([str(binary), "-w", str(igm_work),
+         "Corrected interferograms from selected files", str(CPP_OUT)], "7")
+
+    print()
     print("PASS: golden reproducible, python->C++ round-trip clean, "
-          "C++-written file conforms.")
+          "C++-written file conforms, ArcOptix converters valid.")
 
 
 if __name__ == "__main__":

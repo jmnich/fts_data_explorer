@@ -5,8 +5,8 @@
 #include "allan_variance.h"
 #include "t100.h"
 #include "spectral_toolbox.h"
-#include "adapters/csv_adapter.h"
-#include "adapters/adapter_registry.h"
+#include "interferogram_data.h"
+#include "workspace_reader.h"
 
 #include "imgui.h"
 #include "file_browser.h"
@@ -150,12 +150,15 @@ void ExportPanel::render()
     }
     ImGui::EndDisabled();
 
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     if (ImGui::BeginPopupModal("Export Warning", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::Text("No artifacts selected or available for export.");
         if (ImGui::Button("OK")) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
 
+    ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     if (ImGui::BeginPopupModal("Export Complete", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::Dummy(ImVec2(260, 1));
         float avail = ImGui::GetContentRegionAvail().x;
@@ -567,7 +570,7 @@ void ExportPanel::writeT100AllTransCsv(const std::string& dir)
     bool anyValid = false;
 
     for (size_t i = 0; i < checkedFiles.size(); i++) {
-        auto raw = AdapterRegistry::instance().loadFileStatic(appState->datasetInfo.adapterName, checkedFiles[i]);
+        auto raw = workspaceRead(appState->workspace, checkedFiles[i]);
         SpectralToolbox::ProcessedSpectrum ps;
         if (appState->datasetInfo.hasPrecomputedSpectra) {
             ps.spectrumX = raw.referenceDetector;

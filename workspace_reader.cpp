@@ -552,7 +552,6 @@ void applyViewState(AppState& s) {
 
 DatasetInfo workspaceDatasetInfo(const Workspace& ws) {
     DatasetInfo info;
-    info.adapterName = kHdfWorkspaceAdapter;
     info.hasInterferograms = ws.hasInterferograms();
     info.hasReferenceChannel = ws.hasReferenceChannel();
     info.axisIsCorrected = ws.axisIsCorrected();

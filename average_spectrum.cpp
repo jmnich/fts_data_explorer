@@ -1,7 +1,6 @@
 #include "average_spectrum.h"
 #include "spectral_toolbox.h"
-#include "adapters/csv_adapter.h"
-#include "adapters/adapter_registry.h"
+#include "interferogram_data.h"
 #if FTS_BUILD_HDF5
 #include "workspace_reader.h"
 #endif
@@ -604,14 +603,13 @@ bool AverageSpectrum::tickCalculation() {
                 !appState->filesSelectedForAveraging[i]) continue;
 
             std::string filePath = appState->sortedFiles[i];
-            std::string adapterName = appState->datasetInfo.adapterName;
             bool axisCorr = appState->datasetInfo.axisIsCorrected;
             bool hasPrecomp = appState->datasetInfo.hasPrecomputedSpectra;
             auto fut = appState->computationPool->enqueue([filePath, refLaser, K, xUnit,
-                                                               apodSelector, apodParams, adapterName, axisCorr, hasPrecomp,
+                                                               apodSelector, apodParams, this, axisCorr, hasPrecomp,
                                                                xMethod = static_cast<SpectralToolbox::XCorrectionMethod>(appState->xCorrectionMethod),
                                                                promThresh = appState->peakProminenceThreshold]() {
-                auto raw = AdapterRegistry::instance().loadFileStatic(adapterName, filePath);
+                auto raw = workspaceRead(appState->workspace, filePath);
                 if (hasPrecomp) {
                     SpectralToolbox::ProcessedSpectrum ps;
                     ps.spectrumX = raw.referenceDetector;

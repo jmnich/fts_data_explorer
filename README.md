@@ -16,7 +16,10 @@ The application is designed to help with handling data from DIY lab instruments 
 - Dark mode (with customizable accent color)
 - Switching spectrum x-axis between cm⁻¹, µm and THz
 - Switching spectrum y-axis between lin, log and dB
-- Flexible data adapter system, allowing for importing raw data in various forms
+- Workspaces in the unified spectral HDF5 container (`.h5`); foreign data enters
+  through the built-in **Conversion screen** with scripted converters (WUST raw CSV,
+  ArcOptix IGMs and spectra; extensible via self-contained `.py` converters from a
+  public repo or a local user dir)
 - Basic plotting of reference and primary detector signals
 - Advanced spectrum calculation capabilities giving the user control over zero-padding, apodization, reference laser tuning and detector sensitivity
 - Rapid average spectrum calculation

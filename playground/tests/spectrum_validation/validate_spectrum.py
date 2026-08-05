@@ -12,9 +12,11 @@ Output lands in playground/outputs/spectrum_validation/:
 
 import csv
 import json
+import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -155,7 +157,7 @@ def compute_spectrum_python(raw_csv_path, config):
 
 
 # ===================================================================
-#  Step 2 — C++ headless run
+#  Step 2 — C++ headless run (convert -c, then process -w)
 # ===================================================================
 def run_headless(dataset_dir, config, output_dir):
     output_dir = Path(output_dir)
@@ -169,25 +171,54 @@ def run_headless(dataset_dir, config, output_dir):
     with open(cfg_path, "w") as f:
         json.dump(cfg_body, f, indent=2)
 
-    cmd = [
-        str(BINARY),
-        "-p",
-        str(dataset_dir),
-        "WUST Mini FTS Raw",
-        str(cfg_path),
-        "Spectra from selected files",
-        str(output_dir),
-    ]
-    print(f"  Running: {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-    if result.returncode != 0:
-        print("  C++ headless error:")
-        print(result.stderr)
-        sys.exit(1)
-    if result.stdout:
-        print("  " + result.stdout.strip().replace("\n", "\n  "))
-    if result.stderr:
-        print("  stderr: " + result.stderr.strip().replace("\n", "\n  "))
+    # Hermetic HOME: -c resolves the converter by id from the scanned dirs and
+    # takes the interpreter from ~/.fts_data_explorer_config. The venv python
+    # running this harness has h5py, so it is exactly the interpreter needed.
+    # The app-repo converters/ dir is the dev/test source, listed as an extra
+    # converter path (the public repo clone is the real-world default).
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        (home / ".fts_data_explorer_config").write_text(
+            f"[Converters]\ninterpreter={sys.executable}\n"
+            f"path={REPO_ROOT / 'converters'}\n")
+        env = {**os.environ, "HOME": str(home)}
+        work_h5 = output_dir / "work.h5"
+
+        cmd = [
+            str(BINARY),
+            "-c",
+            "wust_mini_fts",
+            str(dataset_dir),
+            str(work_h5),
+        ]
+        print(f"  Running: {' '.join(cmd)}")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600,
+                                env=env)
+        if result.returncode != 0:
+            print("  C++ headless error (convert):")
+            print(result.stderr)
+            sys.exit(1)
+        if result.stdout:
+            print("  " + result.stdout.strip().replace("\n", "\n  "))
+
+        cmd = [
+            str(BINARY),
+            "-w",
+            str(work_h5),
+            "Spectra from selected files",
+            str(output_dir),
+            str(cfg_path),
+        ]
+        print(f"  Running: {' '.join(cmd)}")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            print("  C++ headless error (process):")
+            print(result.stderr)
+            sys.exit(1)
+        if result.stdout:
+            print("  " + result.stdout.strip().replace("\n", "\n  "))
+        if result.stderr:
+            print("  stderr: " + result.stderr.strip().replace("\n", "\n  "))
 
     csvs = list(output_dir.glob("*_spectra.csv"))
     if not csvs:

@@ -130,13 +130,11 @@ void AppState::reset() {
     t100.reset();
     filesSelectedForAveraging.clear();
     datasetInfo = DatasetInfo();
-    currentAdapter.reset();
 #if FTS_BUILD_HDF5
     workspace = Workspace{};
     workspacePath.clear();
     pendingWorkspaceAction = PendingWorkspaceAction::None;
     pendingWorkspacePath.clear();
-    pendingWorkspaceAdapterName.clear();
     showUnsavedPrompt = false;
     pendingSaveAsPath.clear();
     showStaleDropPrompt = false;
@@ -145,11 +143,6 @@ void AppState::reset() {
     metadataCommentBuffer[0] = '\0';
     metadataTagsBuffer[0] = '\0';
 #endif
-    showAdapterSelectionPopup = false;
-    showIncompatibleAdapterPopup = false;
-    pendingAdapterName.clear();
-    pendingAdapterDirectory.clear();
-    compatibleAdapters.clear();
     showDeleteConfirmPopup = false;
     deleteConfirmIndex = 0;
     showWorkspaceDeleteConfirmPopup = false;

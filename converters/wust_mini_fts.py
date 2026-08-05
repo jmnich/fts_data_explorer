@@ -1,4 +1,19 @@
 #!/usr/bin/env python3
+#FTS_CONVERTER {"id":"wust_mini_fts","name":"WUST Mini FTS CSV","version":"1.0",
+#  "description":"Import WUST raw_data/ (raw_*.csv + measurementInfo.txt + comments.txt)",
+#  "input":"directory","extensions":[".csv"],"output":"interferograms","params":[]}
+#FTS_FORMAT
+# Tab-separated or comma-separated text. First non-comment line is the header
+# "Reference detector [V],Primary detector [V]"; every following line holds one
+# sample pair. A WUST dataset lives in raw_data/ with one raw_*.csv per scan,
+# plus optional measurementInfo.txt (key:value lines) and comments.txt.
+#FTS_FORMAT_END
+#FTS_FORMAT_SAMPLE
+# Reference detector [V],Primary detector [V]
+# -0.00123,0.00084
+# 0.00031,-0.00047
+# 0.00112,0.00063
+#FTS_FORMAT_SAMPLE_END
 """
 Parse a legacy FTS dataset directory into the unified spectral HDF5 container.
 
@@ -30,11 +45,10 @@ Container layout (this parser):
 Numeric datasets are parsed from ASCII and stored as fp32. Column headers and
 units are recorded as attributes on each dataset.
 
-Usage:
-    python3 legacy_fts_to_h5_parser.py <dataset_dir> [-o out.h5]
+Usage (converter contract):
+    python3 wust_mini_fts.py <dataset_dir> <output.h5> [-o out.h5]
 
-The .h5 is written into the script's directory unless -o is given. Writes
-atomically (temp file + rename) and verifies the result before exiting.
+Writes atomically (temp file + rename) and verifies the result before exiting.
 """
 
 import argparse
@@ -141,8 +155,7 @@ def read_comment(path):
         return f.read()
 
 
-def raw_file_paths(dataset_dir):
-    raw_dir = os.path.join(dataset_dir, "raw_data")
+def raw_file_paths(raw_dir):
     if not os.path.isdir(raw_dir):
         return []
     files = [f for f in os.listdir(raw_dir) if f.endswith(".csv")]
@@ -172,10 +185,10 @@ def build_interferogram_config(channel_names, channel_units, file_count, points_
     }
 
 
-def write_container(out_path, dataset_dir):
+def write_container(out_path, dataset_dir, raw_dir):
     tmp_path = out_path + ".tmp"
-    raw_files = raw_file_paths(dataset_dir)
-    first_path = os.path.join(dataset_dir, "raw_data", raw_files[0])
+    raw_files = raw_file_paths(raw_dir)
+    first_path = os.path.join(raw_dir, raw_files[0])
     first_header = _first_line(first_path)
     channel_names, channel_units = parse_header(first_header)
 
@@ -196,7 +209,7 @@ def write_container(out_path, dataset_dir):
 
         points_per_file = 0
         for fname in raw_files:
-            arr = read_ascii_fp32(os.path.join(dataset_dir, "raw_data", fname))
+            arr = read_ascii_fp32(os.path.join(raw_dir, fname))
             ds_name = os.path.splitext(fname)[0]
             ds = group.create_dataset(ds_name, data=arr)
             ds.attrs["kind"] = "original"
@@ -262,16 +275,22 @@ def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Import a legacy FTS dataset directory into the unified spectral HDF5 container.")
     parser.add_argument("dataset_dir", help="Legacy dataset directory (raw_data/, measurementInfo.txt)")
-    parser.add_argument("-o", "--output",
-                        help="Output .h5 path (default: <script_dir>/<dataset_basename>.h5)")
+    parser.add_argument("output", nargs="?", default=None,
+                        help="Output .h5 path (converter contract: positional)")
+    parser.add_argument("-o", "--output", dest="output_alt", default=None,
+                        help="Output .h5 path (legacy -o form)")
     args = parser.parse_args(argv)
 
     dataset_dir = args.dataset_dir
+    # Lenient input: accept the dataset dir (raw_data/ inside) or raw_data/ itself.
+    raw_dir = os.path.join(dataset_dir, "raw_data")
+    if not os.path.isdir(raw_dir):
+        raw_dir = dataset_dir
     if not os.path.isdir(dataset_dir):
         sys.exit(f"Error: not a directory: {dataset_dir}")
-    if not raw_file_paths(dataset_dir):
-        sys.exit(f"Error: no raw_data/*.csv files in {dataset_dir}")
-    out_path = args.output or os.path.join(
+    if not raw_file_paths(raw_dir):
+        sys.exit(f"Error: no raw_*.csv files in {raw_dir}")
+    out_path = args.output or args.output_alt or os.path.join(
         SCRIPT_DIR, os.path.basename(dataset_dir.rstrip(os.sep)) + ".h5")
 
     raw_files = raw_file_paths(dataset_dir)
@@ -280,7 +299,7 @@ def main(argv=None):
     for fname in raw_files:
         print(f"    {os.path.splitext(fname)[0]}")
     print(f"Writing {out_path}")
-    write_container(out_path, dataset_dir)
+    write_container(out_path, dataset_dir, raw_dir)
     verify(out_path)
     print("OK: verified")
 

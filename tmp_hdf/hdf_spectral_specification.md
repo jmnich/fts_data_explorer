@@ -501,3 +501,30 @@ Does **not** store UI chrome (window geometry, docking, theme, fonts, thread poo
 ### 8.2 Not persisted
 
 Window geometry, UI theme, docking layout, thread config, filesystem paths, host identity, transient state, derivable booleans — live in `~/.fts_data_explorer_config`, not in the `.h5`.
+
+## 9. Converters (app extension, phase 5)
+
+`.h5` is the only runtime input for the FTS Data Explorer engine. Foreign
+formats enter through **converter scripts** — self-contained Python files with
+a magic-line manifest in the file head:
+
+```
+#FTS_CONVERTER {"id":"wust_mini_fts","name":"WUST Mini FTS CSV","version":"1.0",
+#  "description":"...","input":"directory|file","extensions":[".csv"],"params":[]}
+#FTS_FORMAT
+# prose description of the accepted input format (one '# ' line each)
+#FTS_FORMAT_END
+#FTS_FORMAT_SAMPLE
+# verbatim example rows (header included)
+#FTS_FORMAT_SAMPLE_END
+```
+
+The `#FTS_CONVERTER` JSON may span `#`-prefixed continuation lines. Invocation
+contract: `<interpreter> <script> <input> <output.h5> [--param value]`; the
+script writes the container atomically (tmp + rename) and exits 0 on success.
+Converters produce originals only (`igm_uncorrected_x/`, `igm_corrected_x/`,
+`spectra/` members per §2.3-2.4) with `kind="original"`, `columns`/`units`
+attributes, and group-level `@origin`/`@config`. The app validates every
+converted file (root datasets, format attr, no dangling `inputs`) before
+offering it as a workspace. Reference implementations ship in the app's
+`converters/` dir and the public converter repo.

@@ -12,19 +12,15 @@
 #include "nlohmann/json.hpp"
 #include "config.h"
 #include "app_state.h"
-#include "adapters/adapter_registry.h"
 #include "version.h"
-#include "adapters/wust_mini_fts_adapter.h"
-#include "adapters/arcoptix_igms_adapter.h"
-#include "adapters/arcoptix_spectra_adapter.h"
 #include "export.h"
 #include "apodization.h"
 #include "spectral_toolbox.h"
+#include "converter.h"
+#include "app_dirs.h"
 
-#if FTS_BUILD_HDF5
 #include "hdf/h5_store.h"
 #include "workspace_reader.h"
-#endif
 
 using json = nlohmann::json;
 
@@ -48,18 +44,18 @@ static void handleHelp() {
               << "  No flag        Launch the GUI normally with welcome screen.\n"
               << "  -help          Print this help message and exit.\n"
               << "  -v             Print version (" << APP_VERSION << ") and exit.\n"
-              << "  -l [type]      List available options. Types: data_adapter, output, recent.\n"
-              << "  -o <path> <adapter>\n"
-              << "                 Open GUI with dataset at <path> using <adapter>.\n"
-              << "  -p <path> <adapter> <config> <output type> <output dir>\n"
-              << "                 Process data in headless mode and export results.\n"
-#if FTS_BUILD_HDF5
+              << "  -l [type]      List available options. Types: converter, output, recent.\n"
               << "  -w <workspace.h5> <output type> <output dir> [<config.json>]\n"
               << "                 Open workspace, compute <output type> into it, save in\n"
               << "                 place and export. Config optional (saved view state\n"
               << "                 otherwise); processing.workerThreads from config only,\n"
               << "                 pool defaults to hardware_concurrency otherwise.\n"
-#endif
+              << "  -c <converter> <input> <output.h5>\n"
+              << "                 Run a converter (<id> from -l converter, or a direct\n"
+              << "                 .py path) on <input>, validate the result, exit 0/1.\n"
+              << "                 Uses the local clone as-is (no implicit network).\n"
+              << "  -sync-converters\n"
+              << "                 Clone (first run) or pull the standard converter repo.\n"
               << "  -t             Generate template.json with all config settings.\n"
               << "  -r             Reset config by deleting config file and imgui.ini.\n"
               << std::endl;
@@ -77,17 +73,30 @@ static void handleVersion() {
 // ---------------------------------------------------------------------------
 static void handleList(const std::string& type) {
     if (type.empty()) {
-        std::cout << "Available list types: data_adapter, output, recent" << std::endl;
+        std::cout << "Available list types: converter, output, recent" << std::endl;
         return;
     }
 
-    if (type == "data_adapter") {
-        AdapterRegistry::instance().registerAdapter(std::make_unique<WustMiniFtsAdapter>());
-        AdapterRegistry::instance().registerAdapter(std::make_unique<ArcoptixIgmsAdapter>());
-        AdapterRegistry::instance().registerAdapter(std::make_unique<ArcoptixSpectraAdapter>());
-
-        for (const auto& a : AdapterRegistry::instance().getAll()) {
-            std::cout << a->getName() << std::endl;
+    if (type == "converter") {
+        AppConfig config;
+        std::string configFilePath = getConfigFilePath();
+        if (std::filesystem::exists(configFilePath)) {
+            config.loadFromFile(configFilePath);
+        }
+        std::string repoDir = config.converterRepoDir.empty()
+            ? appDataDir() + "/converter-repo" : config.converterRepoDir;
+        ConverterRegistry::instance().refresh(appDataDir() + "/converters",
+                                              config.converterPaths, repoDir);
+        for (const auto& c : ConverterRegistry::instance().all()) {
+            std::cout << c.id;
+            if (c.broken) {
+                std::cout << " [BROKEN: " << c.error << "]";
+            } else {
+                if (!c.name.empty()) std::cout << " — " << c.name;
+                std::cout << " (" << (c.source == ConverterDesc::Source::Repo ? "repo" : "local")
+                          << ")";
+            }
+            std::cout << std::endl;
         }
     } else if (type == "output") {
         struct Label { const char* name; };
@@ -113,15 +122,11 @@ static void handleList(const std::string& type) {
             config.loadFromFile(configFilePath);
         }
         for (const auto& entry : config.recentDatasets) {
-            std::cout << entry.path;
-            if (!entry.adapterName.empty()) {
-                std::cout << " (" << entry.adapterName << ")";
-            }
-            std::cout << std::endl;
+            std::cout << entry.path << std::endl;
         }
     } else {
         std::cerr << "Error: Unknown list type '" << type << "'. "
-                  << "Available: data_adapter, output, recent" << std::endl;
+                  << "Available: converter, output, recent" << std::endl;
         exit(1);
     }
 }
@@ -581,137 +586,12 @@ static bool computeAndExport(const HeadlessConfig& cfg) {
     std::cout << "Exported '" << ot << "' to " << cfg.outputDir << std::endl;
     return true;
 }
-
-// ---------------------------------------------------------------------------
-// Process (-p)
-// ---------------------------------------------------------------------------
-static void handleProcess(const HeadlessConfig& cfg) {
-    // Validate output directory
-    if (!std::filesystem::exists(cfg.outputDir)) {
-        std::cerr << "Error: Directory '" << cfg.outputDir << "' does not exist" << std::endl;
-        exit(1);
-    }
-
-    // 1. Load existing config for worker thread setting
-    std::string configFilePath = getConfigFilePath();
-    AppConfig config;
-    if (std::filesystem::exists(configFilePath)) {
-        config.loadFromFile(configFilePath);
-    }
-
-    // 2. Register adapters
-    AdapterRegistry::instance().registerAdapter(std::make_unique<WustMiniFtsAdapter>());
-    AdapterRegistry::instance().registerAdapter(std::make_unique<ArcoptixIgmsAdapter>());
-    AdapterRegistry::instance().registerAdapter(std::make_unique<ArcoptixSpectraAdapter>());
-
-    if (!AdapterRegistry::instance().getAdapter(cfg.adapter)) {
-        std::cerr << "Error: Unknown adapter '" << cfg.adapter << "'" << std::endl;
-        exit(1);
-    }
-
-    // 3. Set appState cross-references
-    appState.spectrum.appState = &appState;
-    appState.averageSpectrum.appState = &appState;
-    appState.snrSpectrum.appState = &appState;
-    appState.allanVariance.appState = &appState;
-    appState.t100.appState = &appState;
-    appState.exportPanel.appState = &appState;
-
-    // 4. Configure thread pool
-    appState.reconfigurePool(config.workerThreads);
-
-    // 5. Apply adapter selection (this populates csvFiles, sets datasetInfo, etc.)
-    appState.currentDirectory = cfg.path;
-    applyAdapterSelection(cfg.adapter, cfg.path);
-
-    if (appState.csvFiles.empty()) {
-        std::cerr << "Error: No files found in dataset at '" << cfg.path << "'" << std::endl;
-        exit(1);
-    }
-
-    // 6. Sort files and load
-    appState.sortedFiles = appState.csvFiles;
-    std::sort(appState.sortedFiles.begin(), appState.sortedFiles.end(), naturalSortCompare);
-
-    // Set dataset name from directory
-    std::string dirPath = cfg.path;
-    size_t lastSlash = dirPath.find_last_of("/\\");
-    if (lastSlash != std::string::npos) {
-        appState.currentDatasetName = dirPath.substr(lastSlash + 1);
-    } else {
-        appState.currentDatasetName = dirPath;
-    }
-
-    // Load all files as selected (no limit in headless mode)
-    size_t maxSel = appState.sortedFiles.size();
-    for (size_t i = 0; i < appState.sortedFiles.size() && i < maxSel; i++) {
-        try {
-            const auto& filePath = appState.sortedFiles[i];
-            InterferogramData data = appState.currentAdapter->loadFile(filePath);
-            appState.rawDataCache.push_back(data);
-
-            InterferogramData processed = data;
-            if (appState.enableDownsampling && processed.dataSize() > appState.maxPointsBeforeDownsampling) {
-                size_t factor = processed.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
-                std::vector<double> downRef, downPrim;
-                for (size_t j = 0; j < processed.referenceDetector.size(); j += factor) {
-                    downRef.push_back(processed.referenceDetector[j]);
-                    downPrim.push_back(processed.primaryDetector[j]);
-                }
-                processed.referenceDetector = downRef;
-                processed.primaryDetector = downPrim;
-            }
-
-            appState.loadedData.push_back(processed);
-            appState.selectedFiles.push_back(filePath);
-            std::string fname = filePath;
-            size_t ls = fname.find_last_of("/\\");
-            if (ls != std::string::npos) fname = fname.substr(ls + 1);
-            appState.selectedFilenames.push_back(fname);
-        } catch (const std::exception& e) {
-            std::cerr << "Warning: Failed to load " << appState.sortedFiles[i] << ": " << e.what() << std::endl;
-            continue;
-        }
-    }
-
-    if (appState.selectedFiles.empty()) {
-        std::cerr << "Error: Failed to load any files from dataset" << std::endl;
-        exit(1);
-    }
-
-    appState.dataLoaded = true;
-
-    // Mark all files as checked for averaging
-    appState.filesSelectedForAveraging.clear();
-    appState.filesSelectedForAveraging.resize(appState.sortedFiles.size(), true);
-
-    // 7. Parse and apply JSON config
-    json j;
-    try {
-        std::ifstream ifs(cfg.configPath);
-        if (!ifs.is_open()) {
-            std::cerr << "Error: Config file '" << cfg.configPath << "' not found" << std::endl;
-            exit(1);
-        }
-        ifs >> j;
-    } catch (const std::exception& e) {
-        std::cerr << "Error: Invalid JSON in config file '" << cfg.configPath << "': " << e.what() << std::endl;
-        exit(1);
-    }
-
-    applyJsonConfig(appState, j);
-
-    // 8-9. Shared compute + export tail (steps 8-9, moved to computeAndExport)
-    computeAndExport(cfg);
-}
-
 // ---------------------------------------------------------------------------
 // Workspace (-w): open a .h5 workspace, compute the requested artifact into it
 // (the panels mirror derivatives into Workspace when hasWorkspace()), save in
 // place (atomic temp+rename), then export. Mirrors GUI Save minus the prompt:
 // captureViewState -> markConfigStale -> pruneStale -> H5Store::save.
 // ---------------------------------------------------------------------------
-#if FTS_BUILD_HDF5
 static void handleWorkspace(const HeadlessConfig& cfg) {
     // 1. Validate output directory and input file
     if (!std::filesystem::exists(cfg.outputDir)) {
@@ -777,8 +657,7 @@ static void handleWorkspace(const HeadlessConfig& cfg) {
     for (size_t i = 0; i < appState.sortedFiles.size(); i++) {
         try {
             const auto& filePath = appState.sortedFiles[i];
-            InterferogramData data = AdapterRegistry::instance().loadFileStatic(
-                appState.datasetInfo.adapterName, filePath);
+            InterferogramData data = workspaceRead(appState.workspace, filePath);
             appState.rawDataCache.push_back(data);
 
             InterferogramData processed = data;
@@ -834,7 +713,76 @@ static void handleWorkspace(const HeadlessConfig& cfg) {
 
     std::cout << "Saved " << cfg.path << std::endl;
 }
-#endif // FTS_BUILD_HDF5
+
+// ---------------------------------------------------------------------------
+// Convert (-c): run a converter on <input> -> <output.h5>, validate, exit 0/1.
+// Resolves the converter by id from the scanned set, or accepts a direct .py
+// path. Uses the local clone as-is — no implicit network (deterministic CI).
+// ---------------------------------------------------------------------------
+static void handleConvert(const HeadlessConfig& cfg) {
+    AppConfig config;
+    std::string configFilePath = getConfigFilePath();
+    if (std::filesystem::exists(configFilePath)) {
+        config.loadFromFile(configFilePath);
+    }
+    std::string repoDir = config.converterRepoDir.empty()
+        ? appDataDir() + "/converter-repo" : config.converterRepoDir;
+    ConverterRegistry::instance().refresh(appDataDir() + "/converters",
+                                          config.converterPaths, repoDir);
+
+    const ConverterDesc* desc = ConverterRegistry::instance().get(cfg.converter);
+    ConverterDesc direct;
+    if (!desc && std::filesystem::is_regular_file(cfg.converter)) {
+        direct = parseConverterFile(cfg.converter, false);
+        desc = &direct;
+    }
+    if (!desc) {
+        std::cerr << "Error: Unknown converter '" << cfg.converter << "' "
+                  << "(use -l converter to list, or pass a .py path)" << std::endl;
+        exit(1);
+    }
+
+    std::string log, error;
+    if (!runConverterSync(*desc, config.converterInterpreter, cfg.path,
+                          cfg.outputDir, {}, log, error)) {
+        if (log.empty() && !error.empty()) log = error;
+        if (!log.empty()) std::cout << log << std::endl;
+        std::cerr << "Error: Converter '" << cfg.converter << "' failed" << std::endl;
+        exit(1);
+    }
+    if (!log.empty()) std::cout << log << std::endl;
+
+    try {
+        H5Store::validate(cfg.outputDir);
+    } catch (const std::exception& e) {
+        std::cerr << "Error: Converted file failed validation: " << e.what() << std::endl;
+        exit(1);
+    }
+    std::cout << "Converted '" << cfg.path << "' -> '" << cfg.outputDir
+              << "' using " << desc->id << std::endl;
+}
+
+// ---------------------------------------------------------------------------
+// Sync converters (-sync-converters): clone on first run, pull afterwards.
+// ---------------------------------------------------------------------------
+static void handleSyncConverters() {
+    AppConfig config;
+    std::string configFilePath = getConfigFilePath();
+    if (std::filesystem::exists(configFilePath)) {
+        config.loadFromFile(configFilePath);
+    }
+    std::string repoDir = config.converterRepoDir.empty()
+        ? appDataDir() + "/converter-repo" : config.converterRepoDir;
+    std::string url = config.converterRepoUrl.empty()
+        ? "https://github.com/fts-data-explorer/converters" : config.converterRepoUrl;
+
+    std::string error;
+    if (!ensureConverterRepo(url, repoDir, error)) {
+        std::cerr << "Error: " << error << std::endl;
+        exit(1);
+    }
+    std::cout << "Converters synced to " << repoDir << std::endl;
+}
 
 // ---------------------------------------------------------------------------
 // Public interface
@@ -877,30 +825,6 @@ bool parseHeadlessArgs(int argc, char* argv[], HeadlessConfig& cfg) {
         return false;
     }
 
-    if (flag == "-o") {
-        if (argc != 4) {
-            std::cerr << "Error: -o requires <path> and <adapter> arguments" << std::endl;
-            return true;
-        }
-        cfg.command = HeadlessConfig::Command::OpenGUI;
-        cfg.path = argv[2];
-        cfg.adapter = argv[3];
-        return false;
-    }
-
-    if (flag == "-p") {
-        if (argc != 7) {
-            std::cerr << "Error: -p requires <path> <adapter> <config> <output type> <output dir>" << std::endl;
-            return true;
-        }
-        cfg.command = HeadlessConfig::Command::Process;
-        cfg.path = argv[2];
-        cfg.adapter = argv[3];
-        cfg.configPath = argv[4];
-        cfg.outputType = argv[5];
-        cfg.outputDir = argv[6];
-        return false;
-    }
 
     if (flag == "-w") {
         if (argc < 5 || argc > 6) {
@@ -913,6 +837,27 @@ bool parseHeadlessArgs(int argc, char* argv[], HeadlessConfig& cfg) {
         cfg.outputType = argv[3];
         cfg.outputDir = argv[4];
         if (argc == 6) cfg.configPath = argv[5];
+        return false;
+    }
+
+    if (flag == "-c") {
+        if (argc != 5) {
+            std::cerr << "Error: -c requires <converter> <input> <output.h5>" << std::endl;
+            return true;
+        }
+        cfg.command = HeadlessConfig::Command::Convert;
+        cfg.converter = argv[2];
+        cfg.path = argv[3];
+        cfg.outputDir = argv[4];
+        return false;
+    }
+
+    if (flag == "-sync-converters") {
+        if (argc != 2) {
+            std::cerr << "Error: -sync-converters takes no arguments" << std::endl;
+            return true;
+        }
+        cfg.command = HeadlessConfig::Command::SyncConverters;
         return false;
     }
 
@@ -955,19 +900,15 @@ bool runHeadlessCommand(const HeadlessConfig& cfg) {
         case HeadlessConfig::Command::Template:
             handleTemplate();
             return true;
-        case HeadlessConfig::Command::Process:
-            handleProcess(cfg);
-            return true;
         case HeadlessConfig::Command::Workspace:
-#if FTS_BUILD_HDF5
             handleWorkspace(cfg);
-#else
-            std::cerr << "Error: -w requires an HDF5 build (reconfigure with "
-                         "FTS_BUILD_HDF5=ON)" << std::endl;
-            exit(1);
-#endif
             return true;
-        case HeadlessConfig::Command::OpenGUI:
+        case HeadlessConfig::Command::Convert:
+            handleConvert(cfg);
+            return true;
+        case HeadlessConfig::Command::SyncConverters:
+            handleSyncConverters();
+            return true;
         case HeadlessConfig::Command::None:
             return false;
     }

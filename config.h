@@ -14,7 +14,6 @@
 struct AppConfig {
     struct RecentDatasetEntry {
         std::string path;
-        std::string adapterName;
     };
     std::vector<RecentDatasetEntry> recentDatasets;
     size_t maxRecentDatasets = 10;
@@ -36,6 +35,13 @@ struct AppConfig {
 
     // Thread pool config
     int workerThreads = -1; // -1 = AUTO
+
+    // Converter settings (Phase 5; persisted in [Converters]). Empty strings
+    // mean "platform default" (appDataDir()/converter-repo, python3|py).
+    std::string converterRepoUrl = "https://github.com/fts-data-explorer/converters"; // placeholder, real URL TBD
+    std::string converterRepoDir;   // empty = default appDataDir()/converter-repo
+    std::string converterInterpreter; // empty = "python3" (posix) / "py" (Win)
+    std::vector<std::string> converterPaths; // extra user converter dirs
     
     // Docking layout: tracks whether the default layout has been applied
     bool defaultLayoutApplied = false;
@@ -100,26 +106,20 @@ struct AppConfig {
     char t100EnergyRatioDenC[32] = "";
     
     // Add a dataset to recent list (maintains max size, deduplicates)
-    void addRecentDataset(const std::string& datasetPath, const std::string& adapterName = "") {
+    void addRecentDataset(const std::string& datasetPath) {
         // Normalize path: strip trailing slash to prevent formatting mismatches
         std::string normalized = datasetPath;
         while (!normalized.empty() && (normalized.back() == '/' || normalized.back() == '\\'))
             normalized.pop_back();
 
-        // Preserve existing adapter name if present and none provided
-        std::string existingAdapter;
-        auto it = std::find_if(recentDatasets.begin(), recentDatasets.end(),
-            [&](const RecentDatasetEntry& e) { return e.path == normalized; });
-        if (it != recentDatasets.end()) {
-            existingAdapter = it->adapterName;
-            recentDatasets.erase(it);
-        }
+        // Remove existing entry (if any) so the list stays deduplicated
+        recentDatasets.erase(
+            std::remove_if(recentDatasets.begin(), recentDatasets.end(),
+                [&](const RecentDatasetEntry& e) { return e.path == normalized; }),
+            recentDatasets.end());
 
-        // Add to beginning with adapter name (provided, or preserved from old entry)
-        recentDatasets.insert(recentDatasets.begin(), {
-            normalized,
-            adapterName.empty() ? existingAdapter : adapterName
-        });
+        // Add to beginning
+        recentDatasets.insert(recentDatasets.begin(), {normalized});
 
         // Trim to max size
         if (recentDatasets.size() > maxRecentDatasets) {
@@ -151,11 +151,7 @@ struct AppConfig {
             // Write recent datasets
             configFile << "[RecentDatasets]\n";
             for (const auto& entry : recentDatasets) {
-                configFile << "dataset=" << entry.path;
-                if (!entry.adapterName.empty()) {
-                    configFile << "|" << entry.adapterName;
-                }
-                configFile << "\n";
+                configFile << "dataset=" << entry.path << "\n";
             }
             configFile << "\n";
             
@@ -174,6 +170,19 @@ struct AppConfig {
             configFile << "accent_color=" << accentColor << "\n";
             configFile << "worker_threads=" << workerThreads << "\n";
             configFile << "default_layout_applied=" << (defaultLayoutApplied ? "true" : "false") << "\n";
+
+            // Converter settings (only non-defaults are persisted; empty
+            // strings keep the platform defaults)
+            configFile << "\n[Converters]\n";
+            if (!converterRepoUrl.empty())
+                configFile << "repo_url=" << converterRepoUrl << "\n";
+            if (!converterRepoDir.empty())
+                configFile << "repo_dir=" << converterRepoDir << "\n";
+            if (!converterInterpreter.empty())
+                configFile << "interpreter=" << converterInterpreter << "\n";
+            for (const auto& p : converterPaths) {
+                configFile << "path=" << p << "\n";
+            }
             
             // Write window settings
             configFile << "\n[Window]\n";
@@ -232,14 +241,12 @@ struct AppConfig {
                     value.erase(value.find_last_not_of(" \t") + 1);
                     
                     if (currentSection == "RecentDatasets" && key == "dataset") {
-                        RecentDatasetEntry entry;
+                        // Tolerate the legacy "path|adapter" form (adapter
+                        // part dropped — the adapter system is retired).
                         size_t pipePos = value.find('|');
-                        if (pipePos != std::string::npos) {
-                            entry.path = value.substr(0, pipePos);
-                            entry.adapterName = value.substr(pipePos + 1);
-                        } else {
-                            entry.path = value;
-                        }
+                        RecentDatasetEntry entry;
+                        entry.path = pipePos != std::string::npos
+                            ? value.substr(0, pipePos) : value;
                         recentDatasets.push_back(entry);
                     } else if (currentSection == "Settings") {
                         if (key == "max_recent_datasets") {
@@ -279,6 +286,16 @@ struct AppConfig {
                             windowPosY = std::stoi(value);
                         } else if (key == "maximized") {
                             windowMaximized = (value == "true");
+                        }
+                    } else if (currentSection == "Converters") {
+                        if (key == "repo_url") {
+                            converterRepoUrl = value;
+                        } else if (key == "repo_dir") {
+                            converterRepoDir = value;
+                        } else if (key == "interpreter") {
+                            converterInterpreter = value;
+                        } else if (key == "path") {
+                            if (!value.empty()) converterPaths.push_back(value);
                         }
                     }
                 }
