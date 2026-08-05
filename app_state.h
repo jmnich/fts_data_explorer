@@ -129,6 +129,9 @@ struct AppState {
     float scrollAccumX = 0.0f;
     float scrollAccumY = 0.0f;
     double lastScrollEventTime = 0.0;
+    // "Saved" toast deadline (glfwGetTime()); 0.0 = inactive. Set after a
+    // successful workspace save; renderSaveToast draws while now < deadline.
+    double saveToastUntil = 0.0;
     
     // X-range selection state
     bool isSelectingXRange;

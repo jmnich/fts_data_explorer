@@ -516,6 +516,8 @@ void doSaveWorkspace(AppState& s, const std::string& asPath) {
     s.viewStateBaseline = viewStateJson(s);
     s.viewStateBaselinePending = false;
     s.needsRedraw = true;
+    // The save was effective (no exception, no cancel): show the "Saved" toast.
+    s.saveToastUntil = glfwGetTime() + 1.5;
 }
 
 void requestSaveWorkspace(AppState& s, const std::string& asPath) {
@@ -1337,6 +1339,19 @@ int main(int argc, char* argv[]) {
             if (now - lastForceRedrawTime >= 1.0) {
                 appState.needsRedraw = true;
                 lastForceRedrawTime = now;
+            }
+        }
+
+        // "Saved" toast: keep frames rendering while the toast is live, plus
+        // one final frame right after expiry so the overlay is actually
+        // cleared from the screen — the idle skip would otherwise freeze the
+        // last pre-expiry frame with the toast still visible.
+        if (appState.saveToastUntil > 0.0) {
+            if (glfwGetTime() >= appState.saveToastUntil) {
+                appState.saveToastUntil = 0.0;
+                appState.needsRedraw = true;
+            } else if (!appState.needsRedraw) {
+                appState.needsRedraw = true;
             }
         }
 
@@ -5120,6 +5135,27 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                 ImVec2(pos.x - 20, pos.y - 12),
                 ImVec2(pos.x + ts.x + 20, pos.y + ts.y + 12),
                 IM_COL32(30, 30, 50, 230), 8.0f);
+            dl->AddText(pos, IM_COL32(255, 255, 255, 255), msg);
+        }
+
+        // "Saved" toast — centered, undecorated, input-transparent overlay.
+        // Drawn on the foreground draw list (no ImGui window, no input
+        // capture), visible 1.5 s after an effective workspace save.
+        if (glfwGetTime() < appState.saveToastUntil) {
+            ImDrawList* dl = ImGui::GetForegroundDrawList();
+            ImVec2 size = ImGui::GetIO().DisplaySize;
+            const char* msg = "Saved";
+            ImVec2 ts = ImGui::CalcTextSize(msg);
+            ImVec2 pos((size.x - ts.x) * 0.5f, (size.y - ts.y) * 0.5f);
+            dl->AddRectFilled(
+                ImVec2(pos.x - 22, pos.y - 14),
+                ImVec2(pos.x + ts.x + 22, pos.y + ts.y + 14),
+                IM_COL32(30, 30, 50, 230), 8.0f);
+            dl->AddRect(
+                ImVec2(pos.x - 22, pos.y - 14),
+                ImVec2(pos.x + ts.x + 22, pos.y + ts.y + 14),
+                ImGui::ColorConvertFloat4ToU32(modalAccent()),
+                8.0f, ImDrawFlags_None, 2.0f);
             dl->AddText(pos, IM_COL32(255, 255, 255, 255), msg);
         }
 
