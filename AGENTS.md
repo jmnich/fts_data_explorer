@@ -120,7 +120,7 @@ Fails -> "Error: <msg>" to stderr, non-zero exit.
 ```
 ./build_script.sh [-c] [-j N] [-t Release|Debug]
 ```
-Output: `build/fts_data_explorer`. Fetches deps (ImGui/ImPlot/ImPlot3D/GLFW/FFTW3/HDF5), configures CMake, builds. `-c`: clean rebuild. `-j N`: jobs (default: nproc).
+Output: `build/linux-release/fts_data_explorer` (`build/linux-debug/` with `-t Debug`; `build/windows-mingw/fts_data_explorer.exe` with `-w`). `fts_hdf_roundtrip` lands alongside it. Fetches deps (ImGui/ImPlot/ImPlot3D/GLFW/FFTW3/HDF5), configures CMake, builds. `-c`: clean rebuild. `-j N`: jobs (default: nproc).
 
 ## MinGW cross-build with HDF5
 

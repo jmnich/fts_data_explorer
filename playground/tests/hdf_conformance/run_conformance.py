@@ -3,24 +3,32 @@
 -> C++ headless -w (in-place save) -> h5py validator on the C++-written file.
 
 Usage:
-    python3 playground/tests/hdf_conformance/run_conformance.py
+    python3 playground/tests/hdf_conformance/run_conformance.py [--binary PATH]
+        [--roundtrip PATH]
 
 Outputs land in playground/outputs/hdf_conformance/:
     example.h5        — regenerated golden (Python parser)
+    cpp_written.h5    — copy of the golden that the C++ -w run modifies
+                        (the pristine golden stays untouched)
     cpp_out/          — C++ -w export artifacts
-    headless_config.json — auto-generated config for the -w run
+
+The config for the -w run is committed at
+tests/hdf_conformance/headless_config.json (not generated).
 
 Steps:
   1. regenerate golden:  parser -> example.h5
   2. validate golden:    validate_h5.py example.h5        (Python wrote it)
   3. C++ reads golden:   fts_hdf_roundtrip example.h5     (round-trip tests 2+3)
-  4. C++ writes:         fts_data_explorer -w example.h5 "Spectra from selected
-                         files" cpp_out [config.json]     (in-place save)
-  5. validate result:    validate_h5.py example.h5        (C++ wrote it)
+  4. C++ writes:         fts_data_explorer -w cpp_written.h5 "Spectra from
+                         selected files" cpp_out [config.json]  (copy of the
+                         golden; -w saves in place)
+  5. validate result:    validate_h5.py cpp_written.h5    (C++ wrote it)
   6. print PASS/FAIL
 """
 
+import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -31,14 +39,38 @@ REPO_ROOT = HERE.parents[2]
 PY = sys.executable
 VALIDATOR = HERE / "validate_h5.py"
 PARSER = REPO_ROOT / "hdf" / "python_parse" / "legacy_fts_to_h5_parser.py"
-BINARY = REPO_ROOT / "build" / "linux-release" / "fts_data_explorer"
-ROUNDTRIP = REPO_ROOT / "build" / "linux-release" / "fts_hdf_roundtrip"
+# Candidate build dirs, in priority order: the CMake presets used by
+# build_script.sh (linux-release is the default dev build, linux-debug comes
+# from -t Debug) plus the legacy AGENTS.md path. A missing binary is a clean
+# error, not a traceback. Override per-binary with --binary/--roundtrip.
+BIN_DIR_CANDIDATES = (
+    REPO_ROOT / "build" / "linux-release",
+    REPO_ROOT / "build" / "linux-debug",
+    REPO_ROOT / "build" / "windows-mingw",
+    REPO_ROOT / "build",
+)
 DATASET_DIR = (REPO_ROOT / "playground" / "test_data"
                / "2024-06-10_11-38-54_newconfig_zabercurr0.6A_his25000direct_prno2_1mm_1.5mms_avg100")
 OUTPUT_DIR = REPO_ROOT / "playground" / "outputs" / "hdf_conformance"
 GOLDEN = OUTPUT_DIR / "example.h5"
 CPP_OUT = OUTPUT_DIR / "cpp_out"
 CONFIG = HERE / "headless_config.json"
+
+
+def find_binary(name, flag, override=None):
+    if override:
+        p = Path(override)
+        if p.is_file():
+            return p
+        sys.exit(f"Error: '{override}' (from --{flag}) not found")
+    exe = name + (".exe" if os.name == "nt" else "")
+    for d in BIN_DIR_CANDIDATES:
+        p = d / exe
+        if p.is_file():
+            return p
+    searched = ", ".join(str(d / exe) for d in BIN_DIR_CANDIDATES)
+    sys.exit(f"Error: '{name}' not found — build first (./build_script.sh "
+             f"or ./build_script.sh -t Debug). Searched: {searched}")
 
 
 def run(cmd, step):
@@ -54,7 +86,20 @@ def run(cmd, step):
     return result
 
 
-def main():
+def main(argv=None):
+    ap = argparse.ArgumentParser(
+        description="HDF5 conformance suite (parser -> validator -> C++ round-"
+                    "trip -> headless -w -> validator).")
+    ap.add_argument("--binary", default=None,
+                    help="Path to the fts_data_explorer binary (auto-discovered "
+                         "in build/ otherwise)")
+    ap.add_argument("--roundtrip", default=None,
+                    help="Path to the fts_hdf_roundtrip binary (auto-discovered "
+                         "in build/ otherwise)")
+    args = ap.parse_args(argv)
+    binary = find_binary("fts_data_explorer", "binary", args.binary)
+    roundtrip = find_binary("fts_hdf_roundtrip", "roundtrip", args.roundtrip)
+
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     CPP_OUT.mkdir(parents=True, exist_ok=True)
 
@@ -73,19 +118,18 @@ def main():
     print("=" * 60)
     print("Step 3 — C++ round-trip on golden (tests 2+3)")
     print("=" * 60)
-    run([str(ROUNDTRIP), str(GOLDEN)], "3")
+    run([str(roundtrip), str(GOLDEN)], "3")
 
     print()
     print("=" * 60)
     print("Step 4 — C++ headless -w (in-place save, adds spectra)")
     print("=" * 60)
-    cfg_path = CONFIG
     # Copy the golden: -w saves in place, so the pristine golden must be
     # preserved for reproducibility (step 1 re-generates it anyway).
     work = OUTPUT_DIR / "cpp_written.h5"
     shutil.copy(GOLDEN, work)
-    run([str(BINARY), "-w", str(work), "Spectra from selected files",
-         str(CPP_OUT), str(cfg_path)], "4")
+    run([str(binary), "-w", str(work), "Spectra from selected files",
+         str(CPP_OUT), str(CONFIG)], "4")
 
     print()
     print("=" * 60)
