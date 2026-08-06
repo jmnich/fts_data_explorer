@@ -99,8 +99,10 @@ read -r stored_yy stored_mm stored_minor <<< "$(read_version "$VERSION_FILE")"
 if [[ $IS_RELEASE -eq 1 ]]; then
     current_yy=$(date +%y)
     current_mm=$(date +%m)
-    current_minor=$((10#${current_mm}))
+    # Force base-10: zero-padded month/day strings ("08") would otherwise be
+    # parsed as octal by bash arithmetic and fail in -eq / printf.
     current_yy=$((10#${current_yy}))
+    current_mm=$((10#${current_mm}))
 
     if [[ "${current_yy}" -eq "${stored_yy}" && "${current_mm}" -eq "${stored_mm}" ]]; then
         new_minor=$(( stored_minor + 1 ))
