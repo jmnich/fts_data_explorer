@@ -352,6 +352,7 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                 if (last_slash != std::string::npos) {
                     displayName = displayName.substr(last_slash + 1);
                 }
+                displayName = shortenFilename(displayName);
                 
                 // Set color for this spectrum (same as will be used in plot)
                 ImVec4 color;
@@ -367,6 +368,19 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                     color = ImVec4(0.5f, 0.5f, 0.5f, 1.0f); // Grey
                 }
                 plotSpecs[i].LineColor = color;
+
+                // Wrap to next line if this item won't fit on the current line
+                if (i > 0) {
+                    float itemWidth = 12.0f + 2.0f * ImGui::GetStyle().ItemSpacing.x +
+                                      ImGui::CalcTextSize(displayName.c_str()).x;
+                    if (i < primaryDetectors.size() - 1)
+                        itemWidth += ImGui::CalcTextSize("  ").x + ImGui::GetStyle().ItemSpacing.x;
+                    // SameLine() would place the item after the previous item's end
+                    float itemStartX = ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x;
+                    float rightEdge = ImGui::GetWindowPos().x + ImGui::GetContentRegionMax().x;
+                    if (itemStartX + itemWidth <= rightEdge)
+                        ImGui::SameLine();
+                }
                 
                 // Draw colored square patch (same style as Interferogram panel)
                 ImDrawList* draw_list = ImGui::GetWindowDrawList();
@@ -385,7 +399,6 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                 if (i < primaryDetectors.size() - 1) {
                     ImGui::SameLine();
                     ImGui::Text("  "); // Add some spacing between items
-                    ImGui::SameLine();
                 }
             }
             ImGui::EndGroup(); // End horizontal group

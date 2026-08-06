@@ -408,14 +408,6 @@ void applyAdapterSelection(const std::string& adapterName, const std::string& di
     std::cout << "Adapter selected: " << adapterName << " for " << directoryPath << std::endl;
 }
 
-static std::string shortenFilename(const std::string& filename) {
-    const size_t maxLen = 38;
-    if (filename.length() <= maxLen) return filename;
-    const size_t keepStart = 8;
-    const size_t keepEnd = 24;
-    return filename.substr(0, keepStart) + "..." + filename.substr(filename.length() - keepEnd);
-}
-
 static void renderAdapterSelectionPopup() {
     if (!appState.showAdapterSelectionPopup) return;
 
@@ -2240,7 +2232,22 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                     } else if (i == 4) {
                         color = ImVec4(0.5f, 0.5f, 0.5f, 1.0f); // Grey
                     }
-                    
+
+                    std::string displayName = shortenFilename(appState.selectedFilenames[i]);
+
+                    // Wrap to next line if this item won't fit on the current line
+                    if (i > 0) {
+                        float itemWidth = 12.0f + 2.0f * ImGui::GetStyle().ItemSpacing.x +
+                                          ImGui::CalcTextSize(displayName.c_str()).x;
+                        if (i < appState.loadedData.size() - 1)
+                            itemWidth += ImGui::CalcTextSize("  ").x + ImGui::GetStyle().ItemSpacing.x;
+                        // SameLine() would place the item after the previous item's end
+                        float itemStartX = ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x;
+                        float rightEdge = ImGui::GetWindowPos().x + ImGui::GetContentRegionMax().x;
+                        if (itemStartX + itemWidth <= rightEdge)
+                            ImGui::SameLine();
+                    }
+
                     // Draw colored square patch
                     ImDrawList* draw_list = ImGui::GetWindowDrawList();
                     ImVec2 cursor_pos = ImGui::GetCursorScreenPos();
@@ -2253,11 +2260,10 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                     // Move cursor forward and add text
                     ImGui::Dummy(square_size);
                     ImGui::SameLine();
-                    ImGui::Text("%s", appState.selectedFilenames[i].c_str());
+                    ImGui::Text("%s", displayName.c_str());
                     if (i < appState.loadedData.size() - 1) {
                         ImGui::SameLine();
                         ImGui::Text("  "); // Add some spacing between items
-                        ImGui::SameLine();
                     }
                 }
                 ImGui::EndGroup(); // End horizontal group

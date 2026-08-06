@@ -168,5 +168,13 @@ void AppState::reconfigurePool(int count) {
     configuredWorkerCount = count;
 }
 
+std::string shortenFilename(const std::string& filename) {
+    const size_t maxLen = 38;
+    if (filename.length() <= maxLen) return filename;
+    const size_t keepStart = 8;
+    const size_t keepEnd = 24;
+    return filename.substr(0, keepStart) + "..." + filename.substr(filename.length() - keepEnd);
+}
+
 // Global application state instance
 AppState appState;

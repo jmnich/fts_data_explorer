@@ -20,6 +20,7 @@
 
 void selectAdapterForDirectory(const std::string& directoryPath);
 void applyAdapterSelection(const std::string& adapterName, const std::string& directoryPath);
+std::string shortenFilename(const std::string& filename);
 
 // Application state structure
 struct AppState {

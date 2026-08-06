@@ -971,8 +971,22 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
             size_t ls = displayName.find_last_of("/\\");
             if (ls != std::string::npos)
                 displayName = displayName.substr(ls + 1);
+            displayName = shortenFilename(displayName);
 
             ImVec4 color = getT100LineColor(i);
+
+            // Wrap to next line if this item won't fit on the current line
+            if (i > 0) {
+                float itemWidth = 12.0f + 2.0f * ImGui::GetStyle().ItemSpacing.x +
+                                  ImGui::CalcTextSize(displayName.c_str()).x;
+                if (i < lastKnownSelection.size() - 1)
+                    itemWidth += ImGui::CalcTextSize("  ").x + ImGui::GetStyle().ItemSpacing.x;
+                // SameLine() would place the item after the previous item's end
+                float itemStartX = ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x;
+                float rightEdge = ImGui::GetWindowPos().x + ImGui::GetContentRegionMax().x;
+                if (itemStartX + itemWidth <= rightEdge)
+                    ImGui::SameLine();
+            }
 
             ImDrawList* draw_list = ImGui::GetWindowDrawList();
             ImVec2 cursor_pos = ImGui::GetCursorScreenPos();
@@ -991,7 +1005,6 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
             if (i < lastKnownSelection.size() - 1) {
                 ImGui::SameLine();
                 ImGui::Text("  ");
-                ImGui::SameLine();
             }
         }
         ImGui::Separator();
