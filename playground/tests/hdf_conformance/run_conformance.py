@@ -6,6 +6,9 @@ Usage:
     python3 playground/tests/hdf_conformance/run_conformance.py [--binary PATH]
         [--roundtrip PATH]
 
+Requires FTS_CONVERTERS_DIR pointing at the fts_data_explorer_converters
+repository checkout (the converter scripts live there, not in this repo).
+
 Outputs land in playground/outputs/hdf_conformance/:
     example.h5        — regenerated golden (Python parser)
     cpp_written.h5    — copy of the golden that the C++ -w run modifies
@@ -23,8 +26,8 @@ Steps:
                          selected files" cpp_out [config.json]  (copy of the
                          golden; -w saves in place)
   5. validate result:    validate_h5.py cpp_written.h5    (C++ wrote it)
-  6. ArcOptix converters: -c arcoptix_igms / arcoptix_spectra on the sample
-                         files, validate both outputs
+  6. ArcOptix converters: run arcoptix_igms / arcoptix_spectra directly on the
+                         sample files, validate both outputs
   7. C++ engine opens the corrected-IFG workspace (-w, IFG export)
 """
 
@@ -40,7 +43,6 @@ HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[2]
 PY = sys.executable
 VALIDATOR = HERE / "validate_h5.py"
-PARSER = REPO_ROOT / "converters" / "wust_mini_fts.py"
 # Candidate build dirs, in priority order: the CMake presets used by
 # build_script.sh (linux-release is the default dev build, linux-debug comes
 # from -t Debug) plus the legacy AGENTS.md path. A missing binary is a clean
@@ -62,6 +64,18 @@ CPP_OUT = OUTPUT_DIR / "cpp_out"
 CONFIG = HERE / "headless_config.json"
 
 
+def converters_dir():
+    """Location of the converter scripts (FTS_CONVERTERS_DIR, required)."""
+    d = os.environ.get("FTS_CONVERTERS_DIR")
+    if not d:
+        sys.exit("Error: FTS_CONVERTERS_DIR not set — point it at the "
+                 "fts_data_explorer_converters repository checkout")
+    p = Path(d)
+    if not p.is_dir():
+        sys.exit(f"Error: FTS_CONVERTERS_DIR '{d}' is not a directory")
+    return p
+
+
 def find_binary(name, flag, override=None):
     if override:
         p = Path(override)
@@ -76,19 +90,6 @@ def find_binary(name, flag, override=None):
     searched = ", ".join(str(d / exe) for d in BIN_DIR_CANDIDATES)
     sys.exit(f"Error: '{name}' not found — build first (./build_script.sh "
              f"or ./build_script.sh -t Debug). Searched: {searched}")
-
-
-def converter_env():
-    """Hermetic HOME so -c resolves converter ids + the interpreter (the venv
-    python running this harness has h5py)."""
-    import tempfile
-    home = Path(tempfile.mkdtemp(prefix="fts_conformance_"))
-    (home / ".fts_data_explorer_config").write_text(
-        f"[Converters]\ninterpreter={sys.executable}\n"
-        f"path={REPO_ROOT / 'converters'}\n")
-    env = dict(os.environ)
-    env["HOME"] = str(home)
-    return env
 
 
 def run(cmd, step, env=None):
@@ -118,6 +119,13 @@ def main(argv=None):
     args = ap.parse_args(argv)
     binary = find_binary("fts_data_explorer", "binary", args.binary)
     roundtrip = find_binary("fts_hdf_roundtrip", "roundtrip", args.roundtrip)
+    conv_dir = converters_dir()
+    parser = conv_dir / "wust_mini_fts.py"
+    igm_converter = conv_dir / "arcoptix_igms.py"
+    spectra_converter = conv_dir / "arcoptix_spectra.py"
+    for p in (parser, igm_converter, spectra_converter):
+        if not p.is_file():
+            sys.exit(f"Error: {p} not found in FTS_CONVERTERS_DIR")
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     CPP_OUT.mkdir(parents=True, exist_ok=True)
@@ -125,7 +133,7 @@ def main(argv=None):
     print("=" * 60)
     print("Step 1 — Regenerate golden from parser")
     print("=" * 60)
-    run([PY, str(PARSER), str(DATASET_DIR), "-o", str(GOLDEN)], "1")
+    run([PY, str(parser), str(DATASET_DIR), "-o", str(GOLDEN)], "1")
 
     print()
     print("=" * 60)
@@ -158,16 +166,13 @@ def main(argv=None):
 
     print()
     print("=" * 60)
-    print("Step 6 — ArcOptix converters via -c (igm_corrected_x + spectra)")
+    print("Step 6 — ArcOptix converters (igm_corrected_x + spectra)")
     print("=" * 60)
-    env = converter_env()
     igm_out = OUTPUT_DIR / "arcoptix_igm.h5"
-    run([str(binary), "-c", "arcoptix_igms", str(IGM_SAMPLE), str(igm_out)],
-        "6", env=env)
+    run([PY, str(igm_converter), str(IGM_SAMPLE), str(igm_out)], "6")
     run([PY, str(VALIDATOR), str(igm_out)], "6")
     spec_out = OUTPUT_DIR / "arcoptix_spectra.h5"
-    run([str(binary), "-c", "arcoptix_spectra", str(SPECTRA_SAMPLE),
-         str(spec_out)], "6", env=env)
+    run([PY, str(spectra_converter), str(SPECTRA_SAMPLE), str(spec_out)], "6")
     run([PY, str(VALIDATOR), str(spec_out)], "6")
 
     print()

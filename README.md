@@ -18,8 +18,9 @@ The application is designed to help with handling data from DIY lab instruments 
 - Switching spectrum y-axis between lin, log and dB
 - Workspaces in the unified spectral HDF5 container (`.h5`); foreign data enters
   through the built-in **Conversion screen** with scripted converters (WUST raw CSV,
-  ArcOptix IGMs and spectra; extensible via self-contained `.py` converters from a
-  public repo or a local user dir)
+  ArcOptix IGMs and spectra; extensible via self-contained `.py` converters from the
+  [fts_data_explorer_converters](https://github.com/jmnich/fts_data_explorer_converters)
+  repo or a local user dir)
 - Basic plotting of reference and primary detector signals
 - Advanced spectrum calculation capabilities giving the user control over zero-padding, apodization, reference laser tuning and detector sensitivity
 - Rapid average spectrum calculation

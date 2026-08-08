@@ -621,7 +621,7 @@ void startupConverterRefresh(const AppConfig& config) {
     ConverterJob& job = startupJob();
     if (job.running) return;
     std::string url = config.converterRepoUrl.empty()
-        ? "https://github.com/fts-data-explorer/converters" : config.converterRepoUrl;
+        ? "https://github.com/jmnich/fts_data_explorer_converters" : config.converterRepoUrl;
     std::string err;
     if (startRepoSync(url, repoDir, job, err)) {
         // Reaped by pollJobs() each frame; atexit guards the shutdown race.

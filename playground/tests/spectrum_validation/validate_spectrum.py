@@ -16,7 +16,6 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -157,7 +156,7 @@ def compute_spectrum_python(raw_csv_path, config):
 
 
 # ===================================================================
-#  Step 2 — C++ headless run (convert -c, then process -w)
+#  Step 2 — C++ headless run (convert with the converter script, then -w)
 # ===================================================================
 def run_headless(dataset_dir, config, output_dir):
     output_dir = Path(output_dir)
@@ -171,54 +170,48 @@ def run_headless(dataset_dir, config, output_dir):
     with open(cfg_path, "w") as f:
         json.dump(cfg_body, f, indent=2)
 
-    # Hermetic HOME: -c resolves the converter by id from the scanned dirs and
-    # takes the interpreter from ~/.fts_data_explorer_config. The venv python
-    # running this harness has h5py, so it is exactly the interpreter needed.
-    # The app-repo converters/ dir is the dev/test source, listed as an extra
-    # converter path (the public repo clone is the real-world default).
-    with tempfile.TemporaryDirectory() as tmp:
-        home = Path(tmp)
-        (home / ".fts_data_explorer_config").write_text(
-            f"[Converters]\ninterpreter={sys.executable}\n"
-            f"path={REPO_ROOT / 'converters'}\n")
-        env = {**os.environ, "HOME": str(home)}
-        work_h5 = output_dir / "work.h5"
+    # The converter script lives in the separate fts_data_explorer_converters
+    # repo (FTS_CONVERTERS_DIR); the venv python running this harness has
+    # h5py, so it is exactly the interpreter needed.
+    conv_dir = os.environ.get("FTS_CONVERTERS_DIR")
+    if not conv_dir:
+        print("  Error: FTS_CONVERTERS_DIR not set — point it at the "
+              "fts_data_explorer_converters repository checkout")
+        sys.exit(1)
+    parser = Path(conv_dir) / "wust_mini_fts.py"
+    if not parser.is_file():
+        print(f"  Error: {parser} not found in FTS_CONVERTERS_DIR")
+        sys.exit(1)
 
-        cmd = [
-            str(BINARY),
-            "-c",
-            "wust_mini_fts",
-            str(dataset_dir),
-            str(work_h5),
-        ]
-        print(f"  Running: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600,
-                                env=env)
-        if result.returncode != 0:
-            print("  C++ headless error (convert):")
-            print(result.stderr)
-            sys.exit(1)
-        if result.stdout:
-            print("  " + result.stdout.strip().replace("\n", "\n  "))
+    work_h5 = output_dir / "work.h5"
+    cmd = [sys.executable, str(parser), str(dataset_dir), str(work_h5)]
+    print(f"  Running: {' '.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    if result.returncode != 0:
+        print("  Converter error:")
+        print(result.stderr)
+        sys.exit(1)
+    if result.stdout:
+        print("  " + result.stdout.strip().replace("\n", "\n  "))
 
-        cmd = [
-            str(BINARY),
-            "-w",
-            str(work_h5),
-            "Spectra from selected files",
-            str(output_dir),
-            str(cfg_path),
-        ]
-        print(f"  Running: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        if result.returncode != 0:
-            print("  C++ headless error (process):")
-            print(result.stderr)
-            sys.exit(1)
-        if result.stdout:
-            print("  " + result.stdout.strip().replace("\n", "\n  "))
-        if result.stderr:
-            print("  stderr: " + result.stderr.strip().replace("\n", "\n  "))
+    cmd = [
+        str(BINARY),
+        "-w",
+        str(work_h5),
+        "Spectra from selected files",
+        str(output_dir),
+        str(cfg_path),
+    ]
+    print(f"  Running: {' '.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if result.returncode != 0:
+        print("  C++ headless error (process):")
+        print(result.stderr)
+        sys.exit(1)
+    if result.stdout:
+        print("  " + result.stdout.strip().replace("\n", "\n  "))
+    if result.stderr:
+        print("  stderr: " + result.stderr.strip().replace("\n", "\n  "))
 
     csvs = list(output_dir.glob("*_spectra.csv"))
     if not csvs:

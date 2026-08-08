@@ -18,8 +18,6 @@
 #include "hdf/workspace.h"
 #endif
 
-// Use InterferogramData from csv_adapter.h
-
 struct AppState;
 
 #if FTS_BUILD_HDF5

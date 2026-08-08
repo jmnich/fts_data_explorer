@@ -774,7 +774,7 @@ static void handleSyncConverters() {
     std::string repoDir = config.converterRepoDir.empty()
         ? appDataDir() + "/converter-repo" : config.converterRepoDir;
     std::string url = config.converterRepoUrl.empty()
-        ? "https://github.com/fts-data-explorer/converters" : config.converterRepoUrl;
+        ? "https://github.com/jmnich/fts_data_explorer_converters" : config.converterRepoUrl;
 
     std::string error;
     if (!ensureConverterRepo(url, repoDir, error)) {

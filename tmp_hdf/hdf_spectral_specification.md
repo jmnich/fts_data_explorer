@@ -526,5 +526,6 @@ Converters produce originals only (`igm_uncorrected_x/`, `igm_corrected_x/`,
 `spectra/` members per §2.3-2.4) with `kind="original"`, `columns`/`units`
 attributes, and group-level `@origin`/`@config`. The app validates every
 converted file (root datasets, format attr, no dangling `inputs`) before
-offering it as a workspace. Reference implementations ship in the app's
-`converters/` dir and the public converter repo.
+offering it as a workspace. Reference implementations live in the separate
+[fts_data_explorer_converters](https://github.com/jmnich/fts_data_explorer_converters)
+repository.

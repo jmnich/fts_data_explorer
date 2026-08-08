@@ -38,7 +38,7 @@ struct AppConfig {
 
     // Converter settings (Phase 5; persisted in [Converters]). Empty strings
     // mean "platform default" (appDataDir()/converter-repo, python3|py).
-    std::string converterRepoUrl = "https://github.com/fts-data-explorer/converters"; // placeholder, real URL TBD
+    std::string converterRepoUrl = "https://github.com/jmnich/fts_data_explorer_converters";
     std::string converterRepoDir;   // empty = default appDataDir()/converter-repo
     std::string converterInterpreter; // empty = "python3" (posix) / "py" (Win)
     std::vector<std::string> converterPaths; // extra user converter dirs
