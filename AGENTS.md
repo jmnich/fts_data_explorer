@@ -73,7 +73,7 @@ Invocation contract: `<interpreter> <script> <input> <output.h5> [--param v]`; t
 
 **Conversion screen** (`conversion_screen.{h,cpp}`): Setup group (repo URL / clone dir / interpreter, each persisted to `~/.fts_data_explorer_config` on edit — never to `workspace.json`), dependency banners (git/python/h5py probes, cached per session), converter list + format pane, Convert with live log tail, success → Open Workspace via `requestWorkspaceDiscard(OpenPath, …)`. Jobs run in `std::thread` + `popen` with a mutex-protected log; the frame loop joins on the `finished()` false edge (IMGUI_GUIDE §13).
 
-**Built-in converters** (delivered by the separate [fts_data_explorer_converters](https://github.com/jmnich/fts_data_explorer_converters) repo — the app repo ships none): `wust_mini_fts.py` (raw_data/*.csv, dual IFG), `arcoptix_igms.py` (OPD vs IGM .txt → `igm_corrected_x/`), `arcoptix_spectra.py` (spectra .txt → `spectra/` originals). Playground harnesses also invoke these scripts directly via `FTS_CONVERTERS_DIR`.
+**Built-in converters** (delivered by the separate [fts_data_explorer_converters](https://github.com/jmnich/fts_data_explorer_converters) repo — the app repo ships none): `wust_mini_fts.py` (raw_data/*.csv, dual IFG), `arcoptix_igms.py` (OPD vs IGM .txt, file or directory → `igm_corrected_x/`), `arcoptix_spectra.py` (spectra .txt, file or directory → `spectra/` originals). Playground harnesses also invoke these scripts directly via `FTS_CONVERTERS_DIR`.
 
 # AppState & idle rendering# AppState & idle rendering
 

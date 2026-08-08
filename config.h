@@ -134,6 +134,23 @@ struct AppConfig {
             recentDatasets.erase(it);
         }
     }
+
+    // Drop recent entries that do not point at a .h5 workspace (legacy dataset
+    // directories, other file types). Unreachable .h5 paths are kept — the UI
+    // already shows them as "(unreachable)" — so a temporarily unmounted
+    // network drive does not wipe the list. Returns true when the list changed.
+    bool pruneRecentToH5() {
+        size_t before = recentDatasets.size();
+        recentDatasets.erase(
+            std::remove_if(recentDatasets.begin(), recentDatasets.end(),
+                [](const RecentDatasetEntry& e) {
+                    std::error_code ec;
+                    return std::filesystem::path(e.path).extension() != ".h5"
+                        || std::filesystem::is_directory(e.path, ec);
+                }),
+            recentDatasets.end());
+        return recentDatasets.size() != before;
+    }
     
     // Save configuration to file
     bool saveToFile(const std::string& filename) {

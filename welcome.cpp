@@ -145,6 +145,12 @@ static void drawWelcomeBackgroundScatter(ImDrawList* drawList, const ImVec2& vpS
 
 void renderWelcomeScreen(AppState& appState, AppConfig& config,
                          const std::string& configFilePath, bool showPopup) {
+    // Keep the recent list clean: drop stale/non-.h5 entries (files deleted on
+    // disk, legacy dataset directories) and persist when anything changed.
+    if (config.pruneRecentToH5()) {
+        config.saveToFile(configFilePath);
+    }
+
     // Draw decorative background scatter on viewport background draw list (full screen, every frame)
     ImVec2 vpSize = ImGui::GetMainViewport()->Size;
     AccentColor accentScatter = StringToAccentColor(appState.currentAccentColor);
@@ -289,16 +295,10 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                                 ImGui::CloseCurrentPopup();
                                 appState.needsRedraw = true;
                             }
-                        } else
-#endif
-                        if (std::filesystem::exists(datasetPath) && std::filesystem::is_directory(datasetPath)) {
-                            // Legacy dataset: open the Conversion screen
-                            // pre-filled (phase5 decision 6).
-                            ImGui::CloseCurrentPopup();
-                            openConversionScreen(appState, datasetPath);
-                        } else {
-                            std::cerr << "Recent dataset path no longer exists: " << datasetPath << std::endl;
                         }
+                        // Non-.h5 entries are pruned on render; any forced open
+                        // of such a path fails silently in openWorkspace().
+#endif
                     }
 
                     if (!exists && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {

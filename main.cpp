@@ -320,6 +320,13 @@ static InterferogramData loadInterferogram(AppState& s, const std::string& id) {
 
 #if FTS_BUILD_HDF5
 void openWorkspace(AppState& s, const std::string& path) {
+    // Silent fail: only regular .h5 workspaces are accepted; anything else
+    // (legacy directories, missing files, forced non-.h5 opens) does nothing.
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(path, ec)
+        || std::filesystem::path(path).extension() != ".h5") {
+        return;
+    }
     s.workspace = H5Store::load(path);   // throws H5Error on failure
     s.workspacePath = path;
 
@@ -1208,6 +1215,13 @@ int main(int argc, char* argv[]) {
         std::cout << "No existing config found, using defaults" << std::endl;
     }
 
+    // Auto-cleanup: only regular .h5 workspaces stay in the recent list
+    // (legacy dataset directories are no longer openable in-app).
+    if (config.pruneRecentToH5()) {
+        config.saveToFile(configFilePath);
+        std::cout << "Pruned non-.h5 entries from recent datasets" << std::endl;
+    }
+
     // Store config pointers for use by adapter selection
     appState.configPtr = &config;
     appState.configFilePath = configFilePath;
@@ -1958,15 +1972,10 @@ int main(int argc, char* argv[]) {
 #if FTS_BUILD_HDF5
                                     if (std::filesystem::path(datasetPath).extension() == ".h5") {
                                         requestWorkspaceDiscard(appState, PendingWorkspaceAction::OpenPath, datasetPath);
-                                    } else
-#endif
-                                    if (std::filesystem::is_directory(datasetPath)) {
-                                        // Legacy dataset: route through the Conversion screen
-                                        // pre-filled with the path (phase5 decision 6).
-                                        openConversionScreen(appState, datasetPath);
-                                    } else {
-                                        std::cerr << "Recent dataset path no longer exists: " << datasetPath << std::endl;
                                     }
+                                    // Non-.h5 entries are pruned at startup; any
+                                    // forced open fails silently in openWorkspace().
+#endif
                                 }
                             }
                             ImGui::EndMenu();
