@@ -35,6 +35,11 @@ void requestWorkspaceDiscard(AppState& s, PendingWorkspaceAction action, const s
 void dispatchPendingAction(AppState& s);
 #endif
 
+// Ctrl+H "back to home": clear data/selection/panel caches and show the
+// welcome screen (the workspace stays loaded — datasets can be re-opened from
+// the recent list). Shared by the main-window shortcut and the Convert modal.
+void resetToWelcomeScreen(AppState& s);
+
 // Application state structure
 struct AppState {
     // Data adapter state

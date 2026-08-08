@@ -40,6 +40,18 @@ static void loadSetupFields(ConversionScreenState& st, const AppConfig& config) 
              config.converterInterpreter.c_str());
 }
 
+// The .h5 file the converter will produce: <outputDir>/<input stem>.h5
+// (directory inputs use the directory name as the stem — the file inherits
+// the input's name). Empty when either side is unset.
+static std::string derivedOutputH5(const ConversionScreenState& st) {
+    if (st.inputPathBuf[0] == '\0' || st.outputDirBuf[0] == '\0') return "";
+    fs::path in(st.inputPathBuf);
+    std::string stem = fs::is_directory(in) ? in.filename().string()
+                                            : in.stem().string();
+    if (stem.empty()) return "";
+    return (fs::path(st.outputDirBuf) / (stem + ".h5")).string();
+}
+
 static void saveConfigField(AppState& s) {
     if (s.configPtr) {
         s.configPtr->saveToFile(s.configFilePath);
@@ -125,7 +137,7 @@ static void pollJobs(AppState& s) {
         joinConverter(st.job);
         st.showLog = true;
         if (st.job.exitCode == 0) {
-            std::string outPath = st.outputPathBuf;
+            std::string outPath = derivedOutputH5(st);
 #if FTS_BUILD_HDF5
             try {
                 H5Store::validate(outPath);
@@ -190,24 +202,36 @@ void renderConversionScreen(AppState& s) {
         updateToolStatus(st, st.pyPathBuf);
     }
 
-    // Auto-default the output path when the input changes and output is empty
+    // Auto-default the output directory when the input changes and it is
+    // empty: file inputs default to their parent dir, directory inputs to
+    // themselves. The produced file name follows from derivedOutputH5.
     if (st.inputEdited) {
         st.inputEdited = false;
-        if (st.outputPathBuf[0] == '\0' && st.inputPathBuf[0] != '\0') {
-            std::string in = st.inputPathBuf;
-            fs::path p(in);
-            std::string out = (p.parent_path() / (p.stem().string() + ".h5")).string();
-            snprintf(st.outputPathBuf, sizeof(st.outputPathBuf), "%s", out.c_str());
+        if (st.outputDirBuf[0] == '\0' && st.inputPathBuf[0] != '\0') {
+            fs::path in(st.inputPathBuf);
+            fs::path dir = fs::is_directory(in) ? in : in.parent_path();
+            if (!dir.empty())
+                snprintf(st.outputDirBuf, sizeof(st.outputDirBuf), "%s",
+                         dir.string().c_str());
         }
     }
 
-    // Toast-style framing without width pinning: this dialog is resizable and
-    // manages its own position/size/constraints below.
+    // Toast-style framing without width pinning: this dialog sizes itself
+    // below and tracks the app window (Always re-applies each frame).
     ImVec4 accent = GetAccentBase(StringToAccentColor(s.currentAccentColor));
     beginModal(900.0f, accent, /*pinWidth=*/false);
-    // Resizable: the setup group, banners and log grow the content; the list
-    // and log panes adapt to whatever remains.
-    ImGui::SetNextWindowSize(ImVec2(900, 780), ImGuiCond_FirstUseEver);
+
+    // Track the app window with a 15% margin on both axes, clamped to the
+    // existing bounds; Always re-centers while the window resizes.
+    const ImVec2 work = ImGui::GetMainViewport()->WorkSize;
+    // 0.5/0.5 pivot: the window center (not its top-left corner) tracks the
+    // viewport center.
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always,
+                            ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(
+        ImVec2(std::clamp(work.x * 0.85f, 720.0f, 2000.0f),
+               std::clamp(work.y * 0.85f, 620.0f, 1600.0f)),
+        ImGuiCond_Always);
     ImGui::SetNextWindowSizeConstraints(ImVec2(720, 620), ImVec2(2000, 1600));
 
     ImGui::PushStyleColor(ImGuiCol_ModalWindowDimBg, ImVec4(0.0f, 0.0f, 0.0f, 0.7f));
@@ -217,8 +241,14 @@ void renderConversionScreen(AppState& s) {
 
     if (ImGui::BeginPopupModal("Convert Dataset##conversion", nullptr,
                                ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar)) {
+        // Ctrl+H: back to the welcome screen (mirrors the main-window
+        // shortcut); also closes this modal so the welcome screen shows.
+        if (ImGui::IsKeyPressed(ImGuiKey_H) && ImGui::GetIO().KeyCtrl) {
+            st.open = false;
+            resetToWelcomeScreen(s);
+        }
         // NoTitleBar: the title moves into the body so removing the header
-        // loses no information (the Cancel button below covers the old [X]).
+        // loses no information (the Exit button below covers the old [X]).
         ImGui::Text("Convert Dataset");
         ImGui::Spacing();
         ImGui::Separator();
@@ -246,6 +276,14 @@ void renderConversionScreen(AppState& s) {
             ImGui::PopStyleColor();
         }
 
+        // ---- Two-column body: left = configuration, right = paths/conversion ----
+        const auto& converters = ConverterRegistry::instance().all();
+        if (st.selectedIndex >= static_cast<int>(converters.size())) st.selectedIndex = -1;
+        const float colGap = ImGui::GetStyle().ItemSpacing.x;
+        const float leftW = (ImGui::GetContentRegionAvail().x - colGap) * 0.55f;
+
+        ImGui::BeginChild("##convLeft", ImVec2(leftW, -1), ImGuiChildFlags_Borders);
+
         // ---- Setup group --------------------------------------------------------
         ImGui::Text("Setup");
         ImGui::Separator();
@@ -259,8 +297,13 @@ void renderConversionScreen(AppState& s) {
             }
         }
 
-        ImGui::Text("Clone destination");
-        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::Text("Converter repo local destination");
+        // Measured reserve for the Browse button so it clears the column
+        // border at any UI scale (a fixed reserve overflows when the font
+        // grows; a -FLT_MIN fill would clip SameLine items entirely).
+        const float browseW = ImGui::CalcTextSize("Browse...").x
+                            + ImGui::GetStyle().FramePadding.x * 2.0f;
+        ImGui::SetNextItemWidth(-(browseW + ImGui::GetStyle().ItemSpacing.x + 4.0f));
         if (ImGui::InputText("##repoDir", st.repoDirBuf, sizeof(st.repoDirBuf))) {
             if (s.configPtr) {
                 s.configPtr->converterRepoDir = st.repoDirBuf;
@@ -268,9 +311,22 @@ void renderConversionScreen(AppState& s) {
             }
         }
         ImGui::SameLine();
+        if (ImGui::Button("Browse...##repoDir")) {
+            std::string picked = FileBrowser::pickFolder(nullptr,
+                                                         "Select converter repo destination");
+            if (!picked.empty()) {
+                snprintf(st.repoDirBuf, sizeof(st.repoDirBuf), "%s", picked.c_str());
+                if (s.configPtr) {
+                    s.configPtr->converterRepoDir = picked;
+                    saveConfigField(s);
+                }
+            }
+        }
+        // Action + status on their own lines so the button has room to
+        // breathe (see the repoDir row note on -FLT_MIN + SameLine).
         bool canClone = st.gitOk && !busy;
         if (!canClone) ImGui::BeginDisabled();
-        if (ImGui::Button("Clone/Update")) {
+        if (ImGui::Button("Update converters base")) {
             std::string err;
             if (!startRepoSync(st.repoUrlBuf, st.repoDirBuf, st.syncJob, err)) {
                 st.lastError = err;
@@ -279,7 +335,6 @@ void renderConversionScreen(AppState& s) {
             }
         }
         if (!canClone) ImGui::EndDisabled();
-        ImGui::SameLine();
         if (st.syncJob.running) {
             ImGui::Text("Cloning/pulling...");
         } else if (st.gitOk) {
@@ -288,7 +343,7 @@ void renderConversionScreen(AppState& s) {
         }
 
         ImGui::Text("Python interpreter");
-        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::SetNextItemWidth(-(browseW + ImGui::GetStyle().ItemSpacing.x + 4.0f));
         if (ImGui::InputText("##pyPath", st.pyPathBuf, sizeof(st.pyPathBuf))) {
             if (s.configPtr) {
                 s.configPtr->converterInterpreter = st.pyPathBuf;
@@ -297,10 +352,32 @@ void renderConversionScreen(AppState& s) {
             st.probed = false;  // re-probe on the next frame after editing stops
         }
         ImGui::SameLine();
+        if (ImGui::Button("Browse...##pyPath")) {
+            std::string picked = FileBrowser::showFileOpenDialog(
+                "Select Python interpreter", "Python interpreter", "*");
+            if (!picked.empty()) {
+                snprintf(st.pyPathBuf, sizeof(st.pyPathBuf), "%s", picked.c_str());
+                if (s.configPtr) {
+                    s.configPtr->converterInterpreter = picked;
+                    saveConfigField(s);
+                }
+                st.probed = false;  // re-probe the picked interpreter
+            }
+        }
+        // Test + status on their own line (see the repoDir row note). The
+        // "Python test success/failed" label acknowledges the test for 2 s.
         if (ImGui::Button("Test")) {
             updateToolStatus(st, st.pyPathBuf);
+            st.testToastOk = st.pyOk;
+            st.testToastUntil = ImGui::GetTime() + 2.0;
         }
         ImGui::SameLine();
+        if (ImGui::GetTime() < st.testToastUntil)
+            ImGui::TextColored(st.testToastOk
+                                   ? ImVec4(0.4f, 0.9f, 0.4f, 1.0f)
+                                   : ImVec4(1.0f, 0.4f, 0.4f, 1.0f),
+                               st.testToastOk ? "Python test success"
+                                              : "Python test failed");
         if (st.pyOk) {
             ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1.0f), "%s",
                                st.pyVersion.c_str());
@@ -317,18 +394,15 @@ void renderConversionScreen(AppState& s) {
         ImGui::PopStyleColor();
         ImGui::Spacing();
 
-        // ---- Converter list (adaptive height: the format pane and controls
-        // below get their share first; the log pane absorbs any remainder).
-        const auto& converters = ConverterRegistry::instance().all();
-        if (st.selectedIndex >= static_cast<int>(converters.size())) st.selectedIndex = -1;
+        // ---- Converter list (adaptive height: the setup group and format pane
+        // below get their share first; the log pane lives in the right column).
         if (converters.empty()) {
             ImGui::TextDisabled("No converters found. Clone the standard set above "
                                 "or drop .py files into the local dir.");
         } else {
             ImGui::Text("Converters (%zu)", converters.size());
             float listReserve = 20.0f /*"Input format" label*/ + 130.0f /*format pane*/
-                + 160.0f /*input/output rows + actions*/ + 10.0f;
-            if (st.showLog) listReserve += 30.0f /*"Log" label + spacing*/ + 110.0f;
+                + 10.0f;
             float listH = std::clamp(
                 ImGui::GetContentRegionAvail().y - listReserve, 120.0f, 420.0f);
             ImGui::BeginChild("##convList", ImVec2(-1, listH), ImGuiChildFlags_Borders);
@@ -397,10 +471,16 @@ void renderConversionScreen(AppState& s) {
             }
             ImGui::EndChild();
         }
+        ImGui::EndChild();   // ##convLeft
+
+        ImGui::SameLine();
+        ImGui::BeginChild("##convRight", ImVec2(-1, -1), ImGuiChildFlags_Borders);
 
         // ---- Input / output -----------------------------------------------------
         ImGui::Text("Input");
-        ImGui::SetNextItemWidth(-80);
+        // Measured Browse reserve (same as the setup rows): clears the column
+        // border at any UI scale.
+        ImGui::SetNextItemWidth(-(browseW + ImGui::GetStyle().ItemSpacing.x + 4.0f));
         if (ImGui::InputText("##convInput", st.inputPathBuf, sizeof(st.inputPathBuf))) {
             st.inputEdited = true;
         }
@@ -424,19 +504,18 @@ void renderConversionScreen(AppState& s) {
             }
         }
 
-        ImGui::Text("Output .h5");
-        ImGui::SetNextItemWidth(-80);
-        ImGui::InputText("##convOutput", st.outputPathBuf, sizeof(st.outputPathBuf));
+        ImGui::Text("Output directory");
+        ImGui::SetNextItemWidth(-(browseW + ImGui::GetStyle().ItemSpacing.x + 4.0f));
+        ImGui::InputText("##convOutput", st.outputDirBuf, sizeof(st.outputDirBuf));
         ImGui::SameLine();
         if (ImGui::Button("Browse...##out")) {
-            std::string picked = FileBrowser::showFileSaveDialog(
-                "Save converted workspace", "HDF5 files", "*.h5",
-                st.outputPathBuf[0] ? st.outputPathBuf : "");
-            if (!picked.empty()) {
-                snprintf(st.outputPathBuf, sizeof(st.outputPathBuf), "%s", picked.c_str());
-            }
+            std::string picked = FileBrowser::pickFolder(nullptr, "Select output directory");
+            if (!picked.empty())
+                snprintf(st.outputDirBuf, sizeof(st.outputDirBuf), "%s", picked.c_str());
         }
-        bool outputConflicts = !s.workspacePath.empty() && s.workspacePath == st.outputPathBuf;
+        // Conflict: the derived .h5 would overwrite the currently open workspace.
+        const std::string outFile = derivedOutputH5(st);
+        bool outputConflicts = !s.workspacePath.empty() && outFile == s.workspacePath;
         if (outputConflicts) {
             ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f),
                                "Cannot overwrite the currently open workspace.");
@@ -448,13 +527,14 @@ void renderConversionScreen(AppState& s) {
             && st.selectedIndex >= 0
             && st.selectedIndex < static_cast<int>(converters.size())
             && !converters[st.selectedIndex].broken
-            && st.inputPathBuf[0] != '\0' && st.outputPathBuf[0] != '\0'
+            && st.inputPathBuf[0] != '\0' && st.outputDirBuf[0] != '\0'
+            && !outFile.empty()
             && !outputConflicts;
         if (!canConvert) ImGui::BeginDisabled();
         if (ImGui::Button("Convert", ImVec2(120, 0))) {
             const auto& c = converters[st.selectedIndex];
             std::string err;
-            if (!startConverter(c, st.pyPathBuf, st.inputPathBuf, st.outputPathBuf,
+            if (!startConverter(c, st.pyPathBuf, st.inputPathBuf, outFile,
                                 {}, st.job, err)) {
                 st.lastError = err;
             } else {
@@ -468,28 +548,39 @@ void renderConversionScreen(AppState& s) {
         if (ImGui::Button("Refresh", ImVec2(120, 0))) {
             st.refreshPending = true;
         }
-        ImGui::SameLine();
-        // Cancel is locked while a job runs (the thread must be joined).
-        if (busy) ImGui::BeginDisabled();
-        if (ImGui::Button("Cancel", ImVec2(120, 0))) {
-            st.open = false;
-        }
-        if (busy) ImGui::EndDisabled();
         if (st.job.running) {
             ImGui::SameLine();
             ImGui::Text("Converting...");
         }
 
-        // ---- Log tail (absorbs the remaining height so nothing clips) ----------
+        // ---- Log tail (reserves ~40px for the Exit button below) ----------------
         if (st.showLog) {
             ImGui::Spacing();
             ImGui::TextDisabled("Log");
             float logH = std::clamp(
-                ImGui::GetContentRegionAvail().y - 8.0f, 0.0f, 110.0f);
+                ImGui::GetContentRegionAvail().y - 40.0f, 0.0f, 110.0f);
             ImGui::BeginChild("##convLog", ImVec2(-1, logH), ImGuiChildFlags_Borders);
             ImGui::TextUnformatted(lastLogLines(st.job, 20).c_str());
             ImGui::EndChild();
         }
+
+        // ---- Exit: prominent, wide, PINNED to the bottom of the column ----
+        // (replaces the old small Cancel; locked while a job runs — the
+        // converter thread must be joined first). The log above caps at 110px,
+        // so in tall columns push the button down to the column bottom.
+        float spare = ImGui::GetContentRegionAvail().y;
+        float btnBlock = ImGui::GetFrameHeightWithSpacing()
+            + ImGui::GetStyle().ItemSpacing.y * 2.0f + 6.0f;
+        if (spare > btnBlock)
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (spare - btnBlock));
+        ImGui::Separator();
+        ImGui::Spacing();
+        if (busy) ImGui::BeginDisabled();
+        if (ImGui::Button("Exit", ImVec2(-1, 0))) {
+            st.open = false;
+        }
+        if (busy) ImGui::EndDisabled();
+        ImGui::EndChild();   // ##convRight
 
         drawModalAccentFrame(accent);
 
@@ -512,6 +603,7 @@ void openConversionScreen(AppState& s, const std::string& prefillInput) {
     st.lastError.clear();
     st.showLog = false;
     st.probed = false;
+    st.testToastUntil = 0.0;   // no stale Test acknowledgment on reopen
     if (!prefillInput.empty()) {
         snprintf(st.inputPathBuf, sizeof(st.inputPathBuf), "%s", prefillInput.c_str());
         st.inputEdited = true;

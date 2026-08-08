@@ -1631,26 +1631,7 @@ int main(int argc, char* argv[]) {
 
         // Handle Ctrl+H to return to welcome screen
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) && ImGui::IsKeyPressed(ImGuiKey_H) && ImGui::GetIO().KeyCtrl) {
-            // Reset to welcome screen state
-            appState.showWelcomeScreen = true;
-            appState.welcomeScreenInitialized = false;
-            appState.dataLoaded = false;
-            appState.filesChanged = false;
-            appState.loadedData.clear();
-            appState.selectedFiles.clear();
-            appState.selectedFilenames.clear();
-            appState.rawDataCache.clear();
-    appState.hilbertXCache.clear();
-    appState.hilbertCacheLaserWavelength = 0.0f;
-    appState.spectrum.cachedSpectra.clear();
-    appState.spectrum.cachedFrequencies.clear();
-    appState.spectrum.lastPrimaryDetectors.clear();
-    appState.spectrum.lastSpectrumParams.clear();
-    appState.spectrum.pendingSpectra_.clear();
-    appState.clearAverageSpectrum();
-            appState.clearSnrSpectrum();
-            appState.clearAllanVariance();
-            appState.needsRedraw = true;
+            resetToWelcomeScreen(appState);
         }
 
         // 'Left/Right Arrow' - Pan left by 10% of current visible range

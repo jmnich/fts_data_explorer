@@ -354,7 +354,8 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
         }
         ImGui::Spacing();
 
-        // Directory selection button - use accent color
+        // Primary action: open an .h5 workspace directly (accent-styled).
+#if FTS_BUILD_HDF5
         AccentColor accent = StringToAccentColor(appState.currentAccentColor);
         ImVec4 btnBg = GetAccentMuted(accent);
         btnBg.w = 1.0f;
@@ -364,18 +365,10 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
 
         float buttonHeight = ImGui::GetContentRegionAvail().y - ImGui::GetStyle().ItemSpacing.y * 2;
         if (buttonHeight > 60.0f) buttonHeight = 60.0f;
-        bool buttonClicked = ImGui::Button("Convert Dataset...", ImVec2(-FLT_MIN, buttonHeight));
+        bool openClicked = ImGui::Button("Open .h5", ImVec2(-FLT_MIN, buttonHeight));
         ImGui::PopStyleColor(3);
 
-        if (buttonClicked) {
-            // Legacy (non-.h5) datasets enter via the Conversion screen
-            // (phase5 decision 6); .h5 files open directly via the button below.
-            openConversionScreen(appState);
-        }
-
-#if FTS_BUILD_HDF5
-        ImGui::Spacing();
-        if (ImGui::Button("Open Workspace (.h5)...", ImVec2(-FLT_MIN, 0))) {
+        if (openClicked) {
             std::string defaultFolder;
             if (std::filesystem::is_directory(config.lastWorkingDirectory))
                 defaultFolder = config.lastWorkingDirectory;
@@ -391,6 +384,13 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
             }
         }
 #endif
+
+        ImGui::Spacing();
+        // Secondary action: convert foreign formats (legacy/non-.h5 datasets
+        // enter via the Conversion screen — phase5 decision 6).
+        if (ImGui::Button("Convert Dataset", ImVec2(-FLT_MIN, 0))) {
+            openConversionScreen(appState);
+        }
 
         ImGui::EndPopup();
 

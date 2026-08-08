@@ -67,6 +67,31 @@ AppState::AppState()
     // Constructor body
 }
 
+// Ctrl+H "back to home": clear data/selection/panel caches and show the
+// welcome screen (the workspace stays loaded). Mirrors the inline block that
+// used to live in main.cpp's key handler.
+void resetToWelcomeScreen(AppState& s) {
+    s.showWelcomeScreen = true;
+    s.welcomeScreenInitialized = false;
+    s.dataLoaded = false;
+    s.filesChanged = false;
+    s.loadedData.clear();
+    s.selectedFiles.clear();
+    s.selectedFilenames.clear();
+    s.rawDataCache.clear();
+    s.hilbertXCache.clear();
+    s.hilbertCacheLaserWavelength = 0.0f;
+    s.spectrum.cachedSpectra.clear();
+    s.spectrum.cachedFrequencies.clear();
+    s.spectrum.lastPrimaryDetectors.clear();
+    s.spectrum.lastSpectrumParams.clear();
+    s.spectrum.pendingSpectra_.clear();
+    s.clearAverageSpectrum();
+    s.clearSnrSpectrum();
+    s.clearAllanVariance();
+    s.needsRedraw = true;
+}
+
 // Reset method implementation
 void AppState::reset() {
     currentDirectory = "";

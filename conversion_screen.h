@@ -22,7 +22,9 @@ struct ConversionScreenState {
 
     // Conversion inputs
     char inputPathBuf[1024] = "";
-    char outputPathBuf[1024] = "";
+    // Output directory: the converter writes <outputDir>/<input stem>.h5
+    // (directory inputs use the directory name as the stem).
+    char outputDirBuf[1024] = "";
     int selectedIndex = -1;
     bool inputEdited = false;
 
@@ -41,6 +43,11 @@ struct ConversionScreenState {
     bool gitOk = false;
     bool pyOk = false;
     bool h5pyOk = false;
+
+    // "Python test success/failed" acknowledgment shown next to the Test
+    // button for 2 s after clicking it.
+    double testToastUntil = 0.0;   // ImGui::GetTime() deadline; 0 = not shown
+    bool   testToastOk = false;
 };
 
 // Render the modal every frame (no-op when closed). Must be called after
