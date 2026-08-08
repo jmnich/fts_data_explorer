@@ -26,6 +26,7 @@ struct ConversionScreenState {
     // (directory inputs use the directory name as the stem).
     char outputDirBuf[1024] = "";
     int selectedIndex = -1;
+    int lastSelectedIndex = -1;  // scroll-into-view latch: one-shot SetScrollHereY
     bool inputEdited = false;
 
     // Run state

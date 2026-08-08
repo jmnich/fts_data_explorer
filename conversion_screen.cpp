@@ -58,6 +58,17 @@ static void saveConfigField(AppState& s) {
     }
 }
 
+// Input height that grows with the wrapped path/URL content (2..6 lines) so
+// long values wrap onto new lines and are never clipped; clipWidth is the
+// input's inner width.
+static float multilineH(const char* buf, float clipWidth) {
+    const float lineH = ImGui::GetTextLineHeight();
+    const ImVec2 sz = ImGui::CalcTextSize(buf, nullptr, false, clipWidth);
+    int lines = (int)(sz.y / lineH + 0.99f);
+    lines = std::clamp(lines, 2, 6);
+    return ImGui::GetFrameHeight() + (lines - 1) * lineH;
+}
+
 // ---------------------------------------------------------------------------
 // Tool status (probeTools caches per interpreter string)
 // ---------------------------------------------------------------------------
@@ -230,9 +241,9 @@ void renderConversionScreen(AppState& s) {
                             ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(
         ImVec2(std::clamp(work.x * 0.85f, 720.0f, 2000.0f),
-               std::clamp(work.y * 0.85f, 620.0f, 1600.0f)),
+               std::clamp(work.y * 0.85f, 700.0f, 1600.0f)),
         ImGuiCond_Always);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(720, 620), ImVec2(2000, 1600));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(720, 700), ImVec2(2000, 1600));
 
     ImGui::PushStyleColor(ImGuiCol_ModalWindowDimBg, ImVec4(0.0f, 0.0f, 0.0f, 0.7f));
 
@@ -276,21 +287,59 @@ void renderConversionScreen(AppState& s) {
             ImGui::PopStyleColor();
         }
 
-        // ---- Two-column body: left = configuration, right = paths/conversion ----
+        // ---- Two-column body: right = paths/conversion, left = configuration ----
         const auto& converters = ConverterRegistry::instance().all();
         if (st.selectedIndex >= static_cast<int>(converters.size())) st.selectedIndex = -1;
         const float colGap = ImGui::GetStyle().ItemSpacing.x;
         const float leftW = (ImGui::GetContentRegionAvail().x - colGap) * 0.55f;
+        const float rightW = ImGui::GetContentRegionAvail().x - leftW - colGap;
+        // Measured reserve for the Browse button so it clears the column
+        // border at any UI scale (a fixed reserve overflows when the font
+        // grows; a -FLT_MIN fill would clip SameLine items entirely).
+        const float browseW = ImGui::CalcTextSize("Browse...").x
+                            + ImGui::GetStyle().FramePadding.x * 2.0f;
+        // Columns get a fixed height that leaves room for the full-width Exit
+        // below, so the modal never scrolls; only the converter list and the
+        // Input format pane scroll.
+        const float exitReserve = ImGui::GetFrameHeightWithSpacing()
+            + ImGui::GetStyle().ItemSpacing.y * 2.0f + 8.0f;
+        const float colH = std::max(240.0f,
+            ImGui::GetContentRegionAvail().y - exitReserve);
 
-        ImGui::BeginChild("##convLeft", ImVec2(leftW, -1), ImGuiChildFlags_Borders);
+        // Up/Down arrows select the converter (manual handling — ImGui nav
+        // stays disabled per project convention; skip while editing a field).
+        if (!converters.empty() && !ImGui::IsAnyItemActive()) {
+            if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
+                st.selectedIndex = st.selectedIndex <= 0 ? 0 : st.selectedIndex - 1;
+            } else if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
+                st.selectedIndex = (st.selectedIndex < 0 ||
+                                    st.selectedIndex >= (int)converters.size() - 1)
+                                       ? (int)converters.size() - 1
+                                       : st.selectedIndex + 1;
+            }
+        }
+
+        // Right column: setup + converter list. Drawn first: the list fills the
+        // column to its bottom, and its height (fmtH) is shared with the Input
+        // format pane in the left column so both stay at the same vertical level.
+        ImGui::BeginChild("##convRight", ImVec2(rightW, colH), ImGuiChildFlags_Borders,
+                          ImGuiWindowFlags_NoScrollbar |
+                          ImGuiWindowFlags_NoScrollWithMouse);
 
         // ---- Setup group --------------------------------------------------------
         ImGui::Text("Setup");
         ImGui::Separator();
 
+        const float colW = ImGui::GetContentRegionAvail().x;
+        const float fieldPad = ImGui::GetStyle().FramePadding.x * 2.0f;
+        const float browseWide = browseW + ImGui::GetStyle().ItemSpacing.x + 4.0f;
+
         ImGui::Text("Converter repo URL");
+        float hUrl = multilineH(st.repoUrlBuf, colW - fieldPad - 6.0f);
         ImGui::SetNextItemWidth(-FLT_MIN);
-        if (ImGui::InputText("##repoUrl", st.repoUrlBuf, sizeof(st.repoUrlBuf))) {
+        if (ImGui::InputTextMultiline("##repoUrl", st.repoUrlBuf, sizeof(st.repoUrlBuf),
+                                      ImVec2(-FLT_MIN, hUrl),
+                                      ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_WordWrap)) {
             if (s.configPtr) {
                 s.configPtr->converterRepoUrl = st.repoUrlBuf;
                 saveConfigField(s);
@@ -300,17 +349,21 @@ void renderConversionScreen(AppState& s) {
         ImGui::Text("Converter repo local destination");
         // Measured reserve for the Browse button so it clears the column
         // border at any UI scale (a fixed reserve overflows when the font
-        // grows; a -FLT_MIN fill would clip SameLine items entirely).
-        const float browseW = ImGui::CalcTextSize("Browse...").x
-                            + ImGui::GetStyle().FramePadding.x * 2.0f;
-        ImGui::SetNextItemWidth(-(browseW + ImGui::GetStyle().ItemSpacing.x + 4.0f));
-        if (ImGui::InputText("##repoDir", st.repoDirBuf, sizeof(st.repoDirBuf))) {
+        // grows; a -FLT_MIN fill would clip SameLine items entirely). The
+        // explicit width is REQUIRED: with a negative size ImGui fills the
+        // whole column and SameLine pushes the button out of view.
+        float rowTop = ImGui::GetCursorPosY();
+        float hDir = multilineH(st.repoDirBuf, colW - browseWide - fieldPad - 6.0f);
+        if (ImGui::InputTextMultiline("##repoDir", st.repoDirBuf, sizeof(st.repoDirBuf),
+                                      ImVec2(-(browseW + ImGui::GetStyle().ItemSpacing.x + 4.0f), hDir),
+                                      ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_WordWrap)) {
             if (s.configPtr) {
                 s.configPtr->converterRepoDir = st.repoDirBuf;
                 saveConfigField(s);
             }
         }
         ImGui::SameLine();
+        ImGui::SetCursorPosY(rowTop);
         if (ImGui::Button("Browse...##repoDir")) {
             std::string picked = FileBrowser::pickFolder(nullptr,
                                                          "Select converter repo destination");
@@ -320,8 +373,12 @@ void renderConversionScreen(AppState& s) {
                     s.configPtr->converterRepoDir = picked;
                     saveConfigField(s);
                 }
+                // Detect converters in the chosen location immediately.
+                st.refreshPending = true;
             }
         }
+        ImGui::SetCursorPosY(rowTop + hDir);
+
         // Action + status on their own lines so the button has room to
         // breathe (see the repoDir row note on -FLT_MIN + SameLine).
         bool canClone = st.gitOk && !busy;
@@ -343,8 +400,11 @@ void renderConversionScreen(AppState& s) {
         }
 
         ImGui::Text("Python interpreter");
-        ImGui::SetNextItemWidth(-(browseW + ImGui::GetStyle().ItemSpacing.x + 4.0f));
-        if (ImGui::InputText("##pyPath", st.pyPathBuf, sizeof(st.pyPathBuf))) {
+        rowTop = ImGui::GetCursorPosY();
+        float hPy = multilineH(st.pyPathBuf, colW - browseWide - fieldPad - 6.0f);
+        if (ImGui::InputTextMultiline("##pyPath", st.pyPathBuf, sizeof(st.pyPathBuf),
+                                      ImVec2(-(browseW + ImGui::GetStyle().ItemSpacing.x + 4.0f), hPy),
+                                      ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_WordWrap)) {
             if (s.configPtr) {
                 s.configPtr->converterInterpreter = st.pyPathBuf;
                 saveConfigField(s);
@@ -352,6 +412,7 @@ void renderConversionScreen(AppState& s) {
             st.probed = false;  // re-probe on the next frame after editing stops
         }
         ImGui::SameLine();
+        ImGui::SetCursorPosY(rowTop);
         if (ImGui::Button("Browse...##pyPath")) {
             std::string picked = FileBrowser::showFileOpenDialog(
                 "Select Python interpreter", "Python interpreter", "*");
@@ -364,6 +425,7 @@ void renderConversionScreen(AppState& s) {
                 st.probed = false;  // re-probe the picked interpreter
             }
         }
+        ImGui::SetCursorPosY(rowTop + hPy);
         // Test + status on their own line (see the repoDir row note). The
         // "Python test success/failed" label acknowledges the test for 2 s.
         if (ImGui::Button("Test")) {
@@ -394,97 +456,111 @@ void renderConversionScreen(AppState& s) {
         ImGui::PopStyleColor();
         ImGui::Spacing();
 
-        // ---- Converter list (adaptive height: the setup group and format pane
-        // below get their share first; the log pane lives in the right column).
+        // ---- Converter list (bottom block: fills the column to its bottom; the
+        // height fmtH is shared with the Input format pane on the left so both
+        // stay at the same vertical level) --------------------------------------
+        float fmtH = 200.0f;
         if (converters.empty()) {
             ImGui::TextDisabled("No converters found. Clone the standard set above "
                                 "or drop .py files into the local dir.");
         } else {
             ImGui::Text("Converters (%zu)", converters.size());
-            float listReserve = 20.0f /*"Input format" label*/ + 130.0f /*format pane*/
-                + 10.0f;
-            float listH = std::clamp(
-                ImGui::GetContentRegionAvail().y - listReserve, 120.0f, 420.0f);
-            ImGui::BeginChild("##convList", ImVec2(-1, listH), ImGuiChildFlags_Borders);
+            // No upper cap: the list fills the column to its bottom, so it is
+            // always flush with (and vertically aligned to) the Input format
+            // pane pinned in the left column.
+            fmtH = std::max(100.0f, ImGui::GetContentRegionAvail().y);
+            bool selChanged = st.selectedIndex != st.lastSelectedIndex;
+            ImGui::BeginChild("##convList", ImVec2(-1, fmtH), ImGuiChildFlags_Borders,
+                              ImGuiWindowFlags_AlwaysVerticalScrollbar);
+            const float wrapW = ImGui::GetContentRegionAvail().x;
             for (size_t i = 0; i < converters.size(); ++i) {
                 const auto& c = converters[i];
                 ImGui::PushID(static_cast<int>(i));
-                if (ImGui::Selectable(c.name.empty() ? c.id.c_str() : c.name.c_str(),
-                                      st.selectedIndex == static_cast<int>(i))) {
+                const bool selected = st.selectedIndex == static_cast<int>(i);
+                const char* name = c.name.empty() ? c.id.c_str() : c.name.c_str();
+                std::string hint = "input: " + c.input;
+                if (!c.extensions.empty()) {
+                    hint += " (";
+                    for (size_t e = 0; e < c.extensions.size(); ++e) {
+                        if (e) hint += ", ";
+                        hint += c.extensions[e];
+                    }
+                    hint += ")";
+                }
+                // Row block: an InvisibleButton sized to the wrapped texts. It
+                // is the last input item under the mouse, so clicks always land
+                // on it; the highlight and texts are drawn manually on top.
+                const ImVec2 nameSz = ImGui::CalcTextSize(name, nullptr, false, wrapW);
+                const ImVec2 hintSz = ImGui::CalcTextSize(hint.c_str(), nullptr, false, wrapW);
+                const ImVec2 descSz = c.description.empty()
+                    ? ImVec2(0.0f, 0.0f)
+                    : ImGui::CalcTextSize(c.description.c_str(), nullptr, false, wrapW);
+                const float rowH = nameSz.y + hintSz.y + descSz.y
+                    + ImGui::GetStyle().ItemSpacing.y * 2.0f + 2.0f;
+                const ImVec2 rowStart = ImGui::GetCursorScreenPos();
+                if (ImGui::InvisibleButton("##row", ImVec2(-FLT_MIN, rowH))) {
                     st.selectedIndex = static_cast<int>(i);
                 }
+                const bool rowHovered = ImGui::IsItemHovered();
+                if (selected && selChanged) {
+                    ImGui::SetScrollHereY(0.5f);
+                }
+                if (selected || rowHovered) {
+                    ImGui::GetWindowDrawList()->AddRectFilled(
+                        rowStart, ImVec2(rowStart.x + wrapW, rowStart.y + rowH),
+                        ImGui::GetColorU32(selected ? ImGuiCol_Header
+                                                    : ImGuiCol_HeaderHovered));
+                }
+                ImGui::SetCursorScreenPos(rowStart);
+                // PushTextWrapPos takes a window-LOCAL x (it converts to screen
+                // internally); wrapping here must match CalcTextSize above.
+                ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + wrapW);
+                // Name: accent color — visually distinct from the description.
+                ImGui::PushStyleColor(ImGuiCol_Text, accent);
+                ImGui::TextUnformatted(name);
+                ImGui::PopStyleColor();
                 if (!c.broken) {
-                    ImGui::SameLine();
-                    ImGui::TextDisabled("[%s]", c.source == ConverterDesc::Source::Repo ? "repo" : "local");
-                    if (!c.version.empty()) {
-                        ImGui::SameLine();
-                        ImGui::TextDisabled("v%s", c.version.c_str());
-                    }
-                    ImGui::SameLine();
-                    std::string hint = "input: " + c.input;
-                    if (!c.extensions.empty()) {
-                        hint += " (";
-                        for (size_t e = 0; e < c.extensions.size(); ++e) {
-                            if (e) hint += ", ";
-                            hint += c.extensions[e];
-                        }
-                        hint += ")";
-                    }
-                    ImGui::TextDisabled("%s", hint.c_str());
+                    ImGui::PushStyleColor(ImGuiCol_Text,
+                                          ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+                    ImGui::TextUnformatted(hint.c_str());
+                    ImGui::PopStyleColor();
                     if (!c.description.empty()) {
-                        ImGui::TextWrapped("%s", c.description.c_str());
+                        ImGui::TextUnformatted(c.description.c_str());
                     }
                 } else {
-                    ImGui::SameLine();
-                    ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "BROKEN: %s",
-                                       c.error.c_str());
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
+                    ImGui::TextUnformatted((hint + " — BROKEN: " + c.error).c_str());
+                    ImGui::PopStyleColor();
                 }
+                ImGui::PopTextWrapPos();
                 ImGui::PopID();
             }
             ImGui::EndChild();
-
-            // ---- Format pane (below the list) -----------------------------------
-            const ConverterDesc* sel = nullptr;
-            if (st.selectedIndex >= 0 &&
-                st.selectedIndex < static_cast<int>(converters.size()) &&
-                !converters[st.selectedIndex].broken) {
-                sel = &converters[st.selectedIndex];
-            }
-            ImGui::Text("Input format");
-            ImGui::BeginChild("##convFormat", ImVec2(-1, 130), ImGuiChildFlags_Borders);
-            if (!sel) {
-                ImGui::TextDisabled("Select a converter to see its format documentation.");
-            } else if (sel->formatDescription.empty() && sel->formatSample.empty()) {
-                ImGui::TextDisabled("No format documentation.");
-            } else {
-                if (!sel->formatDescription.empty()) {
-                    ImGui::TextWrapped("%s", sel->formatDescription.c_str());
-                }
-                if (!sel->formatSample.empty()) {
-                    if (!sel->formatDescription.empty()) ImGui::Separator();
-                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 0.8f, 1.0f));
-                    // Default font is ProggyClean (monospace); TextUnformatted
-                    // preserves the sample's column alignment verbatim.
-                    ImGui::TextUnformatted(sel->formatSample.c_str());
-                    ImGui::PopStyleColor();
-                }
-            }
-            ImGui::EndChild();
         }
-        ImGui::EndChild();   // ##convLeft
+        st.lastSelectedIndex = st.selectedIndex;
+        ImGui::EndChild();   // ##convRight
 
         ImGui::SameLine();
-        ImGui::BeginChild("##convRight", ImVec2(-1, -1), ImGuiChildFlags_Borders);
+
+        // ---- Left column: paths/conversion + Input format pane (bottom block =
+        // fmtH, shared with the converter list on the right — same level) --------
+        ImGui::BeginChild("##convLeft", ImVec2(leftW, colH), ImGuiChildFlags_Borders,
+                          ImGuiWindowFlags_NoScrollbar |
+                          ImGuiWindowFlags_NoScrollWithMouse);
 
         // ---- Input / output -----------------------------------------------------
+        const float lColW = ImGui::GetContentRegionAvail().x;
         ImGui::Text("Input");
-        // Measured Browse reserve (same as the setup rows): clears the column
-        // border at any UI scale.
-        ImGui::SetNextItemWidth(-(browseW + ImGui::GetStyle().ItemSpacing.x + 4.0f));
-        if (ImGui::InputText("##convInput", st.inputPathBuf, sizeof(st.inputPathBuf))) {
+        rowTop = ImGui::GetCursorPosY();
+        float hIn = multilineH(st.inputPathBuf, lColW - browseWide - fieldPad - 6.0f);
+        if (ImGui::InputTextMultiline("##convInput", st.inputPathBuf,
+                                      sizeof(st.inputPathBuf),
+                                      ImVec2(-(browseW + ImGui::GetStyle().ItemSpacing.x + 4.0f), hIn),
+                                      ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_WordWrap)) {
             st.inputEdited = true;
         }
         ImGui::SameLine();
+        ImGui::SetCursorPosY(rowTop);
         if (ImGui::Button("Browse...")) {
             const ConverterDesc* sel = st.selectedIndex >= 0
                 && st.selectedIndex < static_cast<int>(converters.size())
@@ -503,25 +579,31 @@ void renderConversionScreen(AppState& s) {
                 st.inputEdited = true;
             }
         }
+        ImGui::SetCursorPosY(rowTop + hIn);
 
         ImGui::Text("Output directory");
-        ImGui::SetNextItemWidth(-(browseW + ImGui::GetStyle().ItemSpacing.x + 4.0f));
-        ImGui::InputText("##convOutput", st.outputDirBuf, sizeof(st.outputDirBuf));
+        rowTop = ImGui::GetCursorPosY();
+        float hOut = multilineH(st.outputDirBuf, lColW - browseWide - fieldPad - 6.0f);
+        ImGui::InputTextMultiline("##convOutput", st.outputDirBuf, sizeof(st.outputDirBuf),
+                                  ImVec2(-(browseW + ImGui::GetStyle().ItemSpacing.x + 4.0f), hOut),
+                                  ImGuiInputTextFlags_EnterReturnsTrue |
+                                      ImGuiInputTextFlags_WordWrap);
         ImGui::SameLine();
+        ImGui::SetCursorPosY(rowTop);
         if (ImGui::Button("Browse...##out")) {
             std::string picked = FileBrowser::pickFolder(nullptr, "Select output directory");
             if (!picked.empty())
                 snprintf(st.outputDirBuf, sizeof(st.outputDirBuf), "%s", picked.c_str());
         }
+        ImGui::SetCursorPosY(rowTop + hOut);
         // Conflict: the derived .h5 would overwrite the currently open workspace.
         const std::string outFile = derivedOutputH5(st);
         bool outputConflicts = !s.workspacePath.empty() && outFile == s.workspacePath;
         if (outputConflicts) {
-            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f),
-                               "Cannot overwrite the currently open workspace.");
+            ImGui::TextWrapped("Cannot overwrite the currently open workspace.");
         }
 
-        // ---- Actions ------------------------------------------------------------
+        // ---- Actions (Convert/Refresh 50% taller) --------------------------------
         ImGui::Spacing();
         bool canConvert = st.pyOk && st.h5pyOk && !busy
             && st.selectedIndex >= 0
@@ -530,8 +612,9 @@ void renderConversionScreen(AppState& s) {
             && st.inputPathBuf[0] != '\0' && st.outputDirBuf[0] != '\0'
             && !outFile.empty()
             && !outputConflicts;
+        const float actionH = ImGui::GetFrameHeight() * 1.5f;
         if (!canConvert) ImGui::BeginDisabled();
-        if (ImGui::Button("Convert", ImVec2(120, 0))) {
+        if (ImGui::Button("Convert", ImVec2(120, actionH))) {
             const auto& c = converters[st.selectedIndex];
             std::string err;
             if (!startConverter(c, st.pyPathBuf, st.inputPathBuf, outFile,
@@ -545,7 +628,7 @@ void renderConversionScreen(AppState& s) {
         }
         if (!canConvert) ImGui::EndDisabled();
         ImGui::SameLine();
-        if (ImGui::Button("Refresh", ImVec2(120, 0))) {
+        if (ImGui::Button("Refresh", ImVec2(120, actionH))) {
             st.refreshPending = true;
         }
         if (st.job.running) {
@@ -553,26 +636,62 @@ void renderConversionScreen(AppState& s) {
             ImGui::Text("Converting...");
         }
 
-        // ---- Log tail (reserves ~40px for the Exit button below) ----------------
+        // ---- Input format block (pane height fmtH is shared with the list) ------
+        const float fmtLabelH = ImGui::GetFrameHeightWithSpacing() + 4.0f;
+
+        // ---- Log tail (yields to the format block; never scrolls) ----------------
         if (st.showLog) {
             ImGui::Spacing();
             ImGui::TextDisabled("Log");
+            float logLabelH = ImGui::GetFrameHeightWithSpacing();
+            // The log yields space to the pinned format block, so the block
+            // always ends flush with the column bottom (never below the fold).
             float logH = std::clamp(
-                ImGui::GetContentRegionAvail().y - 40.0f, 0.0f, 110.0f);
-            ImGui::BeginChild("##convLog", ImVec2(-1, logH), ImGuiChildFlags_Borders);
+                ImGui::GetContentRegionAvail().y
+                    - (logLabelH + fmtLabelH + fmtH + 8.0f),
+                40.0f, 110.0f);
+            ImGui::BeginChild("##convLog", ImVec2(-1, logH), ImGuiChildFlags_Borders,
+                              ImGuiWindowFlags_NoScrollbar |
+                              ImGuiWindowFlags_NoScrollWithMouse);
             ImGui::TextUnformatted(lastLogLines(st.job, 20).c_str());
             ImGui::EndChild();
         }
 
-        // ---- Exit: prominent, wide, PINNED to the bottom of the column ----
-        // (replaces the old small Cancel; locked while a job runs — the
-        // converter thread must be joined first). The log above caps at 110px,
-        // so in tall columns push the button down to the column bottom.
+        // ---- Input format pane, PINNED to the bottom of the column (height fmtH
+        // shared with the converter list on the right — same vertical level) -----
+        const ConverterDesc* sel = nullptr;
+        if (st.selectedIndex >= 0 &&
+            st.selectedIndex < static_cast<int>(converters.size()) &&
+            !converters[st.selectedIndex].broken) {
+            sel = &converters[st.selectedIndex];
+        }
         float spare = ImGui::GetContentRegionAvail().y;
-        float btnBlock = ImGui::GetFrameHeightWithSpacing()
-            + ImGui::GetStyle().ItemSpacing.y * 2.0f + 6.0f;
-        if (spare > btnBlock)
-            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (spare - btnBlock));
+        if (spare > fmtLabelH + fmtH)
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (spare - (fmtLabelH + fmtH)));
+        ImGui::Text("Input format");
+        ImGui::BeginChild("##convFormat", ImVec2(-1, fmtH), ImGuiChildFlags_Borders,
+                          ImGuiWindowFlags_AlwaysVerticalScrollbar);
+        if (!sel) {
+            ImGui::TextDisabled("Select a converter to see its format documentation.");
+        } else if (sel->formatDescription.empty() && sel->formatSample.empty()) {
+            ImGui::TextDisabled("No format documentation.");
+        } else {
+            if (!sel->formatDescription.empty()) {
+                ImGui::TextWrapped("%s", sel->formatDescription.c_str());
+            }
+            if (!sel->formatSample.empty()) {
+                if (!sel->formatDescription.empty()) ImGui::Separator();
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 0.8f, 1.0f));
+                // Default font is ProggyClean (monospace); TextUnformatted
+                // preserves the sample's column alignment verbatim.
+                ImGui::TextUnformatted(sel->formatSample.c_str());
+                ImGui::PopStyleColor();
+            }
+        }
+        ImGui::EndChild();
+        ImGui::EndChild();   // ##convLeft
+
+        // ---- Exit: full-width, at the very bottom of the modal ------------------
         ImGui::Separator();
         ImGui::Spacing();
         if (busy) ImGui::BeginDisabled();
@@ -580,7 +699,6 @@ void renderConversionScreen(AppState& s) {
             st.open = false;
         }
         if (busy) ImGui::EndDisabled();
-        ImGui::EndChild();   // ##convRight
 
         drawModalAccentFrame(accent);
 
@@ -600,6 +718,7 @@ void openConversionScreen(AppState& s, const std::string& prefillInput) {
     loadSetupFields(st, config);
     st.refreshPending = true;
     st.selectedIndex = -1;
+    st.lastSelectedIndex = -1;
     st.lastError.clear();
     st.showLog = false;
     st.probed = false;
