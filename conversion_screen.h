@@ -35,7 +35,9 @@ struct ConversionScreenState {
     bool jobStarted = false;
     bool syncStarted = false;
     bool showLog = false;
+    bool openAfterConvert = false; // "Convert and open": open the workspace when done
     std::string lastError;
+    std::string lastSuccess;       // plain Convert confirmation (stays in the modal)
 
     // Tool status (refreshed from probeTools when the interpreter changes)
     std::string pyVersion;

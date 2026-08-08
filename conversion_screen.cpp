@@ -158,9 +158,17 @@ static void pollJobs(AppState& s) {
             }
 #endif
             st.lastError.clear();
-            requestWorkspaceDiscard(s, PendingWorkspaceAction::OpenPath, outPath);
-            if (!s.showUnsavedPrompt && !s.showStaleDropPrompt) {
-                st.open = false;
+            if (st.openAfterConvert) {
+                // "Convert and open": validate, open the workspace, close.
+                st.lastSuccess.clear();
+                requestWorkspaceDiscard(s, PendingWorkspaceAction::OpenPath, outPath);
+                if (!s.showUnsavedPrompt && !s.showStaleDropPrompt) {
+                    st.open = false;
+                }
+            } else {
+                // Plain Convert: save only — confirm and stay in the modal.
+                st.lastSuccess = "Converted: " + outPath;
+                s.needsRedraw = true;
             }
         } else {
             st.lastError = "Converter exited with code " + std::to_string(st.job.exitCode.load());
@@ -284,6 +292,11 @@ void renderConversionScreen(AppState& s) {
         if (!st.lastError.empty()) {
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
             ImGui::TextWrapped("%s", st.lastError.c_str());
+            ImGui::PopStyleColor();
+        }
+        if (!st.lastSuccess.empty()) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 0.9f, 0.4f, 1.0f));
+            ImGui::TextWrapped("%s", st.lastSuccess.c_str());
             ImGui::PopStyleColor();
         }
 
@@ -603,7 +616,7 @@ void renderConversionScreen(AppState& s) {
             ImGui::TextWrapped("Cannot overwrite the currently open workspace.");
         }
 
-        // ---- Actions (Convert/Refresh 50% taller) --------------------------------
+        // ---- Actions (Convert / Convert and open, 50% taller) -------------------
         ImGui::Spacing();
         bool canConvert = st.pyOk && st.h5pyOk && !busy
             && st.selectedIndex >= 0
@@ -613,10 +626,14 @@ void renderConversionScreen(AppState& s) {
             && !outFile.empty()
             && !outputConflicts;
         const float actionH = ImGui::GetFrameHeight() * 1.5f;
-        if (!canConvert) ImGui::BeginDisabled();
-        if (ImGui::Button("Convert", ImVec2(120, actionH))) {
+        const float btnPad = ImGui::GetStyle().FramePadding.x * 2.0f;
+        const float convW = ImGui::CalcTextSize("Convert").x + btnPad + 24.0f;
+        const float convOpenW = ImGui::CalcTextSize("Convert and open").x + btnPad + 24.0f;
+        const float refreshW = ImGui::CalcTextSize("Refresh").x + btnPad + 24.0f;
+        auto startConvertJob = [&](bool openAfter) {
             const auto& c = converters[st.selectedIndex];
             std::string err;
+            st.openAfterConvert = openAfter;
             if (!startConverter(c, st.pyPathBuf, st.inputPathBuf, outFile,
                                 {}, st.job, err)) {
                 st.lastError = err;
@@ -624,15 +641,23 @@ void renderConversionScreen(AppState& s) {
                 st.jobStarted = true;
                 st.showLog = true;
                 st.lastError.clear();
+                st.lastSuccess.clear();
             }
+        };
+        if (!canConvert) ImGui::BeginDisabled();
+        if (ImGui::Button("Convert", ImVec2(convW, actionH))) {
+            startConvertJob(false);
         }
-        if (!canConvert) ImGui::EndDisabled();
         ImGui::SameLine();
-        if (ImGui::Button("Refresh", ImVec2(120, actionH))) {
+        if (ImGui::Button("Convert and open", ImVec2(convOpenW, actionH))) {
+            startConvertJob(true);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Refresh", ImVec2(refreshW, actionH))) {
             st.refreshPending = true;
         }
+        if (!canConvert) ImGui::EndDisabled();
         if (st.job.running) {
-            ImGui::SameLine();
             ImGui::Text("Converting...");
         }
 
@@ -720,6 +745,8 @@ void openConversionScreen(AppState& s, const std::string& prefillInput) {
     st.selectedIndex = -1;
     st.lastSelectedIndex = -1;
     st.lastError.clear();
+    st.lastSuccess.clear();
+    st.openAfterConvert = false;
     st.showLog = false;
     st.probed = false;
     st.testToastUntil = 0.0;   // no stale Test acknowledgment on reopen
