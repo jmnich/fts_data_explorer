@@ -4,6 +4,7 @@
 #if FTS_BUILD_HDF5
 #include "workspace_reader.h"
 #endif
+#include "imgui_internal.h"   // GetCurrentWindowRead()->SkipItems (hidden dock tab)
 #include <cmath>
 #include <algorithm>
 #include <cstdio>
@@ -492,7 +493,11 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
         // because its effect is unreliable in this setup (silently suppressed by
         // ImPlot's internal auto-fit state after user zoom/pan interactions).
 
-        if (!shouldAutoscale && pendingNextXMin < pendingNextXMax) {
+        // Hidden dock tabs set SkipItems: arming SetNextAxisLimits here would
+        // be discarded by ImPlot's hidden-window early return, losing the
+        // restored X range. Keep it armed until the panel is actually visible.
+        if (!shouldAutoscale && pendingNextXMin < pendingNextXMax &&
+            !ImGui::GetCurrentWindowRead()->SkipItems) {
             // Arrow-key pan or shift-drag X-range selection: apply once, then consume.
             ImPlot::SetNextAxisLimits(ImAxis_X1, pendingNextXMin, pendingNextXMax, ImPlotCond_Always);
             pendingNextXMin = 0.0;

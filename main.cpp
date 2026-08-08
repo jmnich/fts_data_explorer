@@ -511,6 +511,7 @@ void doSaveWorkspace(AppState& s, const std::string& asPath) {
             addToRecentDatasets(*s.configPtr, s.configFilePath, asPath);
     }
     s.workspace.dirty = false;
+    s.workspace.changeLog.clear();   // saved: the change list starts fresh
     // Phase 3: re-baseline the latch against the just-saved state so the frame
     // loop does not immediately re-dirty a clean workspace (decision 5).
     s.viewStateBaseline = viewStateJson(s);
@@ -675,6 +676,7 @@ void performWorkspaceMemberDeletion(AppState& s, const std::string& absPath) {
     }
 
     s.workspace.dirty = true;
+    logWorkspaceChange(s.workspace, "Deleted: " + absPath);
     s.needsRedraw = true;
 }
 
@@ -695,6 +697,7 @@ static void stripWorkspaceDerivatives(AppState& s) {
     s.workspace.t100.members.clear();
     clearPanelDerivedResults(s);
     s.workspace.dirty = true;
+    logWorkspaceChange(s.workspace, "Removed all derivative results");
     s.needsRedraw = true;
 }
 
@@ -796,6 +799,36 @@ static void renderUnsavedPromptModal() {
         ImGui::Separator();
         ImGui::Spacing();
 
+        // Change list: per-file "Spectrum: " entries aggregate into one
+        // CAT_SPECTRA line with the distinct-file count; everything else is
+        // shown verbatim. Names match the stale-drop modal (shared constants).
+        // Bullet + TextWrapped: BulletText never wraps, so long entries (e.g.
+        // the view-settings line at scaled UI sizes) clip at the pinned width.
+        const std::string spectrumPrefix = "Spectrum: ";
+        int spectrumCount = 0;
+        for (const auto& entry : appState.workspace.changeLog)
+            if (entry.rfind(spectrumPrefix, 0) == 0) ++spectrumCount;
+        bool shown = false;
+        if (spectrumCount > 0) {
+            ImGui::Bullet();
+            ImGui::TextWrapped("%s (%d file%s)", CAT_SPECTRA, spectrumCount,
+                               spectrumCount == 1 ? "" : "s");
+            shown = true;
+        }
+        for (const auto& entry : appState.workspace.changeLog) {
+            if (entry.rfind(spectrumPrefix, 0) == 0) continue;
+            ImGui::Bullet();
+            ImGui::TextWrapped("%s", entry.c_str());
+            shown = true;
+        }
+        if (!shown) {
+            ImGui::Bullet();
+            ImGui::TextWrapped("Workspace contains unsaved changes.");
+        }
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
         int pressed = modalButtonRow({"Save", "Don't Save", "Cancel"},
                                      focus, wasOpen, modalAccent());
         if (pressed == 0) {
@@ -839,8 +872,12 @@ static void renderStaleDropPromptModal() {
         ImGui::TextWrapped("Some results no longer match the current inputs or settings "
                            "and will not be saved:");
         ImGui::Spacing();
-        for (const auto& cat : appState.workspace.staleCategories())
-            ImGui::BulletText("%s", cat.c_str());
+        // Bullet + TextWrapped (BulletText never wraps): keeps the list look
+        // and wraps long lines at the pinned width instead of clipping.
+        for (const auto& cat : appState.workspace.staleCategories()) {
+            ImGui::Bullet();
+            ImGui::TextWrapped("%s", cat.c_str());
+        }
         ImGui::Spacing();
         ImGui::Separator();
         ImGui::Spacing();
@@ -1787,8 +1824,13 @@ int main(int argc, char* argv[]) {
         // Latching (no baseline update on diff) matches the coarse-dirty model.
         if (appState.hasWorkspace() && !appState.workspace.dirty &&
             !appState.viewStateBaselinePending) {
-            if (viewStateJson(appState) != appState.viewStateBaseline)
+            if (viewStateJson(appState) != appState.viewStateBaseline) {
                 appState.workspace.dirty = true;
+                // One entry per dirty period: the latch only fires on the
+                // clean->dirty transition.
+                logWorkspaceChange(appState.workspace,
+                                   "View settings (zooms, ranges, panel options)");
+            }
         }
 #endif
 
@@ -4967,6 +5009,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                         ImVec2(-FLT_MIN, 4 * ImGui::GetTextLineHeightWithSpacing()))) {
                     appState.workspace.measurementComment = appState.metadataCommentBuffer;
                     appState.workspace.dirty = true;
+                    logWorkspaceChange(appState.workspace, "Edited comment");
                     appState.needsRedraw = true;
                 }
                 ImGui::Text("Tags:");
@@ -4974,6 +5017,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                                      sizeof(appState.metadataTagsBuffer))) {
                     appState.workspace.tags = appState.metadataTagsBuffer;
                     appState.workspace.dirty = true;
+                    logWorkspaceChange(appState.workspace, "Edited tags");
                     appState.needsRedraw = true;
                 }
 

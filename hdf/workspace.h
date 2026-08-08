@@ -10,6 +10,15 @@
 
 enum class MemberKind { Original, Derivative };
 
+// Canonical artifact/category names, shared by the unsaved-changes modal, the
+// stale-drop modal (Workspace::staleCategories) and the change log so the
+// names can never drift between dialogs.
+inline constexpr const char* CAT_SPECTRA = "Spectra";
+inline constexpr const char* CAT_AVERAGE = "Average spectrum";
+inline constexpr const char* CAT_SNR     = "SNR spectrum";
+inline constexpr const char* CAT_ALLAN   = "Allan-Werle";
+inline constexpr const char* CAT_T100    = "100% T";
+
 // Every spec member carries kind/columns/units, and originals may carry a timestamp.
 // origin/config are per-member for spectra/derivative groups (spec shows @origin/@config
 // on each spectra/<id>/ sub-group). For interferogram groups they are empty — the
@@ -95,6 +104,11 @@ struct Workspace {
     // Never serialized. Original members removed from the model are re-created
     // as absences on disk; the H5Store protection skips them.
     std::vector<std::string> deletedOriginalPaths;
+
+    // RAM-only; display-ready human-readable change entries appended wherever
+    // the workspace is mutated (dirty = true). Never serialized. Cleared on
+    // save (GUI doSaveWorkspace); naturally empty on fresh open/close.
+    std::vector<std::string> changeLog;
 
     // Availability flags for the engine (mirrors current DatasetInfo).
     bool hasInterferograms() const;

@@ -640,6 +640,12 @@ nlohmann::json spectrumParamsJson(const AppState& s) {
     return j;
 }
 
+void logWorkspaceChange(Workspace& ws, const std::string& entry) {
+    if (std::find(ws.changeLog.begin(), ws.changeLog.end(), entry) != ws.changeLog.end())
+        return;
+    ws.changeLog.push_back(entry);
+}
+
 void wsUpsertSpectrum(Workspace& ws, const std::string& ifgId,
                       const std::vector<double>& x, const std::vector<double>& y,
                       const nlohmann::json& cfg) {
@@ -658,6 +664,9 @@ void wsUpsertSpectrum(Workspace& ws, const std::string& ifgId,
     m.y = y;
     upsert(ws.spectra, std::move(m));
     ws.dirty = true;
+    // Per-file raw entry; the modal aggregates "Spectrum: " entries into one
+    // CAT_SPECTRA line with the distinct-file count.
+    logWorkspaceChange(ws, "Spectrum: " + ifgId);
 }
 
 void wsUpsertAverage(Workspace& ws, const std::vector<std::string>& inputs, int count,
@@ -677,6 +686,7 @@ void wsUpsertAverage(Workspace& ws, const std::vector<std::string>& inputs, int 
     m.y = y;
     upsert(ws.averageSpectra, std::move(m));
     ws.dirty = true;
+    logWorkspaceChange(ws, std::string(CAT_AVERAGE) + " (" + std::to_string(count) + " files)");
 }
 
 void wsUpsertSnr(Workspace& ws, const std::vector<std::string>& inputs, int fileCount,
@@ -696,6 +706,7 @@ void wsUpsertSnr(Workspace& ws, const std::vector<std::string>& inputs, int file
     m.y = y;
     upsert(ws.snrSpectra, std::move(m));
     ws.dirty = true;
+    logWorkspaceChange(ws, std::string(CAT_SNR) + " (" + std::to_string(fileCount) + " files)");
 }
 
 void wsUpsertAllan(Workspace& ws, const std::vector<std::string>& inputs,
@@ -714,6 +725,7 @@ void wsUpsertAllan(Workspace& ws, const std::vector<std::string>& inputs,
     m.surface = surface;
     upsert(ws.allanWerle, std::move(m));
     ws.dirty = true;
+    logWorkspaceChange(ws, CAT_ALLAN);
 }
 
 void wsUpsertT100(Workspace& ws, const std::vector<std::string>& inputs,
@@ -740,6 +752,7 @@ void wsUpsertT100(Workspace& ws, const std::vector<std::string>& inputs,
     m.curves = curves;
     upsert(ws.t100, std::move(m));
     ws.dirty = true;
+    logWorkspaceChange(ws, CAT_T100);
 }
 
 void wsMirrorSpectrum(AppState& s, const std::string& ifgId,
@@ -808,9 +821,34 @@ void wsUpsertT100FromPanel(AppState& s) {
         curves.push_back(std::move(c));
     }
     auto inputs = checkedInputPaths(s);
+    nlohmann::json cfgJson = makeT100Config(s, inputs);
+    std::string cfg = cfgJson.dump();
+
+    // No-op guard: the t100 member is rewritten after every compute (lazy
+    // fill, stddev completion, reference changes). When the recomputed result
+    // is data- and config-identical to the saved member, skip the replacement
+    // so a pristine open (or an identical re-calculate) neither dirties the
+    // workspace nor claims a change in the unsaved-changes modal.
+    for (const auto& m : s.workspace.t100.members) {
+        if (m.id != "t100") continue;
+        bool same = m.reference.x == s.t100.refX &&
+                    m.reference.y == s.t100.refY &&
+                    m.stddev.x == s.t100.cachedStdX &&
+                    m.stddev.y == s.t100.cachedStdY &&
+                    m.config == cfg &&
+                    m.curves.size() == curves.size();
+        if (same) {
+            for (size_t i = 0; i < curves.size(); ++i) {
+                if (m.curves[i].fileId != curves[i].fileId ||
+                    m.curves[i].x != curves[i].x ||
+                    m.curves[i].y != curves[i].y) { same = false; break; }
+            }
+        }
+        if (same) return;   // identical artifact already saved: nothing changed
+        break;
+    }
     wsUpsertT100(s.workspace, inputs, s.t100.refX, s.t100.refY,
-                 s.t100.cachedStdX, s.t100.cachedStdY, curves,
-                 makeT100Config(s, inputs));
+                 s.t100.cachedStdX, s.t100.cachedStdY, curves, cfgJson);
 }
 
 void markConfigStale(Workspace& ws, const AppState& s) {
@@ -974,11 +1012,41 @@ void seedPanelsFromWorkspace(AppState& s) {
         s.t100.refDescription = (src == "csv") ? "From CSV" : "From workspace";
         s.t100.cachedTransX.clear();
         s.t100.cachedTransY.clear();
+        // Eager restore: seed curves for every saved file still present in the
+        // workspace. The old selectedFiles guard was always empty at seed time
+        // (selection is populated later by the frame loop), so restore-on-open
+        // never worked and the render path recomputed every curve on the first
+        // frame — which rewrote the member and dirtied a pristine open.
         for (const auto& c : m.curves) {
-            if (std::find(s.selectedFiles.begin(), s.selectedFiles.end(), c.fileId) == s.selectedFiles.end())
-                continue;   // lazily recomputed by the needsRecompute fill path
+            if (std::find(s.csvFiles.begin(), s.csvFiles.end(), c.fileId) == s.csvFiles.end())
+                continue;   // deleted/absent member: keep its curve out of caches
             s.t100.cachedTransX[c.fileId] = c.x;
             s.t100.cachedTransY[c.fileId] = c.y;
+        }
+        s.t100.transmittanceAvailable = !s.t100.cachedTransY.empty();
+        // Restore the saved plotted set so the first render sees no selection
+        // diff and skips the needsRecompute wipe + lazy recompute. Absent in
+        // older files -> stays empty -> the first-frame diff arms the lazy
+        // fill instead (workspace_reader is engine-side; see t100.cpp:963).
+        s.t100.lastKnownSelection.clear();
+        const nlohmann::json& wsj = s.workspace.workspaceJson;
+        auto appsIt = wsj.find("applications");
+        if (appsIt != wsj.end() && appsIt->is_object()) {
+            auto appIt = appsIt->find(kAppName);
+            if (appIt != appsIt->end() && appIt->is_object()) {
+                auto selIt = appIt->find("selection");
+                if (selIt != appIt->end() && selIt->is_object()) {
+                    auto filesIt = selIt->find("selectedFiles");
+                    if (filesIt != selIt->end() && filesIt->is_array()) {
+                        for (const auto& f : *filesIt) {
+                            if (!f.is_string()) continue;
+                            const std::string& id = f.get<std::string>();
+                            if (std::find(s.csvFiles.begin(), s.csvFiles.end(), id) != s.csvFiles.end())
+                                s.t100.lastKnownSelection.push_back(id);
+                        }
+                    }
+                }
+            }
         }
         if (!m.stddev.x.empty() && !m.stddev.y.empty()) {
             s.t100.cachedStdX = m.stddev.x;

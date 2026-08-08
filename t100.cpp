@@ -6,6 +6,7 @@
 #endif
 #include "app_state.h"
 #include "average_spectrum.h"
+#include "imgui_internal.h"   // GetCurrentWindowRead()->SkipItems (hidden dock tab)
 #include <cmath>
 #include <algorithm>
 #include <cstdio>
@@ -1073,14 +1074,17 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
         }
     }
 
-    if (pendingNextXMin < pendingNextXMax) {
-        ImPlot::SetNextAxisLimits(ImAxis_X1, pendingNextXMin, pendingNextXMax, ImPlotCond_Always);
-        manualXMin = pendingNextXMin;
-        manualXMax = pendingNextXMax;
-        shouldAutoscale = false;
-        pendingNextXMin = 0.0;
-        pendingNextXMax = -1.0;
-    }
+        // Hidden dock tabs set SkipItems: arming SetNextAxisLimits here would
+        // be discarded by ImPlot's hidden-window early return, losing the
+        // restored X range. Keep it armed until the panel is actually visible.
+        if (pendingNextXMin < pendingNextXMax && !ImGui::GetCurrentWindowRead()->SkipItems) {
+            ImPlot::SetNextAxisLimits(ImAxis_X1, pendingNextXMin, pendingNextXMax, ImPlotCond_Always);
+            manualXMin = pendingNextXMin;
+            manualXMax = pendingNextXMax;
+            shouldAutoscale = false;
+            pendingNextXMin = 0.0;
+            pendingNextXMax = -1.0;
+        }
 
     if (xUnitSelector != prevXUnitSelector) {
         if (!shouldAutoscale && manualXMin < manualXMax) {

@@ -55,6 +55,11 @@ void wsUpsertT100(Workspace& ws, const std::vector<std::string>& inputs,
                   const std::vector<double>& stdX, const std::vector<double>& stdY,
                   const std::vector<T100Member::Curve>& curves, const nlohmann::json& cfg);
 
+// Append `entry` to ws.changeLog unless already present (RAM-only; powers the
+// unsaved-changes modal's change list). Dedupe keeps repeated edits/computes
+// from inflating the list. Used by the upserts and by main.cpp dirty sites.
+void logWorkspaceChange(Workspace& ws, const std::string& entry);
+
 // Mirror the just-computed per-file FFT spectrum into spectra/spec_<ifgId>.
 // No-op outside workspace mode.
 void wsMirrorSpectrum(AppState& s, const std::string& ifgId,

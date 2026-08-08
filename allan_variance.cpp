@@ -6,6 +6,7 @@
 #endif
 #include "app_state.h"
 #include "implot3d.h"
+#include "imgui_internal.h"   // GetCurrentWindowRead()->SkipItems (hidden dock tab)
 #include <cmath>
 #include <algorithm>
 #include <cstdio>
@@ -378,7 +379,10 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
             }
         }
 
-        if (pendingNextXMin < pendingNextXMax) {
+        // Hidden dock tabs set SkipItems: arming SetNextAxisLimits here would
+        // be discarded by ImPlot's hidden-window early return, losing the
+        // restored X range. Keep it armed until the panel is actually visible.
+        if (pendingNextXMin < pendingNextXMax && !ImGui::GetCurrentWindowRead()->SkipItems) {
             ImPlot::SetNextAxisLimits(ImAxis_X1, pendingNextXMin, pendingNextXMax, ImPlotCond_Always);
             manualXMin = pendingNextXMin;
             manualXMax = pendingNextXMax;

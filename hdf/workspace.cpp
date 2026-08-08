@@ -260,11 +260,11 @@ std::vector<std::string> Workspace::staleCategories() const {
         return false;
     };
     std::vector<std::string> out;
-    if (hasStaleDeriv(spectra.members))        out.push_back("Spectra");
-    if (hasStaleDeriv(averageSpectra.members)) out.push_back("Average spectrum");
-    if (hasStaleDeriv(snrSpectra.members))     out.push_back("SNR spectrum");
-    if (hasStaleDeriv(allanWerle.members))     out.push_back("Allan-Werle");
-    if (hasStaleDeriv(t100.members))           out.push_back("100% T");
+    if (hasStaleDeriv(spectra.members))        out.push_back(CAT_SPECTRA);
+    if (hasStaleDeriv(averageSpectra.members)) out.push_back(CAT_AVERAGE);
+    if (hasStaleDeriv(snrSpectra.members))     out.push_back(CAT_SNR);
+    if (hasStaleDeriv(allanWerle.members))     out.push_back(CAT_ALLAN);
+    if (hasStaleDeriv(t100.members))           out.push_back(CAT_T100);
     return out;
 }
 
