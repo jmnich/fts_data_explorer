@@ -6,6 +6,8 @@
 
 // ── Shared modal-popup helpers (IMGUI_GUIDE §14/§15) ────────────────────────
 // Every modal in the app uses these so the behavior is consistent:
+//   * toast-style framing — rounded corners, 2px accent border, dark fill
+//     (the same look as the "Saved" overlay);
 //   * explicitly centered (without SetNextWindowPos an AlwaysAutoResize modal
 //     opens at the top of the screen);
 //   * pinned width (TextWrapped then wraps correctly — long headers are never
@@ -14,11 +16,29 @@
 //     highlight, Enter/Space activate it);
 //   * an accent-colored frame for visibility.
 
-// Center the next modal and pin its width; height stays content-driven.
-inline void setupModalWindow(float width) {
-    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-    ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSizeConstraints(ImVec2(width, 0.0f), ImVec2(width, FLT_MAX));
+// Toast-style modal framing. Pushes window styles (rounding/border/bg), and
+// optionally centers the modal + pins its width (pass pinWidth=false for
+// resizable modals that manage their own position/size). MUST always be paired
+// with endModal() right after the matching EndPopup() so the push/pop stays
+// balanced even when BeginPopupModal returns false.
+inline void beginModal(float width, const ImVec4& accent, bool pinWidth = true) {
+    if (pinWidth) {
+        ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+        ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+        ImGui::SetNextWindowSizeConstraints(ImVec2(width, 0.0f), ImVec2(width, FLT_MAX));
+    }
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 8.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 2.0f);
+    ImGui::PushStyleColor(ImGuiCol_Border, accent);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg,
+        ImVec4(30.0f / 255.0f, 30.0f / 255.0f, 50.0f / 255.0f, 230.0f / 255.0f));
+}
+
+// Pops the styles pushed by beginModal(); call unconditionally after the
+// modal's if (BeginPopupModal(...)) block.
+inline void endModal() {
+    ImGui::PopStyleColor(2);
+    ImGui::PopStyleVar(2);
 }
 
 // Draw an accent-colored frame around the modal body. Call at the end of the
@@ -29,7 +49,7 @@ inline void drawModalAccentFrame(const ImVec4& accent) {
     ImU32 col = ImGui::ColorConvertFloat4ToU32(accent);
     ImGui::GetWindowDrawList()->AddRect(pos,
                                         ImVec2(pos.x + size.x, pos.y + size.y),
-                                        col, 6.0f, ImDrawFlags_None, 3.0f);
+                                        col, 8.0f, ImDrawFlags_None, 3.0f);
 }
 
 // Keyboard-navigable, centered button row. Left/Right/Up/Down move the focus

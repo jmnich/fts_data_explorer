@@ -201,8 +201,10 @@ void renderConversionScreen(AppState& s) {
         }
     }
 
-    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-    ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    // Toast-style framing without width pinning: this dialog is resizable and
+    // manages its own position/size/constraints below.
+    ImVec4 accent = GetAccentBase(StringToAccentColor(s.currentAccentColor));
+    beginModal(900.0f, accent, /*pinWidth=*/false);
     // Resizable: the setup group, banners and log grow the content; the list
     // and log panes adapt to whatever remains.
     ImGui::SetNextWindowSize(ImVec2(900, 780), ImGuiCond_FirstUseEver);
@@ -212,10 +214,15 @@ void renderConversionScreen(AppState& s) {
 
     // While a job runs the modal cannot be dismissed (thread must be joined).
     bool busy = st.job.running || st.syncJob.running;
-    bool* p_open = busy ? nullptr : &st.open;
 
-    if (ImGui::BeginPopupModal("Convert Dataset##conversion", p_open,
-                               ImGuiWindowFlags_NoMove)) {
+    if (ImGui::BeginPopupModal("Convert Dataset##conversion", nullptr,
+                               ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar)) {
+        // NoTitleBar: the title moves into the body so removing the header
+        // loses no information (the Cancel button below covers the old [X]).
+        ImGui::Text("Convert Dataset");
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
         // ---- Dependency banners -------------------------------------------------
         if (!st.gitOk) {
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
@@ -484,11 +491,12 @@ void renderConversionScreen(AppState& s) {
             ImGui::EndChild();
         }
 
-        drawModalAccentFrame(GetAccentBase(StringToAccentColor(s.currentAccentColor)));
+        drawModalAccentFrame(accent);
 
         ImGui::EndPopup();
     }
     ImGui::PopStyleColor();
+    endModal();
 }
 
 // ---------------------------------------------------------------------------

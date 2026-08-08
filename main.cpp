@@ -790,9 +790,13 @@ static void renderUnsavedPromptModal() {
         return;
     }
     ImGui::OpenPopup("Unsaved Changes##confirm");
-    setupModalWindow(520.0f);
+    beginModal(520.0f, modalAccent());
     if (ImGui::BeginPopupModal("Unsaved Changes##confirm", nullptr,
-                               ImGuiWindowFlags_AlwaysAutoResize)) {
+                               ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
+        // NoTitleBar: the title moves into the body so removing the header
+        // loses no information.
+        ImGui::Text("Unsaved Changes");
+        ImGui::Spacing();
         ImGui::TextWrapped("Save changes to \"%s\" before continuing?",
                            appState.currentDatasetName.c_str());
         ImGui::Spacing();
@@ -854,6 +858,7 @@ static void renderUnsavedPromptModal() {
     } else {
         wasOpen = false;
     }
+    endModal();
 }
 
 static void renderStaleDropPromptModal() {
@@ -866,9 +871,13 @@ static void renderStaleDropPromptModal() {
     ImGui::OpenPopup("Stale Data Will Be Dropped##confirm");
     // Fixed width ~1.6x the old autosized width: the wrapped header text
     // never clips and the category list gets breathing room.
-    setupModalWindow(560.0f);
+    beginModal(560.0f, modalAccent());
     if (ImGui::BeginPopupModal("Stale Data Will Be Dropped##confirm", nullptr,
-                               ImGuiWindowFlags_AlwaysAutoResize)) {
+                               ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
+        // NoTitleBar: the title moves into the body so removing the header
+        // loses no information.
+        ImGui::Text("Stale Data Will Be Dropped");
+        ImGui::Spacing();
         ImGui::TextWrapped("Some results no longer match the current inputs or settings "
                            "and will not be saved:");
         ImGui::Spacing();
@@ -910,6 +919,7 @@ static void renderStaleDropPromptModal() {
     } else {
         wasOpen = false;
     }
+    endModal();
 }
 
 #endif // FTS_BUILD_HDF5
@@ -1857,9 +1867,13 @@ int main(int argc, char* argv[]) {
             ImGui::OpenPopup("Adapter Error##adapterError");
             appState.needsRedraw = true;
         }
-        setupModalWindow(520.0f);
+        beginModal(520.0f, modalAccent());
         if (ImGui::BeginPopupModal("Adapter Error##adapterError", &appState.showAdapterErrorPopup,
-                                   ImGuiWindowFlags_AlwaysAutoResize)) {
+                                   ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
+            // NoTitleBar: the title moves into the body so removing the
+            // header loses no information.
+            ImGui::Text("Adapter Error");
+            ImGui::Spacing();
             ImGui::TextWrapped("%s", appState.adapterErrorMsg.c_str());
             ImGui::Spacing();
             ImGui::Separator();
@@ -1875,6 +1889,7 @@ int main(int argc, char* argv[]) {
             drawModalAccentFrame(modalAccent());
             ImGui::EndPopup();
         }
+        endModal();
 
 #if FTS_BUILD_HDF5
         // Phase 2 modals: unsaved-changes + stale-drop confirmation.
@@ -2514,12 +2529,12 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             if (appState.showWorkspaceDeleteConfirmPopup) {
                 ImGui::OpenPopup("Delete Member##confirm");
             }
-            setupModalWindow(480.0f);
+            beginModal(480.0f, modalAccent());
             if (ImGui::BeginPopupModal("Delete Member##confirm", NULL,
-                                       ImGuiWindowFlags_AlwaysAutoResize)) {
+                                       ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
                 const std::string& delPath = appState.pendingWorkspaceDeletionPath;
                 size_t dependentCount = appState.workspace.dependentsOf(delPath).size();
-                ImGui::Text("Delete member?");
+                ImGui::Text("Delete member?");   // body restates the title (NoTitleBar)
                 ImGui::Spacing();
                 ImGui::TextWrapped("%s", delPath.c_str());
                 ImGui::Spacing();
@@ -2545,6 +2560,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                 ImGui::EndPopup();
                 prevWPopupOpen = true;
             }
+            endModal();
         }
 #endif
 
@@ -2554,8 +2570,9 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             static bool prevSelPopupOpen = false;
             if (!ImGui::IsPopupOpen("Selection Limit"))
                 prevSelPopupOpen = false;
-            setupModalWindow(440.0f);
-            if (ImGui::BeginPopupModal("Selection Limit", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
+            beginModal(440.0f, modalAccent());
+            if (ImGui::BeginPopupModal("Selection Limit", NULL,
+                                       ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
                 ImGui::TextWrapped("Maximum of %zu files can be selected at once.",
                                    appState.MAX_SELECTABLE_FILES);
                 ImGui::TextWrapped("Please deselect some files first.");
@@ -2571,6 +2588,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                 ImGui::EndPopup();
                 prevSelPopupOpen = true;
             }
+            endModal();
         }
 
         // Delete confirmation popup
@@ -2580,14 +2598,15 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             if (!appState.showDeleteConfirmPopup)
                 prevPopupOpen = false;
 
-            setupModalWindow(480.0f);
-            if (ImGui::BeginPopupModal("Delete File##confirm", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
+            beginModal(480.0f, modalAccent());
+            if (ImGui::BeginPopupModal("Delete File##confirm", NULL,
+                                       ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
                 size_t idx = appState.deleteConfirmIndex;
                 std::string fname = idx < appState.sortedFiles.size()
                     ? appState.sortedFiles[idx].substr(appState.sortedFiles[idx].find_last_of("/\\") + 1)
                     : "";
 
-                ImGui::Text("Are you sure you want to delete?");
+                ImGui::Text("Are you sure you want to delete?");   // body restates the title (NoTitleBar)
                 ImGui::Spacing();
                 ImGui::TextWrapped("%s", fname.c_str());
                 ImGui::Spacing();
@@ -2617,6 +2636,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                 ImGui::EndPopup();
                 prevPopupOpen = true;
             }
+            endModal();
         }
         
         ImGui::PopTextWrapPos(); // Disable text wrapping
@@ -5179,6 +5199,12 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                 ImVec2(pos.x - 20, pos.y - 12),
                 ImVec2(pos.x + ts.x + 20, pos.y + ts.y + 12),
                 IM_COL32(30, 30, 50, 230), 8.0f);
+            // Accent border, matching the "Saved" toast family.
+            dl->AddRect(
+                ImVec2(pos.x - 20, pos.y - 12),
+                ImVec2(pos.x + ts.x + 20, pos.y + ts.y + 12),
+                ImGui::ColorConvertFloat4ToU32(modalAccent()),
+                8.0f, ImDrawFlags_None, 2.0f);
             dl->AddText(pos, IM_COL32(255, 255, 255, 255), msg);
         }
 

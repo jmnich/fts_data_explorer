@@ -17,15 +17,19 @@ void renderAboutPopup() {
         s_showAbout = false;
     }
 
-    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-    ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-
-    if (!ImGui::BeginPopupModal("About FTS Data Explorer", NULL,
-        ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse)) {
-        return;
-    }
+    ImVec4 accent = GetAccentBase(StringToAccentColor(appState.currentAccentColor));
+    beginModal(1200.0f, accent);
+    if (ImGui::BeginPopupModal("About FTS Data Explorer", NULL,
+        ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar)) {
 
     ImGui::SetWindowSize(ImVec2(1200, 800));
+
+    // NoTitleBar: the title moves into the body so removing the header loses
+    // no information.
+    ImGui::Text("About FTS Data Explorer");
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
 
     // ── Scrollable content ─────────────────────────────────────────────────
     ImGui::BeginChild("##AboutContent", ImVec2(0, -(ImGui::GetFrameHeightWithSpacing() + 10)),
@@ -94,7 +98,6 @@ void renderAboutPopup() {
     ImGui::Separator();
     static int closeFocus = 0;
     static bool wasOpen = false;
-    ImVec4 accent = GetAccentBase(StringToAccentColor(appState.currentAccentColor));
     if (modalButtonRow({"Close"}, closeFocus, wasOpen, accent) == 0 ||
         ImGui::IsKeyPressed(ImGuiKey_Escape)) {
         ImGui::CloseCurrentPopup();
@@ -103,4 +106,6 @@ void renderAboutPopup() {
 
     drawModalAccentFrame(accent);
     ImGui::EndPopup();
+    }
+    endModal();
 }

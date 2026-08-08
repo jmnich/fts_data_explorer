@@ -154,8 +154,13 @@ void ExportPanel::render()
 
     ImVec4 accent = GetAccentBase(StringToAccentColor(appState->currentAccentColor));
 
-    setupModalWindow(440.0f);
-    if (ImGui::BeginPopupModal("Export Warning", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
+    beginModal(440.0f, accent);
+    if (ImGui::BeginPopupModal("Export Warning", NULL,
+                               ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
+        // NoTitleBar: the title moves into the body so removing the header
+        // loses no information.
+        ImGui::Text("Export Warning");
+        ImGui::Spacing();
         ImGui::TextWrapped("No artifacts selected or available for export.");
         ImGui::Spacing();
         ImGui::Separator();
@@ -169,9 +174,12 @@ void ExportPanel::render()
         drawModalAccentFrame(accent);
         ImGui::EndPopup();
     }
+    endModal();
 
-    setupModalWindow(440.0f);
-    if (ImGui::BeginPopupModal("Export Complete", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
+    beginModal(440.0f, accent);
+    if (ImGui::BeginPopupModal("Export Complete", NULL,
+                               ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
+        // NoTitleBar: the body restates the title ("Export complete.").
         ImGui::TextWrapped("Export complete.");
         ImGui::Spacing();
         ImGui::Separator();
@@ -185,6 +193,7 @@ void ExportPanel::render()
         drawModalAccentFrame(accent);
         ImGui::EndPopup();
     }
+    endModal();
 
 
 }
