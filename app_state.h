@@ -63,6 +63,11 @@ struct AppState {
     // ranges mid-frame, so capturing earlier would false-dirty every fresh open.
     nlohmann::json viewStateBaseline;
     bool viewStateBaselinePending = true;
+    // Pristine-open dirty re-baseline: set by openWorkspace, consumed at the
+    // end of the first rendered frame. First-load auto-computes (the spectrum
+    // mirror in wsMirrorSpectrum) must not make a fresh open "dirty" — the
+    // auto-generated members become the baseline, exactly like the view state.
+    bool workspaceDirtyRebaselinePending = false;
     // ponytail: fixed-cap free-text comment; acceptable for a comment field,
     // bump the array size if a real need appears.
     char metadataCommentBuffer[4096];

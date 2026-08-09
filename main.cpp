@@ -340,6 +340,10 @@ void openWorkspace(AppState& s, const std::string& path) {
     s.showWorkspaceDeleteConfirmPopup = false;
     s.pendingWorkspaceDeletionPath.clear();
 
+    // The fresh load is pristine; the first frame's auto-computes (spectrum
+    // mirror) are re-baselined at its end so opening alone is never "dirty".
+    s.workspaceDirtyRebaselinePending = true;
+
     // Populate engine state
     s.datasetInfo = workspaceDatasetInfo(s.workspace);
     s.csvFiles = workspaceFileList(s.workspace);
@@ -845,14 +849,23 @@ static void renderUnsavedPromptModal() {
         if (pressed == 0) {
             try {
                 requestSaveWorkspace(appState, "");
-                if (!appState.showStaleDropPrompt)
+                if (!appState.showStaleDropPrompt) {
                     dispatchPendingAction(appState);
+                    ImGui::CloseCurrentPopup();
+                } else {
+                    // The stale-drop confirmation takes over: close this popup
+                    // now (the pending action stays stashed, dispatched after
+                    // the drop). Without the close it lingers in the popup
+                    // stack un-rendered and freezes the whole UI.
+                    ImGui::CloseCurrentPopup();
+                }
             } catch (const std::exception& e) {
                 appState.adapterErrorMsg = std::string("Save failed:\n") + e.what();
                 appState.showAdapterErrorPopup = true;
             }
         } else if (pressed == 1) {
             dispatchPendingAction(appState);   // discard RAM workspace
+            ImGui::CloseCurrentPopup();
         } else if (pressed == 2 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
             appState.pendingWorkspaceAction = PendingWorkspaceAction::None;
             appState.pendingWorkspacePath.clear();
@@ -1846,7 +1859,15 @@ int main(int argc, char* argv[]) {
         
         // Show welcome screen if no data is loaded and we haven't initialized yet
         if (appState.showWelcomeScreen && !appState.welcomeScreenInitialized) {
-            bool showPopup = !appState.showAdapterErrorPopup && !appState.conversionScreen.open;
+            // While a workspace-discard/save flow is pending, keep the welcome
+            // popup suppressed: its per-frame OpenPopup would force-close the
+            // Unsaved Changes / stale-drop modal (OpenPopupEx closes open
+            // popups with a different id), making the welcome modal
+            // "disappear" and the flow look broken.
+            bool showPopup = !appState.showAdapterErrorPopup
+                          && !appState.conversionScreen.open
+                          && !appState.showUnsavedPrompt
+                          && !appState.showStaleDropPrompt;
             renderWelcomeScreen(appState, config, configFilePath, showPopup);
         }
 
@@ -5227,6 +5248,14 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
         if (appState.hasWorkspace() && appState.viewStateBaselinePending) {
             appState.viewStateBaseline = viewStateJson(appState);
             appState.viewStateBaselinePending = false;
+            // Pristine open: the first frame's auto-computes (spectrum mirror
+            // in wsMirrorSpectrum) are re-baselined along with the view state
+            // — opening a file is not "unsaved changes" by itself.
+            if (appState.workspaceDirtyRebaselinePending) {
+                appState.workspaceDirtyRebaselinePending = false;
+                appState.workspace.dirty = false;
+                appState.workspace.changeLog.clear();
+            }
         }
 #endif
 

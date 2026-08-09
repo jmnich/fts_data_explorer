@@ -89,6 +89,12 @@ void resetToWelcomeScreen(AppState& s) {
     s.clearAverageSpectrum();
     s.clearSnrSpectrum();
     s.clearAllanVariance();
+#if FTS_BUILD_HDF5
+    // Ctrl+H mutates view-state fields (the batch panels reset their manual
+    // zoom); re-arm the latch baseline so "back to home" never dirties a
+    // clean workspace. Re-captured at the end of the next rendered frame.
+    s.viewStateBaselinePending = true;
+#endif
     s.needsRedraw = true;
 }
 
@@ -165,6 +171,7 @@ void AppState::reset() {
     showStaleDropPrompt = false;
     viewStateBaseline = nlohmann::json::object();
     viewStateBaselinePending = true;
+    workspaceDirtyRebaselinePending = false;
     metadataCommentBuffer[0] = '\0';
     metadataTagsBuffer[0] = '\0';
 #endif
