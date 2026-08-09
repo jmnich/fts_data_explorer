@@ -2237,7 +2237,6 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
 #if FTS_BUILD_HDF5
         // In workspace mode the entries are member IDs, not disk paths.
         if (appState.hasWorkspace()) {
-            ImGui::TextWrapped("Workspace: %s", appState.workspacePath.c_str());
             if (ImGui::Button("Strip derivatives", ImVec2(-FLT_MIN, 0))) {
                 stripWorkspaceDerivatives(appState);
             }
@@ -5046,10 +5045,17 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                 // Editable comment (multi-line) + tags (single line). Each
                 // change mirrors into the workspace and marks it dirty.
                 ImGui::Text("Comment:");
+                // Stretch the comment box to roughly half the panel's usable
+                // height so the metadata area makes better use of docked
+                // space (tags + config below stay reachable; the panel scrolls
+                // if the config tree is expanded).
+                float commentHeight = ImGui::GetContentRegionAvail().y * 0.5f;
+                float minCommentH = 3.0f * ImGui::GetTextLineHeightWithSpacing();
+                if (commentHeight < minCommentH) commentHeight = minCommentH;
                 if (ImGui::InputTextMultiline("##metadataComment",
                         appState.metadataCommentBuffer,
                         sizeof(appState.metadataCommentBuffer),
-                        ImVec2(-FLT_MIN, 4 * ImGui::GetTextLineHeightWithSpacing()))) {
+                        ImVec2(-FLT_MIN, commentHeight))) {
                     appState.workspace.measurementComment = appState.metadataCommentBuffer;
                     appState.workspace.dirty = true;
                     logWorkspaceChange(appState.workspace, "Edited comment");
