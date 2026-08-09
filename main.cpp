@@ -641,7 +641,12 @@ static void workspaceEraseMember(Workspace& ws, const std::string& path) {
 // Remove a file/member id from all engine containers referencing it.
 static void removeFileFromEngine(AppState& s, const std::string& id) {
     s.csvFiles.erase(std::remove(s.csvFiles.begin(), s.csvFiles.end(), id), s.csvFiles.end());
-    s.sortedFiles.erase(std::remove(s.sortedFiles.begin(), s.sortedFiles.end(), id), s.sortedFiles.end());
+    auto sortedIt = std::find(s.sortedFiles.begin(), s.sortedFiles.end(), id);
+    size_t sortedIdx = (sortedIt != s.sortedFiles.end())
+        ? static_cast<size_t>(std::distance(s.sortedFiles.begin(), sortedIt)) : s.sortedFiles.size();
+    if (sortedIt != s.sortedFiles.end()) s.sortedFiles.erase(sortedIt);
+    if (sortedIdx < s.filesSelectedForAveraging.size())
+        s.filesSelectedForAveraging.erase(s.filesSelectedForAveraging.begin() + sortedIdx);
     for (size_t i = 0; i < s.selectedFiles.size();) {
         if (s.selectedFiles[i] == id) {
             s.selectedFiles.erase(s.selectedFiles.begin() + i);
@@ -652,6 +657,13 @@ static void removeFileFromEngine(AppState& s, const std::string& id) {
             ++i;
         }
     }
+    // Keep the navigation index and the data-loaded flag consistent with the
+    // shrunk lists (mirrors the legacy performFileDeletion clamp): a stale
+    // index would OOB-index sortedFiles, and dataLoaded=true with an empty
+    // loadedData would OOB-index loadedData[0] in the frame loop.
+    if (s.currentSortedFileIndex >= s.sortedFiles.size())
+        s.currentSortedFileIndex = s.sortedFiles.empty() ? 0 : s.sortedFiles.size() - 1;
+    s.dataLoaded = !s.loadedData.empty();
     s.spectrum.cachedSpectra.erase(id);
     s.spectrum.cachedFrequencies.erase(id);
     s.spectrum.lastPrimaryDetectors.erase(id);

@@ -515,11 +515,14 @@ bool SnrSpectrum::tickCalculation() {
             std::string filePath = appState->sortedFiles[i];
             bool axisCorr = appState->datasetInfo.axisIsCorrected;
             bool hasPrecomp = appState->datasetInfo.hasPrecomputedSpectra;
-            auto fut = appState->computationPool->enqueue([filePath, refLaser, K, xUnit,
+            // Read the raw data on the main thread and capture it by value:
+            // the workspace is mutated/replaced by the main thread (open,
+            // close, member delete, Ctrl+H), so workers must never read it.
+            InterferogramData raw = workspaceRead(appState->workspace, filePath);
+            auto fut = appState->computationPool->enqueue([raw = std::move(raw), refLaser, K, xUnit,
                                                                apodSelector, apodParams, this, axisCorr, hasPrecomp,
                                                                xMethod = static_cast<SpectralToolbox::XCorrectionMethod>(appState->xCorrectionMethod),
-                                                               promThresh = appState->peakProminenceThreshold]() {
-                auto raw = workspaceRead(appState->workspace, filePath);
+                                                               promThresh = appState->peakProminenceThreshold]() mutable {
                 if (hasPrecomp) {
                     SpectralToolbox::ProcessedSpectrum ps;
                     ps.spectrumX = raw.referenceDetector;

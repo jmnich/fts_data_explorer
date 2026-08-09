@@ -175,7 +175,17 @@ MemberGroup<AllanMember> loadAllanSub(hid_t file, const char* path, const char* 
         readMemberGroupAttrs(mg.id, m);
         if (H5Lexists(mg.id, "surface_data", H5P_DEFAULT)) {
             hsize_t dims[2] = {};
-            h5Read2DRaw(mg.id, "surface_data", m.surface, dims);
+            std::vector<double> flat;
+            h5Read2DRaw(mg.id, "surface_data", flat, dims);
+            // On-disk layout is [T,W] tau-major per the spec (each column one
+            // wavelength bin); the engine keeps the surface wavelength-major,
+            // so transpose here. Missing axis data is validated below.
+            const size_t T = static_cast<size_t>(dims[0]);
+            const size_t W = static_cast<size_t>(dims[1]);
+            m.surface.assign(T * W, 0.0);
+            for (size_t t = 0; t < T; ++t)
+                for (size_t w = 0; w < W; ++w)
+                    m.surface[w * T + t] = flat[t * W + w];
             H5DatasetGuard ds(H5Dopen2(mg.id, "surface_data", H5P_DEFAULT));
             if (h5HasAttr(ds.id, "columns"))
                 m.columns = h5ReadAttrStringArray(ds.id, "columns");
@@ -184,6 +194,13 @@ MemberGroup<AllanMember> loadAllanSub(hid_t file, const char* path, const char* 
             h5ReadFp64Vector(mg.id, "wavelengths", m.wavelengths);
         if (H5Lexists(mg.id, "taus", H5P_DEFAULT))
             h5ReadFp64Vector(mg.id, "taus", m.taus);
+        // The render path indexes the surface as [wavelength*T + tau]; a
+        // surface whose size disagrees with the axis vectors would read out of
+        // bounds — fail loudly instead.
+        if (!m.surface.empty() &&
+            m.surface.size() != m.taus.size() * m.wavelengths.size()) {
+            throw H5Error("loadAllanSub: surface size != taus*wavelengths for " + m.id);
+        }
         g.members.push_back(std::move(m));
     }
     return g;
@@ -283,7 +300,14 @@ void writeAllanSub(hid_t file, const char* path, const char* schema,
         hsize_t cols = static_cast<hsize_t>(m.wavelengths.size());
         if (m.surface.size() != static_cast<size_t>(rows * cols))
             throw H5Error("writeAllanSub: surface size != taus*wavelengths for " + m.id);
-        h5Write2DRaw(mg.id, "surface_data", m.surface, rows, cols);
+        // The engine keeps the surface wavelength-major; the spec defines
+        // surface_data as [T,W] tau-major (each column one wavelength bin),
+        // so transpose at the I/O boundary.
+        std::vector<double> tauMajor(static_cast<size_t>(rows) * cols);
+        for (hsize_t t = 0; t < rows; ++t)
+            for (hsize_t w = 0; w < cols; ++w)
+                tauMajor[t * cols + w] = m.surface[w * rows + t];
+        h5Write2DRaw(mg.id, "surface_data", tauMajor, rows, cols);
         H5DatasetGuard sd(H5Dopen2(mg.id, "surface_data", H5P_DEFAULT));
         if (!m.columns.empty()) h5WriteAttrStringArray(sd.id, "columns", m.columns);
         h5WriteFp64Vector(mg.id, "wavelengths", m.wavelengths);

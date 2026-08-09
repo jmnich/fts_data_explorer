@@ -163,7 +163,7 @@ static void pollJobs(AppState& s) {
                 st.lastSuccess.clear();
                 requestWorkspaceDiscard(s, PendingWorkspaceAction::OpenPath, outPath);
                 if (!s.showUnsavedPrompt && !s.showStaleDropPrompt) {
-                    st.open = false;
+                    st.closePending = true;   // close from inside the popup body
                 }
             } else {
                 // Plain Convert: save only — confirm and stay in the modal.
@@ -264,6 +264,7 @@ void renderConversionScreen(AppState& s) {
         // shortcut); also closes this modal so the welcome screen shows.
         if (ImGui::IsKeyPressed(ImGuiKey_H) && ImGui::GetIO().KeyCtrl) {
             st.open = false;
+            ImGui::CloseCurrentPopup();
             resetToWelcomeScreen(s);
         }
         // NoTitleBar: the title moves into the body so removing the header
@@ -722,8 +723,18 @@ void renderConversionScreen(AppState& s) {
         if (busy) ImGui::BeginDisabled();
         if (ImGui::Button("Exit", ImVec2(-1, 0))) {
             st.open = false;
+            ImGui::CloseCurrentPopup();
         }
         if (busy) ImGui::EndDisabled();
+
+        // Close requested by pollJobs ("Convert and open" success): consume
+        // the flag inside the popup body so the popup closes itself — a modal
+        // left in the ImGui popup stack un-rendered blocks all input.
+        if (st.closePending) {
+            st.closePending = false;
+            st.open = false;
+            ImGui::CloseCurrentPopup();
+        }
 
         drawModalAccentFrame(accent);
 

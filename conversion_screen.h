@@ -11,6 +11,10 @@ struct AppState;
 // converter job; the frame loop polls finished() and joins on the false edge.
 struct ConversionScreenState {
     bool open = false;
+    // Close requested from pollJobs (which runs before the popup is begin-ed,
+    // where CloseCurrentPopup is a no-op): consumed inside the modal body so
+    // the popup closes itself instead of lingering in the ImGui popup stack.
+    bool closePending = false;
     bool refreshPending = true;
     bool probed = false;        // tool probes run once per open/Test/edit
 
