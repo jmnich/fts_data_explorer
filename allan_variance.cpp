@@ -145,6 +145,16 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
         return;
     }
 
+    // Defensive: every index below assumes a valid slice (the tick path
+    // clamps on completion, but restore/seed paths must be covered too).
+    if (selectedSliceIndex < 0 ||
+        selectedSliceIndex >= static_cast<int>(cachedSurfaceWavelengths.size()))
+        selectedSliceIndex = static_cast<int>(cachedSurfaceWavelengths.size()) - 1;
+    if (numSurfaceWavelengths != static_cast<int>(cachedSurfaceWavelengths.size()))
+        numSurfaceWavelengths = static_cast<int>(cachedSurfaceWavelengths.size());
+    if (numSurfaceTaus != static_cast<int>(cachedSurfaceTaus.size()))
+        numSurfaceTaus = static_cast<int>(cachedSurfaceTaus.size());
+
     {
         const char* unitStr = (xUnitSelector == 0) ? "cm-1"
                            : (xUnitSelector == 1) ? "\xC2\xB5""m"
@@ -861,6 +871,9 @@ bool AllanVariance::tickPhase2_AllanVariance() {
 
     // Phase 2a: Build wavelength grid (first call only)
     if (!calcState.batchAllanActive) {
+        // Guard against a 0/negative decimation from any restore/config path:
+        // the loop below (i += wavelengthDecimation) would never advance.
+        if (wavelengthDecimation < 1) wavelengthDecimation = 1;
         std::vector<size_t> validBinIndices;
         cachedSurfaceWavelengths.clear();
 

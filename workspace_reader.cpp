@@ -366,7 +366,10 @@ void applyPanelViewState(AppState& s, const nlohmann::json& vs) {
     s.snrSpectrum.prevYAxisMode = s.snrSpectrum.yAxisMode;
 
     s.allanVariance.xUnitSelector = viewInt(vs, "allanView", "xUnit", s.allanVariance.xUnitSelector);
-    s.allanVariance.wavelengthDecimation = viewInt(vs, "allanView", "wavelengthDecimation", s.allanVariance.wavelengthDecimation);
+    // Clamped to the UI range (1..): a saved 0/negative decimation would make
+    // the phase-2a wavelength loop (i += wavelengthDecimation) spin forever.
+    s.allanVariance.wavelengthDecimation = std::max(
+        1, viewInt(vs, "allanView", "wavelengthDecimation", s.allanVariance.wavelengthDecimation));
     s.allanVariance.selectedSliceIndex = viewInt(vs, "allanView", "sliceIndex", s.allanVariance.selectedSliceIndex);
     s.allanVariance.xRangeMin = viewDouble(vs, "allanView", "xRangeMin", s.allanVariance.xRangeMin);
     s.allanVariance.xRangeMax = viewDouble(vs, "allanView", "xRangeMax", s.allanVariance.xRangeMax);
@@ -993,6 +996,15 @@ void seedPanelsFromWorkspace(AppState& s) {
         s.allanVariance.numSurfaceTaus = static_cast<int>(m.taus.size());
         s.allanVariance.numSurfaceWavelengths = static_cast<int>(m.wavelengths.size());
         s.allanVariance.allanAvailable = !m.surface.empty();
+        // Clamp the restored slice index against the restored surface: the
+        // render path indexes cachedSurfaceWavelengths/AllanVar before any
+        // recalculation clamp runs (an out-of-range index would read OOB).
+        if (s.allanVariance.selectedSliceIndex >= s.allanVariance.numSurfaceWavelengths)
+            s.allanVariance.selectedSliceIndex =
+                s.allanVariance.numSurfaceWavelengths > 0
+                    ? s.allanVariance.numSurfaceWavelengths - 1 : 0;
+        if (s.allanVariance.selectedSliceIndex < 0)
+            s.allanVariance.selectedSliceIndex = 0;
         break;
     }
 

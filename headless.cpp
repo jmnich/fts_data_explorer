@@ -343,7 +343,7 @@ static void applyJsonConfig(AppState& state, const json& j) {
     if (j.contains("allan")) {
         const auto& s = j["allan"];
         state.allanVariance.xUnitSelector      = jsonXUnitToInt(jsonVal<std::string>(s, "xUnit", "um"));
-        state.allanVariance.wavelengthDecimation = jsonVal<int>(s, "wavelengthDecimation", 5);
+        state.allanVariance.wavelengthDecimation = std::max(1, jsonVal<int>(s, "wavelengthDecimation", 5));
         state.allanVariance.xRangeMin           = jsonVal<double>(s, "xRangeMinUm", 1.0);
         state.allanVariance.xRangeMax           = jsonVal<double>(s, "xRangeMaxUm", 30.0);
         state.allanVariance.calcBaseSelector    = jsonCalcBaseToInt(jsonVal<std::string>(s, "calcBase", "100% T"));

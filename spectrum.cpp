@@ -736,8 +736,21 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                 if (i < rawDataCache.size()) {
                     rawData = rawDataCache[i];
                 } else {
-                    rawData.primaryDetector  = primaryDetector;
-                    rawData.referenceDetector = primaryDetector;
+                    // rawDataCache out of sync (defensive): pull the true raw
+                    // data from the workspace so precomputed-spectra files get
+                    // their real wavenumber axis. The old fake
+                    // (referenceDetector = primaryDetector) plotted spectrum
+                    // Y values on the X axis for such files. On failure keep
+                    // primary-only: the reference-empty guard below skips the
+                    // computation instead of producing garbage.
+                    rawData.primaryDetector = primaryDetector;
+#if FTS_BUILD_HDF5
+                    if (appState && appState->hasWorkspace()) {
+                        try {
+                            rawData = workspaceRead(appState->workspace, fileId);
+                        } catch (...) { /* keep the primary-only fallback */ }
+                    }
+#endif
                 }
 
                 const bool needsComputation = isSpectrumDirty(fileId, rawData.primaryDetector);

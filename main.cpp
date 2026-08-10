@@ -966,6 +966,21 @@ static std::string shortenFilename(const std::string& filename) {
 }
 
 static void performFileDeletion(AppState& appState, size_t index) {
+#if FTS_BUILD_HDF5
+    // Defensive guard: in workspace mode sortedFiles holds member IDs, not
+    // disk paths — the filesystem remove below would either fail or delete an
+    // unrelated file named like the member from the CWD. Route to the
+    // workspace-aware deletion (cascade + engine cleanup). Callers already
+    // route around this, but the function must be safe on its own.
+    if (appState.hasWorkspace()) {
+        if (index < appState.sortedFiles.size()) {
+            std::string path = memberPathOf(appState.workspace, appState.sortedFiles[index]);
+            if (!path.empty())
+                performWorkspaceMemberDeletion(appState, path);
+        }
+        return;
+    }
+#endif
     const auto& file = appState.sortedFiles[index];
 
     std::error_code ec;
