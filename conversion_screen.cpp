@@ -58,6 +58,14 @@ static void saveConfigField(AppState& s) {
     }
 }
 
+// Leading/trailing whitespace strip for one-line log tails.
+static std::string trimWs(const std::string& s) {
+    size_t b = s.find_first_not_of(" \t\r\n");
+    if (b == std::string::npos) return "";
+    size_t e = s.find_last_not_of(" \t\r\n");
+    return s.substr(b, e - b + 1);
+}
+
 // Input height that grows with the wrapped path/URL content (2..6 lines) so
 // long values wrap onto new lines and are never clipped; clipWidth is the
 // input's inner width.
@@ -140,6 +148,18 @@ static void pollJobs(AppState& s) {
     if (st.syncStarted && !st.syncJob.running) {
         st.syncStarted = false;
         joinConverter(st.syncJob);
+        // Surface the outcome through the existing banner channels: the
+        // worker's log holds "Repo sync OK" or "Repo sync failed: <reason>"
+        // but was never displayed (the log pane only shows converter runs),
+        // so any clone/pull failure looked silent.
+        std::string tail = trimWs(st.syncJob.logTail(2048));
+        if (st.syncJob.exitCode.load() == 0) {
+            st.lastSuccess = tail.empty() ? "Repo sync OK" : tail;
+            st.lastError.clear();
+        } else {
+            st.lastError = tail.empty() ? "Repo sync failed" : tail;
+            st.lastSuccess.clear();
+        }
         st.refreshPending = true;
     }
     // Converter finished
@@ -403,6 +423,10 @@ void renderConversionScreen(AppState& s) {
                 st.lastError = err;
             } else {
                 st.syncStarted = true;
+                // No stale banner while the new sync runs; the outcome lands
+                // in lastSuccess/lastError when the job is reaped (pollJobs).
+                st.lastError.clear();
+                st.lastSuccess.clear();
             }
         }
         if (!canClone) ImGui::EndDisabled();

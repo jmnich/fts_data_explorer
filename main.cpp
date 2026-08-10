@@ -23,6 +23,7 @@
 #include "allan_variance.h"
 #include "spectral_toolbox.h"
 #include "conversion_screen.h"
+#include "app_dirs.h"
 #include "tinyfiledialogs.h"
 #include "icon.h"
 #include "stb_image.h"
@@ -1250,6 +1251,12 @@ int main(int argc, char* argv[]) {
     // Store config pointers for use by adapter selection
     appState.configPtr = &config;
     appState.configFilePath = configFilePath;
+
+    // Pre-create the standard data dirs: the local converters drop-in and
+    // the converter-repo clone destination (ensureAppDirs was previously
+    // never called; the clone created its target lazily, but the drop-in
+    // dir should exist for discoverability).
+    ensureAppDirs();
 
     // Phase 5: best-effort background pull of the converter repo (never a
     // first clone at boot; silent when git is absent or no clone exists).
