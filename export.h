@@ -31,6 +31,8 @@ public:
     ExportPanel();
 
     void render();
+    // Docked "Export" window (moved out of main.cpp, Phase-1 M1.2c).
+    void renderPanel();
     void refreshArtifacts();
     bool isArtifactAvailable(const char* label) const;
     void performExport(const std::string& dir);

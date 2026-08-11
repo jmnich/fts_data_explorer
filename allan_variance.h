@@ -126,7 +126,4 @@ private:
     bool tickPhase1_Transmittance();
     bool tickPhase2_AllanVariance();
 
-    static std::vector<double> interpolateToCommonGrid(const std::vector<double>& srcX,
-                                                         const std::vector<double>& srcY,
-                                                         const std::vector<double>& targetX);
 };

@@ -582,32 +582,7 @@ bool SnrSpectrum::tickCalculation() {
                         std::equal(calcCommonX.begin(), calcCommonX.end(), ps.spectrumX.begin())) {
                         toAdd = ps.spectrumY;
                     } else {
-                        toAdd.reserve(calcNumBins);
-                        for (size_t j = 0; j < calcNumBins; j++) {
-                            double targetX = calcCommonX[j];
-                            const auto& sx = ps.spectrumX;
-                            if (sx.front() < sx.back()) {
-                                auto it = std::lower_bound(sx.begin(), sx.end(), targetX);
-                                if (it == sx.begin()) toAdd.push_back(ps.spectrumY[0]);
-                                else if (it == sx.end()) toAdd.push_back(ps.spectrumY.back());
-                                else {
-                                    size_t hi = it - sx.begin();
-                                    size_t lo = hi - 1;
-                                    double frac = (targetX - sx[lo]) / (sx[hi] - sx[lo]);
-                                    toAdd.push_back(ps.spectrumY[lo] * (1.0 - frac) + ps.spectrumY[hi] * frac);
-                                }
-                            } else {
-                                auto it = std::lower_bound(sx.begin(), sx.end(), targetX, std::greater<double>());
-                                if (it == sx.begin()) toAdd.push_back(ps.spectrumY[0]);
-                                else if (it == sx.end()) toAdd.push_back(ps.spectrumY.back());
-                                else {
-                                    size_t hi = it - sx.begin();
-                                    size_t lo = hi - 1;
-                                    double frac = (targetX - sx[lo]) / (sx[hi] - sx[lo]);
-                                    toAdd.push_back(ps.spectrumY[lo] * (1.0 - frac) + ps.spectrumY[hi] * frac);
-                                }
-                            }
-                        }
+                        toAdd = resampleToGrid(ps.spectrumX, ps.spectrumY, calcCommonX);
                     }
                     if (toAdd.size() == calcNumBins) {
                         for (size_t j = 0; j < calcNumBins; j++) {
@@ -657,4 +632,189 @@ bool SnrSpectrum::tickCalculation() {
     }
 
     return false;
+}
+void renderSnrPanel() {
+        ImGui::Begin("SNR");
+        if (appState.dataLoaded) {
+            if (!appState.snrSpectrum.calcInProgress) {
+                int selCount = 0;
+                for (size_t i = 0; i < appState.filesSelectedForAveraging.size(); i++)
+                    if (appState.filesSelectedForAveraging[i]) selCount++;
+                ImGui::Text("Selected: %d files", selCount);
+                if (ImGui::Button("Calculate SNR##SnrCalcBtn")) {
+                    appState.snrSpectrum.startCalculation();
+                    appState.needsRedraw = true;
+                }
+            } else {
+                ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.75f, 0.25f, 0.15f, 1.0f));
+                char pctBuf[48];
+                float pct = appState.snrSpectrum.progressTotal > 0
+                    ? (float)appState.snrSpectrum.progressCurrent /
+                      (float)appState.snrSpectrum.progressTotal
+                    : 0.0f;
+                std::snprintf(pctBuf, sizeof(pctBuf), "Calculating SNR (%.0f%%)", pct * 100.0f);
+                ImGui::ProgressBar(pct,
+                    ImVec2(ImGui::GetContentRegionAvail().x, 0), pctBuf);
+                ImGui::PopStyleColor();
+            }
+
+            const ImVec4 btnColors[2] = {
+                ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
+                ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
+            };
+
+            ImGui::Text("Cursor");
+            ImGui::SameLine();
+            const bool cursorOn = appState.spectrum.showTrackingCursor;
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[cursorOn ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cursorOn ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("On##SnrCursorOn")) {
+                if (!cursorOn) {
+                    appState.spectrum.showTrackingCursor = true;
+                    appState.needsRedraw = true;
+                }
+            }
+            ImGui::PopStyleColor(3);
+            ImGui::SameLine(0.0f, 0.0f);
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[!cursorOn ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  !cursorOn ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("Off##SnrCursorOff")) {
+                if (cursorOn) {
+                    appState.spectrum.showTrackingCursor = false;
+                    appState.needsRedraw = true;
+                }
+            }
+            ImGui::PopStyleColor(3);
+
+            ImGui::Text("Y scale");
+            ImGui::SameLine();
+            const bool snrLinSel = (appState.snrSpectrum.yScaleSelector == 0);
+            const bool snrLogSel = (appState.snrSpectrum.yScaleSelector == 1);
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[snrLinSel ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  snrLinSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("lin##SnrYScaleLin")) { appState.snrSpectrum.yScaleSelector = 0; appState.needsRedraw = true; }
+            ImGui::PopStyleColor(3);
+            ImGui::SameLine();
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[snrLogSel ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  snrLogSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("log##SnrYScaleLog")) { appState.snrSpectrum.yScaleSelector = 1; appState.needsRedraw = true; }
+            ImGui::PopStyleColor(3);
+
+            ImGui::Text("X unit");
+            ImGui::SameLine();
+            const bool snrCmSel  = (appState.snrSpectrum.xUnitSelector == 0);
+            const bool snrUmSel  = (appState.snrSpectrum.xUnitSelector == 1);
+            const bool snrThzSel = (appState.snrSpectrum.xUnitSelector == 2);
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[snrCmSel ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  snrCmSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("cm-1##SnrXUnitCm")) { appState.snrSpectrum.xUnitSelector = 0; appState.needsRedraw = true; }
+            ImGui::PopStyleColor(3);
+            ImGui::SameLine();
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[snrUmSel ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  snrUmSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("\xC2\xB5""m##SnrXUnitUm")) { appState.snrSpectrum.xUnitSelector = 1; appState.needsRedraw = true; }
+            ImGui::PopStyleColor(3);
+            ImGui::SameLine();
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[snrThzSel ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  snrThzSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("THz##SnrXUnitTHz")) { appState.snrSpectrum.xUnitSelector = 2; appState.needsRedraw = true; }
+            ImGui::PopStyleColor(3);
+
+                // Match X to Spectrum View
+                if (ImGui::Button("Match X to Spectrum View##SnrMatchX")) {
+                    int newXUnit = appState.spectrum.xUnitSelector;
+                    int oldUnit = appState.snrSpectrum.prevXUnitSelector;
+                    double specMin = appState.spectrum.manualXMin;
+                    double specMax = appState.spectrum.manualXMax;
+
+                    if (specMin < specMax) {
+                        appState.snrSpectrum.manualXMin = specMin;
+                        appState.snrSpectrum.manualXMax = specMax;
+                        appState.snrSpectrum.pendingNextXMin = specMin;
+                        appState.snrSpectrum.pendingNextXMax = specMax;
+                        appState.snrSpectrum.shouldAutoscale = false;
+                    } else {
+                        appState.snrSpectrum.shouldAutoscale = true;
+                    }
+
+                    if (appState.snrSpectrum.snrAvailable && !appState.snrSpectrum.cachedSnrX.empty()) {
+                        auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(oldUnit);
+                        auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(newXUnit);
+                        for (double& x : appState.snrSpectrum.cachedSnrX)
+                            x = SpectralToolbox::convertXValue(x, oldU, newU);
+                    }
+
+                    appState.snrSpectrum.xUnitSelector = newXUnit;
+                    appState.snrSpectrum.prevXUnitSelector = newXUnit;
+                    appState.needsRedraw = true;
+                }
+
+            ImGui::Text("Y Axis");
+            ImGui::SameLine();
+            const bool snrAllSel   = (appState.snrSpectrum.yAxisMode == 0);
+            const bool snrTightSel = (appState.snrSpectrum.yAxisMode == 1);
+            const bool snrForceSel = (appState.snrSpectrum.yAxisMode == 2);
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[snrAllSel ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  snrAllSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("all##SnrYAxisAll")) { appState.snrSpectrum.yAxisMode = 0; appState.needsRedraw = true; }
+            ImGui::PopStyleColor(3);
+            ImGui::SameLine();
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[snrTightSel ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  snrTightSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("tight##SnrYAxisTight")) { appState.snrSpectrum.yAxisMode = 1; appState.needsRedraw = true; }
+            ImGui::PopStyleColor(3);
+            ImGui::SameLine();
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[snrForceSel ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  snrForceSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+            if (ImGui::Button("force##SnrYAxisForce")) { appState.snrSpectrum.yAxisMode = 2; appState.needsRedraw = true; }
+            ImGui::PopStyleColor(3);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("all: auto-fit Y to all data\n"
+                                  "tight: auto-fit Y to visible data only\n"
+                                  "force: lock Y to the given min/max");
+            }
+
+            if (appState.snrSpectrum.yAxisMode == 2) {
+                ImGui::Text("min:");
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(80.0f);
+                if (ImGui::InputDouble("##SnrForcedYMin", &appState.snrSpectrum.forcedYMin, 0.0, 0.0, "%.6g"))
+                    appState.needsRedraw = true;
+                ImGui::SameLine();
+                ImGui::Text("max:");
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(80.0f);
+                if (ImGui::InputDouble("##SnrForcedYMax", &appState.snrSpectrum.forcedYMax, 0.0, 0.0, "%.6g"))
+                    appState.needsRedraw = true;
+                if (appState.snrSpectrum.forcedYMin >= appState.snrSpectrum.forcedYMax) {
+                    ImGui::SameLine();
+                    ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "(min<max!)");
+                }
+            }
+
+        } else {
+            ImGui::Text("No data loaded.");
+        }
+        ImGui::End();
+
 }

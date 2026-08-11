@@ -276,6 +276,12 @@ add_executable(fts_data_explorer
     file_browser.cpp
     welcome.cpp
     about.cpp
+    ui/window.cpp
+    ui/app_loop.cpp
+    ui/menu_bar.cpp
+    panels/files_panel.cpp
+    panels/interferogram_view.cpp
+    panels/metadata_panel.cpp
     ${PLATFORM_SOURCES}
     ${EXTRA_SOURCES}
 )

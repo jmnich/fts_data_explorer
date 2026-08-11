@@ -108,6 +108,8 @@ public:
     
     // Reset spectrum window state
     void resetSpectrumWindow();
+    // Docked "Spectrum" config window (moved out of main.cpp, Phase-1 M1.2c).
+    void renderPanel(AppState& s);
     
     // Check if spectrum needs recalculation for a specific file
     bool isSpectrumDirty(const std::string& fileId, const std::vector<double>& primaryDetector);

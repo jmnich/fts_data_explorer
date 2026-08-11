@@ -6,6 +6,7 @@
 #endif
 #include "app_state.h"
 #include "average_spectrum.h"
+#include "tinyfiledialogs.h"
 #include "imgui_internal.h"   // GetCurrentWindowRead()->SkipItems (hidden dock tab)
 #include <cmath>
 #include <algorithm>
@@ -384,7 +385,10 @@ bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
     double overlapMin = std::max(curXmin, refXmin);
     double overlapMax = std::min(curXmax, refXmax);
 
-    bool curAscending = convertedCurFreq.front() < convertedCurFreq.back();
+    // Interpolate the current spectrum onto the reference grid once; the loop
+    // below keeps the overlap filter + ratio (resampleToGrid is the single
+    // linear-interp path, Phase-1 M1.3).
+    std::vector<double> interpVals = resampleToGrid(convertedCurFreq, curSpec, convertedRefX);
 
     std::vector<double> newX, newY;
     newX.reserve(refX.size());
@@ -395,40 +399,9 @@ bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
         if (targetX < overlapMin || targetX > overlapMax)
             continue;
 
-        double interpY;
-
-        if (curAscending) {
-            auto it = std::lower_bound(convertedCurFreq.begin(), convertedCurFreq.end(), targetX);
-            if (it == convertedCurFreq.begin()) {
-                interpY = curSpec[0];
-            } else if (it == convertedCurFreq.end()) {
-                interpY = curSpec.back();
-            } else {
-                size_t hi = it - convertedCurFreq.begin();
-                size_t lo = hi - 1;
-                double frac = (targetX - convertedCurFreq[lo]) /
-                              (convertedCurFreq[hi] - convertedCurFreq[lo]);
-                interpY = curSpec[lo] * (1.0 - frac) + curSpec[hi] * frac;
-            }
-        } else {
-            auto it = std::lower_bound(convertedCurFreq.begin(), convertedCurFreq.end(),
-                                       targetX, std::greater<double>());
-            if (it == convertedCurFreq.begin()) {
-                interpY = curSpec[0];
-            } else if (it == convertedCurFreq.end()) {
-                interpY = curSpec.back();
-            } else {
-                size_t hi = it - convertedCurFreq.begin();
-                size_t lo = hi - 1;
-                double frac = (targetX - convertedCurFreq[lo]) /
-                              (convertedCurFreq[hi] - convertedCurFreq[lo]);
-                interpY = curSpec[lo] * (1.0 - frac) + curSpec[hi] * frac;
-            }
-        }
-
         newX.push_back(targetX);
         double refVal = refY[i];
-        newY.push_back((refVal > 1e-15) ? (interpY / refVal) * 100.0 : 0.0);
+        newY.push_back((refVal > 1e-15) ? (interpVals[i] / refVal) * 100.0 : 0.0);
     }
 
     if (newX.empty() || newY.empty())
@@ -501,7 +474,10 @@ bool T100Spectrum::computeTransmittanceFromVectors(
     double overlapMin = std::max(curXmin, refXmin);
     double overlapMax = std::min(curXmax, refXmax);
 
-    bool curAscending = convertedCurFreq.front() < convertedCurFreq.back();
+    // Interpolate the current spectrum onto the reference grid once; the loop
+    // below keeps the overlap filter + ratio (resampleToGrid is the single
+    // linear-interp path, Phase-1 M1.3).
+    std::vector<double> interpVals = resampleToGrid(convertedCurFreq, specY, convertedRefX);
 
     std::vector<double> newX, newY;
     newX.reserve(refX.size());
@@ -512,40 +488,9 @@ bool T100Spectrum::computeTransmittanceFromVectors(
         if (targetX < overlapMin || targetX > overlapMax)
             continue;
 
-        double interpY;
-
-        if (curAscending) {
-            auto it = std::lower_bound(convertedCurFreq.begin(), convertedCurFreq.end(), targetX);
-            if (it == convertedCurFreq.begin()) {
-                interpY = specY[0];
-            } else if (it == convertedCurFreq.end()) {
-                interpY = specY.back();
-            } else {
-                size_t hi = it - convertedCurFreq.begin();
-                size_t lo = hi - 1;
-                double frac = (targetX - convertedCurFreq[lo]) /
-                              (convertedCurFreq[hi] - convertedCurFreq[lo]);
-                interpY = specY[lo] * (1.0 - frac) + specY[hi] * frac;
-            }
-        } else {
-            auto it = std::lower_bound(convertedCurFreq.begin(), convertedCurFreq.end(),
-                                       targetX, std::greater<double>());
-            if (it == convertedCurFreq.begin()) {
-                interpY = specY[0];
-            } else if (it == convertedCurFreq.end()) {
-                interpY = specY.back();
-            } else {
-                size_t hi = it - convertedCurFreq.begin();
-                size_t lo = hi - 1;
-                double frac = (targetX - convertedCurFreq[lo]) /
-                              (convertedCurFreq[hi] - convertedCurFreq[lo]);
-                interpY = specY[lo] * (1.0 - frac) + specY[hi] * frac;
-            }
-        }
-
         newX.push_back(targetX);
         double refVal = refY[i];
-        newY.push_back((refVal > 1e-15) ? (interpY / refVal) * 100.0 : 0.0);
+        newY.push_back((refVal > 1e-15) ? (interpVals[i] / refVal) * 100.0 : 0.0);
     }
 
     if (newX.empty() || newY.empty())
@@ -728,33 +673,10 @@ bool T100Spectrum::tickStdCalculation() {
                         }
                         calcStdValidFiles++;
                     } else {
+                        auto interpVals = resampleToGrid(transX, transY, calcStdCommonX);
                         for (size_t j = 0; j < calcStdBins; j++) {
-                            double targetX = calcStdCommonX[j];
-                            const auto& sx = transX;
-                            double interpY;
-                            if (sx.front() < sx.back()) {
-                                auto it = std::lower_bound(sx.begin(), sx.end(), targetX);
-                                if (it == sx.begin()) interpY = transY[0];
-                                else if (it == sx.end()) interpY = transY.back();
-                                else {
-                                    size_t hi = it - sx.begin();
-                                    size_t lo = hi - 1;
-                                    double frac = (targetX - sx[lo]) / (sx[hi] - sx[lo]);
-                                    interpY = transY[lo] * (1.0 - frac) + transY[hi] * frac;
-                                }
-                            } else {
-                                auto it = std::lower_bound(sx.begin(), sx.end(), targetX, std::greater<double>());
-                                if (it == sx.begin()) interpY = transY[0];
-                                else if (it == sx.end()) interpY = transY.back();
-                                else {
-                                    size_t hi = it - sx.begin();
-                                    size_t lo = hi - 1;
-                                    double frac = (targetX - sx[lo]) / (sx[hi] - sx[lo]);
-                                    interpY = transY[lo] * (1.0 - frac) + transY[hi] * frac;
-                                }
-                            }
-                            calcStdSum[j] += interpY;
-                            calcStdSum2[j] += interpY * interpY;
+                            calcStdSum[j] += interpVals[j];
+                            calcStdSum2[j] += interpVals[j] * interpVals[j];
                         }
                         calcStdValidFiles++;
                     }
@@ -1707,4 +1629,337 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
         ImGui::Text("%s", msg);
         ImGui::EndChild();
     }
+}
+void renderT100Panel() {
+        ImGui::Begin("100% T");
+        if (appState.dataLoaded) {
+            ImGui::Text("Reference source:");
+            ImGui::SameLine();
+            {
+                int& refSrc = appState.t100.referenceSource;
+                bool avgAvail = appState.averageSpectrum.averageAvailable;
+                const ImVec4 cfgBtnColors[2] = {
+                    ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
+                    ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
+                };
+                ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[refSrc == 0 ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  refSrc == 0 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
+                if (ImGui::Button("File##T100RefSrcFile")) {
+                    refSrc = 0;
+                    appState.needsRedraw = true;
+                }
+                ImGui::PopStyleVar();
+                ImGui::PopStyleColor(3);
+                ImGui::SameLine(0.0f, 0.0f);
+                ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[refSrc == 1 ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  refSrc == 1 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
+                if (ImGui::Button("CSV##T100RefSrcCSV")) {
+                    refSrc = 1;
+                    appState.needsRedraw = true;
+                }
+                ImGui::PopStyleVar();
+                ImGui::PopStyleColor(3);
+                ImGui::SameLine(0.0f, 0.0f);
+                if (!avgAvail) ImGui::BeginDisabled();
+                ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[refSrc == 2 ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  refSrc == 2 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
+                if (ImGui::Button("Avg##T100RefSrcAvg")) {
+                    refSrc = 2;
+                    appState.needsRedraw = true;
+                }
+                ImGui::PopStyleVar();
+                ImGui::PopStyleColor(3);
+                if (!avgAvail) ImGui::EndDisabled();
+            }
+
+            ImGui::Separator();
+
+            if (appState.t100.referenceSource == 0) {
+                if (ImGui::Button("Set as reference##T100SetRef")) {
+                    appState.t100.setReferenceFromCurrentSpectrum();
+                    appState.needsRedraw = true;
+                }
+            } else if (appState.t100.referenceSource == 1) {
+                ImGui::InputText("Path##T100CsvPath", appState.t100.csvPathBuffer,
+                                 sizeof(appState.t100.csvPathBuffer));
+                ImGui::SameLine();
+                if (ImGui::Button("Browse...##T100Browse")) {
+                    const char* filter = "*.csv";
+                    const char* path = tinyfd_openFileDialog("Select Reference CSV", "", 1, &filter, "CSV Files", 0);
+                    if (path) {
+                        strncpy(appState.t100.csvPathBuffer, path,
+                                     sizeof(appState.t100.csvPathBuffer) - 1);
+                        appState.t100.csvPathBuffer[sizeof(appState.t100.csvPathBuffer) - 1] = '\0';
+                        appState.needsRedraw = true;
+                    }
+                }
+                if (appState.t100.csvPathBuffer[0] != '\0') {
+                    if (ImGui::Button("Load##T100LoadCsv")) {
+                        appState.t100.setReferenceFromCSV(appState.t100.csvPathBuffer);
+                        appState.needsRedraw = true;
+                    }
+                }
+            } else if (appState.t100.referenceSource == 2) {
+                if (!appState.averageSpectrum.averageAvailable) ImGui::BeginDisabled();
+                if (ImGui::Button("Use average##T100UseAvg")) {
+                    appState.t100.setReferenceFromAverage();
+                    appState.needsRedraw = true;
+                }
+                if (!appState.averageSpectrum.averageAvailable) ImGui::EndDisabled();
+            }
+
+            if (appState.t100.referenceAvailable) {
+                ImGui::TextColored(ImVec4(0.2f, 0.8f, 0.2f, 1.0f), "Reference loaded");
+                ImGui::TextWrapped("%s", appState.t100.refDescription.c_str());
+                const char* unitName = (appState.t100.refXUnit == 0) ? "cm-1"
+                                     : (appState.t100.refXUnit == 1) ? "um"
+                                     : "THz";
+                ImGui::TextDisabled("%zu points, unit: %s",
+                    appState.t100.refX.size(), unitName);
+            } else {
+                ImGui::TextColored(ImVec4(0.7f, 0.5f, 0.1f, 1.0f), "No reference");
+            }
+
+            ImGui::Separator();
+
+            // Energy Ratios
+            {
+                auto ratioInput = [](const char* label, char* buf, size_t bufSize) {
+                    ImGui::SetNextItemWidth(70);
+                    ImGui::InputText(label, buf, bufSize);
+                };
+
+                ImGui::Text("Energy Ratios");
+                ImGui::SameLine();
+                ImGui::SetWindowFontScale(0.7f);
+                ImGui::Text("(cm-1)");
+                ImGui::SetWindowFontScale(1.0f);
+                ImGui::SameLine();
+                if (ImGui::Button("ASTM E1421##T100AstmE1421")) {
+                    strncpy(appState.t100.energyRatioNumA, "4000", 31);
+                    strncpy(appState.t100.energyRatioDenA, "2000", 31);
+                    strncpy(appState.t100.energyRatioNumB, "2000", 31);
+                    strncpy(appState.t100.energyRatioDenB, "1000", 31);
+                    strncpy(appState.t100.energyRatioNumC, "150", 31);
+                    strncpy(appState.t100.energyRatioDenC, "max", 31);
+                    appState.needsRedraw = true;
+                }
+
+                ImGui::Text("A: "); ImGui::SameLine();
+                ratioInput("##T100RatioNumA", appState.t100.energyRatioNumA,
+                           sizeof(appState.t100.energyRatioNumA));
+                ImGui::SameLine(); ImGui::Text("/"); ImGui::SameLine();
+                ratioInput("##T100RatioDenA", appState.t100.energyRatioDenA,
+                           sizeof(appState.t100.energyRatioDenA));
+
+                ImGui::Text("B: "); ImGui::SameLine();
+                ratioInput("##T100RatioNumB", appState.t100.energyRatioNumB,
+                           sizeof(appState.t100.energyRatioNumB));
+                ImGui::SameLine(); ImGui::Text("/"); ImGui::SameLine();
+                ratioInput("##T100RatioDenB", appState.t100.energyRatioDenB,
+                           sizeof(appState.t100.energyRatioDenB));
+
+                ImGui::Text("C: "); ImGui::SameLine();
+                ratioInput("##T100RatioNumC", appState.t100.energyRatioNumC,
+                           sizeof(appState.t100.energyRatioNumC));
+                ImGui::SameLine(); ImGui::Text("/"); ImGui::SameLine();
+                ratioInput("##T100RatioDenC", appState.t100.energyRatioDenC,
+                           sizeof(appState.t100.energyRatioDenC));
+            }
+
+            ImGui::Separator();
+
+            // Force Y min/max (shown when force mode)
+            if (appState.t100.yAxisMode == 2) {
+                ImGui::Text("Force Y");
+                double vMin = appState.t100.forcedYMin;
+                double vMax = appState.t100.forcedYMax;
+                ImGui::SetNextItemWidth(100);
+                if (ImGui::InputDouble("Min##T100ForceYMin", &vMin, 0.0, 0.0, "%.4f")) {
+                    if (vMax > vMin) {
+                        appState.t100.forcedYMin = vMin;
+                        appState.needsRedraw = true;
+                    }
+                }
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(100);
+                if (ImGui::InputDouble("Max##T100ForceYMax", &vMax, 0.0, 0.0, "%.4f")) {
+                    if (vMax > vMin) {
+                        appState.t100.forcedYMax = vMax;
+                        appState.needsRedraw = true;
+                    }
+                }
+                ImGui::Separator();
+            }
+
+            ImGui::Text("Std Deviation");
+            if (!appState.t100.calcStdInProgress) {
+                if (ImGui::Button("Calculate std##T100CalcStd")) {
+                    if (appState.t100.referenceAvailable) {
+                        appState.t100.startStdCalculation();
+                        appState.needsRedraw = true;
+                    }
+                }
+            } else {
+                float pct = appState.t100.stdProgressTotal > 0
+                    ? (float)appState.t100.stdProgressCurrent / (float)appState.t100.stdProgressTotal
+                    : 0.0f;
+                ImGui::ProgressBar(pct, ImVec2(-1, 0), "");
+                ImGui::Text("Processing %d/%d", appState.t100.stdProgressCurrent,
+                            appState.t100.stdProgressTotal);
+            }
+
+            ImGui::Separator();
+
+            // Navigation block (Cursor, X unit, Match X, Y Axis) - moved to bottom
+            {
+                const ImVec4 cfgBtnColors[2] = {
+                    ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
+                    ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
+                };
+
+                // Cursor On/Off
+                ImGui::Text("Cursor");
+                ImGui::SameLine();
+                const bool cursorOn = appState.spectrum.showTrackingCursor;
+                ImVec4 cursorBtnColors[2] = {
+                    ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
+                    ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
+                };
+                ImGui::PushStyleColor(ImGuiCol_Button,        cursorBtnColors[cursorOn ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cursorOn ? cursorBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cursorBtnColors[1]);
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
+                if (ImGui::Button("On##T100CursorOn")) {
+                    if (!cursorOn) {
+                        appState.spectrum.showTrackingCursor = true;
+                        appState.needsRedraw = true;
+                    }
+                }
+                ImGui::PopStyleVar();
+                ImGui::PopStyleColor(3);
+                ImGui::SameLine(0.0f, 0.0f);
+                ImGui::PushStyleColor(ImGuiCol_Button,        cursorBtnColors[!cursorOn ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  !cursorOn ? cursorBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cursorBtnColors[1]);
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
+                if (ImGui::Button("Off##T100CursorOff")) {
+                    if (cursorOn) {
+                        appState.spectrum.showTrackingCursor = false;
+                        appState.needsRedraw = true;
+                    }
+                }
+                ImGui::PopStyleVar();
+                ImGui::PopStyleColor(3);
+
+                // X unit
+                ImGui::Text("X unit");
+                ImGui::SameLine();
+                int& sel = appState.t100.xUnitSelector;
+                ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[sel == 0 ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  sel == 0 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+                if (ImGui::Button("cm-1##T100XUnitCm")) {
+                    sel = 0;
+                    appState.needsRedraw = true;
+                }
+                ImGui::PopStyleColor(3);
+                ImGui::SameLine(0.0f, 0.0f);
+                ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[sel == 1 ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  sel == 1 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+                if (ImGui::Button("\xC2\xB5" "m##T100XUnitUm")) {
+                    sel = 1;
+                    appState.needsRedraw = true;
+                }
+                ImGui::PopStyleColor(3);
+                ImGui::SameLine(0.0f, 0.0f);
+                ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[sel == 2 ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  sel == 2 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+                if (ImGui::Button("THz##T100XUnitTHz")) {
+                    sel = 2;
+                    appState.needsRedraw = true;
+                }
+                ImGui::PopStyleColor(3);
+
+                // Match X to Spectrum View
+                if (ImGui::Button("Match X to Spectrum View##T100MatchX")) {
+                    int newXUnit = appState.spectrum.xUnitSelector;
+                    int oldUnit = appState.t100.prevXUnitSelector;
+                    double specMin = appState.spectrum.manualXMin;
+                    double specMax = appState.spectrum.manualXMax;
+
+                    if (specMin < specMax) {
+                        appState.t100.manualXMin = specMin;
+                        appState.t100.manualXMax = specMax;
+                        appState.t100.pendingNextXMin = specMin;
+                        appState.t100.pendingNextXMax = specMax;
+                        appState.t100.shouldAutoscale = false;
+                    } else {
+                        appState.t100.shouldAutoscale = true;
+                    }
+
+                    if (appState.t100.transmittanceAvailable && !appState.t100.cachedTransX.empty()) {
+                        auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(oldUnit);
+                        auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(newXUnit);
+                        for (auto& [fid, vec] : appState.t100.cachedTransX)
+                            for (double& x : vec)
+                                x = SpectralToolbox::convertXValue(x, oldU, newU);
+                    }
+                    if (appState.t100.stddevAvailable && !appState.t100.cachedStdX.empty()) {
+                        auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(oldUnit);
+                        auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(newXUnit);
+                        for (double& x : appState.t100.cachedStdX)
+                            x = SpectralToolbox::convertXValue(x, oldU, newU);
+                    }
+
+                    appState.t100.xUnitSelector = newXUnit;
+                    appState.t100.prevXUnitSelector = newXUnit;
+                    appState.needsRedraw = true;
+                }
+
+                // Y Axis
+                ImGui::Text("Y Axis");
+                ImGui::SameLine();
+                int& mode = appState.t100.yAxisMode;
+                ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[mode == 0 ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  mode == 0 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+                if (ImGui::Button("all##T100YAxisAll")) {
+                    mode = 0;
+                    appState.needsRedraw = true;
+                }
+                ImGui::PopStyleColor(3);
+                ImGui::SameLine(0.0f, 0.0f);
+                ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[mode == 1 ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  mode == 1 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+                if (ImGui::Button("tight##T100YAxisTight")) {
+                    mode = 1;
+                    appState.needsRedraw = true;
+                }
+                ImGui::PopStyleColor(3);
+                ImGui::SameLine(0.0f, 0.0f);
+                ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[mode == 2 ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  mode == 2 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+                if (ImGui::Button("force##T100YAxisForce")) {
+                    mode = 2;
+                    appState.needsRedraw = true;
+                }
+                ImGui::PopStyleColor(3);
+            }
+
+        } else {
+            ImGui::Text("No data loaded.");
+        }
+        ImGui::End();
+
 }

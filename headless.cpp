@@ -612,6 +612,7 @@ static void handleWorkspace(const HeadlessConfig& cfg) {
     appState.t100.appState = &appState;
     appState.exportPanel.appState = &appState;
 
+    // TODO(multi-ws): -w cross-store support (Phase 4, optional)
     // 3. Open workspace (loads, sets datasetInfo/csvFiles, applyViewState,
     //    seedPanels, AdapterRegistry::s_workspace, currentDatasetName)
     try {

@@ -785,7 +785,7 @@ bool AllanVariance::tickPhase0_AverageSpectrum() {
                     calcState.fileSpectraY.reserve(calcState.totalAvgSubmitted);
                 }
 
-                std::vector<double> interpolated = interpolateToCommonGrid(ps.spectrumX, ps.spectrumY, calcState.avgX);
+                std::vector<double> interpolated = resampleToGrid(ps.spectrumX, ps.spectrumY, calcState.avgX);
                 if (interpolated.size() == calcState.avgNumBins) {
                     for (size_t j = 0; j < calcState.avgNumBins; j++)
                         calcState.avgSumY[j] += interpolated[j];
@@ -990,38 +990,181 @@ bool AllanVariance::tickPhase2_AllanVariance() {
     return false;
 }
 
-std::vector<double> AllanVariance::interpolateToCommonGrid(const std::vector<double>& srcX,
-                                                            const std::vector<double>& srcY,
-                                                            const std::vector<double>& targetX) {
-    std::vector<double> result;
-    result.reserve(targetX.size());
+void renderAllanPanel() {
+        ImGui::Begin("Allan");
+        if (appState.dataLoaded) {
+            if (!appState.allanVariance.calcInProgress) {
+                int selCount = 0;
+                for (size_t i = 0; i < appState.filesSelectedForAveraging.size(); i++)
+                    if (appState.filesSelectedForAveraging[i]) selCount++;
+                ImGui::Text("Selected: %d files", selCount);
 
-    bool srcAscending = srcX.front() < srcX.back();
+                ImGui::Text("Decimation");
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(80.0f);
+                if (ImGui::InputInt("##AllanDecimation", &appState.allanVariance.wavelengthDecimation, 1, 1)) {
+                    if (appState.allanVariance.wavelengthDecimation < 1)
+                        appState.allanVariance.wavelengthDecimation = 1;
+                    appState.needsRedraw = true;
+                }
 
-    for (double tx : targetX) {
-        double interpY = 0.0;
-        if (srcAscending) {
-            auto it = std::lower_bound(srcX.begin(), srcX.end(), tx);
-            if (it == srcX.begin()) interpY = srcY[0];
-            else if (it == srcX.end()) interpY = srcY.back();
-            else {
-                size_t hi = it - srcX.begin();
-                size_t lo = hi - 1;
-                double frac = (tx - srcX[lo]) / (srcX[hi] - srcX[lo]);
-                interpY = srcY[lo] * (1.0 - frac) + srcY[hi] * frac;
+                const ImVec4 btnColors[2] = {
+                    ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
+                    ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
+                };
+
+                ImGui::Text("Calc base");
+                ImGui::SameLine();
+                const bool allanCalcBase100T = (appState.allanVariance.calcBaseSelector == 0);
+                const bool allanCalcBaseSpectrum = (appState.allanVariance.calcBaseSelector == 1);
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[allanCalcBase100T ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allanCalcBase100T ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("100% T##AllanCalcBase100T")) { appState.allanVariance.calcBaseSelector = 0; appState.needsRedraw = true; }
+                ImGui::PopStyleColor(3);
+                ImGui::SameLine();
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[allanCalcBaseSpectrum ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allanCalcBaseSpectrum ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("Spectrum##AllanCalcBaseSpectrum")) { appState.allanVariance.calcBaseSelector = 1; appState.needsRedraw = true; }
+                ImGui::PopStyleColor(3);
+
+                if (ImGui::Button("Calculate Allan")) {
+                    appState.allanVariance.startCalculation();
+                    appState.needsRedraw = true;
             }
+
+            ImGui::Separator();
+
+                // Navigation block (X unit, Cursor, X range) - moved to bottom
+                {
+                    const ImVec4 navBtnColors[2] = {
+                        ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
+                        ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
+                    };
+
+                    // X unit
+                    ImGui::Text("X unit");
+                    ImGui::SameLine();
+                    const bool allanCmSel  = (appState.allanVariance.xUnitSelector == 0);
+                    const bool allanUmSel  = (appState.allanVariance.xUnitSelector == 1);
+                    const bool allanThzSel = (appState.allanVariance.xUnitSelector == 2);
+
+                    ImGui::PushStyleColor(ImGuiCol_Button,        navBtnColors[allanCmSel ? 1 : 0]);
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allanCmSel ? navBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive,   navBtnColors[1]);
+                    if (ImGui::Button("cm-1##AllanXUnitCm")) { appState.allanVariance.xUnitSelector = 0; appState.needsRedraw = true; }
+                    ImGui::PopStyleColor(3);
+                    ImGui::SameLine(0.0f, 0.0f);
+
+                    ImGui::PushStyleColor(ImGuiCol_Button,        navBtnColors[allanUmSel ? 1 : 0]);
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allanUmSel ? navBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive,   navBtnColors[1]);
+                    if (ImGui::Button("\xC2\xB5""m##AllanXUnitUm")) { appState.allanVariance.xUnitSelector = 1; appState.needsRedraw = true; }
+                    ImGui::PopStyleColor(3);
+                    ImGui::SameLine(0.0f, 0.0f);
+
+                    ImGui::PushStyleColor(ImGuiCol_Button,        navBtnColors[allanThzSel ? 1 : 0]);
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allanThzSel ? navBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive,   navBtnColors[1]);
+                    if (ImGui::Button("THz##AllanXUnitTHz")) { appState.allanVariance.xUnitSelector = 2; appState.needsRedraw = true; }
+                    ImGui::PopStyleColor(3);
+
+                    // Cursor On/Off
+                    ImGui::Text("Cursor");
+                    ImGui::SameLine();
+                    const bool cursorOn = appState.spectrum.showTrackingCursor;
+                    const ImVec4 cursorBtnColors[2] = {
+                        ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
+                        ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
+                    };
+                    ImGui::PushStyleColor(ImGuiCol_Button,        cursorBtnColors[cursorOn ? 1 : 0]);
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cursorOn ? cursorBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cursorBtnColors[1]);
+                    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
+                    if (ImGui::Button("On##AllanCursorOn")) {
+                        if (!cursorOn) {
+                            appState.spectrum.showTrackingCursor = true;
+                            appState.needsRedraw = true;
+                        }
+                    }
+                    ImGui::PopStyleVar();
+                    ImGui::PopStyleColor(3);
+                    ImGui::SameLine(0.0f, 0.0f);
+                    ImGui::PushStyleColor(ImGuiCol_Button,        cursorBtnColors[!cursorOn ? 1 : 0]);
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  !cursorOn ? cursorBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cursorBtnColors[1]);
+                    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
+                    if (ImGui::Button("Off##AllanCursorOff")) {
+                        if (cursorOn) {
+                            appState.spectrum.showTrackingCursor = false;
+                            appState.needsRedraw = true;
+                        }
+                    }
+                    ImGui::PopStyleVar();
+                    ImGui::PopStyleColor(3);
+
+                    // X range min/max (stored in um, displayed in selected unit)
+                    double displayMin = appState.allanVariance.xRangeMin;
+                    double displayMax = appState.allanVariance.xRangeMax;
+                    if (appState.allanVariance.xUnitSelector == 0) {
+                        displayMin = SpectralToolbox::convertUmToCm(appState.allanVariance.xRangeMin);
+                        displayMax = SpectralToolbox::convertUmToCm(appState.allanVariance.xRangeMax);
+                    } else if (appState.allanVariance.xUnitSelector == 2) {
+                        displayMin = SpectralToolbox::convertUmToTHz(appState.allanVariance.xRangeMin);
+                        displayMax = SpectralToolbox::convertUmToTHz(appState.allanVariance.xRangeMax);
+                    }
+                    const char* unitStr = (appState.allanVariance.xUnitSelector == 0) ? "cm-1"
+                                        : (appState.allanVariance.xUnitSelector == 1) ? "\xC2\xB5""m"
+                                                                                       : "THz";
+                    ImGui::Text("X range (%s)", unitStr);
+                    ImGui::SameLine();
+                    ImGui::Text("min:");
+                    ImGui::SameLine();
+                    ImGui::SetNextItemWidth(90.0f);
+                    if (ImGui::InputDouble("##AllanXRangeMin", &displayMin, 0.0, 0.0, "%.6g")) {
+                        if (appState.allanVariance.xUnitSelector == 0)
+                            appState.allanVariance.xRangeMin = SpectralToolbox::convertCmToUm(displayMin);
+                        else if (appState.allanVariance.xUnitSelector == 2)
+                            appState.allanVariance.xRangeMin = SpectralToolbox::convertTHzToUm(displayMin);
+                        else
+                            appState.allanVariance.xRangeMin = displayMin;
+                        appState.needsRedraw = true;
+                    }
+                    ImGui::SameLine();
+                    ImGui::Text("max:");
+                    ImGui::SameLine();
+                    ImGui::SetNextItemWidth(90.0f);
+                    if (ImGui::InputDouble("##AllanXRangeMax", &displayMax, 0.0, 0.0, "%.6g")) {
+                        if (appState.allanVariance.xUnitSelector == 0)
+                            appState.allanVariance.xRangeMax = SpectralToolbox::convertCmToUm(displayMax);
+                        else if (appState.allanVariance.xUnitSelector == 2)
+                            appState.allanVariance.xRangeMax = SpectralToolbox::convertTHzToUm(displayMax);
+                        else
+                            appState.allanVariance.xRangeMax = displayMax;
+                        appState.needsRedraw = true;
+                    }
+                    if (appState.allanVariance.xRangeMin >= appState.allanVariance.xRangeMax) {
+                        ImGui::SameLine();
+                        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "(min<max!)");
+                    }
+                }
+            } else {
+                ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.2f, 0.6f, 0.5f, 1.0f));
+                char pctBuf[48];
+                float pct = appState.allanVariance.progressTotal > 0
+                    ? (float)appState.allanVariance.progressCurrent /
+                      (float)appState.allanVariance.progressTotal
+                    : 0.0f;
+                std::snprintf(pctBuf, sizeof(pctBuf), "Calculating Allan (%.0f%%)", pct * 100.0f);
+                ImGui::ProgressBar(pct,
+                    ImVec2(ImGui::GetContentRegionAvail().x, 0), pctBuf);
+                ImGui::PopStyleColor();
+            }
+
         } else {
-            auto it = std::lower_bound(srcX.begin(), srcX.end(), tx, std::greater<double>());
-            if (it == srcX.begin()) interpY = srcY[0];
-            else if (it == srcX.end()) interpY = srcY.back();
-            else {
-                size_t hi = it - srcX.begin();
-                size_t lo = hi - 1;
-                double frac = (tx - srcX[lo]) / (srcX[hi] - srcX[lo]);
-                interpY = srcY[lo] * (1.0 - frac) + srcY[hi] * frac;
-            }
+            ImGui::Text("No data loaded.");
         }
-        result.push_back(interpY);
-    }
-    return result;
+        ImGui::End();
+
 }

@@ -79,6 +79,7 @@ struct MemberGroup {
 };
 
 // The in-memory model — the single object the app engine will talk to.
+// TODO(multi-ws): cross-store sources/ + experiments/ groups (Phase 2/4)
 struct Workspace {
     std::string format;     // "unified-spectral-data-container"
     std::string created;    // ISO-8601 UTC

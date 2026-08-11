@@ -2,8 +2,52 @@
 
 #include <vector>
 #include <cstddef>
+#include <algorithm>
+#include <functional>
 #include <fftw3.h>
 #include "apodization.h"
+
+// TODO(multi-ws): poolSpectrum/buildPoolMatrix reuse resampleToGrid for cross-workspace alignment (Phase 3)
+// Interpolate (srcX, srcY) onto targetX. Handles ascending and descending srcX.
+// Linear, endpoint-clamped. Empty input -> empty output; degenerate (size 1)
+// srcX -> srcY copy. The ONLY linear-interp path in the codebase (Phase-1 M1.3).
+static std::vector<double> resampleToGrid(
+    const std::vector<double>& srcX,
+    const std::vector<double>& srcY,
+    const std::vector<double>& targetX) {
+    std::vector<double> result;
+    if (srcX.empty()) return result;
+    if (srcX.size() == 1) return srcY;
+    result.reserve(targetX.size());
+
+    const bool ascending = srcX.front() < srcX.back();
+    for (double tx : targetX) {
+        double interpY;
+        if (ascending) {
+            auto it = std::lower_bound(srcX.begin(), srcX.end(), tx);
+            if (it == srcX.begin()) interpY = srcY[0];
+            else if (it == srcX.end()) interpY = srcY.back();
+            else {
+                size_t hi = it - srcX.begin();
+                size_t lo = hi - 1;
+                double frac = (tx - srcX[lo]) / (srcX[hi] - srcX[lo]);
+                interpY = srcY[lo] * (1.0 - frac) + srcY[hi] * frac;
+            }
+        } else {
+            auto it = std::lower_bound(srcX.begin(), srcX.end(), tx, std::greater<double>());
+            if (it == srcX.begin()) interpY = srcY[0];
+            else if (it == srcX.end()) interpY = srcY.back();
+            else {
+                size_t hi = it - srcX.begin();
+                size_t lo = hi - 1;
+                double frac = (tx - srcX[lo]) / (srcX[hi] - srcX[lo]);
+                interpY = srcY[lo] * (1.0 - frac) + srcY[hi] * frac;
+            }
+        }
+        result.push_back(interpY);
+    }
+    return result;
+}
 
 /**
  * @brief FFTW-based numerical toolbox for FTS spectrum processing.

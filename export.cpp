@@ -697,3 +697,13 @@ void ExportPanel::writeT100StdDevCsv(const std::string& dir)
         ofs << t100.cachedStdX[j] << "," << t100.cachedStdY[j] << "\n";
     ofs.close();
 }
+void ExportPanel::renderPanel() {
+        ImGui::Begin("Export");
+        if (appState->dataLoaded) {
+            render();
+        } else {
+            ImGui::Text("No data loaded.");
+        }
+        ImGui::End();
+
+}

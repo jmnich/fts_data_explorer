@@ -11,6 +11,7 @@
 #include <utility>
 
 // Configuration structure for app settings
+// TODO(multi-ws): [EnvWindow] defaults + recentMultiWorkspaces (Phase 2/3)
 struct AppConfig {
     struct RecentDatasetEntry {
         std::string path;

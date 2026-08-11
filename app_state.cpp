@@ -71,118 +71,42 @@ AppState::AppState()
 // welcome screen (the workspace stays loaded). Mirrors the inline block that
 // used to live in main.cpp's key handler.
 void resetToWelcomeScreen(AppState& s) {
+    clearWorkspacePanels(s);
     s.showWelcomeScreen = true;
     s.welcomeScreenInitialized = false;
-    s.dataLoaded = false;
     s.filesChanged = false;
-    s.loadedData.clear();
-    s.selectedFiles.clear();
-    s.selectedFilenames.clear();
-    s.rawDataCache.clear();
-    s.hilbertXCache.clear();
-    s.hilbertCacheLaserWavelength = 0.0f;
-    s.spectrum.cachedSpectra.clear();
-    s.spectrum.cachedFrequencies.clear();
-    s.spectrum.lastPrimaryDetectors.clear();
-    s.spectrum.lastSpectrumParams.clear();
-    s.spectrum.pendingSpectra_.clear();
-    s.clearAverageSpectrum();
-    s.clearSnrSpectrum();
-    s.clearAllanVariance();
 #if FTS_BUILD_HDF5
     // Ctrl+H mutates view-state fields (the batch panels reset their manual
     // zoom); re-arm the latch baseline so "back to home" never dirties a
     // clean workspace. Re-captured at the end of the next rendered frame.
     s.viewStateBaselinePending = true;
 #endif
-    s.needsRedraw = true;
 }
 
-// Reset method implementation
-void AppState::reset() {
-    currentDirectory = "";
-    csvFiles.clear();
-    loadedData.clear();
-    selectedFiles.clear();
-    selectedFilenames.clear();
-    dataLoaded = false;
-    currentDatasetName = "No dataset selected";
-    currentSortedFileIndex = 0;
-    filesChanged = false;
-    keyboardNavigation = false;
-    multiSelectMode = false;
-    shiftSelectMode = false;
-    lastSelectedIndex = 0;
-    maxAtZero = false;
-    yKeyPressedLastFrame = false;
-    aKeyPressedLastFrame = false;
-    dKeyPressedLastFrame = false;
-    qKeyPressedLastFrame = false;
-    sKeyPressedLastFrame = false;
-    enableDownsampling = true;
-    zoomRange = {0, 0};
-    shouldAutoscale = false;
-    forceXAutofit = false;
-    showFPS = false;
-    gridAlpha = 1.0f;
-    fps = 0.0f;
-    frameCount = 0;
-    lastTime = 0.0f;
-    needsRedraw = true;
-    isSelectingXRange = false;
-    applyXRangeSelection = false;
-    selectionStartX = 0.0;
-    selectionEndX = 0.0;
-    isMouseOverPlot = false;
-    ref_y_min = 0.0f;
-    ref_y_max = 1.0f;
-    prim_y_min = 0.0f;
-    prim_y_max = 1.0f;
-    autoFitYAxis = true;
-    last_x_min = 0;
-    last_x_max = 0;
-    last_ref_y_min = 0.0f;
-    last_ref_y_max = 0.0f;
-    last_prim_y_min = 0.0f;
-    last_prim_y_max = 0.0f;
-    leftArrowPressedLastFrame = false;
-    rightArrowPressedLastFrame = false;
-    leftArrowHandleFlag = false;
-    rightArrowHandleFlag = false;
-    isFirstDataLoad = true;
-    sortedFiles.clear();
-    showWelcomeScreen = true;
-    welcomeScreenInitialized = false;
-    defaultLayoutApplied = false;
-    spectrum.resetSpectrumWindow();
-    averageSpectrum.reset();
-    snrSpectrum.reset();
-    allanVariance.reset();
-    t100.reset();
-    filesSelectedForAveraging.clear();
-    datasetInfo = DatasetInfo();
-#if FTS_BUILD_HDF5
-    workspace = Workspace{};
-    workspacePath.clear();
-    pendingWorkspaceAction = PendingWorkspaceAction::None;
-    pendingWorkspacePath.clear();
-    showUnsavedPrompt = false;
-    pendingSaveAsPath.clear();
-    showStaleDropPrompt = false;
-    viewStateBaseline = nlohmann::json::object();
-    viewStateBaselinePending = true;
-    workspaceDirtyRebaselinePending = false;
-    metadataCommentBuffer[0] = '\0';
-    metadataTagsBuffer[0] = '\0';
-#endif
-    showDeleteConfirmPopup = false;
-    deleteConfirmIndex = 0;
-    showWorkspaceDeleteConfirmPopup = false;
-    pendingWorkspaceDeletionPath.clear();
-    // skipDeleteConfirm intentionally NOT reset — it's a session-level flag
-    hilbertXCache.clear();
-    peakPositionsCache.clear();
-    rawDataCache.clear();
+// The single workspace-reset path.
+// Order matters: futures first (abandoned → workers finish into moved-from
+// futures), then caches, then selection, then panel states. Baselines are
+// re-captured on the next frame by the callers that need them.
+void clearWorkspacePanels(AppState& s) {
+    // TODO(multi-ws): make clearWorkspacePanels reset ONLY the active tab (Phase 2)
+    s.spectrum.pendingSpectra_.clear();
+    s.spectrum.cachedSpectra.clear();
+    s.spectrum.cachedFrequencies.clear();
+    s.spectrum.lastPrimaryDetectors.clear();
+    s.spectrum.lastSpectrumParams.clear();
+    s.loadedData.clear();
+    s.rawDataCache.clear();
+    s.hilbertXCache.clear();
+    s.peakPositionsCache.clear();
+    s.hilbertCacheLaserWavelength = 0.0f;
+    s.selectedFiles.clear();
+    s.selectedFilenames.clear();
+    s.dataLoaded = false;
+    s.clearAverageSpectrum();
+    s.clearSnrSpectrum();
+    s.clearAllanVariance();
+    s.clearT100Spectrum();
+    s.needsRedraw = true;
 }
 
 void AppState::clearAverageSpectrum() {

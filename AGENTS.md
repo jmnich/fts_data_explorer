@@ -168,9 +168,12 @@ Format: `<YY>.<MM>.<minor>` from `VERSION` file. `./build_script.sh` shows last 
 
 # Testing
 
-Manual via `example_datasets/`. Visual plot verification. Python harness: `python3 playground/test_artifacts.py` (outputs -> `playground/outputs/`, log -> `playground/log.txt`); headless demos: `python3 playground/headless_demo/basic_<name>/demo_<name>.py` (convert `-c` + process `-w`).
+Test data lives in `playground/test_data/` (there is no `example_datasets/`). Visual plot verification is manual. The playground harnesses (each needs `FTS_CONVERTERS_DIR` pointing at a `fts_data_explorer_converters` checkout, plus h5py/numpy/matplotlib):
 
-HDF5 conformance: `python3 playground/tests/hdf_conformance/run_conformance.py` (regenerates the golden from the parser, validates Python- and C++-written `.h5` files via `validate_h5.py`, runs `fts_hdf_roundtrip` and a headless `-w` pass). Needs h5py/numpy. Manual like the other playground scripts.
+- **Headless demos** (converter script invoked directly, then process `-w`): `python3 playground/headless_demo/basic_<name>/demo_<name>.py` (spectrum_hilbert, spectrum_peakfinding, average_spectrum, snr, t100, allan; outputs -> `playground/outputs/`). Note: batch-artifact outputs (Average/SNR/Allan/T100) are non-deterministic across runs — `calcCommonX` is taken from the first *completed* future, so completion order shifts the common grid. Single-spectrum outputs are byte-stable.
+- **Resample check** (`resampleToGrid`, audit §5.4): `g++ -std=c++17 -I. -Ifftw-3.3.10/api playground/tests/resample_grid/test_resample.cpp -o /tmp/test_resample && /tmp/test_resample` (assert-based; no framework).
+- **Spectrum validation**: `python3 playground/tests/spectrum_validation/validate_spectrum.py`.
+- **HDF5 conformance**: `python3 playground/tests/hdf_conformance/run_conformance.py` (regenerates the golden from the parser, validates Python- and C++-written `.h5` files via `validate_h5.py`, runs `fts_hdf_roundtrip` and a headless `-w` pass). Manual like the other playground scripts.
 
 # Working with the codebase
 

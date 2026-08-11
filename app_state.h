@@ -19,6 +19,7 @@
 #endif
 
 struct AppState;
+struct GLFWwindow;
 
 // Shorten a long filename for display in legends/labels: keep the first 8
 // chars and last 24, ellipsize the middle.
@@ -31,6 +32,10 @@ enum class PendingWorkspaceAction { None, CloseWorkspace, OpenPath, Exit };
 #if FTS_BUILD_HDF5
 void openWorkspace(AppState& s, const std::string& path);
 void closeWorkspace(AppState& s);
+// Save / Save As (defined in main.cpp; used by the menu bar and input handling).
+void requestSaveWorkspace(AppState& s, const std::string& asPath);
+void doSaveWorkspace(AppState& s, const std::string& asPath);
+void saveWorkspaceAs(AppState& s, GLFWwindow* window);
 // All workspace-discarding entry points route through this; the unsaved-changes
 // modal runs in the frame and dispatches the stashed action on resolution.
 void requestWorkspaceDiscard(AppState& s, PendingWorkspaceAction action, const std::string& path);
@@ -41,6 +46,12 @@ void dispatchPendingAction(AppState& s);
 // welcome screen (the workspace stays loaded — datasets can be re-opened from
 // the recent list). Shared by the main-window shortcut and the Convert modal.
 void resetToWelcomeScreen(AppState& s);
+
+// TODO(multi-ws): stable keys (path / cross.h5#sourceId) resolve to live session indices; never store raw indices (Phase 2)
+// The single workspace-reset path: clears all per-workspace panel state,
+// selection, and caches. openWorkspace/closeWorkspace/clearPanelCaches and
+// resetToWelcomeScreen all route through this.
+void clearWorkspacePanels(AppState& s);
 
 // Application state structure
 struct AppState {
@@ -219,6 +230,8 @@ struct AppState {
     std::map<std::string, std::vector<double>> hilbertXCache;
     float hilbertCacheLaserWavelength = 0.0f;
 
+    // TODO(multi-ws): SessionTab fields (multiWorkspacePath, sources[], mode) live here, GLOBAL — never folded (Phase 2)
+
     // Peak-finding X correction state
     int    xCorrectionMethod = 0;           // 0=Hilbert, 1=PeakFinding
     float  peakProminenceThreshold = 0.02f; // fraction of max peak height
@@ -227,9 +240,6 @@ struct AppState {
     
     // Constructor to initialize constants
     AppState();
-    
-    // Method to reset state
-    void reset();
     
     // Clear average spectrum data (call when dataset changes)
     void clearAverageSpectrum();

@@ -1222,4 +1222,366 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
         }
         ImPlot::PopStyleColor();
 }
+void Spectrum::renderPanel(AppState& s) {
 
+        ImGui::Begin("Spectrum");
+        if (s.dataLoaded) {
+            // Spectrum panel controls
+            ImGui::Separator();
+
+
+            // Lambda helper: invalidate spectrum caches when a control editing is finished
+            auto invalidateSpectrumCaches = [&]() {
+                s.spectrum.cachedSpectra.clear();
+                s.spectrum.cachedFrequencies.clear();
+                s.spectrum.lastPrimaryDetectors.clear();
+                s.spectrum.lastSpectrumParams.clear();
+                s.spectrum.pendingSpectra_.clear();
+                s.needsRedraw = true;
+            };
+
+            // Detector sensitivity textbox
+            ImGui::Text("Detector sensitivity [kV/W]:");
+            ImGui::SameLine();
+
+            float remWidth = ImGui::GetContentRegionAvail().x;
+            ImGui::SetNextItemWidth(remWidth);
+            ImGui::InputText("##DetectorSensitivity",
+                s.spectrum.detectorSensitivityText,
+                sizeof(s.spectrum.detectorSensitivityText));
+            if (ImGui::IsItemDeactivatedAfterEdit()) {
+                std::string sensText(s.spectrum.detectorSensitivityText);
+                sensText.erase(0, sensText.find_first_not_of(" \t\n\r"));
+                sensText.erase(sensText.find_last_not_of(" \t\n\r") + 1);
+
+                if (sensText == "NA" || sensText == "na" || sensText == "n/a" || sensText == "none") {
+                    s.spectrum.detectorSensitivity = 0.0f;
+                    snprintf(s.spectrum.detectorSensitivityText,
+                             sizeof(s.spectrum.detectorSensitivityText), "NA");
+                    invalidateSpectrumCaches();
+                } else {
+                    char* end = nullptr;
+                    float val = std::strtof(sensText.c_str(), &end);
+                    if (end != sensText.c_str() && *end == '\0') {
+                        s.spectrum.detectorSensitivity = val;
+                        if (val == 0.0f)
+                            snprintf(s.spectrum.detectorSensitivityText,
+                                     sizeof(s.spectrum.detectorSensitivityText), "NA");
+                        else
+                            snprintf(s.spectrum.detectorSensitivityText,
+                                     sizeof(s.spectrum.detectorSensitivityText), "%.4f", val);
+                        invalidateSpectrumCaches();
+                    }
+                }
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Detector sensitivity in kV/W.\n"
+                    "Set to 0 or enter 'NA' to normalize spectrum to max=1 (0 dB).");
+            }
+
+            // Reference laser textbox
+            ImGui::Text("Ref laser [\xC2\xB5""m]:");
+            ImGui::SameLine();
+            if (s.datasetInfo.axisIsCorrected) ImGui::BeginDisabled();
+
+            float remainingWidth = ImGui::GetContentRegionAvail().x;
+            ImGui::SetNextItemWidth(remainingWidth);
+            ImGui::InputFloat("##RefLaserTextbox", &(s.spectrum.refLaserTextbox), 0.001, 0.01);
+            if (ImGui::IsItemDeactivatedAfterEdit() && !s.datasetInfo.axisIsCorrected) {
+                invalidateSpectrumCaches();
+            }
+            if (s.datasetInfo.axisIsCorrected) ImGui::EndDisabled();
+
+            // Zero-pad factor K
+            ImGui::Text("Zero-pad K:");
+            ImGui::SameLine();
+            if (s.datasetInfo.hasPrecomputedSpectra) ImGui::BeginDisabled();
+
+            remainingWidth = ImGui::GetContentRegionAvail().x;
+            ImGui::SetNextItemWidth(remainingWidth);
+            if (ImGui::InputInt("##Kpadding", &s.spectrum.Kpadding, 1, 1)) {
+                s.spectrum.Kpadding = std::clamp(s.spectrum.Kpadding, 0, 16);
+                invalidateSpectrumCaches();
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Zero-pad factor K. Output bins = N*(K+1).\n0 disables padding.");
+            }
+
+            // Apodization window selector
+            ImGui::Text("Apodization");
+            ImGui::SameLine();
+            const auto& windowNames = Apodization::getWindowNames();
+            if (ImGui::Combo("##ApodizationSelector", &s.spectrum.apodizationSelector,
+                             windowNames.data(), static_cast<int>(windowNames.size()))) {
+                invalidateSpectrumCaches();
+            }
+
+            // Conditional parametric controls based on selected window
+            if (s.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Gauss)) {
+                if (ImGui::SliderFloat("Sigma##GaussSigma", &s.spectrum.apodizationParams.gaussSigma,
+                                       1.0f, 3.0f, "%.1f")) {
+                    invalidateSpectrumCaches();
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Gauss sigma fraction (1.0-3.0).\n1.0 = narrow, 3.0 = wide.");
+                }
+            } else if (s.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Rectangular)) {
+                ImGui::Text("Mode");
+                ImGui::SameLine();
+                const bool rectSym  = !s.spectrum.apodizationParams.rectAsymMode;
+                const bool rectAsym =  s.spectrum.apodizationParams.rectAsymMode;
+                const ImVec4 rectBtnClr[2] = {
+                    ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
+                    ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
+                };
+                ImGui::PushStyleColor(ImGuiCol_Button,        rectBtnClr[rectSym ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  rectSym ? rectBtnClr[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   rectBtnClr[1]);
+                if (ImGui::Button("Sym##RectMode")) {
+                    s.spectrum.apodizationParams.rectAsymMode = false;
+                    invalidateSpectrumCaches();
+                }
+                ImGui::PopStyleColor(3);
+                ImGui::SameLine(0.0f, 0.0f);
+                ImGui::PushStyleColor(ImGuiCol_Button,        rectBtnClr[rectAsym ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  rectAsym ? rectBtnClr[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   rectBtnClr[1]);
+                if (ImGui::Button("Asym##RectMode")) {
+                    s.spectrum.apodizationParams.rectAsymMode = true;
+                    invalidateSpectrumCaches();
+                }
+                ImGui::PopStyleColor(3);
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Sym: uses the longer side's distance on both sides (shorter side saturates).\nAsym: each side extends proportionally to its own distance from peak.");
+                }
+                if (ImGui::SliderFloat("Width##RectWidth", &s.spectrum.apodizationParams.rectWidth,
+                                       0.05f, 1.0f, "%.2f")) {
+                    invalidateSpectrumCaches();
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Rectangular window width fraction (0.05-1.0).\n1.0 = full signal, 0.05 = 5% of signal.");
+                }
+            } else if (s.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::NortonBeer)) {
+                if (ImGui::SliderFloat("FWHM##NortonBeerFwhm", &s.spectrum.apodizationParams.nortonBeerFwhm,
+                                       1.0f, 2.0f, "%.1f")) {
+                    invalidateSpectrumCaches();
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Norton-Beer FWHM parameter (1.0-2.0 step 0.1).\nControls the relative full-width at half maximum.");
+                }
+            } else if (s.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::DolphChebyshev)) {
+                float at = s.spectrum.apodizationParams.dolphChebyshevAt;
+                ImGui::SliderFloat("Attenuation##DolphChebyshevAt", &at,
+                                   50.0f, 160.0f, "%.0f dB");
+                at = std::round(at / 10.0f) * 10.0f;
+                if (at != s.spectrum.apodizationParams.dolphChebyshevAt) {
+                    s.spectrum.apodizationParams.dolphChebyshevAt = at;
+                    invalidateSpectrumCaches();
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Dolph-Chebyshev attenuation (50-160 dB, step 10).\nHigher values produce lower sidelobes.");
+                }
+            } else if (s.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Hamming)) {
+                if (ImGui::SliderFloat("Alpha##HammingAlpha", &s.spectrum.apodizationParams.hammingAlpha, 0.36f, 1.0f, "%.2f")) {
+                    invalidateSpectrumCaches();
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Generalized Hamming alpha (0.36-1.0).\n0.54 = standard Hamming, 1.0 = rectangular.");
+                }
+            } else if (s.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Kaiser)) {
+                if (ImGui::SliderFloat("Beta##KaiserBeta", &s.spectrum.apodizationParams.kaiserBeta, 0.5f, 12.0f, "%.1f")) {
+                    invalidateSpectrumCaches();
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Kaiser beta (0.5-12.0).\nHigher values suppress sidelobes at the cost of a broader mainlobe.\nDefault 6.0 is similar to Hamming.");
+                }
+            }
+
+            if (s.datasetInfo.hasPrecomputedSpectra) ImGui::EndDisabled();
+
+            ImGui::Separator();
+
+            // Navigation block: Cursor, Y scale, X unit, Y Axis (moved to bottom)
+            {
+                // Shared button style colors for X-unit and Y-scale toggle buttons
+                const ImVec4 btnColors[2] = {
+                    ImVec4(0.22f, 0.22f, 0.22f, 0.7f), // unselected: visible gray
+                    ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive) // selected: highlight
+                };
+
+                // Tracking cursor toggle
+                ImGui::Text("Cursor");
+                ImGui::SameLine();
+                const bool cursorOn = s.spectrum.showTrackingCursor;
+
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[cursorOn ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cursorOn ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("On##CursorOn")) {
+                    if (!cursorOn) {
+                        s.spectrum.showTrackingCursor = true;
+                        s.needsRedraw = true;
+                    }
+                }
+                ImGui::PopStyleColor(3);
+                ImGui::SameLine(0.0f, 0.0f);
+
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[!cursorOn ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  !cursorOn ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("Off##CursorOff")) {
+                    if (cursorOn) {
+                        s.spectrum.showTrackingCursor = false;
+                        s.needsRedraw = true;
+                    }
+                }
+                ImGui::PopStyleColor(3);
+
+                // Y scale selector (lin / log / dB) - rendering only, no cache invalidation needed
+                ImGui::Text("Y scale");
+                ImGui::SameLine();
+
+                const bool linSelected = (s.spectrum.yScaleSelector == 0);
+                const bool logSelected = (s.spectrum.yScaleSelector == 1);
+
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[linSelected ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  linSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("lin##YScaleLin")) {
+                    if (!linSelected) {
+                        s.spectrum.yScaleSelector = 0;
+                        s.needsRedraw = true;
+                    }
+                }
+                ImGui::PopStyleColor(3);
+
+                ImGui::SameLine();
+
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[logSelected ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  logSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("log##YScaleLog")) {
+                    if (!logSelected) {
+                        s.spectrum.yScaleSelector = 1;
+                        s.needsRedraw = true;
+                    }
+                }
+                ImGui::PopStyleColor(3);
+
+                ImGui::SameLine();
+
+                const bool dbSelected = (s.spectrum.yScaleSelector == 2);
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[dbSelected ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  dbSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("dB##YScaleDb")) {
+                    if (!dbSelected) {
+                        s.spectrum.yScaleSelector = 2;
+                        s.needsRedraw = true;
+                    }
+                }
+                ImGui::PopStyleColor(3);
+
+                // X unit selector (cm-1 / µm / THz) - changing unit invalidates spectrum cache
+                ImGui::Text("X unit");
+                ImGui::SameLine();
+
+                const bool cmSelected  = (s.spectrum.xUnitSelector == 0);
+                const bool umSelected  = (s.spectrum.xUnitSelector == 1);
+                const bool thzSelected = (s.spectrum.xUnitSelector == 2);
+
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[cmSelected ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cmSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("cm-1##XUnitCm")) {
+                    if (!cmSelected) {
+                        s.spectrum.xUnitSelector = 0;
+                        s.needsRedraw = true;
+                    }
+                }
+                ImGui::PopStyleColor(3);
+
+                ImGui::SameLine();
+
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[umSelected ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  umSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("\xC2\xB5""m##XUnitUm")) {
+                    if (!umSelected) {
+                        s.spectrum.xUnitSelector = 1;
+                        s.needsRedraw = true;
+                    }
+                }
+                ImGui::PopStyleColor(3);
+
+                ImGui::SameLine();
+
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[thzSelected ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  thzSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("THz##XUnitTHz")) {
+                    if (!thzSelected) {
+                        s.spectrum.xUnitSelector = 2;
+                        s.needsRedraw = true;
+                    }
+                }
+                ImGui::PopStyleColor(3);
+
+                // Y-axis mode selector (all / tight / force) - matching X-unit / Y-scale button style
+                ImGui::Text("Y Axis");
+                ImGui::SameLine();
+
+                const bool allSelected   = (s.spectrum.yAxisMode == 0);
+                const bool tightSelected = (s.spectrum.yAxisMode == 1);
+                const bool forceSelected = (s.spectrum.yAxisMode == 2);
+
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[allSelected ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("all##YAxisAll")) {
+                    if (!allSelected) {
+                        s.spectrum.yAxisMode = 0;
+                        s.needsRedraw = true;
+                    }
+                }
+                ImGui::PopStyleColor(3);
+
+                ImGui::SameLine();
+
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[tightSelected ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  tightSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("tight##YAxisTight")) {
+                    if (!tightSelected) {
+                        s.spectrum.yAxisMode = 1;
+                        s.needsRedraw = true;
+                    }
+                }
+                ImGui::PopStyleColor(3);
+
+                ImGui::SameLine();
+
+                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[forceSelected ? 1 : 0]);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  forceSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+                if (ImGui::Button("force##YAxisForce")) {
+                    if (!forceSelected) {
+                        s.spectrum.yAxisMode = 2;
+                        s.needsRedraw = true;
+                    }
+                }
+                ImGui::PopStyleColor(3);
+
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("all: auto-fit Y to all data\n"
+                                      "tight: auto-fit Y to visible data only\n"
+                                      "force: lock Y to the given min/max");
+                }
+            }
+
+        } else {
+            ImGui::Text("No data loaded.");
+        }
+        ImGui::End();
+
+}

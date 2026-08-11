@@ -143,6 +143,7 @@ static void drawWelcomeBackgroundScatter(ImDrawList* drawList, const ImVec2& vpS
     }
 }
 
+// TODO(multi-ws): launch-only two-column layout (Phase 2)
 void renderWelcomeScreen(AppState& appState, AppConfig& config,
                          const std::string& configFilePath, bool showPopup) {
     // Keep the recent list clean: drop stale/non-.h5 entries (files deleted on

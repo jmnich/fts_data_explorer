@@ -584,6 +584,7 @@ std::vector<std::string> workspaceFileList(const Workspace& ws) {
     return ids;
 }
 
+// TODO(multi-ws): embedded sources load in-memory via crossLoadSource — no temp extraction (Phase 2)
 InterferogramData workspaceRead(const Workspace& ws, const std::string& id) {
     // Active group priority: corrected > uncorrected > spectra originals.
     if (const auto* m = findInGroup(ws.correctedIfg.members, id)) {
