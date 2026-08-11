@@ -1,9 +1,12 @@
 #include "t100.h"
 #include "spectral_toolbox.h"
-#include "adapters/csv_adapter.h"
-#include "adapters/adapter_registry.h"
+#include "interferogram_data.h"
+#if FTS_BUILD_HDF5
+#include "workspace_reader.h"
+#endif
 #include "app_state.h"
 #include "average_spectrum.h"
+#include "imgui_internal.h"   // GetCurrentWindowRead()->SkipItems (hidden dock tab)
 #include <cmath>
 #include <algorithm>
 #include <cstdio>
@@ -181,6 +184,9 @@ void T100Spectrum::setReferenceFromCurrentSpectrum() {
     firstLoadCompleted = false;
     needsRecompute = true;
     clearStdDev();
+#if FTS_BUILD_HDF5
+    wsUpsertT100FromPanel(*appState);
+#endif
 }
 
 static int detectXUnitFromHeader(const std::string& header) {
@@ -245,6 +251,9 @@ void T100Spectrum::setReferenceFromCSV(const std::string& path) {
     firstLoadCompleted = false;
     needsRecompute = true;
     clearStdDev();
+#if FTS_BUILD_HDF5
+    wsUpsertT100FromPanel(*appState);
+#endif
 }
 
 void T100Spectrum::setReferenceFromAverage() {
@@ -284,6 +293,9 @@ void T100Spectrum::setReferenceFromAverage() {
     firstLoadCompleted = false;
     needsRecompute = true;
     clearStdDev();
+#if FTS_BUILD_HDF5
+    wsUpsertT100FromPanel(*appState);
+#endif
 }
 
 bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
@@ -311,7 +323,7 @@ bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
             if (fn == fileId) { fullPath = sp; break; }
         }
         try {
-            auto raw = AdapterRegistry::instance().loadFileStatic(appState->datasetInfo.adapterName, fullPath);
+            auto raw = workspaceRead(appState->workspace, fullPath);
             SpectralToolbox::ProcessedSpectrum ps;
             if (appState->datasetInfo.hasPrecomputedSpectra) {
                 ps.spectrumX = raw.referenceDetector;
@@ -451,6 +463,10 @@ bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
     cachedTransX[fileId] = std::move(newX);
     cachedTransY[fileId] = std::move(newY);
     transmittanceAvailable = true;
+#if FTS_BUILD_HDF5
+    if (appState)
+        wsUpsertT100FromPanel(*appState);
+#endif
     return true;
 }
 
@@ -622,14 +638,16 @@ bool T100Spectrum::tickStdCalculation() {
                 !appState->filesSelectedForAveraging[i]) continue;
 
             std::string filePath = appState->sortedFiles[i];
-            std::string adapterName = appState->datasetInfo.adapterName;
             bool axisCorr = appState->datasetInfo.axisIsCorrected;
             bool hasPrecomp = appState->datasetInfo.hasPrecomputedSpectra;
+            // Read the raw data on the main thread and capture it by value:
+            // the workspace is mutated/replaced by the main thread (open,
+            // close, member delete, Ctrl+H), so workers must never read it.
+            InterferogramData raw = workspaceRead(appState->workspace, filePath);
             auto fut = appState->computationPool->enqueue(
-                [filePath, refLaser, K, xUnit, apodSelector, apodParams, adapterName, axisCorr, hasPrecomp,
+                [raw = std::move(raw), refLaser, K, xUnit, apodSelector, apodParams, this, axisCorr, hasPrecomp,
                  xMethod = static_cast<SpectralToolbox::XCorrectionMethod>(appState->xCorrectionMethod),
-                 promThresh = appState->peakProminenceThreshold]() {
-                    auto raw = AdapterRegistry::instance().loadFileStatic(adapterName, filePath);
+                 promThresh = appState->peakProminenceThreshold]() mutable {
                     if (hasPrecomp) {
                         SpectralToolbox::ProcessedSpectrum ps;
                         ps.spectrumX = raw.referenceDetector;
@@ -782,6 +800,10 @@ bool T100Spectrum::tickStdCalculation() {
             computeStats(calcRatioC, ratioAvgC, ratioSpreadC, ratioStdDevC);
             ratioStatsAvailable = true;
         }
+#if FTS_BUILD_HDF5
+        if (appState)
+            wsUpsertT100FromPanel(*appState);
+#endif
         batchActive_ = false;
         calcStdInProgress = false;
         return true;
@@ -930,6 +952,14 @@ static void formatEnergyRatio(char* buf, size_t bufSize, double val) {
 }
 
 void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
+#if FTS_BUILD_HDF5
+    // Staleness banner (§4.2).
+    if (appState && appState->hasWorkspace() && t100Outdated(*appState)) {
+        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
+            "Saved result is stale - press Calculate to recompute.");
+        ImGui::Spacing();
+    }
+#endif
     // Detect file selection changes
     {
         std::vector<std::string> currentSelection(appState->selectedFilenames.begin(),
@@ -1060,14 +1090,17 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
         }
     }
 
-    if (pendingNextXMin < pendingNextXMax) {
-        ImPlot::SetNextAxisLimits(ImAxis_X1, pendingNextXMin, pendingNextXMax, ImPlotCond_Always);
-        manualXMin = pendingNextXMin;
-        manualXMax = pendingNextXMax;
-        shouldAutoscale = false;
-        pendingNextXMin = 0.0;
-        pendingNextXMax = -1.0;
-    }
+        // Hidden dock tabs set SkipItems: arming SetNextAxisLimits here would
+        // be discarded by ImPlot's hidden-window early return, losing the
+        // restored X range. Keep it armed until the panel is actually visible.
+        if (pendingNextXMin < pendingNextXMax && !ImGui::GetCurrentWindowRead()->SkipItems) {
+            ImPlot::SetNextAxisLimits(ImAxis_X1, pendingNextXMin, pendingNextXMax, ImPlotCond_Always);
+            manualXMin = pendingNextXMin;
+            manualXMax = pendingNextXMax;
+            shouldAutoscale = false;
+            pendingNextXMin = 0.0;
+            pendingNextXMax = -1.0;
+        }
 
     if (xUnitSelector != prevXUnitSelector) {
         if (!shouldAutoscale && manualXMin < manualXMax) {

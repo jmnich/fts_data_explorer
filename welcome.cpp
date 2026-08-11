@@ -4,7 +4,6 @@
 #include "welcome.h"
 #include "app_state.h"
 #include "config.h"
-#include "adapters/adapter_registry.h"
 #include "file_browser.h"
 #include "theme.h"
 #include "version.h"
@@ -112,9 +111,8 @@ void destroyWelcomeBackground() {
 }
 
 void addToRecentDatasets(AppConfig& config, const std::string& configFilePath,
-                         const std::string& datasetPath,
-                         const std::string& adapterName) {
-    config.addRecentDataset(datasetPath, adapterName);
+                         const std::string& datasetPath) {
+    config.addRecentDataset(datasetPath);
     config.saveToFile(configFilePath);
 }
 
@@ -147,6 +145,12 @@ static void drawWelcomeBackgroundScatter(ImDrawList* drawList, const ImVec2& vpS
 
 void renderWelcomeScreen(AppState& appState, AppConfig& config,
                          const std::string& configFilePath, bool showPopup) {
+    // Keep the recent list clean: drop stale/non-.h5 entries (files deleted on
+    // disk, legacy dataset directories) and persist when anything changed.
+    if (config.pruneRecentToH5()) {
+        config.saveToFile(configFilePath);
+    }
+
     // Draw decorative background scatter on viewport background draw list (full screen, every frame)
     ImVec2 vpSize = ImGui::GetMainViewport()->Size;
     AccentColor accentScatter = StringToAccentColor(appState.currentAccentColor);
@@ -227,6 +231,9 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                     const auto& datasetPath = entry.path;
                     bool exists = std::filesystem::exists(datasetPath)
                         || std::filesystem::is_directory(datasetPath);
+#if FTS_BUILD_HDF5
+                    bool isH5 = std::filesystem::path(datasetPath).extension() == ".h5";
+#endif
 
                     std::string displayName = datasetPath;
                     size_t last_slash = displayName.find_last_of("/\\");
@@ -272,31 +279,6 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                         ImGui::BeginDisabled(true);
                     }
 
-                    // Adapter override (A) button — pick new adapter
-                    if (ImGui::Button("A", ImVec2(btnH, btnH))) {
-                        if (std::filesystem::exists(datasetPath) && std::filesystem::is_directory(datasetPath)) {
-                            std::string rawDataPath = datasetPath + "/raw_data";
-                            if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {
-                                appState.currentDirectory = rawDataPath;
-                            } else {
-                                appState.currentDirectory = datasetPath;
-                            }
-                            appState.currentDatasetName = datasetPath.substr(datasetPath.find_last_of("/\\") + 1);
-                            appState.pendingRecentDatasetAdapterSave = datasetPath;
-                            selectAdapterForDirectory(appState.currentDirectory);
-                            appState.needsRedraw = true;
-                            ImGui::CloseCurrentPopup();
-                            std::cout << "Opening adapter selector for: " << datasetPath << std::endl;
-                        }
-                    }
-                    if (ImGui::IsItemHovered(exists ? 0 : ImGuiHoveredFlags_AllowWhenDisabled)) {
-                        std::string tip = exists 
-                            ? ("Select adapter for " + datasetPath)
-                            : ("Path not reachable: " + datasetPath);
-                        ImGui::SetTooltip("%s", tip.c_str());
-                    }
-                    ImGui::SameLine();
-
                     // Dataset name button (mouse click or Enter on selected row)
                     bool shouldOpen = false;
                     if (ImGui::Button(displayName.c_str(), ImVec2(-FLT_MIN, 0))) {
@@ -306,30 +288,17 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                         shouldOpen = true;
                     }
                     if (shouldOpen) {
-                        if (std::filesystem::exists(datasetPath) && std::filesystem::is_directory(datasetPath)) {
-                            std::string rawDataPath = datasetPath + "/raw_data";
-                            if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {
-                                appState.currentDirectory = rawDataPath;
-                            } else {
-                                appState.currentDirectory = datasetPath;
+#if FTS_BUILD_HDF5
+                        if (isH5) {
+                            requestWorkspaceDiscard(appState, PendingWorkspaceAction::OpenPath, datasetPath);
+                            if (!appState.showUnsavedPrompt && !appState.showStaleDropPrompt) {
+                                ImGui::CloseCurrentPopup();
+                                appState.needsRedraw = true;
                             }
-
-                            appState.currentDatasetName = datasetPath.substr(datasetPath.find_last_of("/\\") + 1);
-
-                            // Use stored adapter if available, otherwise show selection popup
-                            if (!entry.adapterName.empty() && AdapterRegistry::instance().getAdapter(entry.adapterName)) {
-                                applyAdapterSelection(entry.adapterName, appState.currentDirectory);
-                                addToRecentDatasets(config, configFilePath, datasetPath, entry.adapterName);
-                            } else {
-                                selectAdapterForDirectory(appState.currentDirectory);
-                                addToRecentDatasets(config, configFilePath, datasetPath);
-                            }
-                            appState.needsRedraw = true;
-                            std::cout << "Opened recent dataset: " << datasetPath << std::endl;
-                            ImGui::CloseCurrentPopup();
-                        } else {
-                            std::cerr << "Recent dataset path no longer exists: " << datasetPath << std::endl;
                         }
+                        // Non-.h5 entries are pruned on render; any forced open
+                        // of such a path fails silently in openWorkspace().
+#endif
                     }
 
                     if (!exists && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
@@ -385,7 +354,8 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
         }
         ImGui::Spacing();
 
-        // Directory selection button - use accent color
+        // Primary action: open an .h5 workspace directly (accent-styled).
+#if FTS_BUILD_HDF5
         AccentColor accent = StringToAccentColor(appState.currentAccentColor);
         ImVec4 btnBg = GetAccentMuted(accent);
         btnBg.w = 1.0f;
@@ -395,26 +365,31 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
 
         float buttonHeight = ImGui::GetContentRegionAvail().y - ImGui::GetStyle().ItemSpacing.y * 2;
         if (buttonHeight > 60.0f) buttonHeight = 60.0f;
-        bool buttonClicked = ImGui::Button("Select Dataset Directory", ImVec2(-FLT_MIN, buttonHeight));
+        bool openClicked = ImGui::Button("Open .h5", ImVec2(-FLT_MIN, buttonHeight));
         ImGui::PopStyleColor(3);
 
-        if (buttonClicked) {
-            std::string selectedDirectory = FileBrowser::showDirectorySelectionDialog(glfwGetCurrentContext());
-            if (!selectedDirectory.empty()) {
-                std::string rawDataPath = selectedDirectory + "/raw_data";
-                if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {
-                    appState.currentDirectory = rawDataPath;
-                    appState.currentDatasetName = selectedDirectory.substr(selectedDirectory.find_last_of("/\\") + 1);
-                } else {
-                    appState.currentDirectory = selectedDirectory;
-                    appState.currentDatasetName = selectedDirectory.substr(selectedDirectory.find_last_of("/\\") + 1);
+        if (openClicked) {
+            std::string defaultFolder;
+            if (std::filesystem::is_directory(config.lastWorkingDirectory))
+                defaultFolder = config.lastWorkingDirectory;
+            std::string path = FileBrowser::showFileOpenDialog(
+                "Open HDF5 Workspace", "HDF5 files", "*.h5",
+                glfwGetCurrentContext(), defaultFolder);
+            if (!path.empty()) {
+                requestWorkspaceDiscard(appState, PendingWorkspaceAction::OpenPath, path);
+                if (!appState.showUnsavedPrompt && !appState.showStaleDropPrompt) {
+                    ImGui::CloseCurrentPopup();
+                    appState.needsRedraw = true;
                 }
-                selectAdapterForDirectory(appState.currentDirectory);
-                appState.needsRedraw = true;
-                addToRecentDatasets(config, configFilePath, selectedDirectory);
-                std::cout << "Working directory set to: " << appState.currentDirectory << std::endl;
-                ImGui::CloseCurrentPopup();
             }
+        }
+#endif
+
+        ImGui::Spacing();
+        // Secondary action: convert foreign formats (legacy/non-.h5 datasets
+        // enter via the Conversion screen — phase5 decision 6).
+        if (ImGui::Button("Convert Dataset", ImVec2(-FLT_MIN, 0))) {
+            openConversionScreen(appState);
         }
 
         ImGui::EndPopup();

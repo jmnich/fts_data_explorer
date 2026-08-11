@@ -1,0 +1,21 @@
+{
+  "spectrum": {
+    "refLaserWavelengthUm": { "value": 1.55 },
+    "zeroPadK": { "value": 2 },
+    "apodizationWindow": { "value": "Rectangular" },
+    "rectWidth": { "value": 1.0 },
+    "rectAsymMode": { "value": true },
+    "xUnit": { "value": "cm-1" },
+    "yScale": { "value": "lin" },
+    "yAxisMode": { "value": "all" },
+    "forcedYMin": { "value": 0.0 },
+    "forcedYMax": { "value": 0.0 },
+    "detectorSensitivityKVperW": { "value": 0.0 },
+    "gaussSigma": { "value": 1.0 },
+    "nortonBeerFwhm": { "value": 1.5 },
+    "dolphChebyshevAttenuationDb": { "value": 60.0 }
+  },
+  "processing": {
+    "workerThreads": { "value": -1 }
+  }
+}

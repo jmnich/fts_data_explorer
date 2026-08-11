@@ -1,9 +1,12 @@
 #include "allan_variance.h"
 #include "spectral_toolbox.h"
-#include "adapters/csv_adapter.h"
-#include "adapters/adapter_registry.h"
+#include "interferogram_data.h"
+#if FTS_BUILD_HDF5
+#include "workspace_reader.h"
+#endif
 #include "app_state.h"
 #include "implot3d.h"
+#include "imgui_internal.h"   // GetCurrentWindowRead()->SkipItems (hidden dock tab)
 #include <cmath>
 #include <algorithm>
 #include <cstdio>
@@ -123,6 +126,14 @@ static std::vector<double> getSliceData(const std::vector<double>& surfaceZ,
 }
 
 void AllanVariance::renderAllanContents(bool showTrackingCursor) {
+#if FTS_BUILD_HDF5
+    // Staleness banner (§4.2).
+    if (appState && allanOutdated(*appState)) {
+        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
+            "Saved result is stale - press Calculate to recompute.");
+        ImGui::Spacing();
+    }
+#endif
     if (!allanAvailable || cachedSurfaceWavelengths.empty() ||
         cachedSurfaceTaus.empty() || cachedSurfaceAllanVar.empty()) {
         ImVec2 avail = ImGui::GetContentRegionAvail();
@@ -133,6 +144,16 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
         ImGui::Text("No Allan variance available");
         return;
     }
+
+    // Defensive: every index below assumes a valid slice (the tick path
+    // clamps on completion, but restore/seed paths must be covered too).
+    if (selectedSliceIndex < 0 ||
+        selectedSliceIndex >= static_cast<int>(cachedSurfaceWavelengths.size()))
+        selectedSliceIndex = static_cast<int>(cachedSurfaceWavelengths.size()) - 1;
+    if (numSurfaceWavelengths != static_cast<int>(cachedSurfaceWavelengths.size()))
+        numSurfaceWavelengths = static_cast<int>(cachedSurfaceWavelengths.size());
+    if (numSurfaceTaus != static_cast<int>(cachedSurfaceTaus.size()))
+        numSurfaceTaus = static_cast<int>(cachedSurfaceTaus.size());
 
     {
         const char* unitStr = (xUnitSelector == 0) ? "cm-1"
@@ -368,7 +389,10 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
             }
         }
 
-        if (pendingNextXMin < pendingNextXMax) {
+        // Hidden dock tabs set SkipItems: arming SetNextAxisLimits here would
+        // be discarded by ImPlot's hidden-window early return, losing the
+        // restored X range. Keep it armed until the panel is actually visible.
+        if (pendingNextXMin < pendingNextXMax && !ImGui::GetCurrentWindowRead()->SkipItems) {
             ImPlot::SetNextAxisLimits(ImAxis_X1, pendingNextXMin, pendingNextXMax, ImPlotCond_Always);
             manualXMin = pendingNextXMin;
             manualXMax = pendingNextXMax;
@@ -697,14 +721,16 @@ bool AllanVariance::tickPhase0_AverageSpectrum() {
                 !appState->filesSelectedForAveraging[i]) continue;
 
             std::string filePath = appState->sortedFiles[i];
-            std::string adapterName = appState->datasetInfo.adapterName;
             bool axisCorr = appState->datasetInfo.axisIsCorrected;
             bool hasPrecomp = appState->datasetInfo.hasPrecomputedSpectra;
-            auto fut = appState->computationPool->enqueue([filePath, refLaser, K, xUnit,
-                                                               apodSelector, apodParams, adapterName, axisCorr, hasPrecomp,
+            // Read the raw data on the main thread and capture it by value:
+            // the workspace is mutated/replaced by the main thread (open,
+            // close, member delete, Ctrl+H), so workers must never read it.
+            InterferogramData raw = workspaceRead(appState->workspace, filePath);
+            auto fut = appState->computationPool->enqueue([raw = std::move(raw), refLaser, K, xUnit,
+                                                               apodSelector, apodParams, this, axisCorr, hasPrecomp,
                                                                xMethod = static_cast<SpectralToolbox::XCorrectionMethod>(appState->xCorrectionMethod),
-                                                               promThresh = appState->peakProminenceThreshold]() {
-                auto raw = AdapterRegistry::instance().loadFileStatic(adapterName, filePath);
+                                                               promThresh = appState->peakProminenceThreshold]() mutable {
                 if (hasPrecomp) {
                     SpectralToolbox::ProcessedSpectrum ps;
                     ps.spectrumX = raw.referenceDetector;
@@ -845,6 +871,9 @@ bool AllanVariance::tickPhase2_AllanVariance() {
 
     // Phase 2a: Build wavelength grid (first call only)
     if (!calcState.batchAllanActive) {
+        // Guard against a 0/negative decimation from any restore/config path:
+        // the loop below (i += wavelengthDecimation) would never advance.
+        if (wavelengthDecimation < 1) wavelengthDecimation = 1;
         std::vector<size_t> validBinIndices;
         cachedSurfaceWavelengths.clear();
 
@@ -941,6 +970,15 @@ bool AllanVariance::tickPhase2_AllanVariance() {
         numSurfaceWavelengths = static_cast<int>(cachedSurfaceWavelengths.size());
         fileCount = M_raw;
         allanAvailable = (numSurfaceWavelengths > 0 && numSurfaceTaus > 0);
+
+#if FTS_BUILD_HDF5
+        if (appState && appState->hasWorkspace() && allanAvailable) {
+            auto inputs = checkedInputPaths(*appState);
+            wsUpsertAllan(appState->workspace, inputs,
+                          cachedSurfaceTaus, cachedSurfaceWavelengths, cachedSurfaceAllanVar,
+                          makeAllanConfig(*appState, inputs));
+        }
+#endif
 
         if (selectedSliceIndex >= numSurfaceWavelengths)
             selectedSliceIndex = (numSurfaceWavelengths > 0) ? numSurfaceWavelengths - 1 : 0;

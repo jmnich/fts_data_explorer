@@ -22,11 +22,8 @@
 #include "snr_spectrum.h"
 #include "allan_variance.h"
 #include "spectral_toolbox.h"
-#include "adapters/csv_adapter.h"
-#include "adapters/adapter_registry.h"
-#include "adapters/wust_mini_fts_adapter.h"
-#include "adapters/arcoptix_igms_adapter.h"
-#include "adapters/arcoptix_spectra_adapter.h"
+#include "conversion_screen.h"
+#include "app_dirs.h"
 #include "tinyfiledialogs.h"
 #include "icon.h"
 #include "stb_image.h"
@@ -34,8 +31,13 @@
 #include "welcome.h"
 #include "about.h"
 #include "theme.h"
+#include "popup_utils.h"
 #include "headless.h"
 #include "version.h"
+#if FTS_BUILD_HDF5
+#include "workspace_reader.h"
+#include "hdf/h5_store.h"
+#endif
 
 // Include imgui and other dependencies
 #include "imgui.h"
@@ -312,208 +314,665 @@ void handleWindowEvents(GLFWwindow* window, AppConfig& config) {
     config.windowMaximized = glfwGetWindowAttrib(window, GLFW_MAXIMIZED);
 }
 
-void applyAdapterSelection(const std::string& adapterName, const std::string& directoryPath);
-
-void selectAdapterForDirectory(const std::string& directoryPath) {
-    // Clear any stale incompatible-adapter state from previous interactions
-    appState.showIncompatibleAdapterPopup = false;
-    appState.pendingAdapterName.clear();
-    appState.pendingAdapterDirectory.clear();
-
-    // Commented out: auto-filtering of adapters based on directory contents.
-    // For now, always show all registered adapters so user can pick.
-    // auto adapters = AdapterRegistry::instance().findAdaptersForDirectory(directoryPath);
-    const auto& allAdapters = AdapterRegistry::instance().getAll();
-    std::vector<DataAdapter*> adapters;
-    for (const auto& a : allAdapters) adapters.push_back(a.get());
-
-    if (adapters.empty()) {
-        appState.adapterErrorMsg = "No compatible data format found in:\n" + directoryPath;
-        appState.showAdapterErrorPopup = true;
-        appState.showWelcomeScreen = true;
-        appState.welcomeScreenInitialized = false;
-        appState.csvFiles.clear();
-    } else {
-        // Always show popup — user picks adapter each time
-        appState.compatibleAdapters = adapters;
-        appState.showAdapterSelectionPopup = true;
-        // Keep welcome screen active so popup shows on top of it
-        appState.showWelcomeScreen = true;
-        appState.welcomeScreenInitialized = false;
-        appState.csvFiles.clear();
-    }
+// Single read path for all engine loads: the workspace.
+static InterferogramData loadInterferogram(AppState& s, const std::string& id) {
+    return workspaceRead(s.workspace, id);
 }
 
-void applyAdapterSelection(const std::string& adapterName, const std::string& directoryPath) {
-    auto* adapter = AdapterRegistry::instance().getAdapter(adapterName);
-    if (!adapter) return;
-
-    appState.currentAdapter.reset();
-    // Create appropriate concrete adapter based on name
-    if (adapterName == "WUST Mini FTS Raw")
-        appState.currentAdapter = std::make_unique<WustMiniFtsAdapter>();
-    else if (adapterName == "ArcOptix raw IGMs")
-        appState.currentAdapter = std::make_unique<ArcoptixIgmsAdapter>();
-    else if (adapterName == "ArcOptix Spectra Sequence")
-        appState.currentAdapter = std::make_unique<ArcoptixSpectraAdapter>();
-    else return;
-
-    appState.datasetInfo = adapter->getDatasetInfo();
-    appState.csvFiles = adapter->listFiles(directoryPath);
-    appState.showAdapterSelectionPopup = false;
-    appState.showIncompatibleAdapterPopup = false;
-    appState.pendingAdapterName.clear();
-    appState.pendingAdapterDirectory.clear();
-
-    // Apply feature gates based on dataset info
-    if (appState.datasetInfo.axisIsCorrected) {
-        appState.xAxisBase = 1; // Force OPD mode
+#if FTS_BUILD_HDF5
+void openWorkspace(AppState& s, const std::string& path) {
+    // Silent fail: only regular .h5 workspaces are accepted; anything else
+    // (legacy directories, missing files, forced non-.h5 opens) does nothing.
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(path, ec)
+        || std::filesystem::path(path).extension() != ".h5") {
+        return;
     }
-    appState.clearAverageSpectrum();
-    appState.clearSnrSpectrum();
-    appState.clearAllanVariance();
-    appState.clearT100Spectrum();
-    appState.showWelcomeScreen = false;
-    appState.welcomeScreenInitialized = true;
-    appState.dataLoaded = false;
-    appState.loadedData.clear();
-    appState.rawDataCache.clear();
-    appState.hilbertXCache.clear();
-    appState.peakPositionsCache.clear();
-    appState.hilbertCacheLaserWavelength = 0.0f;
-    appState.spectrum.cachedSpectra.clear();
-    appState.spectrum.cachedFrequencies.clear();
-    appState.spectrum.lastPrimaryDetectors.clear();
-    appState.spectrum.lastSpectrumParams.clear();
-    appState.spectrum.pendingSpectra_.clear();
-    appState.selectedFiles.clear();
-    appState.selectedFilenames.clear();
-    appState.filesChanged = true;
-    appState.currentSortedFileIndex = 0;
-    appState.isFirstDataLoad = true;
-    appState.needsRedraw = true;
+    s.workspace = H5Store::load(path);   // throws H5Error on failure
+    s.workspacePath = path;
 
-    // Save adapter to recent datasets if pendingRecentDatasetAdapterSave is set
-    if (appState.configPtr && !appState.pendingRecentDatasetAdapterSave.empty()) {
-        for (auto& entry : appState.configPtr->recentDatasets) {
-            if (entry.path == appState.pendingRecentDatasetAdapterSave) {
-                entry.adapterName = adapterName;
-                break;
+
+    // Clear any pending discard/save modal state from a previous flow.
+    s.pendingWorkspaceAction = PendingWorkspaceAction::None;
+    s.pendingWorkspacePath.clear();
+    s.showUnsavedPrompt = false;
+    s.pendingSaveAsPath.clear();
+    s.showStaleDropPrompt = false;
+    s.showWorkspaceDeleteConfirmPopup = false;
+    s.pendingWorkspaceDeletionPath.clear();
+
+    // The fresh load is pristine; the first frame's auto-computes (spectrum
+    // mirror) are re-baselined at its end so opening alone is never "dirty".
+    s.workspaceDirtyRebaselinePending = true;
+
+    // Populate engine state
+    s.datasetInfo = workspaceDatasetInfo(s.workspace);
+    s.csvFiles = workspaceFileList(s.workspace);
+
+    // Feature gate
+    if (s.datasetInfo.axisIsCorrected)
+        s.xAxisBase = 1; // Force OPD mode
+
+    // Clear all caches
+    s.clearAverageSpectrum();
+    s.clearSnrSpectrum();
+    s.clearAllanVariance();
+    s.clearT100Spectrum();
+    // Spectrum panel is not reset by the clears above; reset its zoom/param
+    // state too so a fresh workspace starts autoscaled (applyViewState below
+    // restores the saved subset when present).
+    s.spectrum.resetSpectrumWindow();
+    s.showWelcomeScreen = false;
+    s.welcomeScreenInitialized = true;
+    s.dataLoaded = false;
+    s.loadedData.clear();
+    s.rawDataCache.clear();
+    s.hilbertXCache.clear();
+    s.peakPositionsCache.clear();
+    s.hilbertCacheLaserWavelength = 0.0f;
+    s.spectrum.cachedSpectra.clear();
+    s.spectrum.cachedFrequencies.clear();
+    s.spectrum.lastPrimaryDetectors.clear();
+    s.spectrum.lastSpectrumParams.clear();
+    s.spectrum.pendingSpectra_.clear();
+    s.selectedFiles.clear();
+    s.selectedFilenames.clear();
+    s.filesChanged = true;
+    s.currentSortedFileIndex = 0;
+    s.isFirstDataLoad = true;
+    s.needsRedraw = true;
+
+    // Dataset display name
+    s.currentDatasetName = std::filesystem::path(path).stem().string();
+    s.currentDirectory = "";
+
+    // Recent datasets (configPtr is set at startup; guard for robustness)
+    if (s.configPtr)
+        addToRecentDatasets(*s.configPtr, s.configFilePath, path);
+
+    // Phase 3: restore saved view state (decision 3). Runs after the
+    // axisIsCorrected -> xAxisBase gate (a default for fresh files, not a hard
+    // constraint) and before seedPanelsFromWorkspace so the restored spectrum
+    // params match the saved member configs (no spurious staleness).
+    applyViewState(s);
+
+    // Re-baseline the dirty latch: opening never dirties the workspace. The
+    // baseline is finalized at the end of the FIRST rendered frame (first-load
+    // autoscale finalizes zoom ranges mid-frame).
+    s.viewStateBaseline = nlohmann::json::object();
+    s.viewStateBaselinePending = true;
+
+    // Fill the editable comment/tags buffers from the loaded workspace.
+    snprintf(s.metadataCommentBuffer, sizeof(s.metadataCommentBuffer), "%s",
+             s.workspace.measurementComment.c_str());
+    snprintf(s.metadataTagsBuffer, sizeof(s.metadataTagsBuffer), "%s",
+             s.workspace.tags.c_str());
+
+    // Restore-on-open: fill panel caches from matching saved members.
+    seedPanelsFromWorkspace(s);
+}
+
+void closeWorkspace(AppState& s) {
+    s.workspace = Workspace{};
+    s.workspacePath.clear();
+
+    // Clear pending discard/save modal state.
+    s.pendingWorkspaceAction = PendingWorkspaceAction::None;
+    s.pendingWorkspacePath.clear();
+    s.showUnsavedPrompt = false;
+    s.pendingSaveAsPath.clear();
+    s.showStaleDropPrompt = false;
+    s.showWorkspaceDeleteConfirmPopup = false;
+    s.pendingWorkspaceDeletionPath.clear();
+
+    // Return to welcome screen (mirror Ctrl+H reset)
+    s.showWelcomeScreen = true;
+    s.welcomeScreenInitialized = false;
+    s.csvFiles.clear();
+    s.sortedFiles.clear();
+    s.loadedData.clear();
+    s.rawDataCache.clear();
+    s.hilbertXCache.clear();
+    s.hilbertCacheLaserWavelength = 0.0f;
+    s.peakPositionsCache.clear();
+    s.spectrum.cachedSpectra.clear();
+    s.spectrum.cachedFrequencies.clear();
+    s.spectrum.lastPrimaryDetectors.clear();
+    s.spectrum.lastSpectrumParams.clear();
+    s.spectrum.pendingSpectra_.clear();
+    s.clearAverageSpectrum();
+    s.clearSnrSpectrum();
+    s.clearAllanVariance();
+    s.clearT100Spectrum();
+    s.selectedFiles.clear();
+    s.selectedFilenames.clear();
+    s.filesChanged = false;
+    s.dataLoaded = false;
+    // Phase 3: clear the dirty-latch baseline and the metadata edit buffers so
+    // no stale state survives into the next workspace. AppState view fields
+    // keep their last values (legacy mode is dormant).
+    s.viewStateBaseline = nlohmann::json::object();
+    s.viewStateBaselinePending = true;
+    s.metadataCommentBuffer[0] = '\0';
+    s.metadataTagsBuffer[0] = '\0';
+    s.needsRedraw = true;
+}
+#endif // FTS_BUILD_HDF5
+
+#if FTS_BUILD_HDF5
+
+// ── Save / Save As + dirty-close routing (Phase 2) ─────────────────────────
+
+// Clear panel caches + selection (applyAdapterSelection-style block).
+static void clearPanelCaches(AppState& s) {
+    s.clearAverageSpectrum();
+    s.clearSnrSpectrum();
+    s.clearAllanVariance();
+    s.clearT100Spectrum();
+    s.loadedData.clear();
+    s.rawDataCache.clear();
+    s.hilbertXCache.clear();
+    s.peakPositionsCache.clear();
+    s.hilbertCacheLaserWavelength = 0.0f;
+    s.spectrum.cachedSpectra.clear();
+    s.spectrum.cachedFrequencies.clear();
+    s.spectrum.lastPrimaryDetectors.clear();
+    s.spectrum.lastSpectrumParams.clear();
+    s.spectrum.pendingSpectra_.clear();
+    s.selectedFiles.clear();
+    s.selectedFilenames.clear();
+}
+
+// Clear only derived results (keep file selection / interferogram view).
+static void clearPanelDerivedResults(AppState& s) {
+    s.clearAverageSpectrum();
+    s.clearSnrSpectrum();
+    s.clearAllanVariance();
+    s.clearT100Spectrum();
+    s.spectrum.cachedSpectra.clear();
+    s.spectrum.cachedFrequencies.clear();
+    s.spectrum.lastPrimaryDetectors.clear();
+    s.spectrum.lastSpectrumParams.clear();
+    s.spectrum.pendingSpectra_.clear();
+    s.t100.cachedTransX.clear();
+    s.t100.cachedTransY.clear();
+    s.t100.needsRecompute = true;
+}
+
+// Save. Stale derivatives are never dropped silently: when any stale category
+// exists, the actual H5Store::save is deferred behind the §1.5 confirmation.
+void doSaveWorkspace(AppState& s, const std::string& asPath) {
+    // Phase 3: merge the current view state into workspace.json BEFORE the
+    // pruneStale copy, so Save As copies the captured view state too.
+    captureViewState(s);
+    const Workspace* toSave = &s.workspace;
+    Workspace copy;
+    if (!asPath.empty()) {
+        copy = s.workspace.pruneStale();
+        copy.created.clear();                // reset @created (spec §2.2)
+        toSave = &copy;
+    } else if (!s.workspace.staleCategories().empty()) {
+        copy = s.workspace.pruneStale();     // §1.5 confirmed: drop stale
+        toSave = &copy;
+    }
+    H5Store::save(asPath.empty() ? s.workspacePath : asPath, *toSave);   // throws H5Error
+    if (!asPath.empty()) {
+        s.workspacePath = asPath;
+        s.currentDatasetName = std::filesystem::path(asPath).stem().string();
+        if (s.configPtr)
+            addToRecentDatasets(*s.configPtr, s.configFilePath, asPath);
+    }
+    s.workspace.dirty = false;
+    s.workspace.changeLog.clear();   // saved: the change list starts fresh
+    // Phase 3: re-baseline the latch against the just-saved state so the frame
+    // loop does not immediately re-dirty a clean workspace (decision 5).
+    s.viewStateBaseline = viewStateJson(s);
+    s.viewStateBaselinePending = false;
+    s.needsRedraw = true;
+    // The save was effective (no exception, no cancel): show the "Saved" toast.
+    s.saveToastUntil = glfwGetTime() + 1.5;
+}
+
+void requestSaveWorkspace(AppState& s, const std::string& asPath) {
+    markConfigStale(s.workspace, s);
+    if (s.workspace.staleCategories().empty()) {
+        doSaveWorkspace(s, asPath);
+        return;
+    }
+    s.pendingSaveAsPath = asPath;
+    s.showStaleDropPrompt = true;
+    s.needsRedraw = true;
+}
+
+void saveWorkspaceAs(AppState& s, GLFWwindow* window) {
+    std::string defaultFolder = s.workspacePath.empty()
+        ? (std::filesystem::is_directory(s.currentDirectory) ? s.currentDirectory : "")
+        : std::filesystem::path(s.workspacePath).parent_path().string();
+    std::string displayName = s.workspacePath.empty()
+        ? "workspace.h5" : std::filesystem::path(s.workspacePath).filename().string();
+    std::string path = FileBrowser::showFileSaveDialog(
+        "Save Workspace As", displayName, "*.h5", defaultFolder, window);
+    if (path.empty()) return;
+    requestSaveWorkspace(s, path);
+}
+
+// Single choke point for every workspace-discarding entry point. Stashes the
+// action; if the workspace is clean (or absent) it dispatches immediately.
+void requestWorkspaceDiscard(AppState& s, PendingWorkspaceAction action, const std::string& path) {
+    if (action != PendingWorkspaceAction::None) {
+        s.pendingWorkspaceAction = action;
+        s.pendingWorkspacePath = path;
+    }
+    if (!s.hasWorkspace() || !s.workspace.dirty) {
+        dispatchPendingAction(s);
+        return;
+    }
+    s.showUnsavedPrompt = true;
+    s.needsRedraw = true;
+}
+
+void dispatchPendingAction(AppState& s) {
+    if (s.pendingWorkspaceAction == PendingWorkspaceAction::None) return;
+    PendingWorkspaceAction action = s.pendingWorkspaceAction;
+    std::string path = s.pendingWorkspacePath;
+    s.pendingWorkspaceAction = PendingWorkspaceAction::None;
+    s.pendingWorkspacePath.clear();
+    s.showUnsavedPrompt = false;
+    s.showStaleDropPrompt = false;
+    s.pendingSaveAsPath.clear();
+    s.needsRedraw = true;
+
+    switch (action) {
+        case PendingWorkspaceAction::CloseWorkspace:
+            closeWorkspace(s);
+            break;
+        case PendingWorkspaceAction::OpenPath:
+            try {
+                openWorkspace(s, path);
+            } catch (const std::exception& e) {
+                s.adapterErrorMsg = std::string("Failed to open workspace:\n") + e.what();
+                s.showAdapterErrorPopup = true;
             }
-        }
-        appState.configPtr->saveToFile(appState.configFilePath);
-        appState.pendingRecentDatasetAdapterSave.clear();
+            break;
+        case PendingWorkspaceAction::Exit:
+            s.workspace.dirty = false;   // discarding: keep the close-intercept from re-firing
+            glfwSetWindowShouldClose(glfwGetCurrentContext(), GLFW_TRUE);
+            break;
+        case PendingWorkspaceAction::None:
+            break;
     }
-
-    std::cout << "Adapter selected: " << adapterName << " for " << directoryPath << std::endl;
 }
 
-static void renderAdapterSelectionPopup() {
-    if (!appState.showAdapterSelectionPopup) return;
+// ── Cascading member deletion (Phase 2) ────────────────────────────────────
 
-    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-    ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(800, 250), ImGuiCond_Always);
+static bool workspaceMemberIsOriginal(const Workspace& ws, const std::string& path) {
+    auto slash = path.find('/', 1);
+    if (path.empty() || path[0] != '/' || slash == std::string::npos) return false;
+    std::string group = path.substr(1, slash - 1);
+    std::string id = path.substr(slash + 1);
+    auto isOrig = [&](const auto& members) {
+        for (const auto& m : members)
+            if (m.id == id) return m.kind == MemberKind::Original;
+        return false;
+    };
+    if (group == "igm_uncorrected_x") return isOrig(ws.uncorrectedIfg.members);
+    if (group == "igm_corrected_x")   return isOrig(ws.correctedIfg.members);
+    if (group == "spectra")           return isOrig(ws.spectra.members);
+    return false;
+}
 
-    ImGui::PushStyleColor(ImGuiCol_ModalWindowDimBg, ImVec4(0.0f, 0.0f, 0.0f, 0.7f));
+static void workspaceEraseMember(Workspace& ws, const std::string& path) {
+    auto slash = path.find('/', 1);
+    if (path.empty() || path[0] != '/' || slash == std::string::npos) return;
+    std::string group = path.substr(1, slash - 1);
+    std::string id = path.substr(slash + 1);
+    auto eraseById = [&](auto& members) {
+        members.erase(std::remove_if(members.begin(), members.end(),
+            [&](const auto& m) { return m.id == id; }), members.end());
+    };
+    if (group == "igm_uncorrected_x") eraseById(ws.uncorrectedIfg.members);
+    else if (group == "igm_corrected_x") eraseById(ws.correctedIfg.members);
+    else if (group == "spectra") eraseById(ws.spectra.members);
+    else if (group == "average_spectra") eraseById(ws.averageSpectra.members);
+    else if (group == "snr_spectra") eraseById(ws.snrSpectra.members);
+    else if (group == "allan_werle") eraseById(ws.allanWerle.members);
+    else if (group == "t100") eraseById(ws.t100.members);
+}
 
-    if (ImGui::BeginPopupModal("Select Data Adapter##adapterSelect", &appState.showAdapterSelectionPopup,
-                               ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove)) {
-        ImGui::TextWrapped("Dataset: %s", appState.currentDirectory.c_str());
-        ImGui::Separator();
-        ImGui::Spacing();
+// Remove a file/member id from all engine containers referencing it.
+static void removeFileFromEngine(AppState& s, const std::string& id) {
+    s.csvFiles.erase(std::remove(s.csvFiles.begin(), s.csvFiles.end(), id), s.csvFiles.end());
+    auto sortedIt = std::find(s.sortedFiles.begin(), s.sortedFiles.end(), id);
+    size_t sortedIdx = (sortedIt != s.sortedFiles.end())
+        ? static_cast<size_t>(std::distance(s.sortedFiles.begin(), sortedIt)) : s.sortedFiles.size();
+    if (sortedIt != s.sortedFiles.end()) s.sortedFiles.erase(sortedIt);
+    if (sortedIdx < s.filesSelectedForAveraging.size())
+        s.filesSelectedForAveraging.erase(s.filesSelectedForAveraging.begin() + sortedIdx);
+    for (size_t i = 0; i < s.selectedFiles.size();) {
+        if (s.selectedFiles[i] == id) {
+            s.selectedFiles.erase(s.selectedFiles.begin() + i);
+            if (i < s.selectedFilenames.size()) s.selectedFilenames.erase(s.selectedFilenames.begin() + i);
+            if (i < s.loadedData.size()) s.loadedData.erase(s.loadedData.begin() + i);
+            if (i < s.rawDataCache.size()) s.rawDataCache.erase(s.rawDataCache.begin() + i);
+        } else {
+            ++i;
+        }
+    }
+    // Keep the navigation index and the data-loaded flag consistent with the
+    // shrunk lists (mirrors the legacy performFileDeletion clamp): a stale
+    // index would OOB-index sortedFiles, and dataLoaded=true with an empty
+    // loadedData would OOB-index loadedData[0] in the frame loop.
+    if (s.currentSortedFileIndex >= s.sortedFiles.size())
+        s.currentSortedFileIndex = s.sortedFiles.empty() ? 0 : s.sortedFiles.size() - 1;
+    s.dataLoaded = !s.loadedData.empty();
+    s.spectrum.cachedSpectra.erase(id);
+    s.spectrum.cachedFrequencies.erase(id);
+    s.spectrum.lastPrimaryDetectors.erase(id);
+    s.spectrum.lastSpectrumParams.erase(id);
+    s.hilbertXCache.erase(id);
+    s.peakPositionsCache.erase(id);
+    s.t100.cachedTransX.erase(id);
+    s.t100.cachedTransY.erase(id);
+}
 
-        static int selectedIdx = 0;
-        if (selectedIdx >= static_cast<int>(appState.compatibleAdapters.size()))
-            selectedIdx = 0;
+void performWorkspaceMemberDeletion(AppState& s, const std::string& absPath) {
+    const std::string id = absPath.substr(absPath.find_last_of('/') + 1);
+    const bool isOriginal = workspaceMemberIsOriginal(s.workspace, absPath);
 
-        for (size_t i = 0; i < appState.compatibleAdapters.size(); i++) {
-            auto* adapter = appState.compatibleAdapters[i];
-            bool compatible = adapter->canLoadDirectory(appState.currentDirectory);
-            std::string label = std::string("- ") + adapter->getName() + " (" + adapter->getFileExtension() + ")";
+    // 1. Remove the member from its group.
+    workspaceEraseMember(s.workspace, absPath);
+    if (isOriginal)
+        s.workspace.deletedOriginalPaths.push_back(absPath);
 
-            if (!compatible)
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.5f, 0.5f, 0.5f));
+    // 2. Cascade: downstream derivatives (and their dependents) go stale.
+    markDependentsStale(s.workspace, absPath);
 
-            if (ImGui::Selectable(label.c_str(), static_cast<int>(i) == selectedIdx)) {
-                if (compatible) {
-                    applyAdapterSelection(adapter->getName(), appState.currentDirectory);
-                } else {
-                    appState.pendingAdapterName = adapter->getName();
-                    appState.pendingAdapterDirectory = appState.currentDirectory;
-                    appState.showIncompatibleAdapterPopup = true;
-                    appState.showAdapterSelectionPopup = false;
-                    appState.compatibleAdapters.clear();
+    // 3. Clear engine state referencing the removed member.
+    removeFileFromEngine(s, id);
+
+    // 4. Original removed from the active group → re-derive datasetInfo +
+    //    csvFiles (active-group priority may shift) and clear panel caches.
+    if (isOriginal) {
+        s.datasetInfo = workspaceDatasetInfo(s.workspace);
+        s.csvFiles = workspaceFileList(s.workspace);
+        clearPanelCaches(s);
+        s.filesChanged = true;
+    }
+
+    s.workspace.dirty = true;
+    logWorkspaceChange(s.workspace, "Deleted: " + absPath);
+    s.needsRedraw = true;
+}
+
+// "Strip derivatives": reset the file to originals. All derivative members are
+// removed from all groups; panel results are cleared; selection is kept.
+static void stripWorkspaceDerivatives(AppState& s) {
+    auto clearDerivs = [](auto& members) {
+        members.erase(std::remove_if(members.begin(), members.end(),
+            [](const auto& m) { return m.kind == MemberKind::Derivative; }),
+            members.end());
+    };
+    clearDerivs(s.workspace.uncorrectedIfg.members);
+    clearDerivs(s.workspace.correctedIfg.members);
+    clearDerivs(s.workspace.spectra.members);
+    s.workspace.averageSpectra.members.clear();
+    s.workspace.snrSpectra.members.clear();
+    s.workspace.allanWerle.members.clear();
+    s.workspace.t100.members.clear();
+    clearPanelDerivedResults(s);
+    s.workspace.dirty = true;
+    logWorkspaceChange(s.workspace, "Removed all derivative results");
+    s.needsRedraw = true;
+}
+
+// ── Metadata: grouped measurement_config.json renderer (Phase 3) ────────────
+
+// Text form for a scalar config value: strings verbatim, everything else via
+// JSON dump (numbers, bools, null).
+static std::string configValueText(const nlohmann::json& v) {
+    if (v.is_string()) return v.get<std::string>();
+    if (v.is_null()) return "null";
+    return v.dump();
+}
+
+// Recursive "key: value" rows for an object; nested objects/arrays become
+// collapsible TreeNodes. ##-suffixed + PushID labels keep IDs unique per path
+// (IMGUI_GUIDE §3).
+static void renderConfigRows(const nlohmann::json& obj) {
+    for (auto it = obj.begin(); it != obj.end(); ++it) {
+        const std::string& key = it.key();
+        const nlohmann::json& v = it.value();
+        ImGui::PushID(key.c_str());
+        if (v.is_object()) {
+            if (ImGui::TreeNode(key.c_str())) {
+                renderConfigRows(v);
+                ImGui::TreePop();
+            }
+        } else if (v.is_array()) {
+            if (ImGui::TreeNode(key.c_str())) {
+                int idx = 0;
+                for (const auto& el : v) {
+                    ImGui::PushID(idx++);
+                    if (el.is_object()) renderConfigRows(el);
+                    else ImGui::Text("%s", configValueText(el).c_str());
+                    ImGui::PopID();
                 }
-                selectedIdx = 0;
-                if (!compatible)
-                    ImGui::PopStyleColor(); // pop text color
-                ImGui::PopStyleColor(); // pop dim bg
-                ImGui::EndPopup();
-                return;
+                ImGui::TreePop();
             }
-
-            if (!compatible) {
-                ImVec2 textMin = ImGui::GetItemRectMin();
-                ImVec2 textMax = ImGui::GetItemRectMax();
-                float lineY = (textMin.y + textMax.y) * 0.5f;
-                ImGui::GetWindowDrawList()->AddLine(
-                    ImVec2(textMin.x, lineY),
-                    ImVec2(textMax.x, lineY),
-                    IM_COL32(128, 128, 128, 128), 1.0f);
-                ImGui::PopStyleColor();
-            }
+        } else {
+            ImGui::Text("%s", key.c_str());
+            ImGui::SameLine();
+            ImGui::TextDisabled(": %s", configValueText(v).c_str());
         }
+        ImGui::PopID();
+    }
+}
 
+// Top level in fixed order (decision 7): instrument, detector, acquisitionCard,
+// acquisition, laser, environment, then legacy (flat passthrough), then any
+// remaining unknown keys as their own collapsible section.
+static void renderMeasurementConfig(const nlohmann::json& cfg) {
+    static const char* kOrder[] = {"instrument", "detector", "acquisitionCard",
+                                   "acquisition", "laser", "environment", "legacy"};
+    for (const char* key : kOrder) {
+        auto it = cfg.find(key);
+        if (it == cfg.end()) continue;
+        ImGui::PushID(key);
+        if (ImGui::TreeNode(key)) {
+            renderConfigRows(*it);
+            ImGui::TreePop();
+        }
+        ImGui::PopID();
+    }
+    for (auto it = cfg.begin(); it != cfg.end(); ++it) {
+        const std::string& key = it.key();
+        bool known = false;
+        for (const char* k : kOrder)
+            if (key == k) { known = true; break; }
+        if (known) continue;
+        ImGui::PushID(key.c_str());
+        if (ImGui::TreeNode(key.c_str())) {
+            renderConfigRows(it.value());
+            ImGui::TreePop();
+        }
+        ImGui::PopID();
+    }
+}
+
+// ── Unsaved-changes + stale-drop modals ─────────────────────────────────────
+
+// Accent color used by the modal frames + focused buttons.
+static ImVec4 modalAccent() {
+    return GetAccentBase(StringToAccentColor(appState.currentAccentColor));
+}
+
+static void renderUnsavedPromptModal() {
+    static int focus = 0;
+    static bool wasOpen = false;
+    if (!appState.showUnsavedPrompt) {
+        wasOpen = false;
+        return;
+    }
+    ImGui::OpenPopup("Unsaved Changes##confirm");
+    beginModal(520.0f, modalAccent());
+    if (ImGui::BeginPopupModal("Unsaved Changes##confirm", nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
+        // NoTitleBar: the title moves into the body so removing the header
+        // loses no information.
+        ImGui::Text("Unsaved Changes");
+        ImGui::Spacing();
+        ImGui::TextWrapped("Save changes to \"%s\" before continuing?",
+                           appState.currentDatasetName.c_str());
         ImGui::Spacing();
         ImGui::Separator();
         ImGui::Spacing();
 
-        // Keyboard navigation
-        if (ImGui::IsKeyPressed(ImGuiKey_UpArrow) && selectedIdx > 0)
-            selectedIdx--;
-        if (ImGui::IsKeyPressed(ImGuiKey_DownArrow) && selectedIdx < static_cast<int>(appState.compatibleAdapters.size()) - 1)
-            selectedIdx++;
-        if (ImGui::IsKeyPressed(ImGuiKey_Enter) && selectedIdx >= 0 && selectedIdx < static_cast<int>(appState.compatibleAdapters.size())) {
-            auto* adapter = appState.compatibleAdapters[selectedIdx];
-            bool enterCompatible = adapter->canLoadDirectory(appState.currentDirectory);
-            if (enterCompatible) {
-                applyAdapterSelection(adapter->getName(), appState.currentDirectory);
-            } else {
-                appState.pendingAdapterName = adapter->getName();
-                appState.pendingAdapterDirectory = appState.currentDirectory;
-                appState.showIncompatibleAdapterPopup = true;
-                appState.showAdapterSelectionPopup = false;
-                appState.compatibleAdapters.clear();
+        // Change list: per-file "Spectrum: " entries aggregate into one
+        // CAT_SPECTRA line with the distinct-file count; everything else is
+        // shown verbatim. Names match the stale-drop modal (shared constants).
+        // Bullet + TextWrapped: BulletText never wraps, so long entries (e.g.
+        // the view-settings line at scaled UI sizes) clip at the pinned width.
+        const std::string spectrumPrefix = "Spectrum: ";
+        int spectrumCount = 0;
+        for (const auto& entry : appState.workspace.changeLog)
+            if (entry.rfind(spectrumPrefix, 0) == 0) ++spectrumCount;
+        bool shown = false;
+        if (spectrumCount > 0) {
+            ImGui::Bullet();
+            ImGui::TextWrapped("%s (%d file%s)", CAT_SPECTRA, spectrumCount,
+                               spectrumCount == 1 ? "" : "s");
+            shown = true;
+        }
+        for (const auto& entry : appState.workspace.changeLog) {
+            if (entry.rfind(spectrumPrefix, 0) == 0) continue;
+            ImGui::Bullet();
+            ImGui::TextWrapped("%s", entry.c_str());
+            shown = true;
+        }
+        if (!shown) {
+            ImGui::Bullet();
+            ImGui::TextWrapped("Workspace contains unsaved changes.");
+        }
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        int pressed = modalButtonRow({"Save", "Don't Save", "Cancel"},
+                                     focus, wasOpen, modalAccent());
+        if (pressed == 0) {
+            try {
+                requestSaveWorkspace(appState, "");
+                if (!appState.showStaleDropPrompt) {
+                    dispatchPendingAction(appState);
+                    ImGui::CloseCurrentPopup();
+                } else {
+                    // The stale-drop confirmation takes over: close this popup
+                    // now (the pending action stays stashed, dispatched after
+                    // the drop). Without the close it lingers in the popup
+                    // stack un-rendered and freezes the whole UI.
+                    ImGui::CloseCurrentPopup();
+                }
+            } catch (const std::exception& e) {
+                appState.adapterErrorMsg = std::string("Save failed:\n") + e.what();
+                appState.showAdapterErrorPopup = true;
             }
-            selectedIdx = 0;
-            ImGui::PopStyleColor(); // pop dim bg
-            ImGui::EndPopup();
-            return;
+        } else if (pressed == 1) {
+            dispatchPendingAction(appState);   // discard RAM workspace
+            ImGui::CloseCurrentPopup();
+        } else if (pressed == 2 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            appState.pendingWorkspaceAction = PendingWorkspaceAction::None;
+            appState.pendingWorkspacePath.clear();
+            appState.showUnsavedPrompt = false;
+            ImGui::CloseCurrentPopup();
         }
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-            appState.showAdapterSelectionPopup = false;
-            appState.compatibleAdapters.clear();
-            appState.currentDirectory = "";
-            selectedIdx = 0;
-            ImGui::PopStyleColor();
-            ImGui::EndPopup();
-            return;
-        }
-
-        if (ImGui::Button("Cancel", ImVec2(120, 0))) {
-            appState.showAdapterSelectionPopup = false;
-            appState.compatibleAdapters.clear();
-            appState.currentDirectory = "";
-            selectedIdx = 0;
-        }
-
+        drawModalAccentFrame(modalAccent());
         ImGui::EndPopup();
+        wasOpen = true;
+    } else {
+        wasOpen = false;
     }
-    ImGui::PopStyleColor();
+    endModal();
 }
+
+static void renderStaleDropPromptModal() {
+    static int focus = 0;
+    static bool wasOpen = false;
+    if (!appState.showStaleDropPrompt) {
+        wasOpen = false;
+        return;
+    }
+    ImGui::OpenPopup("Stale Data Will Be Dropped##confirm");
+    // Fixed width ~1.6x the old autosized width: the wrapped header text
+    // never clips and the category list gets breathing room.
+    beginModal(560.0f, modalAccent());
+    if (ImGui::BeginPopupModal("Stale Data Will Be Dropped##confirm", nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
+        // NoTitleBar: the title moves into the body so removing the header
+        // loses no information.
+        ImGui::Text("Stale Data Will Be Dropped");
+        ImGui::Spacing();
+        ImGui::TextWrapped("Some results no longer match the current inputs or settings "
+                           "and will not be saved:");
+        ImGui::Spacing();
+        // Bullet + TextWrapped (BulletText never wraps): keeps the list look
+        // and wraps long lines at the pinned width instead of clipping.
+        for (const auto& cat : appState.workspace.staleCategories()) {
+            ImGui::Bullet();
+            ImGui::TextWrapped("%s", cat.c_str());
+        }
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        int pressed = modalButtonRow({"Cancel", "Drop Stale Data"},
+                                     focus, wasOpen, modalAccent());
+        if (pressed == 0 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            appState.pendingSaveAsPath.clear();
+            appState.showStaleDropPrompt = false;
+            // Keep pendingWorkspaceAction: if the save was chained from the
+            // Unsaved Changes modal, "Don't Save" must still dispatch it. Only
+            // the Unsaved modal's own Cancel aborts the pending action.
+            ImGui::CloseCurrentPopup();
+        } else if (pressed == 1) {
+            try {
+                doSaveWorkspace(appState, appState.pendingSaveAsPath);
+                appState.pendingSaveAsPath.clear();
+                appState.showStaleDropPrompt = false;
+                if (appState.pendingWorkspaceAction != PendingWorkspaceAction::None)
+                    dispatchPendingAction(appState);
+                ImGui::CloseCurrentPopup();
+            } catch (const std::exception& e) {
+                appState.adapterErrorMsg = std::string("Save failed:\n") + e.what();
+                appState.showAdapterErrorPopup = true;
+            }
+        }
+        drawModalAccentFrame(modalAccent());
+        ImGui::EndPopup();
+        wasOpen = true;
+    } else {
+        wasOpen = false;
+    }
+    endModal();
+}
+
+#endif // FTS_BUILD_HDF5
 
 static void performFileDeletion(AppState& appState, size_t index) {
+#if FTS_BUILD_HDF5
+    // Defensive guard: in workspace mode sortedFiles holds member IDs, not
+    // disk paths — the filesystem remove below would either fail or delete an
+    // unrelated file named like the member from the CWD. Route to the
+    // workspace-aware deletion (cascade + engine cleanup). Callers already
+    // route around this, but the function must be safe on its own.
+    if (appState.hasWorkspace()) {
+        if (index < appState.sortedFiles.size()) {
+            std::string path = memberPathOf(appState.workspace, appState.sortedFiles[index]);
+            if (!path.empty())
+                performWorkspaceMemberDeletion(appState, path);
+        }
+        return;
+    }
+#endif
     const auto& file = appState.sortedFiles[index];
 
     std::error_code ec;
@@ -562,75 +1021,6 @@ static void performFileDeletion(AppState& appState, size_t index) {
         appState.dataLoaded = false;
 
     appState.needsRedraw = true;
-}
-
-static void renderIncompatibleAdapterPopup() {
-    static int focusIdx = 0;
-    static bool prevPopupOpen = false;
-    if (!appState.showIncompatibleAdapterPopup) {
-        prevPopupOpen = false;
-        return;
-    }
-
-    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-    ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(450, 160), ImGuiCond_Always);
-
-    ImGui::PushStyleColor(ImGuiCol_ModalWindowDimBg, ImVec4(0.0f, 0.0f, 0.0f, 0.7f));
-
-    bool popupOpened = ImGui::BeginPopupModal("Incompatible##incompatAdapter", nullptr,
-                               ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
-    if (popupOpened) {
-        ImGui::TextWrapped("Incompatible data adapter. Continue anyway?");
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-
-        bool enterPressed = ImGui::IsKeyPressed(ImGuiKey_Enter);
-        if (popupOpened && !prevPopupOpen)
-            focusIdx = 0;
-        if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow))
-            focusIdx = 0;
-        if (ImGui::IsKeyPressed(ImGuiKey_RightArrow))
-            focusIdx = 1;
-
-        // Highlight focused button with accent color
-        if (focusIdx == 0)
-            ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-        if (ImGui::Button("Back", ImVec2(120, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape) ||
-            (enterPressed && prevPopupOpen && focusIdx == 0)) {
-            if (focusIdx == 0) ImGui::PopStyleColor();
-            const auto& allAdapters = AdapterRegistry::instance().getAll();
-            std::vector<DataAdapter*> adapters;
-            for (const auto& a : allAdapters) adapters.push_back(a.get());
-            appState.compatibleAdapters = adapters;
-            appState.showAdapterSelectionPopup = true;
-            appState.showIncompatibleAdapterPopup = false;
-            appState.pendingAdapterName.clear();
-            appState.pendingAdapterDirectory.clear();
-            ImGui::CloseCurrentPopup();
-        } else if (focusIdx == 0) {
-            ImGui::PopStyleColor();
-        }
-        ImGui::SameLine();
-        if (focusIdx == 1)
-            ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-        if (ImGui::Button("Yes", ImVec2(120, 0)) ||
-            (enterPressed && prevPopupOpen && focusIdx == 1)) {
-            if (focusIdx == 1) ImGui::PopStyleColor();
-            applyAdapterSelection(appState.pendingAdapterName, appState.pendingAdapterDirectory);
-            appState.showIncompatibleAdapterPopup = false;
-            appState.pendingAdapterName.clear();
-            appState.pendingAdapterDirectory.clear();
-            ImGui::CloseCurrentPopup();
-        } else if (focusIdx == 1) {
-            ImGui::PopStyleColor();
-        }
-
-        ImGui::EndPopup();
-    }
-    prevPopupOpen = popupOpened;
-    ImGui::PopStyleColor();
 }
 
 /**
@@ -686,11 +1076,11 @@ void handleKeyboardNavigation(const std::vector<std::string>& csvFiles,
                 if (it == selectedFiles.end()) {
                     // File not already selected, add it
                     try {
-                        if (!appState.currentAdapter) {
+                        if (!appState.dataSourceReady()) {
                             filesChanged = false;
                             return;
                         }
-                        InterferogramData data = appState.currentAdapter->loadFile(fullPath);
+                        InterferogramData data = loadInterferogram(appState, fullPath);
                         InterferogramData rawData = data; // Store raw data before any processing
                         
                         // Apply downsampling
@@ -858,27 +1248,32 @@ int main(int argc, char* argv[]) {
         std::cout << "No existing config found, using defaults" << std::endl;
     }
 
+    // Auto-cleanup: only regular .h5 workspaces stay in the recent list
+    // (legacy dataset directories are no longer openable in-app).
+    if (config.pruneRecentToH5()) {
+        config.saveToFile(configFilePath);
+        std::cout << "Pruned non-.h5 entries from recent datasets" << std::endl;
+    }
+
     // Store config pointers for use by adapter selection
     appState.configPtr = &config;
     appState.configFilePath = configFilePath;
+
+    // Pre-create the standard data dirs: the local converters drop-in and
+    // the converter-repo clone destination (ensureAppDirs was previously
+    // never called; the clone created its target lazily, but the drop-in
+    // dir should exist for discoverability).
+    ensureAppDirs();
+
+    // Phase 5: best-effort background pull of the converter repo (never a
+    // first clone at boot; silent when git is absent or no clone exists).
+    startupConverterRefresh(config);
+
 
     // UI size settings
     appState.currentUiSize = config.uiSize;
     appState.currentAccentColor = config.accentColor;
     appState.reconfigurePool(config.workerThreads);
-
-    // Register data adapters
-    AdapterRegistry::instance().registerAdapter(std::make_unique<WustMiniFtsAdapter>());
-    AdapterRegistry::instance().registerAdapter(std::make_unique<ArcoptixIgmsAdapter>());
-    AdapterRegistry::instance().registerAdapter(std::make_unique<ArcoptixSpectraAdapter>());
-
-    // Handle -o flag: auto-apply adapter (skips welcome screen) before GUI init
-    if (headlessCfg.command == HeadlessConfig::Command::OpenGUI) {
-        std::cout << "Auto-selecting adapter: " << headlessCfg.adapter
-                  << " for " << headlessCfg.path << std::endl;
-        appState.currentDirectory = headlessCfg.path;
-        applyAdapterSelection(headlessCfg.adapter, headlessCfg.path);
-    }
 
     // Initialize application
     GLFWwindow* window = nullptr;
@@ -962,14 +1357,13 @@ int main(int argc, char* argv[]) {
         appState.currentDirectory = "";
     }
     
-    appState.maxAtZero = config.maxAtZero; // Use config setting for peak alignment
+    // View-state (panels, plotDefaults, selection) lives in workspace.json now
+    // (Phase 3); the AppConfig fields above are session defaults only.
     appState.autoFitYAxis = config.autoFitYAxis; // Load from config
     appState.enableDownsampling = config.enableDownsampling; // Load from config
-    appState.xAxisBase = config.xAxisBase; // Load from config
     appState.showFPS = config.showFPS; // Load from config
+    appState.showTimestamps = config.showTimestamps; // Load from config
     appState.gridAlpha = config.gridAlpha; // Load from config
-    appState.xCorrectionMethod = config.xCorrectionMethod;
-    appState.peakProminenceThreshold = config.peakProminence;
     appState.showPeakIndicators = config.showPeakIndicators;
     appState.currentAccentColor = config.accentColor; // Load accent color from config
 
@@ -982,33 +1376,6 @@ int main(int argc, char* argv[]) {
         appState.defaultLayoutApplied = false;
     }
     
-    // Load spectrum window settings from config
-    appState.spectrum.yAxisMode           = config.spectrumYAxisMode;
-    appState.spectrum.prevYAxisMode       = config.spectrumYAxisMode;
-    appState.spectrum.xUnitSelector       = config.spectrumXUnitSelector;
-    appState.spectrum.yScaleSelector  = config.spectrumYScaleSelector;
-    appState.spectrum.prevXUnitSelector = config.spectrumXUnitSelector;
-    appState.spectrum.prevYScaleSelector = config.spectrumYScaleSelector;
-    appState.spectrum.forcedYMin      = config.spectrumForcedYMin;
-    appState.spectrum.forcedYMax    = config.spectrumForcedYMax;
-    appState.spectrum.apodizationSelector = config.apodizationSelector;
-    appState.spectrum.apodizationParams.gaussSigma = config.apodGaussSigma;
-    appState.spectrum.apodizationParams.rectWidth  = config.apodRectWidth;
-    appState.spectrum.apodizationParams.nortonBeerFwhm = config.apodNortonBeerFwhm;
-    appState.spectrum.apodizationParams.dolphChebyshevAt = config.apodDolphChebyshevAt;
-    appState.spectrum.apodizationParams.hammingAlpha = config.apodHammingAlpha;
-    appState.spectrum.apodizationParams.kaiserBeta = config.apodKaiserBeta;
-    appState.spectrum.apodizationParams.rectAsymMode = config.apodRectAsymMode;
-    appState.spectrum.detectorSensitivity = config.spectrumDetectorSensitivity;
-    if (config.spectrumDetectorSensitivity == 0.0f)
-        snprintf(appState.spectrum.detectorSensitivityText,
-                 sizeof(appState.spectrum.detectorSensitivityText), "NA");
-    else
-        snprintf(appState.spectrum.detectorSensitivityText,
-                 sizeof(appState.spectrum.detectorSensitivityText), "%.4f",
-                 config.spectrumDetectorSensitivity);
-    appState.spectrum.refLaserTextbox = config.spectrumRefLaser;
-    
     // Set the appState pointer in the spectrum object for raw data access
     appState.spectrum.appState = &appState;
     appState.averageSpectrum.appState = &appState;
@@ -1016,53 +1383,22 @@ int main(int argc, char* argv[]) {
     appState.allanVariance.appState = &appState;
     appState.t100.appState = &appState;
     appState.exportPanel.appState = &appState;
-    
-    // Load average window settings from config
-    appState.averageSpectrum.yAxisMode           = config.avgYAxisMode;
-    appState.averageSpectrum.prevYAxisMode       = config.avgYAxisMode;
-    appState.averageSpectrum.xUnitSelector       = config.avgXUnitSelector;
-    appState.averageSpectrum.yScaleSelector      = config.avgYScaleSelector;
-    appState.averageSpectrum.prevXUnitSelector   = config.avgXUnitSelector;
-    appState.averageSpectrum.prevYScaleSelector  = config.avgYScaleSelector;
-    appState.averageSpectrum.forcedYMin          = config.avgForcedYMin;
-    appState.averageSpectrum.forcedYMax          = config.avgForcedYMax;
-
-    // Load SNR window settings from config
-    appState.snrSpectrum.yAxisMode           = config.snrYAxisMode;
-    appState.snrSpectrum.prevYAxisMode       = config.snrYAxisMode;
-    appState.snrSpectrum.xUnitSelector       = config.snrXUnitSelector;
-    appState.snrSpectrum.yScaleSelector      = config.snrYScaleSelector;
-    appState.snrSpectrum.prevXUnitSelector   = config.snrXUnitSelector;
-    appState.snrSpectrum.prevYScaleSelector  = config.snrYScaleSelector;
-    appState.snrSpectrum.forcedYMin          = config.snrForcedYMin;
-    appState.snrSpectrum.forcedYMax          = config.snrForcedYMax;
-
-    appState.allanVariance.xUnitSelector        = config.allanXUnitSelector;
-    appState.allanVariance.wavelengthDecimation  = config.allanWavelengthDecimation;
-    appState.allanVariance.selectedSliceIndex    = config.allanSliceIndex;
-    appState.allanVariance.xRangeMin             = config.allanXRangeMin;
-    appState.allanVariance.xRangeMax             = config.allanXRangeMax;
-    appState.allanVariance.calcBaseSelector      = config.allanCalcBaseSelector;
-
-    // Load 100% T window settings from config
-    appState.t100.yAxisMode           = config.t100YAxisMode;
-    appState.t100.prevYAxisMode       = config.t100YAxisMode;
-    appState.t100.xUnitSelector       = config.t100XUnitSelector;
-    appState.t100.prevXUnitSelector   = config.t100XUnitSelector;
-    appState.t100.forcedYMin          = config.t100ForcedYMin;
-    appState.t100.forcedYMax          = config.t100ForcedYMax;
-    strncpy(appState.t100.energyRatioNumA, config.t100EnergyRatioNumA, 31);
-    strncpy(appState.t100.energyRatioDenA, config.t100EnergyRatioDenA, 31);
-    strncpy(appState.t100.energyRatioNumB, config.t100EnergyRatioNumB, 31);
-    strncpy(appState.t100.energyRatioDenB, config.t100EnergyRatioDenB, 31);
-    strncpy(appState.t100.energyRatioNumC, config.t100EnergyRatioNumC, 31);
-    strncpy(appState.t100.energyRatioDenC, config.t100EnergyRatioDenC, 31);
 
     // No initialization needed for simple file dialog
     
     // Main loop
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
+
+#if FTS_BUILD_HDF5
+        // Window-close / exit intercept: defer closing while the workspace is
+        // dirty so the Unsaved Changes modal can run (resolution sets the flag).
+        if (glfwWindowShouldClose(window) && appState.hasWorkspace() &&
+            appState.workspace.dirty && appState.pendingWorkspaceAction == PendingWorkspaceAction::None) {
+            requestWorkspaceDiscard(appState, PendingWorkspaceAction::Exit, "");
+            glfwSetWindowShouldClose(window, GLFW_FALSE);   // defer
+        }
+#endif
 
         // Poll pending async spectrum computations
         if (!appState.spectrum.pendingSpectra_.empty()) {
@@ -1106,6 +1442,19 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        // "Saved" toast: keep frames rendering while the toast is live, plus
+        // one final frame right after expiry so the overlay is actually
+        // cleared from the screen — the idle skip would otherwise freeze the
+        // last pre-expiry frame with the toast still visible.
+        if (appState.saveToastUntil > 0.0) {
+            if (glfwGetTime() >= appState.saveToastUntil) {
+                appState.saveToastUntil = 0.0;
+                appState.needsRedraw = true;
+            } else if (!appState.needsRedraw) {
+                appState.needsRedraw = true;
+            }
+        }
+
         // Skip rendering when UI is static — saves CPU/GPU
         if (!appState.needsRedraw) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -1124,6 +1473,7 @@ int main(int argc, char* argv[]) {
             bool aKeyPressed = glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
             bool dKeyPressed = glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
             bool qKeyPressed = glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
+            bool sKeyPressed = glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
             
             // 'Ctrl+Y' - Toggle auto-fit Y-axis (only on initial press)
             if (yKeyPressed && !appState.yKeyPressedLastFrame) {
@@ -1155,7 +1505,7 @@ int main(int argc, char* argv[]) {
                     std::vector<InterferogramData> reloadedData;
                     for (const auto& filePath : appState.selectedFiles) {
                         try {
-                            InterferogramData data = appState.currentAdapter->loadFile(filePath);
+                            InterferogramData data = loadInterferogram(appState, filePath);
                             
                             // Apply downsampling if enabled and dataset is large
                             if (appState.enableDownsampling && data.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
@@ -1185,7 +1535,7 @@ int main(int argc, char* argv[]) {
                         size_t reloadedIdx = 0;
                         for (const auto& file : appState.selectedFiles) {
                             try {
-                                InterferogramData rawData = appState.currentAdapter->loadFile(file);
+                                InterferogramData rawData = loadInterferogram(appState, file);
                                 appState.rawDataCache.push_back(rawData);
                             } catch (const std::exception& e) {
                                 std::cerr << "Error reloading raw data for spectrum: " << e.what() << std::endl;
@@ -1210,16 +1560,34 @@ int main(int argc, char* argv[]) {
                 appState.needsRedraw = true;
             }
 
+#if FTS_BUILD_HDF5
+            // 'Ctrl+S' - Save workspace; 'Ctrl+Shift+S' - Save As (workspace mode only)
+            if (sKeyPressed && !appState.sKeyPressedLastFrame && appState.hasWorkspace()) {
+                try {
+                    if (ImGui::GetIO().KeyShift)
+                        saveWorkspaceAs(appState, window);
+                    else
+                        requestSaveWorkspace(appState, "");
+                } catch (const std::exception& e) {
+                    appState.adapterErrorMsg = std::string("Save failed:\n") + e.what();
+                    appState.showAdapterErrorPopup = true;
+                }
+                appState.needsRedraw = true;
+            }
+#endif
+
             // Update key state tracking for next frame
             appState.yKeyPressedLastFrame = yKeyPressed;
             appState.aKeyPressedLastFrame = aKeyPressed;
             appState.dKeyPressedLastFrame = dKeyPressed;
             appState.qKeyPressedLastFrame = qKeyPressed;
+            appState.sKeyPressedLastFrame = sKeyPressed;
         } else {
             // Reset key states when keyboard is captured (e.g., typing in text field)
             appState.yKeyPressedLastFrame = false;
             appState.aKeyPressedLastFrame = false;
             appState.qKeyPressedLastFrame = false;
+            appState.sKeyPressedLastFrame = false;
         }
 
         // Reapply UI scaling if size changed
@@ -1279,6 +1647,16 @@ int main(int argc, char* argv[]) {
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) &&
             ImGui::IsKeyPressed(ImGuiKey_Delete) &&
             !appState.sortedFiles.empty()) {
+#if FTS_BUILD_HDF5
+            if (appState.hasWorkspace()) {
+                appState.pendingWorkspaceDeletionPath =
+                    memberPathOf(appState.workspace, appState.sortedFiles[appState.currentSortedFileIndex]);
+                if (!appState.pendingWorkspaceDeletionPath.empty()) {
+                    appState.showWorkspaceDeleteConfirmPopup = true;
+                    appState.needsRedraw = true;
+                }
+            } else
+#endif
             if (appState.skipDeleteConfirm) {
                 performFileDeletion(appState, appState.currentSortedFileIndex);
             } else {
@@ -1306,26 +1684,7 @@ int main(int argc, char* argv[]) {
 
         // Handle Ctrl+H to return to welcome screen
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) && ImGui::IsKeyPressed(ImGuiKey_H) && ImGui::GetIO().KeyCtrl) {
-            // Reset to welcome screen state
-            appState.showWelcomeScreen = true;
-            appState.welcomeScreenInitialized = false;
-            appState.dataLoaded = false;
-            appState.filesChanged = false;
-            appState.loadedData.clear();
-            appState.selectedFiles.clear();
-            appState.selectedFilenames.clear();
-            appState.rawDataCache.clear();
-    appState.hilbertXCache.clear();
-    appState.hilbertCacheLaserWavelength = 0.0f;
-    appState.spectrum.cachedSpectra.clear();
-    appState.spectrum.cachedFrequencies.clear();
-    appState.spectrum.lastPrimaryDetectors.clear();
-    appState.spectrum.lastSpectrumParams.clear();
-    appState.spectrum.pendingSpectra_.clear();
-    appState.clearAverageSpectrum();
-            appState.clearSnrSpectrum();
-            appState.clearAllanVariance();
-            appState.needsRedraw = true;
+            resetToWelcomeScreen(appState);
         }
 
         // 'Left/Right Arrow' - Pan left by 10% of current visible range
@@ -1350,10 +1709,10 @@ int main(int argc, char* argv[]) {
         }
 
         // Load file if navigation changed
-        if (appState.filesChanged && !appState.csvFiles.empty() && appState.currentAdapter) {
+        if (appState.filesChanged && !appState.csvFiles.empty() && appState.dataSourceReady()) {
             try {
                 // Load the currently selected file
-                InterferogramData data = appState.currentAdapter->loadFile(appState.sortedFiles[appState.currentSortedFileIndex]);
+                InterferogramData data = loadInterferogram(appState, appState.sortedFiles[appState.currentSortedFileIndex]);
                 
 
                 
@@ -1451,7 +1810,7 @@ int main(int argc, char* argv[]) {
                             parentDir.substr(raw_data_pos + 1) == "raw_data") {
                             parentDir = parentDir.substr(0, raw_data_pos);
                         }
-                        addToRecentDatasets(config, configFilePath, parentDir, appState.currentAdapter ? appState.currentAdapter->getName() : "");
+                        addToRecentDatasets(config, configFilePath, parentDir);
                     }
                 }
                 
@@ -1501,6 +1860,24 @@ int main(int argc, char* argv[]) {
         if (appState.scrollAccumY != 0.0f || appState.scrollAccumX != 0.0f)
             appState.needsRedraw = true;
 
+#if FTS_BUILD_HDF5
+        // Phase 3 view-state dirty latch: diff the managed view-state JSON
+        // against the baseline. The baseline is finalized at the end of the
+        // first rendered frame (see the post-render block), so the first-load
+        // autoscale of the zoom ranges can never false-dirty a fresh open.
+        // Latching (no baseline update on diff) matches the coarse-dirty model.
+        if (appState.hasWorkspace() && !appState.workspace.dirty &&
+            !appState.viewStateBaselinePending) {
+            if (viewStateJson(appState) != appState.viewStateBaseline) {
+                appState.workspace.dirty = true;
+                // One entry per dirty period: the latch only fires on the
+                // clean->dirty transition.
+                logWorkspaceChange(appState.workspace,
+                                   "View settings (zooms, ranges, panel options)");
+            }
+        }
+#endif
+
         // Conditionally disable anti-aliasing for large datasets (>50k points)
         if (appState.dataLoaded && appState.loadedData[0].dataSize() > 50000) {
             ImGui::GetStyle().AntiAliasedLines = false;
@@ -1508,39 +1885,59 @@ int main(int argc, char* argv[]) {
         
         // Show welcome screen if no data is loaded and we haven't initialized yet
         if (appState.showWelcomeScreen && !appState.welcomeScreenInitialized) {
-            bool showPopup = !appState.showAdapterSelectionPopup && !appState.showAdapterErrorPopup && !appState.showIncompatibleAdapterPopup;
+            // While a workspace-discard/save flow is pending, keep the welcome
+            // popup suppressed: its per-frame OpenPopup would force-close the
+            // Unsaved Changes / stale-drop modal (OpenPopupEx closes open
+            // popups with a different id), making the welcome modal
+            // "disappear" and the flow look broken.
+            bool showPopup = !appState.showAdapterErrorPopup
+                          && !appState.conversionScreen.open
+                          && !appState.showUnsavedPrompt
+                          && !appState.showStaleDropPrompt;
             renderWelcomeScreen(appState, config, configFilePath, showPopup);
         }
 
-        // Render adapter selection popup on top of welcome screen or main interface
-        if (appState.showAdapterSelectionPopup) {
-            ImGui::OpenPopup("Select Data Adapter##adapterSelect");
+        // Phase 5: dataset conversion screen (foreign formats -> .h5)
+        if (appState.conversionScreen.open) {
+            ImGui::OpenPopup("Convert Dataset##conversion");
             appState.needsRedraw = true;
         }
-        renderAdapterSelectionPopup();
-
-        if (appState.showIncompatibleAdapterPopup) {
-            ImGui::OpenPopup("Incompatible##incompatAdapter");
-            appState.needsRedraw = true;
-        }
-        renderIncompatibleAdapterPopup();
+        renderConversionScreen(appState);
 
         // Render adapter error popup
         if (appState.showAdapterErrorPopup) {
             ImGui::OpenPopup("Adapter Error##adapterError");
             appState.needsRedraw = true;
         }
+        beginModal(520.0f, modalAccent());
         if (ImGui::BeginPopupModal("Adapter Error##adapterError", &appState.showAdapterErrorPopup,
-                                   ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
-                                   ImGuiWindowFlags_AlwaysAutoResize)) {
-            ImGui::Text("%s", appState.adapterErrorMsg.c_str());
+                                   ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
+            // NoTitleBar: the title moves into the body so removing the
+            // header loses no information.
+            ImGui::Text("Adapter Error");
             ImGui::Spacing();
-            if (ImGui::Button("OK", ImVec2(120, 0)) || ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            ImGui::TextWrapped("%s", appState.adapterErrorMsg.c_str());
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            static int errFocus = 0;
+            static bool errWasOpen = false;
+            if (modalButtonRow({"OK"}, errFocus, errWasOpen, modalAccent()) == 0 ||
+                ImGui::IsKeyPressed(ImGuiKey_Escape)) {
                 appState.showAdapterErrorPopup = false;
                 ImGui::CloseCurrentPopup();
             }
+            errWasOpen = true;
+            drawModalAccentFrame(modalAccent());
             ImGui::EndPopup();
         }
+        endModal();
+
+#if FTS_BUILD_HDF5
+        // Phase 2 modals: unsaved-changes + stale-drop confirmation.
+        renderUnsavedPromptModal();
+        renderStaleDropPromptModal();
+#endif
         
         // Only render main docking interface if welcome screen is not active
         if (appState.welcomeScreenInitialized) {
@@ -1557,26 +1954,44 @@ int main(int argc, char* argv[]) {
                 // File menu
                 if (ImGui::BeginMenu("File"))
                 {
-                    if (ImGui::MenuItem("Set Working Directory")) {
-                        // Implement proper directory selection dialog
-                        std::string selectedDirectory = FileBrowser::showDirectorySelectionDialog(window);
-                        if (!selectedDirectory.empty()) {
-                            // Check if the selected directory has a raw_data subdirectory
-                            std::string rawDataPath = selectedDirectory + "/raw_data";
-                            if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {
-                                appState.currentDirectory = rawDataPath; // Use the raw_data subdirectory
-                                // Update dataset name from parent directory
-                                appState.currentDatasetName = selectedDirectory.substr(selectedDirectory.find_last_of("/\\") + 1);
-                            } else {
-                                appState.currentDirectory = selectedDirectory; // Fallback to selected directory
-                                // Update dataset name from selected directory
-                                appState.currentDatasetName = selectedDirectory.substr(selectedDirectory.find_last_of("/\\") + 1);
-                            }
-                            selectAdapterForDirectory(appState.currentDirectory);
-                            addToRecentDatasets(config, configFilePath, selectedDirectory);
-                            std::cout << "Working directory set to: " << appState.currentDirectory << std::endl;
+                    if (ImGui::MenuItem("Convert Dataset...")) {
+                        openConversionScreen(appState);
+                    }
+#if FTS_BUILD_HDF5
+                    if (ImGui::MenuItem("Open Workspace (.h5)...")) {
+                        std::string defaultFolder = appState.currentDirectory;
+                        if (appState.hasWorkspace())
+                            defaultFolder = std::filesystem::path(appState.workspacePath).parent_path().string();
+                        if (!std::filesystem::is_directory(defaultFolder))
+                            defaultFolder = std::filesystem::is_directory(config.lastWorkingDirectory)
+                                ? config.lastWorkingDirectory : "";
+                        std::string path = FileBrowser::showFileOpenDialog(
+                            "Open HDF5 Workspace", "HDF5 files", "*.h5",
+                            window, defaultFolder);
+                        if (!path.empty())
+                            requestWorkspaceDiscard(appState, PendingWorkspaceAction::OpenPath, path);
+                    }
+                    if (ImGui::MenuItem("Close Workspace", nullptr, false, appState.hasWorkspace())) {
+                        requestWorkspaceDiscard(appState, PendingWorkspaceAction::CloseWorkspace, "");
+                    }
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("Save", "Ctrl+S", false, appState.hasWorkspace())) {
+                        try {
+                            requestSaveWorkspace(appState, "");
+                        } catch (const std::exception& e) {
+                            appState.adapterErrorMsg = std::string("Save failed:\n") + e.what();
+                            appState.showAdapterErrorPopup = true;
                         }
                     }
+                    if (ImGui::MenuItem("Save As...", "Ctrl+Shift+S", false, appState.hasWorkspace())) {
+                        try {
+                            saveWorkspaceAs(appState, window);
+                        } catch (const std::exception& e) {
+                            appState.adapterErrorMsg = std::string("Save failed:\n") + e.what();
+                            appState.showAdapterErrorPopup = true;
+                        }
+                    }
+#endif
                     
                     // Recent datasets menu
                     if (config.recentDatasets.empty()) {
@@ -1601,25 +2016,13 @@ int main(int argc, char* argv[]) {
                                 }
 
                                 if (clicked && exists) {
-                                    if (std::filesystem::is_directory(datasetPath)) {
-                                        std::string rawDataPath = datasetPath + "/raw_data";
-                                        if (std::filesystem::exists(rawDataPath) && std::filesystem::is_directory(rawDataPath)) {
-                                            appState.currentDirectory = rawDataPath;
-                                        } else {
-                                            appState.currentDirectory = datasetPath;
-                                        }
-
-                                        appState.currentDatasetName = datasetPath.substr(datasetPath.find_last_of("/\\") + 1);
-
-                                        if (!entry.adapterName.empty() && AdapterRegistry::instance().getAdapter(entry.adapterName)) {
-                                            applyAdapterSelection(entry.adapterName, appState.currentDirectory);
-                                        } else {
-                                            selectAdapterForDirectory(appState.currentDirectory);
-                                        }
-                                        std::cout << "Opened recent dataset: " << datasetPath << std::endl;
-                                    } else {
-                                        std::cerr << "Recent dataset path no longer exists: " << datasetPath << std::endl;
+#if FTS_BUILD_HDF5
+                                    if (std::filesystem::path(datasetPath).extension() == ".h5") {
+                                        requestWorkspaceDiscard(appState, PendingWorkspaceAction::OpenPath, datasetPath);
                                     }
+                                    // Non-.h5 entries are pruned at startup; any
+                                    // forced open fails silently in openWorkspace().
+#endif
                                 }
                             }
                             ImGui::EndMenu();
@@ -1634,6 +2037,7 @@ int main(int argc, char* argv[]) {
                 {
                     // Display FPS toggle
                     ImGui::MenuItem("Display fps", NULL, &appState.showFPS);
+                    ImGui::MenuItem("Show timestamps", NULL, &appState.showTimestamps);
                     ImGui::Text("Grid opacity");
                     ImGui::SameLine();
                     float gridPct = appState.gridAlpha * 100.0f;
@@ -1844,6 +2248,15 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             }
 
             ImGui::Separator();
+#if FTS_BUILD_HDF5
+        // In workspace mode the entries are member IDs, not disk paths.
+        if (appState.hasWorkspace()) {
+            if (ImGui::Button("Strip derivatives", ImVec2(-FLT_MIN, 0))) {
+                stripWorkspaceDerivatives(appState);
+            }
+            ImGui::Separator();
+        }
+#endif
         ImGui::BeginChild("##FileList", ImVec2(0, 0), ImGuiChildFlags_None,
                           ImGuiWindowFlags_AlwaysVerticalScrollbar);
 
@@ -1870,20 +2283,36 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             std::string fullFilename = filename;
             filename = shortenFilename(filename);
             
-            // Delete button (left) — unique label per row avoids needing PushID
+            // Delete button (left) — unique label per row avoids needing PushID.
+            // Workspace mode: member delete (always confirms, decision 1).
+            // Legacy mode: file delete from disk (confirm, or skip-flag).
             float btnH = ImGui::GetFrameHeight();
-            std::string delBtnId = "×##del" + std::to_string(i);
-            if (ImGui::Button(delBtnId.c_str(), ImVec2(btnH, btnH))) {
-                if (appState.skipDeleteConfirm) {
-                    performFileDeletion(appState, i);
-                    continue;
-                } else {
-                    appState.deleteConfirmIndex = i;
-                    appState.showDeleteConfirmPopup = true;
+#if FTS_BUILD_HDF5
+            if (appState.hasWorkspace()) {
+                std::string delBtnId = "×##del" + std::to_string(i);
+                if (ImGui::Button(delBtnId.c_str(), ImVec2(btnH, btnH))) {
+                    appState.pendingWorkspaceDeletionPath = memberPathOf(appState.workspace, file);
+                    if (!appState.pendingWorkspaceDeletionPath.empty()) {
+                        appState.showWorkspaceDeleteConfirmPopup = true;
+                        appState.needsRedraw = true;
+                    }
                 }
+                ImGui::SameLine();
+            } else
+#endif
+            {
+                std::string delBtnId = "×##del" + std::to_string(i);
+                if (ImGui::Button(delBtnId.c_str(), ImVec2(btnH, btnH))) {
+                    if (appState.skipDeleteConfirm) {
+                        performFileDeletion(appState, i);
+                        continue;
+                    } else {
+                        appState.deleteConfirmIndex = i;
+                        appState.showDeleteConfirmPopup = true;
+                    }
+                }
+                ImGui::SameLine();
             }
-            
-            ImGui::SameLine();
             
             ImGui::PushID(static_cast<int>(i));
             
@@ -1928,8 +2357,19 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             // Compute widths: delete button already placed, then filename, then checkbox
             float chkWidth = ImGui::GetFrameHeight();
             float btnWidth = ImGui::GetContentRegionAvail().x - chkWidth - ImGui::GetStyle().ItemSpacing.x;
-            
-            if (ImGui::Button(filename.c_str(), ImVec2(btnWidth, 0))) {
+
+            // "Show timestamps" ribbon: append the member's hh:mm:ss to the row
+            // label (original records only — memberTimestampHMS returns "" for
+            // derivatives / empty timestamps). Rows are under PushID(i), so the
+            // label text change never shifts widget IDs (IMGUI_GUIDE §3).
+            std::string rowLabel = filename;
+#if FTS_BUILD_HDF5
+            if (appState.hasWorkspace() && appState.showTimestamps) {
+                std::string ts = memberTimestampHMS(appState.workspace, file);
+                if (!ts.empty()) rowLabel += " [" + ts + "]";
+            }
+#endif
+            if (ImGui::Button(rowLabel.c_str(), ImVec2(btnWidth, 0))) {
                 // Handle multi-select with Ctrl key
                 if (appState.multiSelectMode) {
                     // Toggle selection for this file
@@ -1946,7 +2386,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                         // Check if we would exceed the limit
                         if (appState.selectedFiles.size() < appState.MAX_SELECTABLE_FILES) {
                             try {
-                                InterferogramData data = appState.currentAdapter->loadFile(fullPath);
+                                InterferogramData data = loadInterferogram(appState, fullPath);
         
                                 
                                 // Store raw data in cache before downsampling
@@ -1969,7 +2409,10 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                                 appState.loadedData.push_back(data);
                                 appState.rawDataCache.push_back(rawData); // Store raw data for spectrum computation
                                 appState.selectedFiles.push_back(fullPath);
-                                appState.selectedFilenames.push_back(filename);
+                                std::string idName = fullPath;
+                                size_t idSlash = idName.find_last_of("/\\");
+                                if (idSlash != std::string::npos) idName = idName.substr(idSlash + 1);
+                                appState.selectedFilenames.push_back(idName);
                             } catch (const std::exception& e) {
                                 std::cerr << "Error loading file: " << e.what() << std::endl;
                             }
@@ -1996,7 +2439,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                         
                         try {
                             std::string fullPath = appState.sortedFiles[j];
-                            InterferogramData data = appState.currentAdapter->loadFile(fullPath);
+                            InterferogramData data = loadInterferogram(appState, fullPath);
                             
                             // Store raw data in cache before downsampling
                             InterferogramData rawData = data;
@@ -2078,16 +2521,110 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
         }
         ImGui::EndChild();
 
-        // Show selection limit popup if needed
-        if (ImGui::BeginPopupModal("Selection Limit", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
-            ImGui::Text("Maximum of %zu files can be selected at once.", appState.MAX_SELECTABLE_FILES);
-            ImGui::Text("Please deselect some files first.");
-            
-            if (ImGui::Button("OK")) {
-                ImGui::CloseCurrentPopup();
+#if FTS_BUILD_HDF5
+        // Derived products section (workspace mode only): derivative members,
+        // each deletable immediately (no confirm — recomputable, spec rule 7).
+        if (appState.hasWorkspace()) {
+            ImGui::Separator();
+            if (ImGui::CollapsingHeader("Derived products")) {
+                bool any = false;
+                auto listGroup = [&](const char* groupName, const auto& members) {
+                    for (const auto& m : members) {
+                        if (m.kind != MemberKind::Derivative) continue;
+                        any = true;
+                        std::string path = std::string("/") + groupName + "/" + m.id;
+                        if (ImGui::Button(("×##delderv" + path).c_str(),
+                                          ImVec2(ImGui::GetFrameHeight(), ImGui::GetFrameHeight()))) {
+                            performWorkspaceMemberDeletion(appState, path);
+                            appState.needsRedraw = true;
+                        }
+                        ImGui::SameLine();
+                        ImGui::Text("%s/%s", groupName, m.id.c_str());
+                        if (m.stale) {
+                            ImGui::SameLine();
+                            ImGui::TextDisabled("(stale)");
+                        }
+                    }
+                };
+                listGroup("spectra", appState.workspace.spectra.members);
+                listGroup("average_spectra", appState.workspace.averageSpectra.members);
+                listGroup("snr_spectra", appState.workspace.snrSpectra.members);
+                listGroup("allan_werle", appState.workspace.allanWerle.members);
+                listGroup("t100", appState.workspace.t100.members);
+                if (!any) ImGui::TextDisabled("(none)");
             }
-            
-            ImGui::EndPopup();
+        }
+
+        // Workspace member delete confirmation (decision 1: always confirm).
+        {
+            static int delFocus = 0;
+            static bool prevWPopupOpen = false;
+            if (!appState.showWorkspaceDeleteConfirmPopup) {
+                prevWPopupOpen = false;
+            }
+            if (appState.showWorkspaceDeleteConfirmPopup) {
+                ImGui::OpenPopup("Delete Member##confirm");
+            }
+            beginModal(480.0f, modalAccent());
+            if (ImGui::BeginPopupModal("Delete Member##confirm", NULL,
+                                       ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
+                const std::string& delPath = appState.pendingWorkspaceDeletionPath;
+                size_t dependentCount = appState.workspace.dependentsOf(delPath).size();
+                ImGui::Text("Delete member?");   // body restates the title (NoTitleBar)
+                ImGui::Spacing();
+                ImGui::TextWrapped("%s", delPath.c_str());
+                ImGui::Spacing();
+                if (dependentCount > 0)
+                    ImGui::TextWrapped("Some derived results may be marked stale.");
+                ImGui::Separator();
+                ImGui::Spacing();
+
+                int pressed = modalButtonRow({"Cancel", "Delete"},
+                                             delFocus, prevWPopupOpen, modalAccent());
+                if (pressed == 0 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+                    appState.showWorkspaceDeleteConfirmPopup = false;
+                    appState.pendingWorkspaceDeletionPath.clear();
+                    ImGui::CloseCurrentPopup();
+                } else if (pressed == 1) {
+                    if (!appState.pendingWorkspaceDeletionPath.empty())
+                        performWorkspaceMemberDeletion(appState, appState.pendingWorkspaceDeletionPath);
+                    appState.showWorkspaceDeleteConfirmPopup = false;
+                    appState.pendingWorkspaceDeletionPath.clear();
+                    ImGui::CloseCurrentPopup();
+                }
+                drawModalAccentFrame(modalAccent());
+                ImGui::EndPopup();
+                prevWPopupOpen = true;
+            }
+            endModal();
+        }
+#endif
+
+        // Show selection limit popup if needed
+        {
+            static int selFocus = 0;
+            static bool prevSelPopupOpen = false;
+            if (!ImGui::IsPopupOpen("Selection Limit"))
+                prevSelPopupOpen = false;
+            beginModal(440.0f, modalAccent());
+            if (ImGui::BeginPopupModal("Selection Limit", NULL,
+                                       ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
+                ImGui::TextWrapped("Maximum of %zu files can be selected at once.",
+                                   appState.MAX_SELECTABLE_FILES);
+                ImGui::TextWrapped("Please deselect some files first.");
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+
+                if (modalButtonRow({"OK"}, selFocus, prevSelPopupOpen, modalAccent()) == 0 ||
+                    ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+                    ImGui::CloseCurrentPopup();
+                }
+                drawModalAccentFrame(modalAccent());
+                ImGui::EndPopup();
+                prevSelPopupOpen = true;
+            }
+            endModal();
         }
 
         // Delete confirmation popup
@@ -2097,71 +2634,45 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             if (!appState.showDeleteConfirmPopup)
                 prevPopupOpen = false;
 
-            if (ImGui::BeginPopupModal("Delete File##confirm", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
+            beginModal(480.0f, modalAccent());
+            if (ImGui::BeginPopupModal("Delete File##confirm", NULL,
+                                       ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
                 size_t idx = appState.deleteConfirmIndex;
                 std::string fname = idx < appState.sortedFiles.size()
                     ? appState.sortedFiles[idx].substr(appState.sortedFiles[idx].find_last_of("/\\") + 1)
                     : "";
 
-                ImGui::Text("Are you sure you want to delete?");
+                ImGui::Text("Are you sure you want to delete?");   // body restates the title (NoTitleBar)
+                ImGui::Spacing();
                 ImGui::TextWrapped("%s", fname.c_str());
                 ImGui::Spacing();
                 ImGui::Separator();
                 ImGui::Spacing();
 
-                bool enterPressed = ImGui::IsKeyPressed(ImGuiKey_Enter);
-
-                if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) && focusIdx > 0)
-                    focusIdx--;
-                if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) && focusIdx < 2)
-                    focusIdx++;
-
-                // Cancel
-                if (focusIdx == 0)
-                    ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-                if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape) ||
-                    (enterPressed && prevPopupOpen && focusIdx == 0)) {
-                    if (focusIdx == 0) ImGui::PopStyleColor();
+                int pressed = modalButtonRow(
+                    {"Cancel", "Yes", "Yes, don't ask again"},
+                    focusIdx, prevPopupOpen, modalAccent());
+                if (pressed == 0 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
                     appState.showDeleteConfirmPopup = false;
                     ImGui::CloseCurrentPopup();
-                } else if (focusIdx == 0) {
-                    ImGui::PopStyleColor();
-                }
-                ImGui::SameLine();
-
-                // Yes
-                if (focusIdx == 1)
-                    ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-                if (ImGui::Button("Yes") ||
-                    (enterPressed && prevPopupOpen && focusIdx == 1)) {
-                    if (focusIdx == 1) ImGui::PopStyleColor();
+                } else if (pressed == 1) {
                     if (idx < appState.sortedFiles.size())
                         performFileDeletion(appState, idx);
                     appState.showDeleteConfirmPopup = false;
                     ImGui::CloseCurrentPopup();
-                } else if (focusIdx == 1) {
-                    ImGui::PopStyleColor();
-                }
-                ImGui::SameLine();
-
-                // Yes, don't ask again
-                if (focusIdx == 2)
-                    ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-                if (ImGui::Button("Yes, don't ask again") ||
-                    (enterPressed && prevPopupOpen && focusIdx == 2)) {
-                    if (focusIdx == 2) ImGui::PopStyleColor();
+                } else if (pressed == 2) {
                     appState.skipDeleteConfirm = true;
                     if (idx < appState.sortedFiles.size())
                         performFileDeletion(appState, idx);
                     appState.showDeleteConfirmPopup = false;
                     ImGui::CloseCurrentPopup();
-                } else if (focusIdx == 2) {
-                    ImGui::PopStyleColor();
                 }
 
+                drawModalAccentFrame(modalAccent());
                 ImGui::EndPopup();
                 prevPopupOpen = true;
             }
+            endModal();
         }
         
         ImGui::PopTextWrapPos(); // Disable text wrapping
@@ -2260,7 +2771,15 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                     // Move cursor forward and add text
                     ImGui::Dummy(square_size);
                     ImGui::SameLine();
-                    ImGui::Text("%s", displayName.c_str());
+                    std::string legendLabel = appState.selectedFilenames[i];
+#if FTS_BUILD_HDF5
+                    // "Show timestamps": append hh:mm:ss for original members.
+                    if (appState.hasWorkspace() && appState.showTimestamps) {
+                        std::string ts = memberTimestampHMS(appState.workspace, appState.selectedFiles[i]);
+                        if (!ts.empty()) legendLabel += " [" + ts + "]";
+                    }
+#endif
+                    ImGui::Text("%s", legendLabel.c_str());
                     if (i < appState.loadedData.size() - 1) {
                         ImGui::SameLine();
                         ImGui::Text("  "); // Add some spacing between items
@@ -4327,7 +4846,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                         std::vector<InterferogramData> reloadedData;
                         for (const auto& filePath : appState.selectedFiles) {
                             try {
-                                InterferogramData data = appState.currentAdapter->loadFile(filePath);
+                                InterferogramData data = loadInterferogram(appState, filePath);
                                 if (appState.enableDownsampling && data.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
                                     size_t localDownsampleFactor = data.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
                                     std::vector<double> downsampledRef, downsampledPrim;
@@ -4349,7 +4868,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                             size_t reloadedIdx = 0;
                             for (const auto& file : appState.selectedFiles) {
                                 try {
-                                    InterferogramData rawData = appState.currentAdapter->loadFile(file);
+                                    InterferogramData rawData = loadInterferogram(appState, file);
                                     appState.rawDataCache.push_back(rawData);
                                 } catch (const std::exception& e) {
                                     std::cerr << "Error reloading raw data: " << e.what() << std::endl;
@@ -4382,7 +4901,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                         std::vector<InterferogramData> reloadedData;
                         for (const auto& filePath : appState.selectedFiles) {
                             try {
-                                InterferogramData data = appState.currentAdapter->loadFile(filePath);
+                                InterferogramData data = loadInterferogram(appState, filePath);
                                 if (appState.enableDownsampling && data.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
                                     size_t localDownsampleFactor = data.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
                                     std::vector<double> downsampledRef, downsampledPrim;
@@ -4404,7 +4923,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                             size_t reloadedIdx = 0;
                             for (const auto& file : appState.selectedFiles) {
                                 try {
-                                    InterferogramData rawData = appState.currentAdapter->loadFile(file);
+                                    InterferogramData rawData = loadInterferogram(appState, file);
                                     appState.rawDataCache.push_back(rawData);
                                 } catch (const std::exception& e) {
                                     std::cerr << "Error reloading raw data: " << e.what() << std::endl;
@@ -4540,9 +5059,57 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
         if (appState.dataLoaded) {
             ImGui::Text("File: %s", appState.csvFiles.empty() ? "None" : appState.csvFiles[0].c_str());
             ImGui::Text("Samples: %zu", appState.loadedData.empty() ? 0 : appState.loadedData[0].dataSize());
-            ImGui::Text("Adapter: %s", appState.datasetInfo.adapterName.c_str());
+            const char* dataTypeName = appState.datasetInfo.hasPrecomputedSpectra
+                ? "Precomputed spectra"
+                : (appState.datasetInfo.axisIsCorrected ? "Corrected single IFG"
+                                                        : "Uncorrected dual IFG");
+            ImGui::Text("Data type: %s", dataTypeName);
             
             // Display comments if comments.txt exists (WUST format)
+#if FTS_BUILD_HDF5
+            if (appState.hasWorkspace()) {
+                ImGui::Separator();
+
+                // Editable comment (multi-line) + tags (single line). Each
+                // change mirrors into the workspace and marks it dirty.
+                ImGui::Text("Comment:");
+                // Stretch the comment box to roughly half the panel's usable
+                // height so the metadata area makes better use of docked
+                // space (tags + config below stay reachable; the panel scrolls
+                // if the config tree is expanded).
+                float commentHeight = ImGui::GetContentRegionAvail().y * 0.5f;
+                float minCommentH = 3.0f * ImGui::GetTextLineHeightWithSpacing();
+                if (commentHeight < minCommentH) commentHeight = minCommentH;
+                if (ImGui::InputTextMultiline("##metadataComment",
+                        appState.metadataCommentBuffer,
+                        sizeof(appState.metadataCommentBuffer),
+                        ImVec2(-FLT_MIN, commentHeight))) {
+                    appState.workspace.measurementComment = appState.metadataCommentBuffer;
+                    appState.workspace.dirty = true;
+                    logWorkspaceChange(appState.workspace, "Edited comment");
+                    appState.needsRedraw = true;
+                }
+                ImGui::Text("Tags:");
+                if (ImGui::InputText("##metadataTags", appState.metadataTagsBuffer,
+                                     sizeof(appState.metadataTagsBuffer))) {
+                    appState.workspace.tags = appState.metadataTagsBuffer;
+                    appState.workspace.dirty = true;
+                    logWorkspaceChange(appState.workspace, "Edited tags");
+                    appState.needsRedraw = true;
+                }
+
+                if (!appState.workspace.created.empty())
+                    ImGui::TextWrapped("@created: %s", appState.workspace.created.c_str());
+                if (!appState.workspace.format.empty())
+                    ImGui::TextWrapped("@format: %s", appState.workspace.format.c_str());
+                if (!appState.workspace.measurementConfig.empty()) {
+                    if (ImGui::TreeNode("Measurement Config")) {
+                        renderMeasurementConfig(appState.workspace.measurementConfig);
+                        ImGui::TreePop();
+                    }
+                }
+            } else
+#endif
             if (appState.datasetInfo.hasMetadataFile) {
                 ImGui::Separator();
                 ImGui::Text("Comments:");
@@ -4689,8 +5256,54 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                 ImVec2(pos.x - 20, pos.y - 12),
                 ImVec2(pos.x + ts.x + 20, pos.y + ts.y + 12),
                 IM_COL32(30, 30, 50, 230), 8.0f);
+            // Accent border, matching the "Saved" toast family.
+            dl->AddRect(
+                ImVec2(pos.x - 20, pos.y - 12),
+                ImVec2(pos.x + ts.x + 20, pos.y + ts.y + 12),
+                ImGui::ColorConvertFloat4ToU32(modalAccent()),
+                8.0f, ImDrawFlags_None, 2.0f);
             dl->AddText(pos, IM_COL32(255, 255, 255, 255), msg);
         }
+
+        // "Saved" toast — centered, undecorated, input-transparent overlay.
+        // Drawn on the foreground draw list (no ImGui window, no input
+        // capture), visible 1.5 s after an effective workspace save.
+        if (glfwGetTime() < appState.saveToastUntil) {
+            ImDrawList* dl = ImGui::GetForegroundDrawList();
+            ImVec2 size = ImGui::GetIO().DisplaySize;
+            const char* msg = "Saved";
+            ImVec2 ts = ImGui::CalcTextSize(msg);
+            ImVec2 pos((size.x - ts.x) * 0.5f, (size.y - ts.y) * 0.5f);
+            dl->AddRectFilled(
+                ImVec2(pos.x - 22, pos.y - 14),
+                ImVec2(pos.x + ts.x + 22, pos.y + ts.y + 14),
+                IM_COL32(30, 30, 50, 230), 8.0f);
+            dl->AddRect(
+                ImVec2(pos.x - 22, pos.y - 14),
+                ImVec2(pos.x + ts.x + 22, pos.y + ts.y + 14),
+                ImGui::ColorConvertFloat4ToU32(modalAccent()),
+                8.0f, ImDrawFlags_None, 2.0f);
+            dl->AddText(pos, IM_COL32(255, 255, 255, 255), msg);
+        }
+
+        // Phase 3: finalize the view-state baseline at the end of the first
+        // rendered frame, AFTER the panels have rendered and the first-load
+        // autoscale has written the final zoom ranges. Latch compares from the
+        // next frame.
+#if FTS_BUILD_HDF5
+        if (appState.hasWorkspace() && appState.viewStateBaselinePending) {
+            appState.viewStateBaseline = viewStateJson(appState);
+            appState.viewStateBaselinePending = false;
+            // Pristine open: the first frame's auto-computes (spectrum mirror
+            // in wsMirrorSpectrum) are re-baselined along with the view state
+            // — opening a file is not "unsaved changes" by itself.
+            if (appState.workspaceDirtyRebaselinePending) {
+                appState.workspaceDirtyRebaselinePending = false;
+                appState.workspace.dirty = false;
+                appState.workspace.changeLog.clear();
+            }
+        }
+#endif
 
         // Rendering
         ImGui::Render();
@@ -4725,72 +5338,19 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
     destroyWelcomeBackground();
     cleanupApplication(window);
     
-    // Save configuration before exiting
-    config.maxAtZero = appState.maxAtZero;
+    // Save configuration before exiting. View-state (panels, plotDefaults,
+    // selection) is persisted in workspace.json (Phase 3), not here.
     config.autoFitYAxis = appState.autoFitYAxis;
     config.enableDownsampling = appState.enableDownsampling;
-    config.xAxisBase = appState.xAxisBase;
     config.lastWorkingDirectory = appState.currentDirectory;
     config.uiSize = appState.currentUiSize;
 
     // Update config with current FPS setting before saving
     config.showFPS = appState.showFPS;
+    config.showTimestamps = appState.showTimestamps;
     config.gridAlpha = appState.gridAlpha;
-    config.xCorrectionMethod = appState.xCorrectionMethod;
-    config.peakProminence = appState.peakProminenceThreshold;
     config.showPeakIndicators = appState.showPeakIndicators;
     config.accentColor = appState.currentAccentColor;
-    
-    // Save spectrum window settings
-    config.spectrumYAxisMode           = appState.spectrum.yAxisMode;
-    config.spectrumXUnitSelector       = appState.spectrum.xUnitSelector;
-    config.spectrumYScaleSelector      = appState.spectrum.yScaleSelector;
-    config.spectrumForcedYMin          = appState.spectrum.forcedYMin;
-    config.spectrumForcedYMax   = appState.spectrum.forcedYMax;
-    config.apodizationSelector  = appState.spectrum.apodizationSelector;
-    config.apodGaussSigma       = appState.spectrum.apodizationParams.gaussSigma;
-    config.apodRectWidth        = appState.spectrum.apodizationParams.rectWidth;
-    config.apodNortonBeerFwhm  = appState.spectrum.apodizationParams.nortonBeerFwhm;
-    config.apodDolphChebyshevAt = appState.spectrum.apodizationParams.dolphChebyshevAt;
-    config.apodHammingAlpha     = appState.spectrum.apodizationParams.hammingAlpha;
-    config.apodKaiserBeta       = appState.spectrum.apodizationParams.kaiserBeta;
-    config.apodRectAsymMode     = appState.spectrum.apodizationParams.rectAsymMode;
-    config.spectrumDetectorSensitivity = appState.spectrum.detectorSensitivity;
-    config.spectrumRefLaser = appState.spectrum.refLaserTextbox;
-    
-    // Save average window settings
-    config.avgYAxisMode           = appState.averageSpectrum.yAxisMode;
-    config.avgXUnitSelector       = appState.averageSpectrum.xUnitSelector;
-    config.avgYScaleSelector      = appState.averageSpectrum.yScaleSelector;
-    config.avgForcedYMin          = appState.averageSpectrum.forcedYMin;
-    config.avgForcedYMax          = appState.averageSpectrum.forcedYMax;
-
-    // Save SNR window settings
-    config.snrYAxisMode           = appState.snrSpectrum.yAxisMode;
-    config.snrXUnitSelector       = appState.snrSpectrum.xUnitSelector;
-    config.snrYScaleSelector      = appState.snrSpectrum.yScaleSelector;
-    config.snrForcedYMin          = appState.snrSpectrum.forcedYMin;
-    config.snrForcedYMax          = appState.snrSpectrum.forcedYMax;
-
-    // Save Allan window settings
-    config.allanXUnitSelector        = appState.allanVariance.xUnitSelector;
-    config.allanWavelengthDecimation = appState.allanVariance.wavelengthDecimation;
-    config.allanSliceIndex           = appState.allanVariance.selectedSliceIndex;
-    config.allanXRangeMin            = appState.allanVariance.xRangeMin;
-    config.allanXRangeMax            = appState.allanVariance.xRangeMax;
-    config.allanCalcBaseSelector     = appState.allanVariance.calcBaseSelector;
-
-    // Save 100% T window settings
-    config.t100YAxisMode      = appState.t100.yAxisMode;
-    config.t100XUnitSelector  = appState.t100.xUnitSelector;
-    config.t100ForcedYMin     = appState.t100.forcedYMin;
-    config.t100ForcedYMax     = appState.t100.forcedYMax;
-    strncpy(config.t100EnergyRatioNumA, appState.t100.energyRatioNumA, 31);
-    strncpy(config.t100EnergyRatioDenA, appState.t100.energyRatioDenA, 31);
-    strncpy(config.t100EnergyRatioNumB, appState.t100.energyRatioNumB, 31);
-    strncpy(config.t100EnergyRatioDenB, appState.t100.energyRatioDenB, 31);
-    strncpy(config.t100EnergyRatioNumC, appState.t100.energyRatioNumC, 31);
-    strncpy(config.t100EnergyRatioDenC, appState.t100.energyRatioDenC, 31);
 
     // Save accent color
     config.accentColor = appState.currentAccentColor;

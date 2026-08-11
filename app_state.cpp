@@ -23,6 +23,7 @@ AppState::AppState()
       aKeyPressedLastFrame(false),
       dKeyPressedLastFrame(false),
       qKeyPressedLastFrame(false),
+      sKeyPressedLastFrame(false),
       enableDownsampling(true),
       zoomRange({0, 0}),
       shouldAutoscale(false),
@@ -66,6 +67,37 @@ AppState::AppState()
     // Constructor body
 }
 
+// Ctrl+H "back to home": clear data/selection/panel caches and show the
+// welcome screen (the workspace stays loaded). Mirrors the inline block that
+// used to live in main.cpp's key handler.
+void resetToWelcomeScreen(AppState& s) {
+    s.showWelcomeScreen = true;
+    s.welcomeScreenInitialized = false;
+    s.dataLoaded = false;
+    s.filesChanged = false;
+    s.loadedData.clear();
+    s.selectedFiles.clear();
+    s.selectedFilenames.clear();
+    s.rawDataCache.clear();
+    s.hilbertXCache.clear();
+    s.hilbertCacheLaserWavelength = 0.0f;
+    s.spectrum.cachedSpectra.clear();
+    s.spectrum.cachedFrequencies.clear();
+    s.spectrum.lastPrimaryDetectors.clear();
+    s.spectrum.lastSpectrumParams.clear();
+    s.spectrum.pendingSpectra_.clear();
+    s.clearAverageSpectrum();
+    s.clearSnrSpectrum();
+    s.clearAllanVariance();
+#if FTS_BUILD_HDF5
+    // Ctrl+H mutates view-state fields (the batch panels reset their manual
+    // zoom); re-arm the latch baseline so "back to home" never dirties a
+    // clean workspace. Re-captured at the end of the next rendered frame.
+    s.viewStateBaselinePending = true;
+#endif
+    s.needsRedraw = true;
+}
+
 // Reset method implementation
 void AppState::reset() {
     currentDirectory = "";
@@ -86,6 +118,7 @@ void AppState::reset() {
     aKeyPressedLastFrame = false;
     dKeyPressedLastFrame = false;
     qKeyPressedLastFrame = false;
+    sKeyPressedLastFrame = false;
     enableDownsampling = true;
     zoomRange = {0, 0};
     shouldAutoscale = false;
@@ -128,14 +161,24 @@ void AppState::reset() {
     t100.reset();
     filesSelectedForAveraging.clear();
     datasetInfo = DatasetInfo();
-    currentAdapter.reset();
-    showAdapterSelectionPopup = false;
-    showIncompatibleAdapterPopup = false;
-    pendingAdapterName.clear();
-    pendingAdapterDirectory.clear();
-    compatibleAdapters.clear();
+#if FTS_BUILD_HDF5
+    workspace = Workspace{};
+    workspacePath.clear();
+    pendingWorkspaceAction = PendingWorkspaceAction::None;
+    pendingWorkspacePath.clear();
+    showUnsavedPrompt = false;
+    pendingSaveAsPath.clear();
+    showStaleDropPrompt = false;
+    viewStateBaseline = nlohmann::json::object();
+    viewStateBaselinePending = true;
+    workspaceDirtyRebaselinePending = false;
+    metadataCommentBuffer[0] = '\0';
+    metadataTagsBuffer[0] = '\0';
+#endif
     showDeleteConfirmPopup = false;
     deleteConfirmIndex = 0;
+    showWorkspaceDeleteConfirmPopup = false;
+    pendingWorkspaceDeletionPath.clear();
     // skipDeleteConfirm intentionally NOT reset — it's a session-level flag
     hilbertXCache.clear();
     peakPositionsCache.clear();

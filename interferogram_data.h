@@ -2,13 +2,9 @@
 
 #include <vector>
 #include <string>
-#include <fstream>
-#include <sstream>
-#include <stdexcept>
-#include <iostream>
-#include <charconv>
-#include <cstdlib>
 #include <cerrno>
+#include <cstdlib>
+#include <charconv>
 #include <type_traits>
 #include <utility>
 
@@ -16,7 +12,7 @@
 struct InterferogramData {
     std::vector<double> referenceDetector;
     std::vector<double> primaryDetector;
-    std::vector<double> opdAxis;    // pre-corrected OPD axis (empty if not available, e.g. WUST)
+    std::vector<double> opdAxis;    // pre-corrected OPD axis in meters (empty if not available)
     std::string metadata;
 
     size_t dataSize() const {
@@ -25,6 +21,23 @@ struct InterferogramData {
         if (!opdAxis.empty()) return opdAxis.size();
         return 0;
     }
+};
+
+// Data type flags describing what the current workspace holds.
+enum class DataType {
+    UncorrectedDualIFG,   // dual detectors, needs Hilbert OPD correction
+    CorrectedSingleIFG,   // OPD already in meters, single detector
+    PrecomputedSpectra    // spectra only, no interferograms
+};
+
+struct DatasetInfo {
+    DataType dataType;
+
+    bool hasInterferograms      = false;
+    bool hasReferenceChannel    = false;
+    bool axisIsCorrected        = false;
+    bool hasPrecomputedSpectra  = false;
+    bool hasMetadataFile        = false;
 };
 
 namespace fts_parse_detail {
@@ -82,56 +95,3 @@ inline bool parseDoubleFromChars(const std::string& s, double& out) {
     }
     return fts_parse_detail::parseDouble(begin, end, out);
 }
-
-class CSVAdapter {
-public:
-    /**
-     * Load interferogram data from a CSV file
-     * 
-     * @param filePath Path to the CSV file
-     * @return InterferogramData containing reference and primary detector data
-     * @throws std::runtime_error if file cannot be opened
-     */
-    static InterferogramData loadFromCSV(const std::string& filePath) {
-        InterferogramData data;
-        std::ifstream file(filePath);
-        
-        if (!file.is_open()) {
-            throw std::runtime_error("Could not open file: " + filePath);
-        }
-        
-        std::string line;
-        bool isFirstLine = true;
-        
-        while (std::getline(file, line)) {
-            if (isFirstLine) {
-                isFirstLine = false;
-                continue; // Skip header line
-            }
-            
-            std::istringstream iss(line);
-            std::string refValue, primaryValue;
-            
-            // Parse CSV line (format: Reference detector [V],Primary detector [V])
-            if (std::getline(iss, refValue, ',') && std::getline(iss, primaryValue, ',')) {
-                // parseDoubleFromChars, NOT std::stod: Windows CRT strtod is globally
-                // locked, so std::stod makes parallel parsing slower with more threads.
-                double ref = 0.0, prim = 0.0;
-                if (parseDoubleFromChars(refValue, ref) && parseDoubleFromChars(primaryValue, prim)) {
-                    // Convert strings to doubles and store in vectors
-                    data.referenceDetector.push_back(ref);
-                    data.primaryDetector.push_back(prim);
-                } else {
-                    // Skip malformed lines but continue processing
-                    std::cerr << "Warning: Error parsing line '" << line 
-                              << "' in file " << filePath << std::endl;
-                }
-            }
-        }
-        
-        // Add basic metadata
-        data.metadata = "CSV File: " + filePath;
-        
-        return data;
-    }
-};

@@ -1,8 +1,11 @@
 #include "snr_spectrum.h"
 #include "spectral_toolbox.h"
-#include "adapters/csv_adapter.h"
-#include "adapters/adapter_registry.h"
+#include "interferogram_data.h"
+#if FTS_BUILD_HDF5
+#include "workspace_reader.h"
+#endif
 #include "app_state.h"
+#include "imgui_internal.h"   // GetCurrentWindowRead()->SkipItems (hidden dock tab)
 #include <cmath>
 #include <algorithm>
 #include <cstdio>
@@ -107,6 +110,14 @@ void SnrSpectrum::reset() {
 }
 
 void SnrSpectrum::renderSnrContents(bool showTrackingCursor) {
+#if FTS_BUILD_HDF5
+    // Staleness banner (§4.2).
+    if (appState && snrOutdated(*appState)) {
+        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
+            "Saved result is stale - press Calculate to recompute.");
+        ImGui::Spacing();
+    }
+#endif
     if (!snrAvailable || cachedSnrX.empty() || cachedSnrY.empty()) {
         ImVec2 avail = ImGui::GetContentRegionAvail();
         ImVec2 textSize = ImGui::CalcTextSize("No SNR spectrum available");
@@ -176,7 +187,10 @@ void SnrSpectrum::renderSnrContents(bool showTrackingCursor) {
         }
     }
 
-    if (pendingNextXMin < pendingNextXMax) {
+    // Hidden dock tabs set SkipItems: arming SetNextAxisLimits here would
+    // be discarded by ImPlot's hidden-window early return, losing the
+    // restored X range. Keep it armed until the panel is actually visible.
+    if (pendingNextXMin < pendingNextXMax && !ImGui::GetCurrentWindowRead()->SkipItems) {
         ImPlot::SetNextAxisLimits(ImAxis_X1, pendingNextXMin, pendingNextXMax, ImPlotCond_Always);
         manualXMin = pendingNextXMin;
         manualXMax = pendingNextXMax;
@@ -499,14 +513,16 @@ bool SnrSpectrum::tickCalculation() {
                 !appState->filesSelectedForAveraging[i]) continue;
 
             std::string filePath = appState->sortedFiles[i];
-            std::string adapterName = appState->datasetInfo.adapterName;
             bool axisCorr = appState->datasetInfo.axisIsCorrected;
             bool hasPrecomp = appState->datasetInfo.hasPrecomputedSpectra;
-            auto fut = appState->computationPool->enqueue([filePath, refLaser, K, xUnit,
-                                                               apodSelector, apodParams, adapterName, axisCorr, hasPrecomp,
+            // Read the raw data on the main thread and capture it by value:
+            // the workspace is mutated/replaced by the main thread (open,
+            // close, member delete, Ctrl+H), so workers must never read it.
+            InterferogramData raw = workspaceRead(appState->workspace, filePath);
+            auto fut = appState->computationPool->enqueue([raw = std::move(raw), refLaser, K, xUnit,
+                                                               apodSelector, apodParams, this, axisCorr, hasPrecomp,
                                                                xMethod = static_cast<SpectralToolbox::XCorrectionMethod>(appState->xCorrectionMethod),
-                                                               promThresh = appState->peakProminenceThreshold]() {
-                auto raw = AdapterRegistry::instance().loadFileStatic(adapterName, filePath);
+                                                               promThresh = appState->peakProminenceThreshold]() mutable {
                 if (hasPrecomp) {
                     SpectralToolbox::ProcessedSpectrum ps;
                     ps.spectrumX = raw.referenceDetector;
@@ -623,6 +639,14 @@ bool SnrSpectrum::tickCalculation() {
             cachedSnrX = calcCommonX;
             fileCount = calcValidFiles;
             snrAvailable = true;
+#if FTS_BUILD_HDF5
+            if (appState && appState->hasWorkspace() && snrAvailable) {
+                auto inputs = checkedInputPaths(*appState);
+                wsUpsertSnr(appState->workspace, inputs, fileCount,
+                            cachedSnrX, cachedSnrY,
+                            makeSnrConfig(*appState, inputs, fileCount));
+            }
+#endif
         } else {
             snrAvailable = false;
             fileCount = 0;

@@ -1,7 +1,10 @@
 #include "spectrum.h"
 #include "spectral_toolbox.h"
-#include "adapters/csv_adapter.h"
-#include "adapters/adapter_registry.h"
+#include "interferogram_data.h"
+#if FTS_BUILD_HDF5
+#include "workspace_reader.h"
+#endif
+#include "imgui_internal.h"   // GetCurrentWindowRead()->SkipItems (hidden dock tab)
 #include <cmath>
 #include <algorithm>
 #include <cstdio>
@@ -221,6 +224,10 @@ void Spectrum::pollPendingSpectra() {
                 auto ps = it->future.get();
                 cachedSpectra[it->fileId] = std::move(ps.spectrumY);
                 cachedFrequencies[it->fileId] = std::move(ps.spectrumX);
+#if FTS_BUILD_HDF5
+                wsMirrorSpectrum(*appState, it->fileId,
+                                 cachedFrequencies[it->fileId], cachedSpectra[it->fileId]);
+#endif
 
                 // Update lastSpectrumParams so isSpectrumDirty returns false next time
                 double activeParam = 0.0;
@@ -261,7 +268,7 @@ void Spectrum::pollPendingSpectra() {
 bool Spectrum::computeAndCacheSpectrum(const std::string& filePath, const std::string& fileId) {
     if (!appState) return false;
     try {
-        auto raw = AdapterRegistry::instance().loadFileStatic(appState->datasetInfo.adapterName, filePath);
+        auto raw = workspaceRead(appState->workspace, filePath);
 
         auto targetUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
 
@@ -297,6 +304,10 @@ bool Spectrum::computeAndCacheSpectrum(const std::string& filePath, const std::s
             cachedSpectra[fileId] = std::move(ps.spectrumY);
             lastPrimaryDetectors[fileId] = raw.primaryDetector;
         }
+
+#if FTS_BUILD_HDF5
+        wsMirrorSpectrum(*appState, fileId, cachedFrequencies[fileId], cachedSpectra[fileId]);
+#endif
 
         double activeParam = 0.0;
         auto apodSel = static_cast<ApodizationWindow>(apodizationSelector);
@@ -334,8 +345,6 @@ bool Spectrum::computeAndCacheSpectrum(const std::string& filePath, const std::s
 void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, std::vector<double>>>& primaryDetectors,
                                      const std::vector<InterferogramData>& rawDataCache) {
 
-
-        
         // Create plot specifications with matching colors (needed for legend)
         std::vector<ImPlotSpec> plotSpecs(primaryDetectors.size());
         
@@ -394,7 +403,17 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                 // Move cursor forward and add text
                 ImGui::Dummy(square_size);
                 ImGui::SameLine();
-                ImGui::Text("%s", displayName.c_str());
+                std::string legendLabel = displayName;
+#if FTS_BUILD_HDF5
+                // "Show timestamps": precomputed-spectrum originals only; derived
+                // spectra (spec_*) never get a timestamp (plan §4, site 3).
+                if (appState && appState->hasWorkspace() && appState->showTimestamps &&
+                    isOriginalSpectraMember(appState->workspace, fileData.first)) {
+                    std::string ts = memberTimestampHMS(appState->workspace, fileData.first);
+                    if (!ts.empty()) legendLabel += " [" + ts + "]";
+                }
+#endif
+                ImGui::Text("%s", legendLabel.c_str());
                 
                 if (i < primaryDetectors.size() - 1) {
                     ImGui::SameLine();
@@ -487,7 +506,11 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
         // because its effect is unreliable in this setup (silently suppressed by
         // ImPlot's internal auto-fit state after user zoom/pan interactions).
 
-        if (!shouldAutoscale && pendingNextXMin < pendingNextXMax) {
+        // Hidden dock tabs set SkipItems: arming SetNextAxisLimits here would
+        // be discarded by ImPlot's hidden-window early return, losing the
+        // restored X range. Keep it armed until the panel is actually visible.
+        if (!shouldAutoscale && pendingNextXMin < pendingNextXMax &&
+            !ImGui::GetCurrentWindowRead()->SkipItems) {
             // Arrow-key pan or shift-drag X-range selection: apply once, then consume.
             ImPlot::SetNextAxisLimits(ImAxis_X1, pendingNextXMin, pendingNextXMax, ImPlotCond_Always);
             pendingNextXMin = 0.0;
@@ -726,8 +749,21 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                 if (i < rawDataCache.size()) {
                     rawData = rawDataCache[i];
                 } else {
-                    rawData.primaryDetector  = primaryDetector;
-                    rawData.referenceDetector = primaryDetector;
+                    // rawDataCache out of sync (defensive): pull the true raw
+                    // data from the workspace so precomputed-spectra files get
+                    // their real wavenumber axis. The old fake
+                    // (referenceDetector = primaryDetector) plotted spectrum
+                    // Y values on the X axis for such files. On failure keep
+                    // primary-only: the reference-empty guard below skips the
+                    // computation instead of producing garbage.
+                    rawData.primaryDetector = primaryDetector;
+#if FTS_BUILD_HDF5
+                    if (appState && appState->hasWorkspace()) {
+                        try {
+                            rawData = workspaceRead(appState->workspace, fileId);
+                        } catch (...) { /* keep the primary-only fallback */ }
+                    }
+#endif
                 }
 
                 const bool needsComputation = isSpectrumDirty(fileId, rawData.primaryDetector);
@@ -795,6 +831,10 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
 
                         cachedSpectra[fileId]     = std::move(ps.spectrumY);
                         cachedFrequencies[fileId] = std::move(ps.spectrumX);
+#if FTS_BUILD_HDF5
+                        wsMirrorSpectrum(*appState, fileId,
+                                         cachedFrequencies[fileId], cachedSpectra[fileId]);
+#endif
 
                         double activeParam = 0.0;
                         if (apodizationSelector == static_cast<int>(ApodizationWindow::Gauss))

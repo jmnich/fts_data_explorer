@@ -35,6 +35,25 @@ playground/
 - Python 3.10+
 - `numpy`, `scipy`, `matplotlib`
 
+## Headless demos and tests
+
+`headless_demo/basic_<name>/demo_<name>.py` runs the app's headless mode
+(`-w`) on converted test data; `tests/hdf_conformance/run_conformance.py` and
+`tests/spectrum_validation/validate_spectrum.py` are the verification suites.
+
+These scripts need the converter scripts, which live in the separate
+[fts_data_explorer_converters](https://github.com/jmnich/fts_data_explorer_converters)
+repo (not in this repository). Set `FTS_CONVERTERS_DIR` to that checkout before
+running them:
+
+```bash
+export FTS_CONVERTERS_DIR=/path/to/fts_data_explorer_converters
+python3 playground/headless_demo/basic_allan/demo_allan.py
+python3 playground/tests/hdf_conformance/run_conformance.py
+```
+
+Without the variable the scripts exit with a clear error message.
+
 ## Running
 
 ```bash

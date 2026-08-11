@@ -14,13 +14,13 @@
 struct AppConfig {
     struct RecentDatasetEntry {
         std::string path;
-        std::string adapterName;
     };
     std::vector<RecentDatasetEntry> recentDatasets;
     size_t maxRecentDatasets = 10;
     bool autoFitYAxis = true;
     bool maxAtZero = false;
     bool showFPS = false; // FPS counter display setting
+    bool showTimestamps = false; // "Show timestamps" ribbon toggle
     float gridAlpha = 1.0f; // Grid opacity (0.0 = invisible, 1.0 = full)
     bool enableDownsampling = true;
     int xAxisBase = 0;
@@ -35,6 +35,13 @@ struct AppConfig {
 
     // Thread pool config
     int workerThreads = -1; // -1 = AUTO
+
+    // Converter settings (Phase 5; persisted in [Converters]). Empty strings
+    // mean "platform default" (appDataDir()/converter-repo, python3|py).
+    std::string converterRepoUrl = "https://github.com/jmnich/fts_data_explorer_converters";
+    std::string converterRepoDir;   // empty = default appDataDir()/converter-repo
+    std::string converterInterpreter; // empty = "python3" (posix) / "py" (Win)
+    std::vector<std::string> converterPaths; // extra user converter dirs
     
     // Docking layout: tracks whether the default layout has been applied
     bool defaultLayoutApplied = false;
@@ -99,26 +106,20 @@ struct AppConfig {
     char t100EnergyRatioDenC[32] = "";
     
     // Add a dataset to recent list (maintains max size, deduplicates)
-    void addRecentDataset(const std::string& datasetPath, const std::string& adapterName = "") {
+    void addRecentDataset(const std::string& datasetPath) {
         // Normalize path: strip trailing slash to prevent formatting mismatches
         std::string normalized = datasetPath;
         while (!normalized.empty() && (normalized.back() == '/' || normalized.back() == '\\'))
             normalized.pop_back();
 
-        // Preserve existing adapter name if present and none provided
-        std::string existingAdapter;
-        auto it = std::find_if(recentDatasets.begin(), recentDatasets.end(),
-            [&](const RecentDatasetEntry& e) { return e.path == normalized; });
-        if (it != recentDatasets.end()) {
-            existingAdapter = it->adapterName;
-            recentDatasets.erase(it);
-        }
+        // Remove existing entry (if any) so the list stays deduplicated
+        recentDatasets.erase(
+            std::remove_if(recentDatasets.begin(), recentDatasets.end(),
+                [&](const RecentDatasetEntry& e) { return e.path == normalized; }),
+            recentDatasets.end());
 
-        // Add to beginning with adapter name (provided, or preserved from old entry)
-        recentDatasets.insert(recentDatasets.begin(), {
-            normalized,
-            adapterName.empty() ? existingAdapter : adapterName
-        });
+        // Add to beginning
+        recentDatasets.insert(recentDatasets.begin(), {normalized});
 
         // Trim to max size
         if (recentDatasets.size() > maxRecentDatasets) {
@@ -132,6 +133,23 @@ struct AppConfig {
         if (it != recentDatasets.end()) {
             recentDatasets.erase(it);
         }
+    }
+
+    // Drop recent entries that do not point at a .h5 workspace (legacy dataset
+    // directories, other file types). Unreachable .h5 paths are kept — the UI
+    // already shows them as "(unreachable)" — so a temporarily unmounted
+    // network drive does not wipe the list. Returns true when the list changed.
+    bool pruneRecentToH5() {
+        size_t before = recentDatasets.size();
+        recentDatasets.erase(
+            std::remove_if(recentDatasets.begin(), recentDatasets.end(),
+                [](const RecentDatasetEntry& e) {
+                    std::error_code ec;
+                    return std::filesystem::path(e.path).extension() != ".h5"
+                        || std::filesystem::is_directory(e.path, ec);
+                }),
+            recentDatasets.end());
+        return recentDatasets.size() != before;
     }
     
     // Save configuration to file
@@ -150,11 +168,7 @@ struct AppConfig {
             // Write recent datasets
             configFile << "[RecentDatasets]\n";
             for (const auto& entry : recentDatasets) {
-                configFile << "dataset=" << entry.path;
-                if (!entry.adapterName.empty()) {
-                    configFile << "|" << entry.adapterName;
-                }
-                configFile << "\n";
+                configFile << "dataset=" << entry.path << "\n";
             }
             configFile << "\n";
             
@@ -162,13 +176,10 @@ struct AppConfig {
             configFile << "[Settings]\n";
             configFile << "max_recent_datasets=" << maxRecentDatasets << "\n";
 
-            configFile << "max_at_zero=" << (maxAtZero ? "true" : "false") << "\n";
             configFile << "auto_fit_y_axis=" << (autoFitYAxis ? "true" : "false") << "\n";
             configFile << "enable_downsampling=" << (enableDownsampling ? "true" : "false") << "\n";
-            configFile << "x_axis_base=" << xAxisBase << "\n";
             configFile << "show_fps=" << (showFPS ? "true" : "false") << "\n";
-            configFile << "x_correction_method=" << xCorrectionMethod << "\n";
-            configFile << "peak_prominence=" << peakProminence << "\n";
+            configFile << "show_timestamps=" << (showTimestamps ? "true" : "false") << "\n";
             configFile << "show_peak_indicators=" << (showPeakIndicators ? "true" : "false") << "\n";
             configFile << "grid_alpha=" << gridAlpha << "\n";
             configFile << "last_working_directory=" << lastWorkingDirectory << "\n";
@@ -176,6 +187,19 @@ struct AppConfig {
             configFile << "accent_color=" << accentColor << "\n";
             configFile << "worker_threads=" << workerThreads << "\n";
             configFile << "default_layout_applied=" << (defaultLayoutApplied ? "true" : "false") << "\n";
+
+            // Converter settings (only non-defaults are persisted; empty
+            // strings keep the platform defaults)
+            configFile << "\n[Converters]\n";
+            if (!converterRepoUrl.empty())
+                configFile << "repo_url=" << converterRepoUrl << "\n";
+            if (!converterRepoDir.empty())
+                configFile << "repo_dir=" << converterRepoDir << "\n";
+            if (!converterInterpreter.empty())
+                configFile << "interpreter=" << converterInterpreter << "\n";
+            for (const auto& p : converterPaths) {
+                configFile << "path=" << p << "\n";
+            }
             
             // Write window settings
             configFile << "\n[Window]\n";
@@ -184,62 +208,6 @@ struct AppConfig {
             configFile << "pos_x=" << windowPosX << "\n";
             configFile << "pos_y=" << windowPosY << "\n";
             configFile << "maximized=" << (windowMaximized ? "true" : "false") << "\n";
-            
-            // Write spectrum window settings
-            configFile << "\n[SpectrumWindow]\n";
-            configFile << "y_axis_mode=" << spectrumYAxisMode << "\n";
-            configFile << "x_unit_selector=" << spectrumXUnitSelector << "\n";
-            configFile << "y_scale_selector=" << spectrumYScaleSelector << "\n";
-            configFile << "forced_y_min=" << spectrumForcedYMin << "\n";
-            configFile << "forced_y_max=" << spectrumForcedYMax << "\n";
-            configFile << "apod_selector=" << apodizationSelector << "\n";
-            configFile << "apod_gauss_sigma=" << apodGaussSigma << "\n";
-            configFile << "apod_rect_width=" << apodRectWidth << "\n";
-            configFile << "apod_norton_beer_fwhm=" << apodNortonBeerFwhm << "\n";
-            configFile << "apod_dolph_chebyshev_at=" << apodDolphChebyshevAt << "\n";
-            configFile << "apod_hamming_alpha=" << apodHammingAlpha << "\n";
-            configFile << "apod_kaiser_beta=" << apodKaiserBeta << "\n";
-            configFile << "apod_rect_asym_mode=" << (apodRectAsymMode ? "1" : "0") << "\n";
-            configFile << "detector_sensitivity=" << spectrumDetectorSensitivity << "\n";
-            configFile << "ref_laser=" << spectrumRefLaser << "\n";
-            
-            // Write average window settings
-            configFile << "\n[AverageWindow]\n";
-            configFile << "y_axis_mode=" << avgYAxisMode << "\n";
-            configFile << "x_unit_selector=" << avgXUnitSelector << "\n";
-            configFile << "y_scale_selector=" << avgYScaleSelector << "\n";
-            configFile << "forced_y_min=" << avgForcedYMin << "\n";
-            configFile << "forced_y_max=" << avgForcedYMax << "\n";
-
-            // Write SNR window settings
-            configFile << "\n[SNRWindow]\n";
-            configFile << "y_axis_mode=" << snrYAxisMode << "\n";
-            configFile << "x_unit_selector=" << snrXUnitSelector << "\n";
-            configFile << "y_scale_selector=" << snrYScaleSelector << "\n";
-            configFile << "forced_y_min=" << snrForcedYMin << "\n";
-            configFile << "forced_y_max=" << snrForcedYMax << "\n";
-
-            // Write Allan window settings
-            configFile << "\n[AllanWindow]\n";
-            configFile << "x_unit_selector=" << allanXUnitSelector << "\n";
-            configFile << "wavelength_decimation=" << allanWavelengthDecimation << "\n";
-            configFile << "slice_index=" << allanSliceIndex << "\n";
-            configFile << "x_range_min=" << allanXRangeMin << "\n";
-            configFile << "x_range_max=" << allanXRangeMax << "\n";
-            configFile << "calc_base_selector=" << allanCalcBaseSelector << "\n";
-
-            // Write T100 window settings
-            configFile << "\n[T100Window]\n";
-            configFile << "y_axis_mode=" << t100YAxisMode << "\n";
-            configFile << "x_unit_selector=" << t100XUnitSelector << "\n";
-            configFile << "forced_y_min=" << t100ForcedYMin << "\n";
-            configFile << "forced_y_max=" << t100ForcedYMax << "\n";
-            configFile << "energy_ratio_num_a=" << t100EnergyRatioNumA << "\n";
-            configFile << "energy_ratio_den_a=" << t100EnergyRatioDenA << "\n";
-            configFile << "energy_ratio_num_b=" << t100EnergyRatioNumB << "\n";
-            configFile << "energy_ratio_den_b=" << t100EnergyRatioDenB << "\n";
-            configFile << "energy_ratio_num_c=" << t100EnergyRatioNumC << "\n";
-            configFile << "energy_ratio_den_c=" << t100EnergyRatioDenC << "\n";
             
             configFile.flush();
             configFile.close();
@@ -290,33 +258,25 @@ struct AppConfig {
                     value.erase(value.find_last_not_of(" \t") + 1);
                     
                     if (currentSection == "RecentDatasets" && key == "dataset") {
-                        RecentDatasetEntry entry;
+                        // Tolerate the legacy "path|adapter" form (adapter
+                        // part dropped — the adapter system is retired).
                         size_t pipePos = value.find('|');
-                        if (pipePos != std::string::npos) {
-                            entry.path = value.substr(0, pipePos);
-                            entry.adapterName = value.substr(pipePos + 1);
-                        } else {
-                            entry.path = value;
-                        }
+                        RecentDatasetEntry entry;
+                        entry.path = pipePos != std::string::npos
+                            ? value.substr(0, pipePos) : value;
                         recentDatasets.push_back(entry);
                     } else if (currentSection == "Settings") {
                         if (key == "max_recent_datasets") {
                             maxRecentDatasets = std::stoul(value);
 
-                        } else if (key == "max_at_zero") {
-                            maxAtZero = (value == "true");
                         } else if (key == "auto_fit_y_axis") {
                             autoFitYAxis = (value == "true");
                         } else if (key == "enable_downsampling") {
                             enableDownsampling = (value == "true");
-                        } else if (key == "x_axis_base") {
-                            xAxisBase = std::stoi(value);
                         } else if (key == "show_fps") {
                             showFPS = (value == "true");
-                        } else if (key == "x_correction_method") {
-                            xCorrectionMethod = std::stoi(value);
-                        } else if (key == "peak_prominence") {
-                            peakProminence = std::stof(value);
+                        } else if (key == "show_timestamps") {
+                            showTimestamps = (value == "true");
                         } else if (key == "show_peak_indicators") {
                             showPeakIndicators = (value == "true");
                         } else if (key == "grid_alpha") {
@@ -344,99 +304,21 @@ struct AppConfig {
                         } else if (key == "maximized") {
                             windowMaximized = (value == "true");
                         }
-                    } else if (currentSection == "SpectrumWindow") {
-                        if (key == "y_axis_mode") {
-                            spectrumYAxisMode = std::stoi(value);
-                        } else if (key == "x_unit_selector") {
-                            spectrumXUnitSelector = std::stoi(value);
-                        } else if (key == "y_scale_selector") {
-                            spectrumYScaleSelector = std::stoi(value);
-                        } else if (key == "forced_y_min") {
-                            spectrumForcedYMin = std::stod(value);
-                        } else if (key == "forced_y_max") {
-                            spectrumForcedYMax = std::stod(value);
-                        } else if (key == "apod_selector") {
-                            apodizationSelector = std::stoi(value);
-                        } else if (key == "apod_gauss_sigma") {
-                            apodGaussSigma = std::stof(value);
-                        } else if (key == "apod_rect_width") {
-                            apodRectWidth = std::stof(value);
-                        } else if (key == "apod_norton_beer_fwhm") {
-                            apodNortonBeerFwhm = std::stof(value);
-                        } else if (key == "apod_dolph_chebyshev_at") {
-                            apodDolphChebyshevAt = std::stof(value);
-                        } else if (key == "apod_hamming_alpha") {
-                            apodHammingAlpha = std::stof(value);
-                        } else if (key == "apod_kaiser_beta") {
-                            apodKaiserBeta = std::stof(value);
-                        } else if (key == "apod_rect_asym_mode") {
-                            apodRectAsymMode = (value == "1");
-                        } else if (key == "detector_sensitivity") {
-                            spectrumDetectorSensitivity = std::stof(value);
-                        } else if (key == "ref_laser") {
-                            spectrumRefLaser = std::stof(value);
-                        }
-                    } else if (currentSection == "AverageWindow") {
-                        if (key == "y_axis_mode") {
-                            avgYAxisMode = std::stoi(value);
-                        } else if (key == "x_unit_selector") {
-                            avgXUnitSelector = std::stoi(value);
-                        } else if (key == "y_scale_selector") {
-                            avgYScaleSelector = std::stoi(value);
-                        } else if (key == "forced_y_min") {
-                            avgForcedYMin = std::stod(value);
-                        } else if (key == "forced_y_max") {
-                            avgForcedYMax = std::stod(value);
-                        }
-                    } else if (currentSection == "SNRWindow") {
-                        if (key == "y_axis_mode") {
-                            snrYAxisMode = std::stoi(value);
-                        } else if (key == "x_unit_selector") {
-                            snrXUnitSelector = std::stoi(value);
-                        } else if (key == "y_scale_selector") {
-                            snrYScaleSelector = std::stoi(value);
-                        } else if (key == "forced_y_min") {
-                            snrForcedYMin = std::stod(value);
-                        } else if (key == "forced_y_max") {
-                            snrForcedYMax = std::stod(value);
-                        }
-                    } else if (currentSection == "AllanWindow") {
-                        if (key == "x_unit_selector") {
-                            allanXUnitSelector = std::stoi(value);
-                        } else if (key == "wavelength_decimation") {
-                            allanWavelengthDecimation = std::stoi(value);
-                        } else if (key == "slice_index") {
-                            allanSliceIndex = std::stoi(value);
-                        } else if (key == "x_range_min") {
-                            allanXRangeMin = std::stod(value);
-                        } else if (key == "x_range_max") {
-                            allanXRangeMax = std::stod(value);
-                        } else if (key == "calc_base_selector") {
-                            allanCalcBaseSelector = std::stoi(value);
-                        } else if (key == "target_wavelength") {
-                            // legacy field — ignore
-                        }
-                    } else if (currentSection == "T100Window") {
-                        if (key == "y_axis_mode") {
-                            t100YAxisMode = std::stoi(value);
-                        } else if (key == "x_unit_selector") {
-                            t100XUnitSelector = std::stoi(value);
-                        } else if (key == "forced_y_min") {
-                            t100ForcedYMin = std::stod(value);
-                        } else if (key == "forced_y_max") {
-                            t100ForcedYMax = std::stod(value);
-                        } else if (key == "energy_ratio_num_a") {
-                            strncpy(t100EnergyRatioNumA, value.c_str(), 31);
-                        } else if (key == "energy_ratio_den_a") {
-                            strncpy(t100EnergyRatioDenA, value.c_str(), 31);
-                        } else if (key == "energy_ratio_num_b") {
-                            strncpy(t100EnergyRatioNumB, value.c_str(), 31);
-                        } else if (key == "energy_ratio_den_b") {
-                            strncpy(t100EnergyRatioDenB, value.c_str(), 31);
-                        } else if (key == "energy_ratio_num_c") {
-                            strncpy(t100EnergyRatioNumC, value.c_str(), 31);
-                        } else if (key == "energy_ratio_den_c") {
-                            strncpy(t100EnergyRatioDenC, value.c_str(), 31);
+                    } else if (currentSection == "Converters") {
+                        if (key == "repo_url") {
+                            // Guard: only accept a plausible repo URL; anything
+                            // else falls back to the default so a typo'd value
+                            // can't make git open a bogus credential prompt.
+                            if (value.rfind("http://", 0) == 0
+                                || value.rfind("https://", 0) == 0
+                                || value.rfind("git@", 0) == 0)
+                                converterRepoUrl = value;
+                        } else if (key == "repo_dir") {
+                            converterRepoDir = value;
+                        } else if (key == "interpreter") {
+                            converterInterpreter = value;
+                        } else if (key == "path") {
+                            if (!value.empty()) converterPaths.push_back(value);
                         }
                     }
                 }

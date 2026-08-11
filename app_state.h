@@ -12,29 +12,73 @@
 #include "allan_variance.h"
 #include "t100.h"
 #include "export.h"
-#include "adapters/csv_adapter.h"
-#include "adapters/dataset_info.h"
-#include "adapters/data_adapter.h"
+#include "interferogram_data.h"
+#include "conversion_screen.h"
+#if FTS_BUILD_HDF5
+#include "hdf/workspace.h"
+#endif
 
-// Use InterferogramData from csv_adapter.h
+struct AppState;
 
-void selectAdapterForDirectory(const std::string& directoryPath);
-void applyAdapterSelection(const std::string& adapterName, const std::string& directoryPath);
+// Shorten a long filename for display in legends/labels: keep the first 8
+// chars and last 24, ellipsize the middle.
 std::string shortenFilename(const std::string& filename);
+
+#if FTS_BUILD_HDF5
+enum class PendingWorkspaceAction { None, CloseWorkspace, OpenPath, Exit };
+#endif
+
+#if FTS_BUILD_HDF5
+void openWorkspace(AppState& s, const std::string& path);
+void closeWorkspace(AppState& s);
+// All workspace-discarding entry points route through this; the unsaved-changes
+// modal runs in the frame and dispatches the stashed action on resolution.
+void requestWorkspaceDiscard(AppState& s, PendingWorkspaceAction action, const std::string& path);
+void dispatchPendingAction(AppState& s);
+#endif
+
+// Ctrl+H "back to home": clear data/selection/panel caches and show the
+// welcome screen (the workspace stays loaded — datasets can be re-opened from
+// the recent list). Shared by the main-window shortcut and the Convert modal.
+void resetToWelcomeScreen(AppState& s);
 
 // Application state structure
 struct AppState {
     // Data adapter state
     DatasetInfo datasetInfo;
-    std::unique_ptr<DataAdapter> currentAdapter;
-    bool showAdapterSelectionPopup = false;
+#if FTS_BUILD_HDF5
+    Workspace workspace;      // in-memory HDF5 workspace
+    std::string workspacePath; // empty = no workspace open
+
+    // Pending workspace-discarding action stashed while the unsaved-changes
+    // modal runs; dispatched by dispatchPendingAction on resolution.
+    PendingWorkspaceAction pendingWorkspaceAction = PendingWorkspaceAction::None;
+    std::string pendingWorkspacePath;
+    bool showUnsavedPrompt = false;
+
+    // Stale-drop confirmation state (§1.5): stashed save target + modal flag.
+    // pendingSaveAsPath empty = plain Save, non-empty = Save As target.
+    std::string pendingSaveAsPath;
+    bool showStaleDropPrompt = false;
+
+    // Phase 3: view-state dirty latch + editable metadata buffers.
+    // Baseline is captured at the end of the FIRST rendered frame after open
+    // (not at open time): first-load autoscale finalizes the per-panel zoom
+    // ranges mid-frame, so capturing earlier would false-dirty every fresh open.
+    nlohmann::json viewStateBaseline;
+    bool viewStateBaselinePending = true;
+    // Pristine-open dirty re-baseline: set by openWorkspace, consumed at the
+    // end of the first rendered frame. First-load auto-computes (the spectrum
+    // mirror in wsMirrorSpectrum) must not make a fresh open "dirty" — the
+    // auto-generated members become the baseline, exactly like the view state.
+    bool workspaceDirtyRebaselinePending = false;
+    // ponytail: fixed-cap free-text comment; acceptable for a comment field,
+    // bump the array size if a real need appears.
+    char metadataCommentBuffer[4096];
+    char metadataTagsBuffer[128];
+#endif
     bool showAdapterErrorPopup = false;
     std::string adapterErrorMsg;
-    bool showIncompatibleAdapterPopup = false;
-    std::string pendingAdapterName;
-    std::string pendingAdapterDirectory;
-    std::vector<DataAdapter*> compatibleAdapters;
-    std::string pendingRecentDatasetAdapterSave; // Path to save adapter for in recent datasets
     AppConfig* configPtr = nullptr;
     std::string configFilePath;
     // UI state
@@ -67,6 +111,7 @@ struct AppState {
     bool aKeyPressedLastFrame;
     bool dKeyPressedLastFrame;
     bool qKeyPressedLastFrame;
+    bool sKeyPressedLastFrame;
     
     // Performance optimization
     bool enableDownsampling;
@@ -79,6 +124,9 @@ struct AppState {
     
     // FPS counter state
     bool showFPS;
+    // "Show timestamps" ribbon toggle (UI chrome; persisted in config). Effect
+    // gated on hasWorkspace() — display-only, never written to the .h5.
+    bool showTimestamps = false;
     float gridAlpha; // Grid opacity (0.0 = invisible, 1.0 = full)
     float fps;
     int frameCount;
@@ -93,6 +141,9 @@ struct AppState {
     float scrollAccumX = 0.0f;
     float scrollAccumY = 0.0f;
     double lastScrollEventTime = 0.0;
+    // "Saved" toast deadline (glfwGetTime()); 0.0 = inactive. Set after a
+    // successful workspace save; renderSaveToast draws while now < deadline.
+    double saveToastUntil = 0.0;
     
     // X-range selection state
     bool isSelectingXRange;
@@ -197,11 +248,27 @@ struct AppState {
     size_t deleteConfirmIndex = 0;
     bool skipDeleteConfirm = false; // "Don't ask again" flag — survives dataset changes, not config
 
+    // Workspace member deletion confirmation (decision 1: originals always confirm).
+    bool showWorkspaceDeleteConfirmPopup = false;
+    std::string pendingWorkspaceDeletionPath;
+
+    // Phase 5: dataset conversion screen (foreign formats -> .h5)
+    ConversionScreenState conversionScreen;
+
     // Thread pool for parallel computation
     std::unique_ptr<ThreadPool> computationPool;
     int configuredWorkerCount = -1;   // -1 = AUTO
 
     void reconfigurePool(int count);
+
+#if FTS_BUILD_HDF5
+    bool hasWorkspace() const { return !workspacePath.empty(); }
+    bool workspaceDirty() const { return workspace.dirty; }
+#else
+    bool hasWorkspace() const { return false; }
+    bool workspaceDirty() const { return false; }
+#endif
+    bool dataSourceReady() const { return hasWorkspace(); }
 };
 
 // Global application state instance

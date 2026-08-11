@@ -1,12 +1,14 @@
 #include "export.h"
 #include "app_state.h"
+#include "theme.h"
+#include "popup_utils.h"
 #include "spectrum.h"
 #include "average_spectrum.h"
 #include "allan_variance.h"
 #include "t100.h"
 #include "spectral_toolbox.h"
-#include "adapters/csv_adapter.h"
-#include "adapters/adapter_registry.h"
+#include "interferogram_data.h"
+#include "workspace_reader.h"
 
 #include "imgui.h"
 #include "file_browser.h"
@@ -150,21 +152,48 @@ void ExportPanel::render()
     }
     ImGui::EndDisabled();
 
-    if (ImGui::BeginPopupModal("Export Warning", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::Text("No artifacts selected or available for export.");
-        if (ImGui::Button("OK")) ImGui::CloseCurrentPopup();
-        ImGui::EndPopup();
-    }
+    ImVec4 accent = GetAccentBase(StringToAccentColor(appState->currentAccentColor));
 
-    if (ImGui::BeginPopupModal("Export Complete", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::Dummy(ImVec2(260, 1));
-        float avail = ImGui::GetContentRegionAvail().x;
-        float btnW = 120.0f;
-        ImGui::SetCursorPosX((avail - btnW) * 0.5f);
-        if (ImGui::Button("OK", ImVec2(btnW, 0)) || ImGui::IsKeyPressed(ImGuiKey_Enter))
+    beginModal(440.0f, accent);
+    if (ImGui::BeginPopupModal("Export Warning", NULL,
+                               ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
+        // NoTitleBar: the title moves into the body so removing the header
+        // loses no information.
+        ImGui::Text("Export Warning");
+        ImGui::Spacing();
+        ImGui::TextWrapped("No artifacts selected or available for export.");
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+        static int warnFocus = 0;
+        static bool warnWasOpen = false;
+        if (modalButtonRow({"OK"}, warnFocus, warnWasOpen, accent) == 0 ||
+            ImGui::IsKeyPressed(ImGuiKey_Escape))
             ImGui::CloseCurrentPopup();
+        warnWasOpen = true;
+        drawModalAccentFrame(accent);
         ImGui::EndPopup();
     }
+    endModal();
+
+    beginModal(440.0f, accent);
+    if (ImGui::BeginPopupModal("Export Complete", NULL,
+                               ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
+        // NoTitleBar: the body restates the title ("Export complete.").
+        ImGui::TextWrapped("Export complete.");
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+        static int doneFocus = 0;
+        static bool doneWasOpen = false;
+        if (modalButtonRow({"OK"}, doneFocus, doneWasOpen, accent) == 0 ||
+            ImGui::IsKeyPressed(ImGuiKey_Escape))
+            ImGui::CloseCurrentPopup();
+        doneWasOpen = true;
+        drawModalAccentFrame(accent);
+        ImGui::EndPopup();
+    }
+    endModal();
 
 
 }
@@ -567,7 +596,7 @@ void ExportPanel::writeT100AllTransCsv(const std::string& dir)
     bool anyValid = false;
 
     for (size_t i = 0; i < checkedFiles.size(); i++) {
-        auto raw = AdapterRegistry::instance().loadFileStatic(appState->datasetInfo.adapterName, checkedFiles[i]);
+        auto raw = workspaceRead(appState->workspace, checkedFiles[i]);
         SpectralToolbox::ProcessedSpectrum ps;
         if (appState->datasetInfo.hasPrecomputedSpectra) {
             ps.spectrumX = raw.referenceDetector;

@@ -8,6 +8,9 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import demo_common
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[2]
@@ -21,10 +24,8 @@ def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     cfg_path = HERE / "config.json"
 
-    cmd = [str(BINARY), "-p", str(DATASET_DIR), "WUST Mini FTS Raw",
-           str(cfg_path), "Average spectrum", str(OUTPUT_DIR)]
-    print(f"Running: {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    result = demo_common.convert_and_process(
+        BINARY, DATASET_DIR, cfg_path, "Average spectrum", OUTPUT_DIR)
     if result.returncode != 0:
         print("ERROR:", result.stderr)
         sys.exit(1)

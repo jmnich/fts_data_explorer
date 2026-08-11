@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.14)  # FetchContent requires 3.14+
+cmake_minimum_required(VERSION 3.18)  # FetchContent 3.14+; HDF5 1.14.3 requires 3.18
 project(fts_data_explorer)
 
 # -- Version header fallback ---------------------------------------------------
@@ -48,6 +48,9 @@ set(GLIBCOMPAT_WRAP
     # Safety net for C23 functions from dependencies
     -Wl,--wrap,__isoc23_sscanf
     -Wl,--wrap,__isoc23_strtoul
+    -Wl,--wrap,__isoc23_strtol
+    -Wl,--wrap,__isoc23_strtoll
+    -Wl,--wrap,__isoc23_strtoull
     # Re-versioned math (GLIBC_2.44) and C++ runtime (GLIBCXX_3.4.32/CXXABI_1.3.15)
     # that would raise the minimum glibc/libstdc++ above Ubuntu 22.04
     -Wl,--wrap,cosh
@@ -95,6 +98,69 @@ FetchContent_Declare(
     GIT_TAG v3.11.3
 )
 FetchContent_MakeAvailable(nlohmann_json)
+
+# Download and build HDF5 (static C library, no optional features).
+# The pinned tag is hdf5-1_14_3 (the 'hdf5-1.14.3' spelling does not exist upstream).
+# On MinGW the cross-configure must skip HDF5's try_run() probes (x86-64 safe values)
+# and declare vasprintf via _GNU_SOURCE; see phase0.md.
+# Phase 5: HDF5 is unconditional — .h5 is the only runtime input, the
+# FTS_BUILD_HDF5=OFF escape hatch was retired with the adapter system.
+set(HDF5_BUILD_SHARED_LIBS   OFF CACHE BOOL "Build HDF5 as static library")
+set(HDF5_BUILD_STATIC_LIBS   ON  CACHE BOOL "Build HDF5 as static library")
+set(HDF5_BUILD_CPP_LIB       OFF CACHE BOOL "Disable HDF5 C++ library")
+set(HDF5_BUILD_HL_LIB        OFF CACHE BOOL "Disable HDF5 high-level library")
+set(HDF5_BUILD_TOOLS         OFF CACHE BOOL "Disable HDF5 command-line tools")
+set(HDF5_BUILD_EXAMPLES      OFF CACHE BOOL "Disable HDF5 examples")
+set(BUILD_TESTING            OFF CACHE BOOL "Disable HDF5 tests")
+set(HDF5_ENABLE_Z_LIB_SUPPORT  OFF CACHE BOOL "Disable zlib")
+set(HDF5_ENABLE_SZIP_SUPPORT   OFF CACHE BOOL "Disable szip")
+set(HDF5_ENABLE_THREADSAFE     OFF CACHE BOOL "Disable threadsafe (single-writer discipline)")
+
+# HDF5's CMake reads the generic BUILD_SHARED_LIBS/BUILD_STATIC_LIBS vars and, if
+# unset, defaults BUILD_SHARED_LIBS=ON which leaks into FFTW/GLFW configured later.
+# Pin them first so everything stays static.
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static libraries" FORCE)
+set(BUILD_STATIC_LIBS ON  CACHE BOOL "Build static libraries" FORCE)
+
+if(MINGW)
+    # Cross-compile: replace HDF5's try_run() probes with x86-64 MinGW-safe results.
+    # Both <var>_RUN and <var>_RUN__TRYRUN_OUTPUT must be set or CMake re-runs the probe.
+    foreach(v IN ITEMS H5_LDOUBLE_TO_LONG_SPECIAL H5_LONG_TO_LDOUBLE_SPECIAL
+                       H5_LDOUBLE_TO_LLONG_ACCURATE H5_LLONG_TO_LDOUBLE_CORRECT
+                       H5_DISABLE_SOME_LDOUBLE_CONV HAVE_IOEO)
+        set(${v}_RUN__TRYRUN_OUTPUT PLEASE_FILL_OUT-NOTFOUND CACHE STRING "cross-compile result")
+    endforeach()
+    set(H5_LDOUBLE_TO_LONG_SPECIAL_RUN   0 CACHE STRING "MinGW: no special ldouble conversion")
+    set(H5_LONG_TO_LDOUBLE_SPECIAL_RUN   0 CACHE STRING "MinGW: no special ldouble conversion")
+    set(H5_LDOUBLE_TO_LLONG_ACCURATE_RUN 1 CACHE STRING "MinGW: accurate ldouble<->llong")
+    set(H5_LLONG_TO_LDOUBLE_CORRECT_RUN  1 CACHE STRING "MinGW: correct llong->ldouble")
+    set(H5_DISABLE_SOME_LDOUBLE_CONV_RUN 0 CACHE STRING "MinGW: no power9 conversion bug")
+    set(HAVE_IOEO_EXITCODE               0 CACHE STRING "InitOnceExecuteOnce works on Windows x64")
+    # Declare vasprintf (H5_HAVE_VASPRINTF is detected at link time, but MinGW's
+    # headers only declare it under _GNU_SOURCE).
+    set(HDF5_SAVED_C_FLAGS "${CMAKE_C_FLAGS}")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D_GNU_SOURCE")
+endif()
+
+FetchContent_Declare(
+    hdf5
+    GIT_REPOSITORY https://github.com/HDFGroup/hdf5.git
+    GIT_TAG hdf5-1_14_3
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(hdf5)
+
+if(MINGW)
+    set(CMAKE_C_FLAGS "${HDF5_SAVED_C_FLAGS}")
+endif()
+
+add_subdirectory(hdf)  # fts_hdf static library
+
+# HDF5 caches CMAKE_*_OUTPUT_DIRECTORY to its own build tree; restore the
+# project dirs so fts_data_explorer keeps landing in ${CMAKE_BINARY_DIR}.
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR} CACHE PATH "Executables dir" FORCE)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR} CACHE PATH "Libraries dir" FORCE)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR} CACHE PATH "Archives dir" FORCE)
 
 # Add tinyfiledialogs source directly (matching imgui/implot pattern)
 list(APPEND EXTRA_SOURCES
@@ -204,14 +270,20 @@ add_executable(fts_data_explorer
     apodization.cpp
     export.cpp
     theme.cpp
-    adapters/csv_adapter.cpp
-    adapters/adapter_registry.cpp
+    converter.cpp
+    conversion_screen.cpp
+    app_dirs.cpp
     file_browser.cpp
     welcome.cpp
     about.cpp
     ${PLATFORM_SOURCES}
     ${EXTRA_SOURCES}
 )
+
+# fts_hdf integration (unconditional — .h5 is the only runtime input)
+target_sources(fts_data_explorer PRIVATE workspace_reader.cpp)
+target_link_libraries(fts_data_explorer fts_hdf)
+target_compile_definitions(fts_data_explorer PRIVATE FTS_BUILD_HDF5=1)
 
 # Platform-specific compile options
 if(WIN32)

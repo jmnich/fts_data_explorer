@@ -1,6 +1,9 @@
 #include "about.h"
 #include "imgui.h"
 #include "version.h"
+#include "app_state.h"
+#include "theme.h"
+#include "popup_utils.h"
 
 static bool s_showAbout = false;
 
@@ -14,12 +17,19 @@ void renderAboutPopup() {
         s_showAbout = false;
     }
 
-    if (!ImGui::BeginPopupModal("About FTS Data Explorer", NULL,
-        ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse)) {
-        return;
-    }
+    ImVec4 accent = GetAccentBase(StringToAccentColor(appState.currentAccentColor));
+    beginModal(1200.0f, accent);
+    if (ImGui::BeginPopupModal("About FTS Data Explorer", NULL,
+        ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar)) {
 
     ImGui::SetWindowSize(ImVec2(1200, 800));
+
+    // NoTitleBar: the title moves into the body so removing the header loses
+    // no information.
+    ImGui::Text("About FTS Data Explorer");
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
 
     // ── Scrollable content ─────────────────────────────────────────────────
     ImGui::BeginChild("##AboutContent", ImVec2(0, -(ImGui::GetFrameHeightWithSpacing() + 10)),
@@ -86,11 +96,16 @@ void renderAboutPopup() {
 
     // ── Close button ───────────────────────────────────────────────────────
     ImGui::Separator();
-    float closeBtnWidth = 120.0f;
-    ImGui::SetCursorPosX((ImGui::GetWindowWidth() - closeBtnWidth) * 0.5f);
-    if (ImGui::Button("Close", ImVec2(closeBtnWidth, 0))) {
+    static int closeFocus = 0;
+    static bool wasOpen = false;
+    if (modalButtonRow({"Close"}, closeFocus, wasOpen, accent) == 0 ||
+        ImGui::IsKeyPressed(ImGuiKey_Escape)) {
         ImGui::CloseCurrentPopup();
     }
+    wasOpen = true;
 
+    drawModalAccentFrame(accent);
     ImGui::EndPopup();
+    }
+    endModal();
 }
