@@ -2,6 +2,8 @@
 
 #include <string>
 
+#include "session/session_tab.h"
+
 struct AppState;
 struct AppConfig;
 struct GLFWwindow;
@@ -19,11 +21,14 @@ public:
 
 private:
     void pollEvents();             // GLFW poll + exit intercept
-    void pollAsyncComputations();  // spectrum poll + 4 batch ticks
+    void pollAsyncComputations();  // spectrum poll + 4 batch ticks (active tab)
+    void tickSessions();           // SessionBase::tickAsync() per tab
     void scheduleRedraws();        // FPS overlay + "Saved" toast keep-alive
     void handleInput();            // keyboard shortcuts + navigation + file load
     void renderUI();               // NewFrame + menu bar + welcome + dock + panels
     void present();                // Render/swap/deferred export
+
+    SessionTab sessionTab_;      // unique browser hub (M2.5); state in AppState
 
     AppConfig& config_;
     std::string configFilePath_;

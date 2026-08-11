@@ -1,5 +1,7 @@
 #include "app_state.h"
 
+#include <type_traits>
+
 // Constructor implementation
 AppState::AppState()
     : MAX_SELECTABLE_FILES(5),
@@ -67,28 +69,31 @@ AppState::AppState()
     // Constructor body
 }
 
-// Ctrl+H "back to home": clear data/selection/panel caches and show the
-// welcome screen (the workspace stays loaded). Mirrors the inline block that
-// used to live in main.cpp's key handler.
-void resetToWelcomeScreen(AppState& s) {
-    clearWorkspacePanels(s);
-    s.showWelcomeScreen = true;
-    s.welcomeScreenInitialized = false;
-    s.filesChanged = false;
-#if FTS_BUILD_HDF5
-    // Ctrl+H mutates view-state fields (the batch panels reset their manual
-    // zoom); re-arm the latch baseline so "back to home" never dirties a
-    // clean workspace. Re-captured at the end of the next rendered frame.
-    s.viewStateBaselinePending = true;
-#endif
+// Ctrl+H "back to home" (M2.2): reset the ACTIVE workspace tab's panels and
+// selection (clears but keeps the tab); when a non-workspace tab is focused,
+// reset the most-recently-active workspace tab instead.
+void resetActiveWorkspaceTab(AppState& s) {
+    int target = (s.activeTabKind == ActiveTabKind::Workspace && s.activeSessionIdx >= 0)
+                     ? s.activeSessionIdx
+                     : s.lastActiveSessionIdx;
+    if (target < 0 || target >= static_cast<int>(s.sessions.size())) return;
+    if (target == s.activeSessionIdx) {
+        clearWorkspacePanels(s);
+    } else {
+        clearSessionPanels(*s.sessions[target]);
+    }
+    s.needsRedraw = true;
 }
 
 // The single workspace-reset path.
 // Order matters: futures first (abandoned → workers finish into moved-from
 // futures), then caches, then selection, then panel states. Baselines are
 // re-captured on the next frame by the callers that need them.
-void clearWorkspacePanels(AppState& s) {
-    // TODO(multi-ws): make clearWorkspacePanels reset ONLY the active tab (Phase 2)
+// Template over the flat-fields holder: AppState (active tab) and
+// WorkspaceSession mirrors expose the same members under the same names, so
+// the reset is field-identical for both.
+template <typename S>
+static void clearWorkspacePanelsImpl(S& s) {
     s.spectrum.pendingSpectra_.clear();
     s.spectrum.cachedSpectra.clear();
     s.spectrum.cachedFrequencies.clear();
@@ -102,11 +107,19 @@ void clearWorkspacePanels(AppState& s) {
     s.selectedFiles.clear();
     s.selectedFilenames.clear();
     s.dataLoaded = false;
-    s.clearAverageSpectrum();
-    s.clearSnrSpectrum();
-    s.clearAllanVariance();
-    s.clearT100Spectrum();
-    s.needsRedraw = true;
+    s.averageSpectrum.reset();
+    s.snrSpectrum.reset();
+    s.allanVariance.reset();
+    s.t100.reset();
+    if constexpr (std::is_same_v<S, AppState>) s.needsRedraw = true;
+}
+
+void clearWorkspacePanels(AppState& s) {
+    clearWorkspacePanelsImpl(s);
+}
+
+void clearSessionPanels(WorkspaceSession& sess) {
+    clearWorkspacePanelsImpl(sess);
 }
 
 void AppState::clearAverageSpectrum() {

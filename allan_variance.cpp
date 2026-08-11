@@ -1168,3 +1168,108 @@ void renderAllanPanel() {
         ImGui::End();
 
 }
+
+// ── Park/resume mirror support (M2.1) ───────────────────────────────────────
+// calcState (private) holds the futures + atomic counters of the multi-phase
+// computation; the snapshot/restore here covers it wholesale.
+
+void AllanVariance::parkInto(AllanVariance& dst) {
+    dst.appState = appState;
+    dst.cachedSurfaceWavelengths = std::move(cachedSurfaceWavelengths);
+    dst.cachedSurfaceTaus = std::move(cachedSurfaceTaus);
+    dst.cachedSurfaceAllanVar = std::move(cachedSurfaceAllanVar);
+    dst.numSurfaceWavelengths = numSurfaceWavelengths;
+    dst.numSurfaceTaus = numSurfaceTaus;
+    dst.fileCount = fileCount;
+    dst.allanAvailable = allanAvailable;
+    dst.selectedSliceIndex = selectedSliceIndex;
+    dst.calcInProgress = calcInProgress;
+    dst.progressTotal = progressTotal;
+    dst.progressCurrent = progressCurrent;
+    dst.isSelectingXRange = isSelectingXRange;
+    dst.selectionStartX = selectionStartX;
+    dst.selectionEndX = selectionEndX;
+    dst.shouldAutoscale = shouldAutoscale;
+    dst.firstLoadCompleted = firstLoadCompleted;
+    dst.manualXMin = manualXMin; dst.manualXMax = manualXMax;
+    dst.manualYMin = manualYMin; dst.manualYMax = manualYMax;
+    dst.savedYMin = savedYMin; dst.savedYMax = savedYMax;
+    dst.leftArrowPressedLastFrame = leftArrowPressedLastFrame;
+    dst.rightArrowPressedLastFrame = rightArrowPressedLastFrame;
+    dst.leftArrowHandleFlag = leftArrowHandleFlag;
+    dst.rightArrowHandleFlag = rightArrowHandleFlag;
+    dst.pendingNextXMin = pendingNextXMin; dst.pendingNextXMax = pendingNextXMax;
+    dst.xUnitSelector = xUnitSelector;
+    dst.wavelengthDecimation = wavelengthDecimation;
+    dst.xRangeMin = xRangeMin; dst.xRangeMax = xRangeMax;
+    dst.calcBaseSelector = calcBaseSelector;
+
+    dst.calcState.phase = calcState.phase;
+    dst.calcState.progressCurrent = calcState.progressCurrent;
+    dst.calcState.progressTotal = calcState.progressTotal;
+    dst.calcState.avgSumY = std::move(calcState.avgSumY);
+    dst.calcState.avgX = std::move(calcState.avgX);
+    dst.calcState.avgNumBins = calcState.avgNumBins;
+    dst.calcState.avgValidFiles = calcState.avgValidFiles;
+    dst.calcState.avgFirstFile = calcState.avgFirstFile;
+    dst.calcState.fileSpectraY = std::move(calcState.fileSpectraY);
+    dst.calcState.transmittanceCurves = std::move(calcState.transmittanceCurves);
+    dst.calcState.pendingAvgFutures = std::move(calcState.pendingAvgFutures);
+    dst.calcState.completedAvgCount.store(calcState.completedAvgCount.load());
+    dst.calcState.totalAvgSubmitted = calcState.totalAvgSubmitted;
+    dst.calcState.batchAvgActive = calcState.batchAvgActive;
+    dst.calcState.pendingAllanFutures = std::move(calcState.pendingAllanFutures);
+    dst.calcState.completedAllanCount.store(calcState.completedAllanCount.load());
+    dst.calcState.totalAllanSubmitted = calcState.totalAllanSubmitted;
+    dst.calcState.batchAllanActive = calcState.batchAllanActive;
+}
+
+void AllanVariance::resumeFrom(AllanVariance& src) {
+    cachedSurfaceWavelengths = std::move(src.cachedSurfaceWavelengths);
+    cachedSurfaceTaus = std::move(src.cachedSurfaceTaus);
+    cachedSurfaceAllanVar = std::move(src.cachedSurfaceAllanVar);
+    numSurfaceWavelengths = src.numSurfaceWavelengths;
+    numSurfaceTaus = src.numSurfaceTaus;
+    fileCount = src.fileCount;
+    allanAvailable = src.allanAvailable;
+    selectedSliceIndex = src.selectedSliceIndex;
+    calcInProgress = src.calcInProgress;
+    progressTotal = src.progressTotal;
+    progressCurrent = src.progressCurrent;
+    isSelectingXRange = src.isSelectingXRange;
+    selectionStartX = src.selectionStartX;
+    selectionEndX = src.selectionEndX;
+    shouldAutoscale = src.shouldAutoscale;
+    firstLoadCompleted = src.firstLoadCompleted;
+    manualXMin = src.manualXMin; manualXMax = src.manualXMax;
+    manualYMin = src.manualYMin; manualYMax = src.manualYMax;
+    savedYMin = src.savedYMin; savedYMax = src.savedYMax;
+    leftArrowPressedLastFrame = src.leftArrowPressedLastFrame;
+    rightArrowPressedLastFrame = src.rightArrowPressedLastFrame;
+    leftArrowHandleFlag = src.leftArrowHandleFlag;
+    rightArrowHandleFlag = src.rightArrowHandleFlag;
+    pendingNextXMin = src.pendingNextXMin; pendingNextXMax = src.pendingNextXMax;
+    xUnitSelector = src.xUnitSelector;
+    wavelengthDecimation = src.wavelengthDecimation;
+    xRangeMin = src.xRangeMin; xRangeMax = src.xRangeMax;
+    calcBaseSelector = src.calcBaseSelector;
+
+    calcState.phase = src.calcState.phase;
+    calcState.progressCurrent = src.calcState.progressCurrent;
+    calcState.progressTotal = src.calcState.progressTotal;
+    calcState.avgSumY = std::move(src.calcState.avgSumY);
+    calcState.avgX = std::move(src.calcState.avgX);
+    calcState.avgNumBins = src.calcState.avgNumBins;
+    calcState.avgValidFiles = src.calcState.avgValidFiles;
+    calcState.avgFirstFile = src.calcState.avgFirstFile;
+    calcState.fileSpectraY = std::move(src.calcState.fileSpectraY);
+    calcState.transmittanceCurves = std::move(src.calcState.transmittanceCurves);
+    calcState.pendingAvgFutures = std::move(src.calcState.pendingAvgFutures);
+    calcState.completedAvgCount.store(src.calcState.completedAvgCount.load());
+    calcState.totalAvgSubmitted = src.calcState.totalAvgSubmitted;
+    calcState.batchAvgActive = src.calcState.batchAvgActive;
+    calcState.pendingAllanFutures = std::move(src.calcState.pendingAllanFutures);
+    calcState.completedAllanCount.store(src.calcState.completedAllanCount.load());
+    calcState.totalAllanSubmitted = src.calcState.totalAllanSubmitted;
+    calcState.batchAllanActive = src.calcState.batchAllanActive;
+}

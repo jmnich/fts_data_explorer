@@ -66,6 +66,12 @@ int wavelengthDecimation;
     void startCalculation();
     bool tickCalculation();
 
+    // Park/resume mirror support (M2.1): heavy members (caches, futures) are
+    // moved, scalars copied, atomic counters snapshotted. Every per-workspace
+    // field must appear in BOTH directions (incl. the private calcState).
+    void parkInto(AllanVariance& dst);
+    void resumeFrom(AllanVariance& src);
+
     static void computeAllanVariance(const std::vector<double>& signal,
                                       std::vector<double>& outTau,
                                       std::vector<double>& outAllanVar);

@@ -80,4 +80,10 @@ public:
 
     void startCalculation();
     bool tickCalculation();
+
+    // Park/resume mirror support (M2.1): heavy members (caches, futures) are
+    // moved, scalars copied, the atomic counter snapshotted. Every
+    // per-workspace field must appear in BOTH directions.
+    void parkInto(SnrSpectrum& dst);
+    void resumeFrom(SnrSpectrum& src);
 };

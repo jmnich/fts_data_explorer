@@ -43,6 +43,12 @@ public:
     // Export a single artifact by label (used by headless mode -p)
     bool exportArtifact(const std::string& label, const std::string& dir);
 
+    // Park/resume mirror support (M2.1): heavy members (caches, futures) are
+    // moved, scalars copied. Every per-workspace field must appear in BOTH
+    // directions.
+    void parkInto(ExportPanel& dst);
+    void resumeFrom(ExportPanel& src);
+
 private:
     void writeCorrectedIFGCsv(const std::string& dir);
     void writeUncorrectedIFGCsv(const std::string& dir);

@@ -121,4 +121,10 @@ public:
     // settings (K, xUnit, refLaser, apodization, xCorrectionMethod, etc.).
     // Loads raw data from disk via the active adapter. Returns false on failure.
     bool computeAndCacheSpectrum(const std::string& filePath, const std::string& fileId);
+
+    // Park/resume mirror support (M2.1): heavy members (caches, futures) are
+    // moved, scalars copied. Every per-workspace field must appear in BOTH
+    // directions. Futures are moved, never copied.
+    void parkInto(Spectrum& dst);
+    void resumeFrom(Spectrum& src);
 };

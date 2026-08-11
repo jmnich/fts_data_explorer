@@ -88,4 +88,10 @@ public:
     // Multi-frame average calculation
     void startCalculation();
     bool tickCalculation();
+
+    // Park/resume mirror support (M2.1): heavy members (caches, futures) are
+    // moved, scalars copied, the atomic counter snapshotted. Every
+    // per-workspace field must appear in BOTH directions.
+    void parkInto(AverageSpectrum& dst);
+    void resumeFrom(AverageSpectrum& src);
 };

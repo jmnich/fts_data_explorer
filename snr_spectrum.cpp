@@ -818,3 +818,90 @@ void renderSnrPanel() {
         ImGui::End();
 
 }
+
+// ── Park/resume mirror support (M2.1) ───────────────────────────────────────
+
+void SnrSpectrum::parkInto(SnrSpectrum& dst) {
+    dst.appState = appState;
+    dst.cachedSnrY = std::move(cachedSnrY);
+    dst.cachedSnrX = std::move(cachedSnrX);
+    dst.fileCount = fileCount;
+    dst.snrAvailable = snrAvailable;
+    dst.calcInProgress = calcInProgress;
+    dst.progressTotal = progressTotal;
+    dst.progressCurrent = progressCurrent;
+    dst.isSelectingXRange = isSelectingXRange;
+    dst.selectionStartX = selectionStartX;
+    dst.selectionEndX = selectionEndX;
+    dst.shouldAutoscale = shouldAutoscale;
+    dst.firstLoadCompleted = firstLoadCompleted;
+    dst.manualXMin = manualXMin; dst.manualXMax = manualXMax;
+    dst.manualYMin = manualYMin; dst.manualYMax = manualYMax;
+    dst.savedYMin = savedYMin; dst.savedYMax = savedYMax;
+    dst.leftArrowPressedLastFrame = leftArrowPressedLastFrame;
+    dst.rightArrowPressedLastFrame = rightArrowPressedLastFrame;
+    dst.leftArrowHandleFlag = leftArrowHandleFlag;
+    dst.rightArrowHandleFlag = rightArrowHandleFlag;
+    dst.xUnitSelector = xUnitSelector;
+    dst.prevXUnitSelector = prevXUnitSelector;
+    dst.yScaleSelector = yScaleSelector;
+    dst.prevYScaleSelector = prevYScaleSelector;
+    dst.yAxisMode = yAxisMode;
+    dst.prevYAxisMode = prevYAxisMode;
+    dst.forcedYMin = forcedYMin; dst.forcedYMax = forcedYMax;
+    dst.pendingNextXMin = pendingNextXMin; dst.pendingNextXMax = pendingNextXMax;
+    dst.xUnitSwitchedThisFrame = xUnitSwitchedThisFrame;
+    dst.convertedXMin = convertedXMin; dst.convertedXMax = convertedXMax;
+    dst.calcCommonX = std::move(calcCommonX);
+    dst.calcNumBins = calcNumBins;
+    dst.calcValidFiles = calcValidFiles;
+    dst.calcFirstFile = calcFirstFile;
+    dst.calcSumY = std::move(calcSumY);
+    dst.calcSumSqY = std::move(calcSumSqY);
+    dst.pendingFutures_ = std::move(pendingFutures_);
+    dst.completedCount_.store(completedCount_.load());
+    dst.totalSubmitted_ = totalSubmitted_;
+    dst.batchActive_ = batchActive_;
+}
+
+void SnrSpectrum::resumeFrom(SnrSpectrum& src) {
+    cachedSnrY = std::move(src.cachedSnrY);
+    cachedSnrX = std::move(src.cachedSnrX);
+    fileCount = src.fileCount;
+    snrAvailable = src.snrAvailable;
+    calcInProgress = src.calcInProgress;
+    progressTotal = src.progressTotal;
+    progressCurrent = src.progressCurrent;
+    isSelectingXRange = src.isSelectingXRange;
+    selectionStartX = src.selectionStartX;
+    selectionEndX = src.selectionEndX;
+    shouldAutoscale = src.shouldAutoscale;
+    firstLoadCompleted = src.firstLoadCompleted;
+    manualXMin = src.manualXMin; manualXMax = src.manualXMax;
+    manualYMin = src.manualYMin; manualYMax = src.manualYMax;
+    savedYMin = src.savedYMin; savedYMax = src.savedYMax;
+    leftArrowPressedLastFrame = src.leftArrowPressedLastFrame;
+    rightArrowPressedLastFrame = src.rightArrowPressedLastFrame;
+    leftArrowHandleFlag = src.leftArrowHandleFlag;
+    rightArrowHandleFlag = src.rightArrowHandleFlag;
+    xUnitSelector = src.xUnitSelector;
+    prevXUnitSelector = src.prevXUnitSelector;
+    yScaleSelector = src.yScaleSelector;
+    prevYScaleSelector = src.prevYScaleSelector;
+    yAxisMode = src.yAxisMode;
+    prevYAxisMode = src.prevYAxisMode;
+    forcedYMin = src.forcedYMin; forcedYMax = src.forcedYMax;
+    pendingNextXMin = src.pendingNextXMin; pendingNextXMax = src.pendingNextXMax;
+    xUnitSwitchedThisFrame = src.xUnitSwitchedThisFrame;
+    convertedXMin = src.convertedXMin; convertedXMax = src.convertedXMax;
+    calcCommonX = std::move(src.calcCommonX);
+    calcNumBins = src.calcNumBins;
+    calcValidFiles = src.calcValidFiles;
+    calcFirstFile = src.calcFirstFile;
+    calcSumY = std::move(src.calcSumY);
+    calcSumSqY = std::move(src.calcSumSqY);
+    pendingFutures_ = std::move(src.pendingFutures_);
+    completedCount_.store(src.completedCount_.load());
+    totalSubmitted_ = src.totalSubmitted_;
+    batchActive_ = src.batchActive_;
+}

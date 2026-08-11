@@ -11,13 +11,20 @@
 #include <utility>
 
 // Configuration structure for app settings
-// TODO(multi-ws): [EnvWindow] defaults + recentMultiWorkspaces (Phase 2/3)
+// Cross-store sources/ live under a group prefix and are read/written via
+// H5Store::loadGroup/saveGroup (M2.4); experiments/ groups land in Phase 4.
 struct AppConfig {
     struct RecentDatasetEntry {
         std::string path;
     };
     std::vector<RecentDatasetEntry> recentDatasets;
     size_t maxRecentDatasets = 10;
+    // Recent multi-workspace (.cross.h5) files (M2.5) — the Welcome screen's
+    // right column + the Session tab's file pickers.
+    std::vector<std::string> recentMultiWorkspaces;
+    size_t maxRecentMultiWorkspaces = 10;
+    // Last opened/created multi-workspace file (default folder hint).
+    std::string lastMultiWorkspacePath;
     bool autoFitYAxis = true;
     bool maxAtZero = false;
     bool showFPS = false; // FPS counter display setting
@@ -128,6 +135,15 @@ struct AppConfig {
         }
     }
 
+    void addRecentMultiWorkspace(const std::string& path) {
+        recentMultiWorkspaces.erase(
+            std::remove(recentMultiWorkspaces.begin(), recentMultiWorkspaces.end(), path),
+            recentMultiWorkspaces.end());
+        recentMultiWorkspaces.insert(recentMultiWorkspaces.begin(), path);
+        if (recentMultiWorkspaces.size() > maxRecentMultiWorkspaces)
+            recentMultiWorkspaces.resize(maxRecentMultiWorkspaces);
+    }
+
     void removeRecentDataset(const std::string& datasetPath) {
         auto it = std::find_if(recentDatasets.begin(), recentDatasets.end(),
             [&](const RecentDatasetEntry& e) { return e.path == datasetPath; });
@@ -173,6 +189,13 @@ struct AppConfig {
             }
             configFile << "\n";
             
+            // Write recent multi-workspace files
+            configFile << "[RecentMultiWorkspaces]\n";
+            for (const auto& p : recentMultiWorkspaces) {
+                configFile << "dataset=" << p << "\n";
+            }
+            configFile << "\n";
+            
             // Write other settings
             configFile << "[Settings]\n";
             configFile << "max_recent_datasets=" << maxRecentDatasets << "\n";
@@ -187,6 +210,7 @@ struct AppConfig {
             configFile << "ui_size=" << uiSize << "\n";
             configFile << "accent_color=" << accentColor << "\n";
             configFile << "worker_threads=" << workerThreads << "\n";
+            configFile << "last_multi_workspace=" << lastMultiWorkspacePath << "\n";
             configFile << "default_layout_applied=" << (defaultLayoutApplied ? "true" : "false") << "\n";
 
             // Converter settings (only non-defaults are persisted; empty
@@ -258,7 +282,9 @@ struct AppConfig {
                     value.erase(0, value.find_first_not_of(" \t"));
                     value.erase(value.find_last_not_of(" \t") + 1);
                     
-                    if (currentSection == "RecentDatasets" && key == "dataset") {
+                    if (currentSection == "RecentMultiWorkspaces" && key == "dataset") {
+                        if (!value.empty()) recentMultiWorkspaces.push_back(value);
+                    } else if (currentSection == "RecentDatasets" && key == "dataset") {
                         // Tolerate the legacy "path|adapter" form (adapter
                         // part dropped — the adapter system is retired).
                         size_t pipePos = value.find('|');
@@ -290,6 +316,8 @@ struct AppConfig {
                             accentColor = value;
                         } else if (key == "worker_threads") {
                             workerThreads = std::stoi(value);
+                        } else if (key == "last_multi_workspace") {
+                            lastMultiWorkspacePath = value;
                         } else if (key == "default_layout_applied") {
                             defaultLayoutApplied = (value == "true");
                         }

@@ -707,3 +707,22 @@ void ExportPanel::renderPanel() {
         ImGui::End();
 
 }
+
+// ── Park/resume mirror support (M2.1) ───────────────────────────────────────
+
+void ExportPanel::parkInto(ExportPanel& dst) {
+    dst.appState = appState;
+    dst.artifactLabels = std::move(artifactLabels);
+    dst.artifactChecked = std::move(artifactChecked);
+    dst.exportPending = exportPending;
+    dst.exportJustCompleted = exportJustCompleted;
+    dst.exportDir = exportDir;
+}
+
+void ExportPanel::resumeFrom(ExportPanel& src) {
+    artifactLabels = std::move(src.artifactLabels);
+    artifactChecked = std::move(src.artifactChecked);
+    exportPending = src.exportPending;
+    exportJustCompleted = src.exportJustCompleted;
+    exportDir = src.exportDir;
+}

@@ -14,6 +14,7 @@
 #include "export.h"
 #include "interferogram_data.h"
 #include "conversion_screen.h"
+#include "session/workspace_session.h"
 #if FTS_BUILD_HDF5
 #include "hdf/workspace.h"
 #endif
@@ -26,12 +27,27 @@ struct GLFWwindow;
 std::string shortenFilename(const std::string& filename);
 
 #if FTS_BUILD_HDF5
-enum class PendingWorkspaceAction { None, CloseWorkspace, OpenPath, Exit };
+enum class PendingWorkspaceAction { None, CloseWorkspace, OpenPath, OpenMultiWorkspace, Exit };
 #endif
 
 #if FTS_BUILD_HDF5
 void openWorkspace(AppState& s, const std::string& path);
-void closeWorkspace(AppState& s);
+// Open in a new workspace tab (M2.2): dedupes by stable key, queues the swap,
+// stashes the path; the load runs at frame top after the swap.
+void openWorkspaceInNewTab(AppState& s, const std::string& path);
+// Open an embedded source of a .cross.h5 in a new tab (M2.5): stable key
+// "<crossPath>#<sourceId>", in-memory load, save target = the .cross.h5.
+void openEmbeddedInNewTab(AppState& s, const std::string& crossPath,
+                          const std::string& sourceId);
+// Frame-top executor for the stashed open; called by AppLoop after
+// executePendingSwap.
+void executePendingOpen(AppState& s);
+// Remember an opened/created .cross.h5: lastMultiWorkspacePath + recent list.
+void rememberMultiWorkspace(AppState& s, const std::string& path);
+// Shared open tail (filesystem + embedded): engine state, caches, view-state
+// restore, metadata buffers, panel seeding.
+void finishWorkspaceLoad(AppState& s, const std::string& displayName,
+                         const std::string& recentPath);
 // Save / Save As (defined in main.cpp; used by the menu bar and input handling).
 void requestSaveWorkspace(AppState& s, const std::string& asPath);
 void doSaveWorkspace(AppState& s, const std::string& asPath);
@@ -42,16 +58,40 @@ void requestWorkspaceDiscard(AppState& s, PendingWorkspaceAction action, const s
 void dispatchPendingAction(AppState& s);
 #endif
 
-// Ctrl+H "back to home": clear data/selection/panel caches and show the
-// welcome screen (the workspace stays loaded — datasets can be re-opened from
-// the recent list). Shared by the main-window shortcut and the Convert modal.
-void resetToWelcomeScreen(AppState& s);
+// Ctrl+H "back to home": clear data/selection/panel caches of the ACTIVE
+// workspace tab (or the most-recently-active one when a non-workspace tab is
+// focused). The tab itself stays open. Shared by the main-window shortcut and
+// the Convert modal.
+void resetActiveWorkspaceTab(AppState& s);
 
-// TODO(multi-ws): stable keys (path / cross.h5#sourceId) resolve to live session indices; never store raw indices (Phase 2)
 // The single workspace-reset path: clears all per-workspace panel state,
 // selection, and caches. openWorkspace/closeWorkspace/clearPanelCaches and
 // resetToWelcomeScreen all route through this.
 void clearWorkspacePanels(AppState& s);
+// Same reset applied to a PARKED session's mirrors (Ctrl+H on a non-active
+// workspace tab) — the operation is field-identical, only the target differs.
+void clearSessionPanels(WorkspaceSession& sess);
+
+// Active tab discriminator (Amendment 4): the active concept spans three tab
+// types, so activeSessionIdx alone is insufficient. AppLoop dispatches on this
+// — one switch, no ad-hoc -1 conventions.
+enum class ActiveTabKind { Session, Workspace, Environment };
+
+// Session-tab browser state (data_structures_audit.md §1.4) — GLOBAL, never
+// folded: the Session tab is unique, so its state lives in AppState.
+struct SourceSummary {                  // mirrors @summary in the archive
+    std::string id;                     // sources/<id>/ group name
+    std::string name;                   // display name (file stem)
+    std::string originPath;             // informational only
+    size_t memberCount = 0;
+    std::string createdIso;             // ISO-8601 UTC
+};
+
+struct SessionTabState {
+    bool multiWorkspaceOpen = false;    // mode: false = single-file, true = multi
+    std::string multiWorkspacePath;     // open .cross.h5
+    std::vector<SourceSummary> sources; // column (a); manifest-derived, no data loaded
+};
 
 // Application state structure
 struct AppState {
@@ -230,7 +270,43 @@ struct AppState {
     std::map<std::string, std::vector<double>> hilbertXCache;
     float hilbertCacheLaserWavelength = 0.0f;
 
-    // TODO(multi-ws): SessionTab fields (multiWorkspacePath, sources[], mode) live here, GLOBAL — never folded (Phase 2)
+    // ── Multi-workspace tabs (Phase-2 M2.1) ────────────────────────────────
+    // sessions order is fixed at creation (UI reorder remaps only the strip
+    // order); cross-references use WorkspaceSession::key, never raw indices.
+    std::vector<std::unique_ptr<WorkspaceSession>> sessions;
+    int activeSessionIdx = -1;          // valid when activeTabKind == Workspace
+    int activeEnvIdx = -1;              // Phase 3: environment instances
+    int lastActiveSessionIdx = -1;      // most-recent workspace tab (Ctrl+H target)
+    ActiveTabKind activeTabKind = ActiveTabKind::Workspace;
+    SessionTabState sessionTab;         // Session tab: GLOBAL, never folded
+    bool sessionTabPresent = false;     // set by ensureSessionTab; never unset
+    // Queued tab switch (Amendment 4): swapInSession/focusSessionTab only
+    // stash this; executePendingSwap runs at the top of the next frame.
+    int pendingSwapIdx = -1;
+    bool pendingSwapToSession = false;
+
+    // ── M2.2 lifecycle queues ──────────────────────────────────────────────
+    // Close of a dirty tab: target index while its unsaved modal is up.
+    int pendingTabCloseIdx = -1;
+    // Close of a PARKED dirty tab: it must be swapped in first (frame top),
+    // then its unsaved modal shows. Set alongside a swapInSession queue.
+    int pendingCloseAfterSwap = -1;
+    // Clean close of the ACTIVE tab: the removal runs at frame top (never
+    // mid-frame — the panels must not render against a half-closed tab).
+    int pendingRemoveIdx = -1;
+    // Open requested on a NEW workspace tab: the blank session is queued for
+    // swap; the load runs at frame top AFTER the swap so the previous tab's
+    // flat fields are already parked when openWorkspace overwrites them.
+    // pendingOpenSourceId non-empty = embedded source (pendingOpenPath = the
+    // .cross.h5 path); empty = filesystem workspace.
+    std::string pendingOpenPath;
+    std::string pendingOpenSourceId;
+    // Multi-dirty Exit modal + sequential Save All (runs at frame top).
+    bool showExitDirtyModal = false;
+    std::vector<int> exitDirtyTabs;         // dirty tab indices (active first)
+    std::vector<std::string> exitDirtyLabels;
+    bool exitSaveAllRunning = false;
+    size_t exitSaveAllCursor = 0;
 
     // Peak-finding X correction state
     int    xCorrectionMethod = 0;           // 0=Hilbert, 1=PeakFinding
@@ -272,7 +348,15 @@ struct AppState {
     void reconfigurePool(int count);
 
 #if FTS_BUILD_HDF5
-    bool hasWorkspace() const { return !workspacePath.empty(); }
+    bool hasWorkspace() const {
+        if (!workspacePath.empty()) return true;
+        // Embedded-source tabs keep an empty filesystem path — the workspace
+        // lives in the .cross.h5 (its save target is derived from the session
+        // key). Without this, embedded tabs would never be savable.
+        return activeTabKind == ActiveTabKind::Workspace && activeSessionIdx >= 0 &&
+               activeSessionIdx < static_cast<int>(sessions.size()) &&
+               sessions[activeSessionIdx]->key.find('#') != std::string::npos;
+    }
     bool workspaceDirty() const { return workspace.dirty; }
 #else
     bool hasWorkspace() const { return false; }

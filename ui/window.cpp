@@ -363,7 +363,6 @@ void setupApplication(AppConfig& config, const std::string& configFilePath,
     }
 
     // Set the appState pointer in the panel objects for raw data access.
-    // TODO(multi-ws): no re-wire needed — &appState is stable (Phase 2)
     appState.spectrum.appState = &appState;
     appState.averageSpectrum.appState = &appState;
     appState.snrSpectrum.appState = &appState;

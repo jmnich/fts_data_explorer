@@ -14,6 +14,7 @@
 #include "spectral_toolbox.h"
 #include "apodization.h"
 #include "app_dirs.h"
+#include "file_browser.h"
 #include <imgui.h>
 #include "imgui_internal.h" // DockBuilder API
 #include "imgui_impl_glfw.h"
@@ -27,6 +28,10 @@
 #include <iostream>
 #include <thread>
 #include <vector>
+
+// Soft cap on workspace+environment tabs (Session excluded) — warning tooltip
+// on [+] at the cap (HL §3.2).
+static constexpr int kMaxWorkspaceTabs = 8;
 
 static bool naturalSortCompare(const std::string& a, const std::string& b) {
     size_t i = 0, j = 0;
@@ -112,13 +117,26 @@ static void renderUnsavedPromptModal() {
         ImGui::Separator();
         ImGui::Spacing();
 
+        // Tab-close resolution (M2.2): the modal saves/closes the ACTIVE tab
+        // (pendingTabCloseIdx); the change list above comes from the same flat
+        // fields, so text and data always agree.
+        const bool closingTab = appState.pendingTabCloseIdx >= 0;
         int pressed = modalButtonRow({"Save", "Don't Save", "Cancel"},
                                      focus, wasOpen, modalAccent());
         if (pressed == 0) {
             try {
+                if (closingTab) appState.pendingWorkspaceAction = PendingWorkspaceAction::CloseWorkspace;
                 requestSaveWorkspace(appState, "");
                 if (!appState.showStaleDropPrompt) {
-                    dispatchPendingAction(appState);
+                    if (closingTab) {
+                        const int idx = appState.pendingTabCloseIdx;
+                        appState.pendingTabCloseIdx = -1;
+                        appState.pendingWorkspaceAction = PendingWorkspaceAction::None;
+                        appState.pendingRemoveIdx = idx;   // frame top removes
+                        appState.needsRedraw = true;
+                    } else {
+                        dispatchPendingAction(appState);
+                    }
                     ImGui::CloseCurrentPopup();
                 } else {
                     // The stale-drop confirmation takes over: close this popup
@@ -128,15 +146,26 @@ static void renderUnsavedPromptModal() {
                     ImGui::CloseCurrentPopup();
                 }
             } catch (const std::exception& e) {
+                appState.pendingTabCloseIdx = -1;
+                appState.pendingWorkspaceAction = PendingWorkspaceAction::None;
                 appState.adapterErrorMsg = std::string("Save failed:\n") + e.what();
                 appState.showAdapterErrorPopup = true;
             }
         } else if (pressed == 1) {
-            dispatchPendingAction(appState);   // discard RAM workspace
+            if (closingTab) {
+                const int idx = appState.pendingTabCloseIdx;
+                appState.pendingTabCloseIdx = -1;
+                appState.pendingWorkspaceAction = PendingWorkspaceAction::None;
+                appState.pendingRemoveIdx = idx;   // frame top removes
+                appState.needsRedraw = true;
+            } else {
+                dispatchPendingAction(appState);   // discard RAM workspace
+            }
             ImGui::CloseCurrentPopup();
         } else if (pressed == 2 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
             appState.pendingWorkspaceAction = PendingWorkspaceAction::None;
             appState.pendingWorkspacePath.clear();
+            appState.pendingTabCloseIdx = -1;
             appState.showUnsavedPrompt = false;
             ImGui::CloseCurrentPopup();
         }
@@ -208,6 +237,240 @@ static void renderStaleDropPromptModal() {
     }
     endModal();
 }
+// Multi-dirty Exit modal (M2.2): lists every dirty tab; Save All saves each
+// sequentially at frame top (one swap per frame), Discard All clears the
+// latches, Cancel defers the close.
+static void renderExitDirtyModal() {
+    static int focus = 0;
+    static bool wasOpen = false;
+    if (!appState.showExitDirtyModal) {
+        wasOpen = false;
+        return;
+    }
+    ImGui::OpenPopup("Exit with Unsaved Changes##confirm");
+    beginModal(560.0f, modalAccent());
+    if (ImGui::BeginPopupModal("Exit with Unsaved Changes##confirm", nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
+        ImGui::Text("Unsaved Changes");
+        ImGui::Spacing();
+        ImGui::TextWrapped("The following tabs have unsaved changes:");
+        ImGui::Spacing();
+        for (const auto& label : appState.exitDirtyLabels) {
+            ImGui::Bullet();
+            ImGui::TextWrapped("%s", label.c_str());
+        }
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        int pressed = modalButtonRow({"Save All", "Discard All", "Cancel"},
+                                     focus, wasOpen, modalAccent());
+        if (pressed == 0) {
+            appState.showExitDirtyModal = false;
+            appState.exitSaveAllRunning = true;
+            appState.exitSaveAllCursor = 0;
+            appState.needsRedraw = true;
+            ImGui::CloseCurrentPopup();
+        } else if (pressed == 1) {
+            for (int idx : appState.exitDirtyTabs) {
+                if (idx == appState.activeSessionIdx &&
+                    appState.activeTabKind == ActiveTabKind::Workspace) {
+                    appState.workspace.dirty = false;
+                    appState.workspace.changeLog.clear();
+                } else if (idx >= 0 && idx < static_cast<int>(appState.sessions.size())) {
+                    appState.sessions[idx]->workspaceDirty = false;
+                    appState.sessions[idx]->workspace.dirty = false;
+                    appState.sessions[idx]->workspace.changeLog.clear();
+                }
+            }
+            appState.exitDirtyTabs.clear();
+            appState.exitDirtyLabels.clear();
+            appState.showExitDirtyModal = false;
+            glfwSetWindowShouldClose(glfwGetCurrentContext(), GLFW_TRUE);
+            ImGui::CloseCurrentPopup();
+        } else if (pressed == 2 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            appState.exitDirtyTabs.clear();
+            appState.exitDirtyLabels.clear();
+            appState.showExitDirtyModal = false;
+            ImGui::CloseCurrentPopup();
+        }
+        drawModalAccentFrame(modalAccent());
+        ImGui::EndPopup();
+        wasOpen = true;
+    } else {
+        wasOpen = false;
+    }
+    endModal();
+}
+
+// Exit "Save All" state machine: one dirty tab per frame. Runs at frame top
+// (after the queued swap) so every save sees the tab's data in the flat
+// fields. Pauses while an unsaved/stale confirmation modal is up; a stale
+// "Cancel" is treated as save-skip (the user declined the drop; Save All is
+// best-effort).
+static void advanceExitSaveAll() {
+    if (!appState.exitSaveAllRunning) return;
+    if (appState.showUnsavedPrompt || appState.showStaleDropPrompt) return;
+    if (appState.pendingSwapIdx >= 0) return;   // swap queued, not yet executed
+    if (appState.exitDirtyTabs.empty()) {
+        appState.exitSaveAllRunning = false;
+        return;
+    }
+    if (appState.activeSessionIdx != appState.exitDirtyTabs[appState.exitSaveAllCursor]) {
+        swapInSession(appState, appState.exitDirtyTabs[appState.exitSaveAllCursor]);
+        return;
+    }
+    try {
+        doSaveWorkspace(appState, "");
+    } catch (const std::exception& e) {
+        appState.adapterErrorMsg = std::string("Save failed:\n") + e.what();
+        appState.showAdapterErrorPopup = true;
+        appState.exitSaveAllRunning = false;
+        appState.exitDirtyTabs.clear();
+        appState.exitDirtyLabels.clear();
+        return;
+    }
+    appState.exitSaveAllCursor++;
+    if (appState.exitSaveAllCursor >= appState.exitDirtyTabs.size()) {
+        appState.exitSaveAllRunning = false;
+        appState.exitDirtyTabs.clear();
+        appState.exitDirtyLabels.clear();
+        glfwSetWindowShouldClose(glfwGetCurrentContext(), GLFW_TRUE);
+    } else {
+        swapInSession(appState, appState.exitDirtyTabs[appState.exitSaveAllCursor]);
+    }
+}
+
+// Tab strip (M2.2) — OUTSIDE the DockSpace window, between the menu bar and
+// the DockSpace Begin. Two regions: a fixed left region with the Session tab
+// (pinned by construction — never scrolled, never closable, never reorderable)
+// and a scrollable/reorderable bar for the workspace tabs + [+] button.
+// Returns the strip height in pixels (0 when no tabs exist yet, i.e. behind
+// the launch welcome).
+static float renderTabStrip(GLFWwindow* window) {
+    if (!appState.sessionTabPresent) return 0.0f;
+    // The strip must NOT render windowless: widgets after EndMainMenuBar
+    // would land in ImGui's implicit "Debug##Default" fallback window (a
+    // decorated 400x400 box at viewport+(60,60)). It gets its own borderless
+    // window pinned under the menu bar, full width, with an explicit height:
+    // tab content (FrameHeight) + the tab bar's bottom border + 1px.
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float tabH = ImGui::GetFrameHeight();
+    const float stripH = tabH + style.TabBarBorderSize + 1.0f;
+
+    ImGui::SetNextWindowPos(ImVec2(vp->Pos.x, vp->Pos.y + ImGui::GetFrameHeight()),
+                            ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(vp->Size.x, stripH), ImGuiCond_Always);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    ImGui::Begin("##TabStrip", nullptr,
+                 ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
+                 ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings |
+                 ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoBringToFrontOnFocus |
+                 ImGuiWindowFlags_NoFocusOnAppearing);
+
+    // ── Pinned Session tab: styled selectable (the plan's fallback — full
+    // control over the selected look, no close affordance).
+    const bool sessionActive = (appState.activeTabKind == ActiveTabKind::Session);
+    ImGui::PushStyleColor(ImGuiCol_Header, sessionActive
+        ? ImGui::GetStyleColorVec4(ImGuiCol_TabSelected)
+        : ImGui::GetStyleColorVec4(ImGuiCol_Tab));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImGui::GetStyleColorVec4(ImGuiCol_TabHovered));
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImGui::GetStyleColorVec4(ImGuiCol_TabSelected));
+    // FIXED width — a 0.0f (fill-remaining) width would make this selectable's
+    // hit-rect span the WHOLE strip and swallow every workspace-tab click.
+    const float sessionTabW = ImGui::CalcTextSize("Session").x +
+                              style.ItemSpacing.x * 2.0f + style.FramePadding.x * 2.0f;
+    if (ImGui::Selectable("Session##pinned", sessionActive, 0,
+                          ImVec2(sessionTabW, tabH))) {
+        if (!sessionActive) focusSessionTab(appState);
+    }
+    ImGui::PopStyleColor(3);
+    ImGui::SameLine(0.0f, 0.0f);
+
+    // ── Scrollable workspace tabs + [+] ─────────────────────────────────────
+    // Reorderable: the visual strip order may differ from sessions[] (session
+    // order is fixed at creation); selection/click/close are bound to the
+    // stable tab IDs, so no index remap is needed.
+    if (ImGui::BeginTabBar("##WorkspaceTabs",
+            ImGuiTabBarFlags_FittingPolicyScroll | ImGuiTabBarFlags_Reorderable)) {
+        // While the Session tab is focused, no workspace tab is active: clear
+        // the bar's stale selection so the workspace tab does not stay
+        // highlighted (the pinned Session tab carries the selected look).
+        if (appState.activeTabKind != ActiveTabKind::Workspace) {
+            ImGuiTabBar* bar = ImGui::GetCurrentTabBar();
+            if (bar && bar->SelectedTabId != 0) {
+                bar->SelectedTabId = 0;
+                bar->NextSelectedTabId = 0;
+            }
+        }
+        for (int i = 0; i < static_cast<int>(appState.sessions.size()); ++i) {
+            WorkspaceSession* sess = appState.sessions[i].get();
+            const bool isActive = (appState.activeTabKind == ActiveTabKind::Workspace &&
+                                   appState.activeSessionIdx == i);
+            const bool dirty = isActive ? appState.workspaceDirty() : sess->isDirty();
+            const std::string label = sess->label() + (dirty ? " *" : "") +
+                                      "##ws" + std::to_string(i);
+            bool open = true;
+            const bool shown = ImGui::BeginTabItem(label.c_str(), &open,
+                isActive ? ImGuiTabItemFlags_SetSelected : 0);
+            // Click detection runs OUTSIDE the shown gate: BeginTabItem
+            // returns "contents visible", not "clicked" — a non-selected tab
+            // (e.g. every workspace tab while the Session tab is focused)
+            // returns false, yet ImGui's button hit-test still registered the
+            // click (LastItemData), so IsItemClicked() is valid here.
+            if (ImGui::IsItemClicked() && !isActive) swapInSession(appState, i);
+            // EndTabItem must live INSIDE the BeginTabItem if-block: on the
+            // tab's appearing frame (and when ItemAdd clips it) BeginTabItem
+            // returns false WITHOUT pushing an ID — an unconditional
+            // EndTabItem then pops the previous tab's ID, unbalancing the
+            // stack and aborting in EndTabBar (crash on first tab render).
+            if (shown) {
+                if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Middle))
+                    open = false;
+                if (ImGui::BeginPopupContextItem("##tabClose")) {
+                    if (ImGui::MenuItem("Close")) open = false;
+                    ImGui::EndPopup();
+                }
+                ImGui::EndTabItem();
+            }
+            if (!open) {
+                closeTab(appState, i);
+                break;   // sessions vector changed — stop iterating
+            }
+        }
+        if (ImGui::TabItemButton("+")) {
+            std::string defaultFolder = appState.currentDirectory;
+            if (appState.hasWorkspace())
+                defaultFolder = std::filesystem::path(appState.workspacePath).parent_path().string();
+            if (!std::filesystem::is_directory(defaultFolder))
+                defaultFolder = "";
+            std::string path = FileBrowser::showFileOpenDialog(
+                "Open HDF5 Workspace", "HDF5 files", "*.h5", window, defaultFolder);
+            if (!path.empty())
+                requestWorkspaceDiscard(appState, PendingWorkspaceAction::OpenPath, path);
+        }
+        if (appState.sessions.size() >= kMaxWorkspaceTabs && ImGui::IsItemHovered())
+            ImGui::SetTooltip("Tab limit reached (%d) — close a tab to add more.",
+                              kMaxWorkspaceTabs);
+        ImGui::EndTabBar();
+    }
+
+    // Bottom rule spanning the strip (the tab bar draws its own separator;
+    // this covers the pinned Session region on the left).
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddLine(ImVec2(0.0f, stripH - 1.0f),
+                ImVec2(ImGui::GetWindowSize().x, stripH - 1.0f),
+                ImGui::GetColorU32(ImGuiCol_Border));
+
+    ImGui::End();
+    ImGui::PopStyleVar(3);
+    return stripH;
+}
+
 // Handle keyboard navigation for file selection
 // @param csvFiles List of available CSV files
 // @param currentSortedFileIndex Current file index reference
@@ -320,12 +583,12 @@ void handleKeyboardNavigation(const std::vector<std::string>& csvFiles,
  * @param uiSizeChanged Reference to UI size changed flag
  */
 // TODO(multi-ws): environment instance windows docked here (Phase 3)
-static void rebuildDefaultLayout(ImGuiID dockspace_id) {
+static void rebuildDefaultLayout(ImGuiID dockspace_id, float topOffset) {
     ImGui::DockBuilderRemoveNode(dockspace_id);
     ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
     ImGuiViewport* vp = ImGui::GetMainViewport();
     ImGui::DockBuilderSetNodeSize(dockspace_id,
-        ImVec2(vp->Size.x, vp->Size.y - ImGui::GetFrameHeight()));
+        ImVec2(vp->Size.x, vp->Size.y - topOffset));
 
     ImGuiID dock_left, dock_right;
     ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Left, 0.16f, &dock_left, &dock_right);
@@ -357,6 +620,7 @@ static void rebuildDefaultLayout(ImGuiID dockspace_id) {
     ImGui::DockBuilderDockWindow("SNR View",           dock_right_top);
     ImGui::DockBuilderDockWindow("Average View",       dock_right_top);
     ImGui::DockBuilderDockWindow("Spectrum View",      dock_right_bottom);
+    ImGui::DockBuilderDockWindow("Session",             dock_center);
 
     ImGui::DockBuilderFinish(dockspace_id);
 }
@@ -451,10 +715,36 @@ AppLoop::AppLoop(AppConfig& config, const std::string& configFilePath,
 // One frame. Reads like pseudocode: poll -> async poll -> redraw scheduling ->
 // (idle gate) -> input -> UI -> present. Returns false when the window closes.
 bool AppLoop::runFrame() {
-    // TODO(multi-ws): execute queued swapInSession here, before pollAsyncComputations (Phase 2)
+    // Frame-top queued-swap execution (M2.2/3): tab clicks queue (park, idx)
+    // mid-frame; the actual park/resume runs HERE — before any poll walks a
+    // future vector — so no panel ever renders or polls against a
+    // half-swapped state.
+    executePendingSwap(appState);
+    // A stashed open of a NEW workspace tab: the blank session was swapped in
+    // above; load the workspace into the (now blank) flat fields.
+    executePendingOpen(appState);
+    // Close of a PARKED dirty tab: the swap above brought it in — show its
+    // unsaved modal now (flat fields hold the right workspace).
+    if (appState.pendingCloseAfterSwap >= 0) {
+        appState.pendingTabCloseIdx = appState.pendingCloseAfterSwap;
+        appState.pendingCloseAfterSwap = -1;
+        appState.showUnsavedPrompt = true;
+        appState.needsRedraw = true;
+    }
+    // Queued removal of the ACTIVE tab (clean close, or the unsaved modal's
+    // Save/Discard resolution): park-free removal at frame top.
+    if (appState.pendingRemoveIdx >= 0) {
+        const int idx = appState.pendingRemoveIdx;
+        appState.pendingRemoveIdx = -1;
+        removeTab(appState, idx);
+    }
+    // Exit "Save All": sequential per-tab saves, one swap per frame.
+    advanceExitSaveAll();
+
     pollEvents();
     if (glfwWindowShouldClose(window_)) return false;
     pollAsyncComputations();
+    tickSessions();
     scheduleRedraws();
 
     // Skip rendering when UI is static — saves CPU/GPU
@@ -476,19 +766,43 @@ void AppLoop::pollEvents() {
         glfwPollEvents();
 
 #if FTS_BUILD_HDF5
-        // TODO(multi-ws): iterate all tabs for dirty-check (Phase 2)
-        // Window-close / exit intercept: defer closing while the workspace is
-        // dirty so the Unsaved Changes modal can run (resolution sets the flag).
-        if (glfwWindowShouldClose(window_) && appState.hasWorkspace() &&
-            appState.workspace.dirty && appState.pendingWorkspaceAction == PendingWorkspaceAction::None) {
-            requestWorkspaceDiscard(appState, PendingWorkspaceAction::Exit, "");
-            glfwSetWindowShouldClose(window_, GLFW_FALSE);   // defer
+        // Exit intercept (M2.2): defer closing while ANY tab is dirty so the
+        // multi-dirty modal can run (Save All / Discard All / Cancel). The
+        // active workspace's dirty flag lives in the flat fields; parked
+        // sessions answer via their latch.
+        if (glfwWindowShouldClose(window_) && !appState.showExitDirtyModal &&
+            !appState.showUnsavedPrompt && appState.exitSaveAllRunning == false &&
+            appState.pendingWorkspaceAction == PendingWorkspaceAction::None) {
+            std::vector<int> dirtyTabs;
+            std::vector<std::string> dirtyLabels;
+            if (appState.activeTabKind == ActiveTabKind::Workspace &&
+                appState.activeSessionIdx >= 0 && appState.workspaceDirty()) {
+                dirtyTabs.push_back(appState.activeSessionIdx);
+                dirtyLabels.push_back(appState.sessions[appState.activeSessionIdx]->label() + " *");
+            }
+            for (int i = 0; i < static_cast<int>(appState.sessions.size()); ++i) {
+                if (i == appState.activeSessionIdx) continue;
+                if (appState.sessions[i]->isDirty()) {
+                    dirtyTabs.push_back(i);
+                    dirtyLabels.push_back(appState.sessions[i]->title());
+                }
+            }
+            if (!dirtyTabs.empty()) {
+                glfwSetWindowShouldClose(window_, GLFW_FALSE);   // defer
+                appState.showExitDirtyModal = true;
+                appState.exitDirtyTabs = std::move(dirtyTabs);
+                appState.exitDirtyLabels = std::move(dirtyLabels);
+                appState.needsRedraw = true;
+            }
         }
 #endif
 }
 
 void AppLoop::pollAsyncComputations() {
-    // TODO(multi-ws): per-tab SessionBase::tickAsync() dispatch (Phase 2/3)
+        // Workspace-tab polls run only while a workspace tab is active — the
+        // flat fields then hold THAT tab's data (M2.3). Session/environment
+        // tabs poll via SessionBase::tickAsync() instead.
+        if (appState.activeTabKind != ActiveTabKind::Workspace) return;
         // Poll pending async spectrum computations
         if (!appState.spectrum.pendingSpectra_.empty()) {
             appState.needsRedraw = true;
@@ -523,6 +837,14 @@ void AppLoop::pollAsyncComputations() {
 
 }
 
+// Per-tab async polls (M2.3): workspace tabs are no-ops here — their
+// polling runs on the flat fields in pollAsyncComputations while active;
+// Session/environment tabs (M2.5/Phase 3) poll their own futures.
+void AppLoop::tickSessions() {
+    sessionTab_.tickAsync();
+    for (auto& sess : appState.sessions) sess->tickAsync();
+}
+
 void AppLoop::scheduleRedraws() {
         static double lastForceRedrawTime = 0.0;
         if (!appState.needsRedraw && appState.showFPS) {
@@ -551,9 +873,23 @@ void AppLoop::handleInput() {
     ImGuiIO& io = ImGui::GetIO();
         appState.multiSelectMode = ImGui::GetIO().KeyCtrl;
         appState.shiftSelectMode = ImGui::GetIO().KeyShift;
-        
+
+        // Per-workspace input (M2.3): shortcuts, navigation and file loading
+        // operate on the ACTIVE workspace tab's flat fields. With a
+        // non-workspace tab focused, the per-workspace edge flags are cleared
+        // so no stale key edge fires after the next swap.
+        const bool wsActive = (appState.activeTabKind == ActiveTabKind::Workspace &&
+                               appState.activeSessionIdx >= 0);
+        if (!wsActive) {
+            appState.yKeyPressedLastFrame = false;
+            appState.aKeyPressedLastFrame = false;
+            appState.dKeyPressedLastFrame = false;
+            appState.qKeyPressedLastFrame = false;
+            appState.sKeyPressedLastFrame = false;
+        }
+
         // Handle keyboard shortcuts - only trigger once per key press
-        if (!ImGui::GetIO().WantCaptureKeyboard) {
+        if (wsActive && !ImGui::GetIO().WantCaptureKeyboard) {
             bool yKeyPressed = glfwGetKey(window_, GLFW_KEY_Y) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
             bool aKeyPressed = glfwGetKey(window_, GLFW_KEY_A) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
             bool dKeyPressed = glfwGetKey(window_, GLFW_KEY_D) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
@@ -712,14 +1048,14 @@ void AppLoop::handleInput() {
             return naturalSortCompare(nameA, nameB);
         });
         
-        // TODO(multi-ws): per-session selection set (Phase 2)
         // Ensure averaging checkboxes match the sorted files size
+        if (wsActive) {
         if (appState.filesSelectedForAveraging.size() != appState.sortedFiles.size()) {
             appState.filesSelectedForAveraging.clear();
             appState.filesSelectedForAveraging.resize(appState.sortedFiles.size(), true);
         }
 
-        // Handle keyboard navigation for file selection
+// Handle keyboard navigation for file selection
         handleKeyboardNavigation(appState.csvFiles, appState.currentSortedFileIndex, appState.filesChanged, appState.keyboardNavigation, 
                                 appState.shiftSelectMode, appState.selectedFiles, appState.selectedFilenames, appState.loadedData, appState.rawDataCache, appState.dataLoaded, 
                                 appState.sortedFiles, appState.enableDownsampling, appState.maxPointsBeforeDownsampling, appState.MAX_SELECTABLE_FILES);
@@ -768,10 +1104,10 @@ void AppLoop::handleInput() {
             appState.needsRedraw = true;
         }
 
-        // TODO(multi-ws): reset active workspace tab; keep Session tab (Phase 2)
-        // Handle Ctrl+H to return to welcome screen
+        // Ctrl+H (M2.2): reset the ACTIVE workspace tab's panels/selection;
+        // with a non-workspace tab focused, reset the most-recent workspace.
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) && ImGui::IsKeyPressed(ImGuiKey_H) && ImGui::GetIO().KeyCtrl) {
-            resetToWelcomeScreen(appState);
+            resetActiveWorkspaceTab(appState);
         }
 
         // 'Left/Right Arrow' - Pan left by 10% of current visible range
@@ -907,7 +1243,8 @@ void AppLoop::handleInput() {
                 appState.filesChanged = false;
             }
         }
-        
+        }   // end wsActive gate
+
 }
 
 void AppLoop::renderUI() {
@@ -967,8 +1304,12 @@ void AppLoop::renderUI() {
         }
 #endif
 
-        // Conditionally disable anti-aliasing for large datasets (>50k points)
-        if (appState.dataLoaded && appState.loadedData[0].dataSize() > 50000) {
+        // Conditionally disable anti-aliasing for large datasets (>50k points).
+        // Guarded: after a tab switch the flat loadedData is parked (moved
+        // out) while dataLoaded may still be latched true — never index [0]
+        // without the empty check.
+        if (appState.dataLoaded && !appState.loadedData.empty() &&
+            appState.loadedData[0].dataSize() > 50000) {
             ImGui::GetStyle().AntiAliasedLines = false;
         }
         
@@ -1026,6 +1367,7 @@ void AppLoop::renderUI() {
         // Phase 2 modals: unsaved-changes + stale-drop confirmation.
         renderUnsavedPromptModal();
         renderStaleDropPromptModal();
+        renderExitDirtyModal();
 #endif
         
         // Only render main docking interface if welcome screen is not active
@@ -1039,7 +1381,11 @@ void AppLoop::renderUI() {
             
             // Create ribbon menu first, before docking
             renderMainMenuBar(config_, configFilePath_, window_);
-            // TODO(multi-ws): tab strip between menu bar and DockSpace goes here — OUTSIDE the DockSpace window; bump its SetNextWindowPos Y by the strip height (Phase 2)
+            // Tab strip (M2.2): Session pinned left, scrollable workspace bar.
+            // OUTSIDE the DockSpace window — the DockSpace Y offset below is
+            // bumped by the strip height so the dock area does not overlap it.
+            const float stripH = renderTabStrip(window_);
+            const float topOffset = ImGui::GetFrameHeight() + stripH;
 
             // Always create dockspace, but make background transparent when welcome screen is active
             // Push style variables for full viewport docking
@@ -1054,9 +1400,9 @@ void AppLoop::renderUI() {
             window_flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
             window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
             
-            // Adjust window position to account for menu bar
-            ImGui::SetNextWindowPos(ImVec2(viewport->Pos.x, viewport->Pos.y + ImGui::GetFrameHeight()));
-            ImGui::SetNextWindowSize(ImVec2(viewport->Size.x, viewport->Size.y - ImGui::GetFrameHeight()));
+            // Adjust window position to account for menu bar + tab strip
+            ImGui::SetNextWindowPos(ImVec2(viewport->Pos.x, viewport->Pos.y + topOffset));
+            ImGui::SetNextWindowSize(ImVec2(viewport->Size.x, viewport->Size.y - topOffset));
             
             // Create main dockspace window
             ImGui::Begin("DockSpace", nullptr, window_flags);
@@ -1072,7 +1418,7 @@ void AppLoop::renderUI() {
                 // Handle manual layout restore request (from Settings menu)
                 if (appState.restoreLayoutRequested) {
                     appState.restoreLayoutRequested = false;
-                    rebuildDefaultLayout(dockspace_id);
+                    rebuildDefaultLayout(dockspace_id, topOffset);
                 }
 
                 // Apply default layout only on first launch (persisted via config)
@@ -1080,15 +1426,18 @@ void AppLoop::renderUI() {
                     appState.defaultLayoutApplied = true;
                     config_.defaultLayoutApplied = true;
                     config_.saveToFile(configFilePath_);
-                    rebuildDefaultLayout(dockspace_id);
+                    rebuildDefaultLayout(dockspace_id, topOffset);
                 }
 
 ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                 
                 ImGui::End();
             
-        // Only render panels when welcome screen is not active
-        if (!appState.showWelcomeScreen || appState.welcomeScreenInitialized) {
+        // Only render panels when welcome screen is not active AND a workspace
+        // tab is focused (M2.3): the flat fields hold the active workspace's
+        // data; the Session tab renders its own windows instead.
+        if ((!appState.showWelcomeScreen || appState.welcomeScreenInitialized) &&
+            appState.activeTabKind == ActiveTabKind::Workspace) {
         // Files panel (left)
         renderFilesPanel();
         
@@ -1135,6 +1484,16 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
         renderT100ViewPanel();
 
         // Close the panel condition (welcome screen)
+        }
+
+        // Session tab: its own browser window (M2.5). Renders whenever the
+        // Session tab is focused — MUST be outside the workspace gate above
+        // (a bug here once left the dock area empty/black and the strip
+        // unresponsive). Docked into the main dock space on first use so it
+        // never appears as a stray floating box over the dock area.
+        if (appState.activeTabKind == ActiveTabKind::Session) {
+            ImGui::SetNextWindowDockID(dockspace_id, ImGuiCond_FirstUseEver);
+            sessionTab_.render();
         }
         
         // Close the docking condition

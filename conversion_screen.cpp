@@ -280,12 +280,11 @@ void renderConversionScreen(AppState& s) {
 
     if (ImGui::BeginPopupModal("Convert Dataset##conversion", nullptr,
                                ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar)) {
-        // Ctrl+H: back to the welcome screen (mirrors the main-window
-        // shortcut); also closes this modal so the welcome screen shows.
+        // Ctrl+H: reset the active workspace tab (mirrors the main-window
+        // shortcut). The modal stays open — the conversion flow is unrelated
+        // to workspace state.
         if (ImGui::IsKeyPressed(ImGuiKey_H) && ImGui::GetIO().KeyCtrl) {
-            st.open = false;
-            ImGui::CloseCurrentPopup();
-            resetToWelcomeScreen(s);
+            resetActiveWorkspaceTab(s);
         }
         // NoTitleBar: the title moves into the body so removing the header
         // loses no information (the Exit button below covers the old [X]).

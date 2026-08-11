@@ -37,6 +37,8 @@
 #if FTS_BUILD_HDF5
 #include "workspace_reader.h"
 #include "hdf/h5_store.h"
+#include "hdf/hdf5_util.h"
+#include "session/cross_store.h"
 #endif
 
 // Include imgui and other dependencies
@@ -49,32 +51,125 @@
 #include <GLFW/glfw3.h>
 
 #if FTS_BUILD_HDF5
-void openWorkspace(AppState& s, const std::string& path) {
-    // TODO(multi-ws): sniff archive.json — route .cross.h5 to crossLoad; never feed it to H5Store::load (Phase 2)
-    // Silent fail: only regular .h5 workspaces are accepted; anything else
-    // (legacy directories, missing files, forced non-.h5 opens) does nothing.
-    std::error_code ec;
-    if (!std::filesystem::is_regular_file(path, ec)
-        || std::filesystem::path(path).extension() != ".h5") {
+// Open a workspace in a NEW tab (M2.2). Dedupes by stable key (path); the
+// blank session is queued for swap and the actual load runs at frame top
+// AFTER the swap (pendingOpenPath) so the previous active tab's flat fields
+// are already parked when openWorkspace overwrites them.
+// M2.4 sniff: archive.json marks a .cross.h5 — route it to crossLoad (Session
+// tab), never to H5Store::load (which throws on the missing root @format).
+void openWorkspaceInNewTab(AppState& s, const std::string& path) {
+    ensureSessionTab(s);
+    if (crossIsCrossFile(path)) {
+        if (s.sessionTab.multiWorkspaceOpen && s.sessionTab.multiWorkspacePath == path) {
+            focusSessionTab(s);        // already the open session file
+        } else if (s.sessionTab.multiWorkspaceOpen) {
+            // A different multi-workspace: replace the session file (confirm
+            // via the discard flow when the active workspace is dirty).
+            requestWorkspaceDiscard(s, PendingWorkspaceAction::OpenMultiWorkspace, path);
+        } else {
+            std::string err;
+            if (crossLoad(s, path, err)) {
+                focusSessionTab(s);
+                rememberMultiWorkspace(s, path);
+            } else {
+                s.adapterErrorMsg = std::string("Failed to open multi-workspace:\n") + err;
+                s.showAdapterErrorPopup = true;
+            }
+            s.needsRedraw = true;
+        }
         return;
     }
-    s.workspace = H5Store::load(path);   // throws H5Error on failure
-    s.workspacePath = path;
+    for (int i = 0; i < static_cast<int>(s.sessions.size()); ++i) {
+        if (s.sessions[i]->key == path) {
+            swapInSession(s, i);      // duplicate → activate the existing tab
+            return;
+        }
+    }
+    auto sess = std::make_unique<WorkspaceSession>();
+    sess->key = path;
+    sess->path = path;
+    s.sessions.push_back(std::move(sess));
+    swapInSession(s, static_cast<int>(s.sessions.size()) - 1);
+    s.pendingOpenPath = path;
+    s.needsRedraw = true;
+}
 
+// Open an EMBEDDED source of a .cross.h5 in a new workspace tab (M2.5).
+// Stable key: "<crossPath>#<sourceId>"; path stays empty (the tab's save
+// target is the .cross.h5 itself). Loads in-memory via crossLoadSource —
+// workspaceRead is in-memory, so no temp files exist.
+void openEmbeddedInNewTab(AppState& s, const std::string& crossPath,
+                          const std::string& sourceId) {
+    ensureSessionTab(s);
+    const std::string key = crossPath + "#" + sourceId;
+    for (int i = 0; i < static_cast<int>(s.sessions.size()); ++i) {
+        if (s.sessions[i]->key == key) {
+            swapInSession(s, i);      // duplicate → activate the existing tab
+            return;
+        }
+    }
+    auto sess = std::make_unique<WorkspaceSession>();
+    sess->key = key;
+    s.sessions.push_back(std::move(sess));
+    swapInSession(s, static_cast<int>(s.sessions.size()) - 1);
+    s.pendingOpenPath = crossPath;
+    s.pendingOpenSourceId = sourceId;
+    s.needsRedraw = true;
+}
 
-    // Clear any pending discard/save modal state from a previous flow.
-    s.pendingWorkspaceAction = PendingWorkspaceAction::None;
-    s.pendingWorkspacePath.clear();
-    s.showUnsavedPrompt = false;
-    s.pendingSaveAsPath.clear();
-    s.showStaleDropPrompt = false;
-    s.showWorkspaceDeleteConfirmPopup = false;
-    s.pendingWorkspaceDeletionPath.clear();
+// Remember an opened/created .cross.h5 (last path + recent list, persisted).
+void rememberMultiWorkspace(AppState& s, const std::string& path) {
+    if (!s.configPtr) return;
+    s.configPtr->lastMultiWorkspacePath = path;
+    s.configPtr->addRecentMultiWorkspace(path);
+    s.configPtr->saveToFile(s.configFilePath);
+}
 
-    // The fresh load is pristine; the first frame's auto-computes (spectrum
-    // mirror) are re-baselined at its end so opening alone is never "dirty".
-    s.workspaceDirtyRebaselinePending = true;
+// Frame-top executor for a stashed openWorkspaceInNewTab load: runs only after
+// the queued swap executed, so the flat fields belong to the new blank tab.
+void executePendingOpen(AppState& s) {
+    if (s.pendingOpenPath.empty()) return;
+    const std::string path = std::move(s.pendingOpenPath);
+    const std::string sourceId = std::move(s.pendingOpenSourceId);
+    s.pendingOpenPath.clear();
+    s.pendingOpenSourceId.clear();
+    try {
+        if (sourceId.empty()) {
+            openWorkspace(s, path);
+        } else {
+            std::string err;
+            Workspace ws = crossLoadSource(path, sourceId, err);
+            if (!err.empty()) throw H5Error(err);
+            // Same open flow as a filesystem workspace, minus the path-based
+            // bits: the tab's save target is the .cross.h5 itself (M2.4).
+            s.workspace = std::move(ws);
+            s.workspacePath.clear();
+            s.pendingWorkspaceAction = PendingWorkspaceAction::None;
+            s.pendingWorkspacePath.clear();
+            s.showUnsavedPrompt = false;
+            s.pendingSaveAsPath.clear();
+            s.showStaleDropPrompt = false;
+            s.showWorkspaceDeleteConfirmPopup = false;
+            s.pendingWorkspaceDeletionPath.clear();
+            s.workspaceDirtyRebaselinePending = true;
+            finishWorkspaceLoad(s, sourceId, "");
+        }
+    } catch (const std::exception& e) {
+        // The load failed: drop the blank tab and return to the Session tab.
+        removeTab(s, s.activeSessionIdx);
+        s.activeTabKind = ActiveTabKind::Session;
+        s.adapterErrorMsg = std::string("Failed to open workspace:\n") + e.what();
+        s.showAdapterErrorPopup = true;
+        s.needsRedraw = true;
+    }
+}
 
+// Shared tail of every workspace open (filesystem and embedded sources):
+// engine state, caches, view-state restore, metadata buffers, panel seeding.
+// `displayName` = currentDatasetName; `recentPath` = "" for embedded sources
+// (their home is the .cross.h5, not a recent-dataset entry).
+void finishWorkspaceLoad(AppState& s, const std::string& displayName,
+                         const std::string& recentPath) {
     // Populate engine state
     s.datasetInfo = workspaceDatasetInfo(s.workspace);
     s.csvFiles = workspaceFileList(s.workspace);
@@ -96,12 +191,13 @@ void openWorkspace(AppState& s, const std::string& path) {
     s.welcomeScreenInitialized = true;
 
     // Dataset display name
-    s.currentDatasetName = std::filesystem::path(path).stem().string();
+    s.currentDatasetName = displayName;
     s.currentDirectory = "";
 
-    // Recent datasets (configPtr is set at startup; guard for robustness)
-    if (s.configPtr)
-        addToRecentDatasets(*s.configPtr, s.configFilePath, path);
+    // Recent datasets (configPtr is set at startup; guard for robustness).
+    // Embedded sources never enter the recent-dataset list.
+    if (!recentPath.empty() && s.configPtr)
+        addToRecentDatasets(*s.configPtr, s.configFilePath, recentPath);
 
     // Phase 3: restore saved view state (decision 3). Runs after the
     // axisIsCorrected -> xAxisBase gate (a default for fresh files, not a hard
@@ -125,12 +221,18 @@ void openWorkspace(AppState& s, const std::string& path) {
     seedPanelsFromWorkspace(s);
 }
 
-void closeWorkspace(AppState& s) {
-    // TODO(multi-ws): route through WorkspaceSession park/resume (Phase 2)
-    s.workspace = Workspace{};
-    s.workspacePath.clear();
+void openWorkspace(AppState& s, const std::string& path) {
+    // Silent fail: only regular .h5 workspaces are accepted; anything else
+    // (legacy directories, missing files, forced non-.h5 opens) does nothing.
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(path, ec)
+        || std::filesystem::path(path).extension() != ".h5") {
+        return;
+    }
+    s.workspace = H5Store::load(path);   // throws H5Error on failure
+    s.workspacePath = path;
 
-    // Clear pending discard/save modal state.
+    // Clear any pending discard/save modal state from a previous flow.
     s.pendingWorkspaceAction = PendingWorkspaceAction::None;
     s.pendingWorkspacePath.clear();
     s.showUnsavedPrompt = false;
@@ -139,21 +241,13 @@ void closeWorkspace(AppState& s) {
     s.showWorkspaceDeleteConfirmPopup = false;
     s.pendingWorkspaceDeletionPath.clear();
 
-    // Return to welcome screen (mirror Ctrl+H reset)
-    clearWorkspacePanels(s);
-    s.showWelcomeScreen = true;
-    s.welcomeScreenInitialized = false;
-    s.csvFiles.clear();
-    s.sortedFiles.clear();
-    s.filesChanged = false;
-    // Phase 3: clear the dirty-latch baseline and the metadata edit buffers so
-    // no stale state survives into the next workspace. AppState view fields
-    // keep their last values (legacy mode is dormant).
-    s.viewStateBaseline = nlohmann::json::object();
-    s.viewStateBaselinePending = true;
-    s.metadataCommentBuffer[0] = '\0';
-    s.metadataTagsBuffer[0] = '\0';
+    // The fresh load is pristine; the first frame's auto-computes (spectrum
+    // mirror) are re-baselined at its end so opening alone is never "dirty".
+    s.workspaceDirtyRebaselinePending = true;
+
+    finishWorkspaceLoad(s, std::filesystem::path(path).stem().string(), path);
 }
+
 #endif // FTS_BUILD_HDF5
 
 #if FTS_BUILD_HDF5
@@ -183,10 +277,18 @@ void clearPanelDerivedResults(AppState& s) {
     s.t100.needsRecompute = true;
 }
 
+// True when the ACTIVE tab is an embedded source (stable key
+// "<crossPath>#<sourceId>", no filesystem path) — its save target is the
+// .cross.h5 itself (M2.4 save-back).
+static bool activeTabIsEmbedded(const AppState& s) {
+    return s.activeTabKind == ActiveTabKind::Workspace && s.activeSessionIdx >= 0 &&
+           s.activeSessionIdx < static_cast<int>(s.sessions.size()) &&
+           s.sessions[s.activeSessionIdx]->key.find('#') != std::string::npos;
+}
+
 // Save. Stale derivatives are never dropped silently: when any stale category
 // exists, the actual H5Store::save is deferred behind the §1.5 confirmation.
 void doSaveWorkspace(AppState& s, const std::string& asPath) {
-    // TODO(multi-ws): embedded-source tabs save back into the .cross.h5 via crossSaveSource (Phase 2)
     // Phase 3: merge the current view state into workspace.json BEFORE the
     // pruneStale copy, so Save As copies the captured view state too.
     captureViewState(s);
@@ -199,6 +301,23 @@ void doSaveWorkspace(AppState& s, const std::string& asPath) {
     } else if (!s.workspace.staleCategories().empty()) {
         copy = s.workspace.pruneStale();     // §1.5 confirmed: drop stale
         toSave = &copy;
+    }
+    if (asPath.empty() && activeTabIsEmbedded(s)) {
+        // Save-back into the .cross.h5: whole-source atomic rewrite.
+        const std::string& key = s.sessions[s.activeSessionIdx]->key;
+        const size_t hash = key.find('#');
+        const std::string crossPath = key.substr(0, hash);
+        const std::string sourceId = key.substr(hash + 1);
+        std::string err;
+        crossSaveSource(crossPath, sourceId, *toSave, err);
+        if (!err.empty()) throw H5Error(err);
+        s.workspace.dirty = false;
+        s.workspace.changeLog.clear();
+        s.viewStateBaseline = viewStateJson(s);
+        s.viewStateBaselinePending = false;
+        s.needsRedraw = true;
+        s.saveToastUntil = glfwGetTime() + 1.5;
+        return;
     }
     H5Store::save(asPath.empty() ? s.workspacePath : asPath, *toSave);   // throws H5Error
     if (!asPath.empty()) {
@@ -241,14 +360,34 @@ void saveWorkspaceAs(AppState& s, GLFWwindow* window) {
     requestSaveWorkspace(s, path);
 }
 
-// TODO(multi-ws): add OpenMultiWorkspace action; multi-dirty Exit modal lists ALL tabs (Phase 2)
-// Single choke point for every workspace-discarding entry point. Stashes the
-// action; if the workspace is clean (or absent) it dispatches immediately.
+// Single choke point for every workspace-discarding entry point (M2.2).
+// Per-action semantics:
+//   OpenPath           → new tab, NO discard confirmation (the active tab
+//                        stays open); dispatches immediately.
+//   OpenMultiWorkspace → replace the session file (M2.4 wires crossLoad);
+//                        only the active workspace's dirty state prompts.
+//   CloseWorkspace     → close the ACTIVE tab (closeTab handles its modal).
+//   Exit               → handled by the multi-dirty exit modal in AppLoop;
+//                        dispatch closes the window.
 void requestWorkspaceDiscard(AppState& s, PendingWorkspaceAction action, const std::string& path) {
     if (action != PendingWorkspaceAction::None) {
         s.pendingWorkspaceAction = action;
         s.pendingWorkspacePath = path;
     }
+    if (action == PendingWorkspaceAction::OpenPath) {
+        dispatchPendingAction(s);
+        return;
+    }
+    if (action == PendingWorkspaceAction::CloseWorkspace) {
+        if (s.activeSessionIdx >= 0) {
+            s.pendingWorkspaceAction = PendingWorkspaceAction::None;
+            closeTab(s, s.activeSessionIdx);
+        } else {
+            dispatchPendingAction(s);
+        }
+        return;
+    }
+    // OpenMultiWorkspace / Exit: prompt only when the active workspace is dirty.
     if (!s.hasWorkspace() || !s.workspace.dirty) {
         dispatchPendingAction(s);
         return;
@@ -258,7 +397,6 @@ void requestWorkspaceDiscard(AppState& s, PendingWorkspaceAction action, const s
 }
 
 void dispatchPendingAction(AppState& s) {
-    // TODO(multi-ws): add OpenMultiWorkspace action; multi-dirty Exit modal lists ALL tabs (Phase 2)
     if (s.pendingWorkspaceAction == PendingWorkspaceAction::None) return;
     PendingWorkspaceAction action = s.pendingWorkspaceAction;
     std::string path = s.pendingWorkspacePath;
@@ -271,18 +409,25 @@ void dispatchPendingAction(AppState& s) {
 
     switch (action) {
         case PendingWorkspaceAction::CloseWorkspace:
-            closeWorkspace(s);
+            // Chained from the stale-drop modal after a close-save: the tab is
+            // clean by then (doSaveWorkspace cleared dirty), so this removes it.
+            closeTab(s, s.activeSessionIdx);
             break;
         case PendingWorkspaceAction::OpenPath:
-            try {
-                openWorkspace(s, path);
-            } catch (const std::exception& e) {
-                s.adapterErrorMsg = std::string("Failed to open workspace:\n") + e.what();
+            openWorkspaceInNewTab(s, path);
+            break;
+        case PendingWorkspaceAction::OpenMultiWorkspace: {
+            std::string err;
+            if (crossLoad(s, path, err)) {
+                focusSessionTab(s);
+                rememberMultiWorkspace(s, path);
+            } else {
+                s.adapterErrorMsg = std::string("Failed to open multi-workspace:\n") + err;
                 s.showAdapterErrorPopup = true;
             }
             break;
+        }
         case PendingWorkspaceAction::Exit:
-            s.workspace.dirty = false;   // discarding: keep the close-intercept from re-firing
             glfwSetWindowShouldClose(glfwGetCurrentContext(), GLFW_TRUE);
             break;
         case PendingWorkspaceAction::None:

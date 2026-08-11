@@ -7,11 +7,14 @@
 #include "file_browser.h"
 #include "theme.h"
 #include "version.h"
+#include "session/cross_store.h"
+#include "session/workspace_session.h"
 
 #include "imgui.h"
 #include <GLFW/glfw3.h>
 #include <GL/gl.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <iostream>
 #include <fstream>
@@ -143,7 +146,6 @@ static void drawWelcomeBackgroundScatter(ImDrawList* drawList, const ImVec2& vpS
     }
 }
 
-// TODO(multi-ws): launch-only two-column layout (Phase 2)
 void renderWelcomeScreen(AppState& appState, AppConfig& config,
                          const std::string& configFilePath, bool showPopup) {
     // Keep the recent list clean: drop stale/non-.h5 entries (files deleted on
@@ -167,238 +169,317 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
 
     if (!showPopup) return;
 
-    // Center the welcome screen
-    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-    ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(1200, 800));
+    // Launch-only welcome (M2.6): a plain two-column window — left = recent
+    // single-dataset workspaces + converter, right = recent multi-workspace
+    // files + New Multi-Workspace. Not a modal: the Session tab takes over
+    // after the first open/create and is never closable afterwards.
+    // Size is clamped to the viewport (minus a margin) so no element is ever
+    // pushed off-screen on small displays.
+    const char* title = "Welcome to FTS Data Explorer";
+    ImVec2 vp = ImGui::GetMainViewport()->Size;
+    const float winW = std::min(1200.0f, vp.x - 40.0f);
+    const float winH = std::min(760.0f, vp.y - 40.0f);
+    const float listChildH = std::max(100.0f, winH - 340.0f);
+    const float crossChildH = std::max(100.0f, winH - 120.0f);
+    ImGui::SetNextWindowPos(ImVec2((vp.x - winW) * 0.5f, (vp.y - winH) * 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(winW, winH));
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.09f, 0.09f, 0.12f, 0.96f));
+    ImGui::Begin(title, nullptr,
+                 ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
+                 ImGuiWindowFlags_NoSavedSettings);
 
-    // Disable the modal dimmer overlay (which fades in over ~10 frames) so the decorative
-    // background pattern behind the popup stays fully visible.
-    ImGui::PushStyleColor(ImGuiCol_ModalWindowDimBg, ImVec4(0, 0, 0, 0));
+    // Semi-transparent dark fill (matches the old popup look).
+    ImDrawList* winDl = ImGui::GetWindowDrawList();
+    ImVec2 winPos = ImGui::GetWindowPos();
+    winDl->AddRectFilled(winPos, ImVec2(winPos.x + winW, winPos.y + winH),
+                         IM_COL32(0, 0, 0, 100));
 
-    // Create a modal popup that blocks all interaction
-    {
-        std::string popupTitle = std::string("Welcome to FTS Data Explorer ") + APP_VERSION;
-        ImGui::OpenPopup(popupTitle.c_str());
+    ImGui::TextColored(GetAccentBase(StringToAccentColor(appState.currentAccentColor)),
+                       "%s %s", title, APP_VERSION);
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
 
-        if (ImGui::BeginPopupModal(popupTitle.c_str(), NULL,
-        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
-        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar |
-        ImGuiWindowFlags_NoBackground)) {
+    ImGui::Columns(2, "##welcomeCols", true);
+    ImGui::Separator();
 
-        // Draw semi-transparent dark background on window draw list
-        ImDrawList* winDrawList = ImGui::GetWindowDrawList();
-        ImVec2 winPos = ImGui::GetWindowPos();
-        ImVec2 winSize = ImGui::GetWindowSize();
-        winDrawList->AddRectFilled(winPos, ImVec2(winPos.x + winSize.x, winPos.y + winSize.y),
-                                   IM_COL32(0, 0, 0, 100));
+    // ── Left: recent single-dataset workspaces + converter ─────────────────
+    ImGui::Text("Recent Datasets");
+    ImGui::Separator();
+    if (ImGui::BeginChild("RecentDatasetsChild", ImVec2(0, listChildH), true)) {
+        if (config.recentDatasets.empty()) {
+            float childHeight = ImGui::GetContentRegionAvail().y;
+            float textHeight = ImGui::GetTextLineHeightWithSpacing() * 3;
+            float offsetY = (childHeight - textHeight) * 0.5f;
+            if (offsetY > 0) ImGui::SetCursorPosY(ImGui::GetCursorPosY() + offsetY);
 
-        ImGui::Spacing();
+            ImGui::Text("No recent datasets found.");
+            ImGui::Text("Use the button below to select a dataset directory.");
+        } else {
+            static int selectedIdx = 0;
+            if (selectedIdx >= (int)config.recentDatasets.size())
+                selectedIdx = config.recentDatasets.empty() ? 0 : (int)config.recentDatasets.size() - 1;
 
-        // Recent datasets section
-        ImGui::Text("Recent Datasets:");
-        ImGui::Spacing();
+            // Arrow key navigation
+            if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
+                int next = selectedIdx - 1;
+                if (next >= 0) selectedIdx = next;
+            }
+            if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
+                int next = selectedIdx + 1;
+                if (next < (int)config.recentDatasets.size()) selectedIdx = next;
+            }
 
-        // Always use a fixed-height child region
-        if (ImGui::BeginChild("RecentDatasetsChild", ImVec2(0, 500), true)) {
-            if (config.recentDatasets.empty()) {
-                float childHeight = ImGui::GetContentRegionAvail().y;
-                float textHeight = ImGui::GetTextLineHeightWithSpacing() * 3;
-                float offsetY = (childHeight - textHeight) * 0.5f;
-                if (offsetY > 0) ImGui::SetCursorPosY(ImGui::GetCursorPosY() + offsetY);
-
-                ImGui::Text("No recent datasets found.");
-                ImGui::Text("Use the button below to select a dataset directory.");
-            } else {
-                static int selectedIdx = 0;
-                if (selectedIdx >= (int)config.recentDatasets.size())
-                    selectedIdx = config.recentDatasets.empty() ? 0 : (int)config.recentDatasets.size() - 1;
-
-                if (selectedIdx >= (int)config.recentDatasets.size())
-                    selectedIdx = config.recentDatasets.empty() ? 0 : (int)config.recentDatasets.size() - 1;
-
-                // Arrow key navigation
-                if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
-                    int next = selectedIdx - 1;
-                    if (next >= 0) selectedIdx = next;
-                }
-                if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
-                    int next = selectedIdx + 1;
-                    if (next < (int)config.recentDatasets.size()) selectedIdx = next;
-                }
-
-                for (size_t i = 0; i < config.recentDatasets.size(); ) {
-                    const auto& entry = config.recentDatasets[i];
-                    const auto& datasetPath = entry.path;
-                    bool exists = std::filesystem::exists(datasetPath)
-                        || std::filesystem::is_directory(datasetPath);
+            for (size_t i = 0; i < config.recentDatasets.size(); ) {
+                const auto& entry = config.recentDatasets[i];
+                const auto& datasetPath = entry.path;
+                bool exists = std::filesystem::exists(datasetPath)
+                    || std::filesystem::is_directory(datasetPath);
 #if FTS_BUILD_HDF5
-                    bool isH5 = std::filesystem::path(datasetPath).extension() == ".h5";
+                bool isH5 = std::filesystem::path(datasetPath).extension() == ".h5";
 #endif
 
-                    std::string displayName = datasetPath;
-                    size_t last_slash = displayName.find_last_of("/\\");
-                    if (last_slash != std::string::npos) {
-                        displayName = displayName.substr(last_slash + 1);
-                        if (displayName == "raw_data" && last_slash > 0) {
-                            size_t parent_slash = datasetPath.substr(0, last_slash).find_last_of("/\\");
-                            if (parent_slash != std::string::npos) {
-                                displayName = datasetPath.substr(parent_slash + 1, last_slash - parent_slash - 1);
-                            }
+                std::string displayName = datasetPath;
+                size_t last_slash = displayName.find_last_of("/\\");
+                if (last_slash != std::string::npos) {
+                    displayName = displayName.substr(last_slash + 1);
+                    if (displayName == "raw_data" && last_slash > 0) {
+                        size_t parent_slash = datasetPath.substr(0, last_slash).find_last_of("/\\");
+                        if (parent_slash != std::string::npos) {
+                            displayName = datasetPath.substr(parent_slash + 1, last_slash - parent_slash - 1);
                         }
                     }
+                }
 
-                    ImGui::PushID(datasetPath.c_str());
+                ImGui::PushID(datasetPath.c_str());
 
-                    float btnH = ImGui::GetFrameHeight();
+                float btnH = ImGui::GetFrameHeight();
 
-                    // Highlight selected row
-                    if ((int)i == selectedIdx) {
-                        ImVec2 rowMin = ImGui::GetCursorScreenPos();
-                        float rowH = ImGui::GetFrameHeight();
-                        ImGui::GetWindowDrawList()->AddRectFilled(
-                            rowMin,
-                            ImVec2(rowMin.x + ImGui::GetContentRegionAvail().x, rowMin.y + rowH),
-                            IM_COL32(80, 80, 200, 120));
-                    }
+                // Highlight selected row
+                if ((int)i == selectedIdx) {
+                    ImVec2 rowMin = ImGui::GetCursorScreenPos();
+                    float rowH = ImGui::GetFrameHeight();
+                    ImGui::GetWindowDrawList()->AddRectFilled(
+                        rowMin,
+                        ImVec2(rowMin.x + ImGui::GetContentRegionAvail().x, rowMin.y + rowH),
+                        IM_COL32(80, 80, 200, 120));
+                }
 
-                    // Cross (×) button — delete from recent list (always active)
-                    if (ImGui::Button("×", ImVec2(btnH, btnH))) {
-                        config.recentDatasets.erase(config.recentDatasets.begin() + i);
-                        config.saveToFile(configFilePath);
-                        if (selectedIdx > (int)i) selectedIdx--;
-                        ImGui::PopID();
-                        continue;
-                    }
-                    ImGui::SameLine();
-
-                    if (!exists) {
-                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.15f, 0.15f, 0.5f));
-                        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.15f, 0.15f, 0.15f, 0.5f));
-                        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.15f, 0.15f, 0.15f, 0.5f));
-                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 0.4f, 0.4f, 1.0f));
-                        ImGui::BeginDisabled(true);
-                    }
-
-                    // Dataset name button (mouse click or Enter on selected row)
-                    bool shouldOpen = false;
-                    if (ImGui::Button(displayName.c_str(), ImVec2(-FLT_MIN, 0))) {
-                        shouldOpen = true;
-                    }
-                    if (!shouldOpen && exists && (int)i == selectedIdx && ImGui::IsKeyPressed(ImGuiKey_Enter)) {
-                        shouldOpen = true;
-                    }
-                    if (shouldOpen) {
-#if FTS_BUILD_HDF5
-                        if (isH5) {
-                            requestWorkspaceDiscard(appState, PendingWorkspaceAction::OpenPath, datasetPath);
-                            if (!appState.showUnsavedPrompt && !appState.showStaleDropPrompt) {
-                                ImGui::CloseCurrentPopup();
-                                appState.needsRedraw = true;
-                            }
-                        }
-                        // Non-.h5 entries are pruned on render; any forced open
-                        // of such a path fails silently in openWorkspace().
-#endif
-                    }
-
-                    if (!exists && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-                        ImGui::SetTooltip("Path not reachable: %s", datasetPath.c_str());
-                    }
-
-                    if (!exists) {
-                        ImGui::EndDisabled();
-                        ImGui::PopStyleColor(4);
-                        ImGui::SameLine();
-                        ImGui::TextDisabled("(unreachable)");
-                    } else {
-                        if (ImGui::IsItemHovered()) {
-                            ImGui::SetTooltip("%s", datasetPath.c_str());
-                        }
-                    }
-
+                // Cross (×) button — delete from recent list (always active)
+                if (ImGui::Button("×", ImVec2(btnH, btnH))) {
+                    config.recentDatasets.erase(config.recentDatasets.begin() + i);
+                    config.saveToFile(configFilePath);
+                    if (selectedIdx > (int)i) selectedIdx--;
                     ImGui::PopID();
-                    i++;
+                    continue;
                 }
-            }
-            ImGui::EndChild();
-        }
+                ImGui::SameLine();
 
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
+                if (!exists) {
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.15f, 0.15f, 0.5f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.15f, 0.15f, 0.15f, 0.5f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.15f, 0.15f, 0.15f, 0.5f));
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 0.4f, 0.4f, 1.0f));
+                    ImGui::BeginDisabled(true);
+                }
 
-        // UI Size selection dropdown
-        ImGui::Text("UI Size:");
-        if (ImGui::BeginCombo("##UISizeCombo", appState.currentUiSize.c_str())) {
-            if (ImGui::Selectable("tiny", appState.currentUiSize == "tiny")) {
-                appState.currentUiSize = "tiny";
-                appState.uiSizeChanged = true;
-            }
-            if (ImGui::Selectable("small", appState.currentUiSize == "small")) {
-                appState.currentUiSize = "small";
-                appState.uiSizeChanged = true;
-            }
-            if (ImGui::Selectable("normal", appState.currentUiSize == "normal")) {
-                appState.currentUiSize = "normal";
-                appState.uiSizeChanged = true;
-            }
-            if (ImGui::Selectable("large", appState.currentUiSize == "large")) {
-                appState.currentUiSize = "large";
-                appState.uiSizeChanged = true;
-            }
-            if (ImGui::Selectable("huge", appState.currentUiSize == "huge")) {
-                appState.currentUiSize = "huge";
-                appState.uiSizeChanged = true;
-            }
-            ImGui::EndCombo();
-        }
-        ImGui::Spacing();
-
-        // Primary action: open an .h5 workspace directly (accent-styled).
+                // Dataset name button (mouse click or Enter on selected row)
+                bool shouldOpen = false;
+                if (ImGui::Button(displayName.c_str(), ImVec2(-FLT_MIN, 0))) {
+                    shouldOpen = true;
+                }
+                if (!shouldOpen && exists && (int)i == selectedIdx && ImGui::IsKeyPressed(ImGuiKey_Enter)) {
+                    shouldOpen = true;
+                }
+                if (shouldOpen) {
 #if FTS_BUILD_HDF5
-        AccentColor accent = StringToAccentColor(appState.currentAccentColor);
-        ImVec4 btnBg = GetAccentMuted(accent);
-        btnBg.w = 1.0f;
-        ImGui::PushStyleColor(ImGuiCol_Button, btnBg);
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, GetAccentHovered(accent));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, GetAccentActive(accent));
-
-        float buttonHeight = ImGui::GetContentRegionAvail().y - ImGui::GetStyle().ItemSpacing.y * 2;
-        if (buttonHeight > 60.0f) buttonHeight = 60.0f;
-        bool openClicked = ImGui::Button("Open .h5", ImVec2(-FLT_MIN, buttonHeight));
-        ImGui::PopStyleColor(3);
-
-        if (openClicked) {
-            std::string defaultFolder;
-            if (std::filesystem::is_directory(config.lastWorkingDirectory))
-                defaultFolder = config.lastWorkingDirectory;
-            std::string path = FileBrowser::showFileOpenDialog(
-                "Open HDF5 Workspace", "HDF5 files", "*.h5",
-                glfwGetCurrentContext(), defaultFolder);
-            if (!path.empty()) {
-                requestWorkspaceDiscard(appState, PendingWorkspaceAction::OpenPath, path);
-                if (!appState.showUnsavedPrompt && !appState.showStaleDropPrompt) {
-                    ImGui::CloseCurrentPopup();
-                    appState.needsRedraw = true;
+                    if (isH5) {
+                        requestWorkspaceDiscard(appState, PendingWorkspaceAction::OpenPath, datasetPath);
+                        appState.needsRedraw = true;
+                    }
+                    // Non-.h5 entries are pruned on render; any forced open
+                    // of such a path fails silently in openWorkspace().
+#endif
                 }
+
+                if (!exists && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                    ImGui::SetTooltip("Path not reachable: %s", datasetPath.c_str());
+                }
+
+                if (!exists) {
+                    ImGui::EndDisabled();
+                    ImGui::PopStyleColor(4);
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("(unreachable)");
+                } else {
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("%s", datasetPath.c_str());
+                    }
+                }
+
+                ImGui::PopID();
+                i++;
             }
         }
+        ImGui::EndChild();
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // UI Size selection dropdown
+    ImGui::Text("UI Size:");
+    if (ImGui::BeginCombo("##UISizeCombo", appState.currentUiSize.c_str())) {
+        if (ImGui::Selectable("tiny", appState.currentUiSize == "tiny")) {
+            appState.currentUiSize = "tiny";
+            appState.uiSizeChanged = true;
+        }
+        if (ImGui::Selectable("small", appState.currentUiSize == "small")) {
+            appState.currentUiSize = "small";
+            appState.uiSizeChanged = true;
+        }
+        if (ImGui::Selectable("normal", appState.currentUiSize == "normal")) {
+            appState.currentUiSize = "normal";
+            appState.uiSizeChanged = true;
+        }
+        if (ImGui::Selectable("large", appState.currentUiSize == "large")) {
+            appState.currentUiSize = "large";
+            appState.uiSizeChanged = true;
+        }
+        if (ImGui::Selectable("huge", appState.currentUiSize == "huge")) {
+            appState.currentUiSize = "huge";
+            appState.uiSizeChanged = true;
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::Spacing();
+
+#if FTS_BUILD_HDF5
+    AccentColor accent = StringToAccentColor(appState.currentAccentColor);
+    ImVec4 btnBg = GetAccentMuted(accent);
+    btnBg.w = 1.0f;
+    ImGui::PushStyleColor(ImGuiCol_Button, btnBg);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, GetAccentHovered(accent));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, GetAccentActive(accent));
+
+    float buttonHeight = ImGui::GetContentRegionAvail().y - ImGui::GetStyle().ItemSpacing.y * 2;
+    if (buttonHeight > 60.0f) buttonHeight = 60.0f;
+    bool openClicked = ImGui::Button("Open .h5", ImVec2(-FLT_MIN, buttonHeight));
+    ImGui::PopStyleColor(3);
+
+    if (openClicked) {
+        std::string defaultFolder;
+        if (std::filesystem::is_directory(config.lastWorkingDirectory))
+            defaultFolder = config.lastWorkingDirectory;
+        std::string path = FileBrowser::showFileOpenDialog(
+            "Open HDF5 Workspace", "HDF5 files", "*.h5",
+            glfwGetCurrentContext(), defaultFolder);
+        if (!path.empty()) {
+            requestWorkspaceDiscard(appState, PendingWorkspaceAction::OpenPath, path);
+            appState.needsRedraw = true;
+        }
+    }
 #endif
 
-        ImGui::Spacing();
-        // Secondary action: convert foreign formats (legacy/non-.h5 datasets
-        // enter via the Conversion screen — phase5 decision 6).
-        if (ImGui::Button("Convert Dataset", ImVec2(-FLT_MIN, 0))) {
-            openConversionScreen(appState);
+    ImGui::Spacing();
+    // Secondary action: convert foreign formats (legacy/non-.h5 datasets
+    // enter via the Conversion screen — phase5 decision 6).
+    if (ImGui::Button("Convert Dataset", ImVec2(-FLT_MIN, 0))) {
+        openConversionScreen(appState);
+    }
+
+    ImGui::NextColumn();
+
+    // ── Right: recent multi-workspace files + New Multi-Workspace ──────────
+    ImGui::Text("Recent Multi-Workspaces");
+    ImGui::Separator();
+    if (ImGui::BeginChild("RecentCrossChild", ImVec2(0, crossChildH), true)) {
+        if (config.recentMultiWorkspaces.empty()) {
+            float childHeight = ImGui::GetContentRegionAvail().y;
+            float textHeight = ImGui::GetTextLineHeightWithSpacing() * 3;
+            float offsetY = (childHeight - textHeight) * 0.5f;
+            if (offsetY > 0) ImGui::SetCursorPosY(ImGui::GetCursorPosY() + offsetY);
+            ImGui::Text("No multi-workspaces yet.");
+            ImGui::Text("Create one below, or embed datasets later from the Session tab.");
+        } else {
+            for (size_t i = 0; i < config.recentMultiWorkspaces.size(); ) {
+                const auto& path = config.recentMultiWorkspaces[i];
+                bool exists = std::filesystem::exists(path);
+                ImGui::PushID(path.c_str());
+                float btnH = ImGui::GetFrameHeight();
+                if (ImGui::Button("×", ImVec2(btnH, btnH))) {
+                    config.recentMultiWorkspaces.erase(config.recentMultiWorkspaces.begin() + i);
+                    config.saveToFile(configFilePath);
+                    ImGui::PopID();
+                    continue;
+                }
+                ImGui::SameLine();
+                std::string displayName = std::filesystem::path(path).filename().string();
+                if (exists) {
+                    if (ImGui::Button(displayName.c_str(), ImVec2(-FLT_MIN, 0))) {
+                        requestWorkspaceDiscard(appState, PendingWorkspaceAction::OpenPath, path);
+                        appState.needsRedraw = true;
+                    }
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("%s", path.c_str());
+                } else {
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 0.4f, 0.4f, 1.0f));
+                    ImGui::BeginDisabled(true);
+                    ImGui::Button(displayName.c_str(), ImVec2(-FLT_MIN, 0));
+                    ImGui::EndDisabled();
+                    ImGui::PopStyleColor();
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("(unreachable)");
+                }
+                ImGui::PopID();
+                i++;
+            }
         }
+        ImGui::EndChild();
+    }
 
-        ImGui::EndPopup();
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
 
-        if (!appState.showWelcomeScreen) {
-            appState.welcomeScreenInitialized = true;
+    // [New Multi-Workspace…]: empty .cross.h5; only the Session tab exists —
+    // start populating via its column (a).
+    if (ImGui::Button("New Multi-Workspace...", ImVec2(-FLT_MIN, 0))) {
+        std::string defaultFolder;
+        if (std::filesystem::is_directory(config.lastWorkingDirectory))
+            defaultFolder = config.lastWorkingDirectory;
+        else if (!config.lastMultiWorkspacePath.empty())
+            defaultFolder = std::filesystem::path(config.lastMultiWorkspacePath).parent_path().string();
+        std::string path = FileBrowser::showFileSaveDialog(
+            "New Multi-Workspace", "workspace.cross.h5", "*.h5",
+            defaultFolder, glfwGetCurrentContext());
+        if (!path.empty()) {
+            ensureSessionTab(appState);
+            std::string err;
+            if (crossCreate(path, err)) {
+                if (crossLoad(appState, path, err)) {
+                    focusSessionTab(appState);
+                    config.lastMultiWorkspacePath = path;
+                    config.addRecentMultiWorkspace(path);
+                    config.saveToFile(configFilePath);
+                    appState.showWelcomeScreen = false;
+                    appState.welcomeScreenInitialized = true;
+                }
+            }
+            if (!err.empty()) {
+                appState.adapterErrorMsg = "Create failed:\n" + err;
+                appState.showAdapterErrorPopup = true;
+            }
+            appState.needsRedraw = true;
         }
     }
-    }
-    ImGui::PopStyleColor(); // ModalWindowDimBg
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Creates an empty .cross.h5. Datasets are embedded from "
+                          "the Session tab's column (a).");
+
+    ImGui::Columns(1);
+    ImGui::End();
+    ImGui::PopStyleColor(); // WindowBg
 }

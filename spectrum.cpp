@@ -1585,3 +1585,84 @@ void Spectrum::renderPanel(AppState& s) {
         ImGui::End();
 
 }
+
+// ── Park/resume mirror support (M2.1) ───────────────────────────────────────
+// Heavy members (caches, futures) are moved; scalars copied. Keep both
+// directions in sync when adding per-workspace fields.
+
+void Spectrum::parkInto(Spectrum& dst) {
+    dst.appState = appState;
+    dst.cachedSpectra = std::move(cachedSpectra);
+    dst.cachedFrequencies = std::move(cachedFrequencies);
+    dst.lastPrimaryDetectors = std::move(lastPrimaryDetectors);
+    dst.spectrumDirty = spectrumDirty;
+    dst.isSelectingXRange = isSelectingXRange;
+    dst.selectionStartX = selectionStartX;
+    dst.selectionEndX = selectionEndX;
+    dst.shouldAutoscale = shouldAutoscale;
+    dst.firstLoadCompleted = firstLoadCompleted;
+    dst.manualXMin = manualXMin; dst.manualXMax = manualXMax;
+    dst.manualYMin = manualYMin; dst.manualYMax = manualYMax;
+    dst.savedYMin = savedYMin; dst.savedYMax = savedYMax;
+    dst.showTrackingCursor = showTrackingCursor;
+    dst.leftArrowPressedLastFrame = leftArrowPressedLastFrame;
+    dst.rightArrowPressedLastFrame = rightArrowPressedLastFrame;
+    dst.leftArrowHandleFlag = leftArrowHandleFlag;
+    dst.rightArrowHandleFlag = rightArrowHandleFlag;
+    dst.xUnitSelector = xUnitSelector;
+    dst.prevXUnitSelector = prevXUnitSelector;
+    dst.yScaleSelector = yScaleSelector;
+    dst.prevYScaleSelector = prevYScaleSelector;
+    dst.refLaserTextbox = refLaserTextbox;
+    dst.detectorSensitivity = detectorSensitivity;
+    std::memcpy(dst.detectorSensitivityText, detectorSensitivityText, sizeof(detectorSensitivityText));
+    dst.Kpadding = Kpadding;
+    dst.apodizationSelector = apodizationSelector;
+    dst.apodizationParams = apodizationParams;
+    dst.yAxisMode = yAxisMode;
+    dst.prevYAxisMode = prevYAxisMode;
+    dst.forcedYMin = forcedYMin; dst.forcedYMax = forcedYMax;
+    dst.pendingNextXMin = pendingNextXMin; dst.pendingNextXMax = pendingNextXMax;
+    dst.xUnitSwitchedThisFrame = xUnitSwitchedThisFrame;
+    dst.convertedXMin = convertedXMin; dst.convertedXMax = convertedXMax;
+    dst.lastSpectrumParams = std::move(lastSpectrumParams);
+    dst.pendingSpectra_ = std::move(pendingSpectra_);
+}
+
+void Spectrum::resumeFrom(Spectrum& src) {
+    cachedSpectra = std::move(src.cachedSpectra);
+    cachedFrequencies = std::move(src.cachedFrequencies);
+    lastPrimaryDetectors = std::move(src.lastPrimaryDetectors);
+    spectrumDirty = src.spectrumDirty;
+    isSelectingXRange = src.isSelectingXRange;
+    selectionStartX = src.selectionStartX;
+    selectionEndX = src.selectionEndX;
+    shouldAutoscale = src.shouldAutoscale;
+    firstLoadCompleted = src.firstLoadCompleted;
+    manualXMin = src.manualXMin; manualXMax = src.manualXMax;
+    manualYMin = src.manualYMin; manualYMax = src.manualYMax;
+    savedYMin = src.savedYMin; savedYMax = src.savedYMax;
+    showTrackingCursor = src.showTrackingCursor;
+    leftArrowPressedLastFrame = src.leftArrowPressedLastFrame;
+    rightArrowPressedLastFrame = src.rightArrowPressedLastFrame;
+    leftArrowHandleFlag = src.leftArrowHandleFlag;
+    rightArrowHandleFlag = src.rightArrowHandleFlag;
+    xUnitSelector = src.xUnitSelector;
+    prevXUnitSelector = src.prevXUnitSelector;
+    yScaleSelector = src.yScaleSelector;
+    prevYScaleSelector = src.prevYScaleSelector;
+    refLaserTextbox = src.refLaserTextbox;
+    detectorSensitivity = src.detectorSensitivity;
+    std::memcpy(detectorSensitivityText, src.detectorSensitivityText, sizeof(detectorSensitivityText));
+    Kpadding = src.Kpadding;
+    apodizationSelector = src.apodizationSelector;
+    apodizationParams = src.apodizationParams;
+    yAxisMode = src.yAxisMode;
+    prevYAxisMode = src.prevYAxisMode;
+    forcedYMin = src.forcedYMin; forcedYMax = src.forcedYMax;
+    pendingNextXMin = src.pendingNextXMin; pendingNextXMax = src.pendingNextXMax;
+    xUnitSwitchedThisFrame = src.xUnitSwitchedThisFrame;
+    convertedXMin = src.convertedXMin; convertedXMax = src.convertedXMax;
+    lastSpectrumParams = std::move(src.lastSpectrumParams);
+    pendingSpectra_ = std::move(src.pendingSpectra_);
+}
