@@ -180,7 +180,7 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
     const float winW = std::min(1200.0f, vp.x - 40.0f);
     const float winH = std::min(760.0f, vp.y - 40.0f);
     const float listChildH = std::max(100.0f, winH - 340.0f);
-    const float crossChildH = std::max(100.0f, winH - 120.0f);
+    const float crossChildH = std::max(100.0f, winH - 160.0f);
     ImGui::SetNextWindowPos(ImVec2((vp.x - winW) * 0.5f, (vp.y - winH) * 0.5f));
     ImGui::SetNextWindowSize(ImVec2(winW, winH));
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.09f, 0.09f, 0.12f, 0.96f));
@@ -201,10 +201,15 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
     ImGui::Separator();
     ImGui::Spacing();
 
-    ImGui::Columns(2, "##welcomeCols", true);
-    ImGui::Separator();
+    // Two side-by-side child windows (NOT ImGui::Columns — columns corrupt
+    // their cursor when a BeginChild runs inside one, which pushed the right
+    // column down to the left column's cursor and broke the whole layout).
+    const float colGap = ImGui::GetStyle().ItemSpacing.x;
+    const float colW = (ImGui::GetContentRegionAvail().x - colGap) * 0.5f;
+    const float colH = winH - 55.0f;
 
     // ── Left: recent single-dataset workspaces + converter ─────────────────
+    ImGui::BeginChild("##welcomeLeft", ImVec2(colW, colH), true);
     ImGui::Text("Recent Datasets");
     ImGui::Separator();
     if (ImGui::BeginChild("RecentDatasetsChild", ImVec2(0, listChildH), true)) {
@@ -390,9 +395,11 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
         openConversionScreen(appState);
     }
 
-    ImGui::NextColumn();
+    ImGui::EndChild();   // ##welcomeLeft
+    ImGui::SameLine();
 
     // ── Right: recent multi-workspace files + New Multi-Workspace ──────────
+    ImGui::BeginChild("##welcomeRight", ImVec2(colW, colH), true);
     ImGui::Text("Recent Multi-Workspaces");
     ImGui::Separator();
     if (ImGui::BeginChild("RecentCrossChild", ImVec2(0, crossChildH), true)) {
@@ -479,7 +486,7 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
         ImGui::SetTooltip("Creates an empty .cross.h5. Datasets are embedded from "
                           "the Session tab's column (a).");
 
-    ImGui::Columns(1);
+    ImGui::EndChild();   // ##welcomeRight
     ImGui::End();
     ImGui::PopStyleColor(); // WindowBg
 }

@@ -29,10 +29,6 @@
 #include <thread>
 #include <vector>
 
-// Soft cap on workspace+environment tabs (Session excluded) — warning tooltip
-// on [+] at the cap (HL §3.2).
-static constexpr int kMaxWorkspaceTabs = 8;
-
 static bool naturalSortCompare(const std::string& a, const std::string& b) {
     size_t i = 0, j = 0;
     while (i < a.size() && j < b.size()) {
@@ -167,6 +163,7 @@ static void renderUnsavedPromptModal() {
             appState.pendingWorkspacePath.clear();
             appState.pendingTabCloseIdx = -1;
             appState.showUnsavedPrompt = false;
+            appState.exitDeferredClose = false;   // Cancel drops a deferred close
             ImGui::CloseCurrentPopup();
         }
         drawModalAccentFrame(modalAccent());
@@ -292,6 +289,7 @@ static void renderExitDirtyModal() {
             appState.exitDirtyTabs.clear();
             appState.exitDirtyLabels.clear();
             appState.showExitDirtyModal = false;
+            appState.exitDeferredClose = false;   // Cancel drops a deferred close
             ImGui::CloseCurrentPopup();
         }
         drawModalAccentFrame(modalAccent());
@@ -342,12 +340,13 @@ static void advanceExitSaveAll() {
 }
 
 // Tab strip (M2.2) — OUTSIDE the DockSpace window, between the menu bar and
-// the DockSpace Begin. Two regions: a fixed left region with the Session tab
-// (pinned by construction — never scrolled, never closable, never reorderable)
-// and a scrollable/reorderable bar for the workspace tabs + [+] button.
+// the DockSpace Begin. ONE tab bar: the Session tab is a real tab item as the
+// FIRST entry (NoReorder: neither draggable nor crossable — order-pinned),
+// unclosable by construction (nullptr p_open: no close button, and no
+// middle-click/context close is handled for it). Workspace tabs follow.
 // Returns the strip height in pixels (0 when no tabs exist yet, i.e. behind
 // the launch welcome).
-static float renderTabStrip(GLFWwindow* window) {
+static float renderTabStrip() {
     if (!appState.sessionTabPresent) return 0.0f;
     // The strip must NOT render windowless: widgets after EndMainMenuBar
     // would land in ImGui's implicit "Debug##Default" fallback window (a
@@ -372,35 +371,27 @@ static float renderTabStrip(GLFWwindow* window) {
                  ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoBringToFrontOnFocus |
                  ImGuiWindowFlags_NoFocusOnAppearing);
 
-    // ── Pinned Session tab: styled selectable (the plan's fallback — full
-    // control over the selected look, no close affordance).
-    const bool sessionActive = (appState.activeTabKind == ActiveTabKind::Session);
-    ImGui::PushStyleColor(ImGuiCol_Header, sessionActive
-        ? ImGui::GetStyleColorVec4(ImGuiCol_TabSelected)
-        : ImGui::GetStyleColorVec4(ImGuiCol_Tab));
-    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImGui::GetStyleColorVec4(ImGuiCol_TabHovered));
-    ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImGui::GetStyleColorVec4(ImGuiCol_TabSelected));
-    // FIXED width — a 0.0f (fill-remaining) width would make this selectable's
-    // hit-rect span the WHOLE strip and swallow every workspace-tab click.
-    const float sessionTabW = ImGui::CalcTextSize("Session").x +
-                              style.ItemSpacing.x * 2.0f + style.FramePadding.x * 2.0f;
-    if (ImGui::Selectable("Session##pinned", sessionActive, 0,
-                          ImVec2(sessionTabW, tabH))) {
-        if (!sessionActive) focusSessionTab(appState);
-    }
-    ImGui::PopStyleColor(3);
-    ImGui::SameLine(0.0f, 0.0f);
-
-    // ── Scrollable workspace tabs + [+] ─────────────────────────────────────
     // Reorderable: the visual strip order may differ from sessions[] (session
     // order is fixed at creation); selection/click/close are bound to the
-    // stable tab IDs, so no index remap is needed.
+    // stable tab IDs, so no index remap is needed. NoReorder keeps the
+    // Session tab first (ImGui blocks dragging it and crossing over it).
     if (ImGui::BeginTabBar("##WorkspaceTabs",
             ImGuiTabBarFlags_FittingPolicyScroll | ImGuiTabBarFlags_Reorderable)) {
-        // While the Session tab is focused, no workspace tab is active: clear
-        // the bar's stale selection so the workspace tab does not stay
-        // highlighted (the pinned Session tab carries the selected look).
-        if (appState.activeTabKind != ActiveTabKind::Workspace) {
+        // ── Session tab: identical look to workspace tabs (a real tab item),
+        // unclosable (nullptr p_open) and order-pinned (NoReorder).
+        const bool sessionActive = (appState.activeTabKind == ActiveTabKind::Session);
+        const bool sessionShown = ImGui::BeginTabItem("Session##session", nullptr,
+            ImGuiTabItemFlags_NoReorder |
+            (sessionActive ? ImGuiTabItemFlags_SetSelected : 0));
+        if (ImGui::IsItemClicked() && !sessionActive) focusSessionTab(appState);
+        if (sessionShown) {
+            ImGui::EndTabItem();
+        }
+
+        // Environment tabs (Phase 3) are not in this bar: with one focused,
+        // no tab is active — clear the bar's stale selection so no workspace
+        // tab stays highlighted (Session/workspace tabs carry their own).
+        if (appState.activeTabKind == ActiveTabKind::Environment) {
             ImGuiTabBar* bar = ImGui::GetCurrentTabBar();
             if (bar && bar->SelectedTabId != 0) {
                 bar->SelectedTabId = 0;
@@ -442,29 +433,8 @@ static float renderTabStrip(GLFWwindow* window) {
                 break;   // sessions vector changed — stop iterating
             }
         }
-        if (ImGui::TabItemButton("+")) {
-            std::string defaultFolder = appState.currentDirectory;
-            if (appState.hasWorkspace())
-                defaultFolder = std::filesystem::path(appState.workspacePath).parent_path().string();
-            if (!std::filesystem::is_directory(defaultFolder))
-                defaultFolder = "";
-            std::string path = FileBrowser::showFileOpenDialog(
-                "Open HDF5 Workspace", "HDF5 files", "*.h5", window, defaultFolder);
-            if (!path.empty())
-                requestWorkspaceDiscard(appState, PendingWorkspaceAction::OpenPath, path);
-        }
-        if (appState.sessions.size() >= kMaxWorkspaceTabs && ImGui::IsItemHovered())
-            ImGui::SetTooltip("Tab limit reached (%d) — close a tab to add more.",
-                              kMaxWorkspaceTabs);
         ImGui::EndTabBar();
     }
-
-    // Bottom rule spanning the strip (the tab bar draws its own separator;
-    // this covers the pinned Session region on the left).
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    dl->AddLine(ImVec2(0.0f, stripH - 1.0f),
-                ImVec2(ImGui::GetWindowSize().x, stripH - 1.0f),
-                ImGui::GetColorU32(ImGuiCol_Border));
 
     ImGui::End();
     ImGui::PopStyleVar(3);
@@ -794,6 +764,25 @@ void AppLoop::pollEvents() {
                 appState.exitDirtyLabels = std::move(dirtyLabels);
                 appState.needsRedraw = true;
             }
+        }
+        // A close request while a dirty-flow modal/state is pending must NOT
+        // close: the pending prompt would be skipped and the dirty tab
+        // silently dropped (e.g. the tab-close "Unsaved Changes" modal is up,
+        // or the exit modal itself, or Save All is mid-run). Defer the close
+        // and re-apply it once the pending flow resolves.
+        if (glfwWindowShouldClose(window_)) {
+            if (appState.showUnsavedPrompt || appState.showExitDirtyModal ||
+                appState.exitSaveAllRunning ||
+                appState.pendingWorkspaceAction != PendingWorkspaceAction::None) {
+                glfwSetWindowShouldClose(window_, GLFW_FALSE);
+                appState.exitDeferredClose = true;
+            }
+        }
+        if (appState.exitDeferredClose && !appState.showUnsavedPrompt &&
+            !appState.showExitDirtyModal && !appState.exitSaveAllRunning &&
+            appState.pendingWorkspaceAction == PendingWorkspaceAction::None) {
+            appState.exitDeferredClose = false;
+            glfwSetWindowShouldClose(window_, GLFW_TRUE);
         }
 #endif
 }
@@ -1384,7 +1373,7 @@ void AppLoop::renderUI() {
             // Tab strip (M2.2): Session pinned left, scrollable workspace bar.
             // OUTSIDE the DockSpace window — the DockSpace Y offset below is
             // bumped by the strip height so the dock area does not overlap it.
-            const float stripH = renderTabStrip(window_);
+            const float stripH = renderTabStrip();
             const float topOffset = ImGui::GetFrameHeight() + stripH;
 
             // Always create dockspace, but make background transparent when welcome screen is active
@@ -1493,8 +1482,24 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
         // never appears as a stray floating box over the dock area.
         if (appState.activeTabKind == ActiveTabKind::Session) {
             ImGui::SetNextWindowDockID(dockspace_id, ImGuiCond_FirstUseEver);
+            // The Session window lives as a tab in a dock node (it shares
+            // dock_center with "Interferogram View" in the default layout).
+            // Without this it stays a background tab: it renders (vertices
+            // exist) but the node never shows it — a black dock area.
+            ImGui::SetNextWindowFocus();
             sessionTab_.render();
         }
+        for (ImGuiWindow* w : ImGui::GetCurrentContext()->Windows) {
+            fprintf(stderr, "WIN-DEBUG %-28s act=%d child=%d flags=0x%X pos=(%.0f,%.0f) size=(%.0f,%.0f)\n",
+                    w->Name, w->Active, (w->Flags & ImGuiWindowFlags_ChildWindow) != 0,
+                    w->Flags, w->Pos.x, w->Pos.y, w->Size.x, w->Size.y);
+        }
+        fprintf(stderr, "WINCOUNT=%d hasSession=%d\n", (int)ImGui::GetCurrentContext()->Windows.Size,
+                ImGui::FindWindowByName("Session") != nullptr);
+        fprintf(stderr, "SWAP-DEBUG kind=%d activeIdx=%d pendingSwapIdx=%d pendingToSession=%d welcome=%d/%d\n",
+                (int)appState.activeTabKind, appState.activeSessionIdx, appState.pendingSwapIdx,
+                (int)appState.pendingSwapToSession, (int)appState.showWelcomeScreen,
+                (int)appState.welcomeScreenInitialized);
         
         // Close the docking condition
         }
@@ -1573,6 +1578,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
 }
 
 void AppLoop::present() {
+        fprintf(stderr, "PRESENT-DEBUG kind=%d\n", (int)appState.activeTabKind);
         // Rendering
         ImGui::Render();
         int display_w, display_h;

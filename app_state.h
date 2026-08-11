@@ -307,6 +307,10 @@ struct AppState {
     std::vector<std::string> exitDirtyLabels;
     bool exitSaveAllRunning = false;
     size_t exitSaveAllCursor = 0;
+    // Close requested while a dirty-flow modal/state was pending: the close
+    // was deferred (GLFW close flag cleared); re-applied by pollEvents once
+    // the pending flow resolves — never exit past an open prompt.
+    bool exitDeferredClose = false;
 
     // Peak-finding X correction state
     int    xCorrectionMethod = 0;           // 0=Hilbert, 1=PeakFinding

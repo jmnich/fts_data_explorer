@@ -71,6 +71,12 @@ void openWorkspaceInNewTab(AppState& s, const std::string& path) {
             if (crossLoad(s, path, err)) {
                 focusSessionTab(s);
                 rememberMultiWorkspace(s, path);
+                // Leave the launch welcome (the Session tab takes over) — the
+                // workspace-tab open path does this via finishWorkspaceLoad;
+                // the cross path must do it explicitly or the welcome keeps
+                // rendering and the dock/Session UI never appears.
+                s.showWelcomeScreen = false;
+                s.welcomeScreenInitialized = true;
             } else {
                 s.adapterErrorMsg = std::string("Failed to open multi-workspace:\n") + err;
                 s.showAdapterErrorPopup = true;
@@ -421,6 +427,8 @@ void dispatchPendingAction(AppState& s) {
             if (crossLoad(s, path, err)) {
                 focusSessionTab(s);
                 rememberMultiWorkspace(s, path);
+                s.showWelcomeScreen = false;
+                s.welcomeScreenInitialized = true;
             } else {
                 s.adapterErrorMsg = std::string("Failed to open multi-workspace:\n") + err;
                 s.showAdapterErrorPopup = true;
