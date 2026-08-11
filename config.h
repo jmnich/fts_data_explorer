@@ -306,7 +306,13 @@ struct AppConfig {
                         }
                     } else if (currentSection == "Converters") {
                         if (key == "repo_url") {
-                            converterRepoUrl = value;
+                            // Guard: only accept a plausible repo URL; anything
+                            // else falls back to the default so a typo'd value
+                            // can't make git open a bogus credential prompt.
+                            if (value.rfind("http://", 0) == 0
+                                || value.rfind("https://", 0) == 0
+                                || value.rfind("git@", 0) == 0)
+                                converterRepoUrl = value;
                         } else if (key == "repo_dir") {
                             converterRepoDir = value;
                         } else if (key == "interpreter") {
