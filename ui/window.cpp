@@ -176,6 +176,9 @@ bool initializeApplication(AppConfig& config, GLFWwindow*& window) {
     });
     glfwSetWindowCloseCallback(window, [](GLFWwindow* w) {
         glfwSetWindowShouldClose(w, GLFW_TRUE);
+        // Wake the idle loop: the exit intercept in pollEvents needs a
+        // rendered frame to show the save/cancel prompt (bugfix 5).
+        static_cast<AppState*>(glfwGetWindowUserPointer(w))->needsRedraw = true;
     });
 
     // Initialize ImGui

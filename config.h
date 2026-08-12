@@ -53,6 +53,12 @@ struct AppConfig {
     
     // Docking layout: tracks whether the default layout has been applied
     bool defaultLayoutApplied = false;
+    // Layout-format version for the Session-tab panels (bugfix 2026-08-13:
+    // they moved from a nested dock space into the main dock). Bumping the
+    // version forces one rebuild so panels whose saved DockIds point at the
+    // retired nested nodes get re-docked (ImGui otherwise recreates those
+    // nodes as implicit floating windows at their stale positions).
+    int sessionPanelLayoutVersion = 0;
     
     // Window state
     int windowWidth = 1280;
@@ -212,6 +218,7 @@ struct AppConfig {
             configFile << "worker_threads=" << workerThreads << "\n";
             configFile << "last_multi_workspace=" << lastMultiWorkspacePath << "\n";
             configFile << "default_layout_applied=" << (defaultLayoutApplied ? "true" : "false") << "\n";
+            configFile << "session_panel_layout_version=" << sessionPanelLayoutVersion << "\n";
 
             // Converter settings (only non-defaults are persisted; empty
             // strings keep the platform defaults)
@@ -320,6 +327,8 @@ struct AppConfig {
                             lastMultiWorkspacePath = value;
                         } else if (key == "default_layout_applied") {
                             defaultLayoutApplied = (value == "true");
+                        } else if (key == "session_panel_layout_version") {
+                            sessionPanelLayoutVersion = std::stoi(value);
                         }
                     } else if (currentSection == "Window") {
                         if (key == "width") {

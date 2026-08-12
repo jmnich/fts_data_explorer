@@ -2,6 +2,7 @@
 #include "session_tab.h"
 
 #include <filesystem>
+#include <functional>
 
 #include "app_state.h"
 #include "config.h"
@@ -13,7 +14,7 @@
 
 #include <GLFW/glfw3.h>
 #include <imgui.h>
-#include "imgui_internal.h"   // ImGuiWindow::DockNode (dock-selection fallback)
+#include "imgui_internal.h"   // DockBuilder + ImGuiWindow::DockNode
 
 namespace {
 
@@ -21,7 +22,7 @@ ImVec4 modalAccent() {
     return GetAccentBase(StringToAccentColor(appState.currentAccentColor));
 }
 
-// Confirm-before-remove modal for column (a) rows.
+// Confirm-before-remove modal for the Datasets panel rows.
 bool g_showRemoveConfirm = false;
 std::string g_removeSourceId;
 
@@ -83,6 +84,42 @@ void renderRemoveConfirm() {
     endModal();
 }
 
+// Dock-selection fallback: if the window is docked but its node's tab bar is
+// showing another tab (background-tab render), force this window's tab to the
+// front. Needed per window — see renderUI's pre-DockSpace force.
+void forceDockSelection() {
+    ImGuiWindow* w = ImGui::GetCurrentWindow();
+    if (w->DockNode && w->DockNode->SelectedTabId != w->TabId) {
+        w->DockNode->SelectedTabId = w->TabId;
+        if (w->DockNode->TabBar)
+            w->DockNode->TabBar->NextSelectedTabId = w->TabId;
+        appState.needsRedraw = true;
+    }
+}
+
+// Resolve the MAIN dock space id. Must be computed from the "DockSpace"
+// window's ID stack (the same context the DockSpace() call uses) — a bare
+// ImGui::GetID here would hash against a different window and miss.
+ImGuiID mainDockSpaceId() {
+    if (ImGuiWindow* ds = ImGui::FindWindowByName("DockSpace"))
+        return ds->GetID("MainDockSpace_v2");
+    return 0;
+}
+
+// One dockable panel window of the Session tab, docked DIRECTLY in the main
+// dock space (no intermediate host window — bugfix: the old nested "Session"
+// dock was redundant). FirstUseEver lets the default layout (rebuildDefault-
+// Layout) or the user's imgui.ini decide the position; afterwards the panel
+// is freely draggable/redockable like every other panel.
+void renderSessionPanel(const char* name, const std::function<void()>& content) {
+    ImGui::SetNextWindowDockID(mainDockSpaceId(), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin(name)) {
+        forceDockSelection();
+        content();
+    }
+    ImGui::End();
+}
+
 }  // namespace
 
 const std::string& SessionTab::title() const {
@@ -91,106 +128,99 @@ const std::string& SessionTab::title() const {
 
 void SessionTab::render() {
     renderRemoveConfirm();
-    if (!ImGui::Begin("Session")) {
-        ImGui::End();
-        return;
-    }
-    // Fallback: if the pre-DockSpace selection force (renderUI) had no window
-    // to act on (very first Session frame), the node's tab bar already
-    // processed this frame without us — force the selection here and render
-    // one more frame so the content is actually shown (BeginDocked reads
-    // node->VisibleWindow set by the tab-bar layout).
-    {
-        ImGuiWindow* w = ImGui::GetCurrentWindow();
-        if (w->DockNode && w->DockNode->SelectedTabId != w->TabId) {
-            w->DockNode->SelectedTabId = w->TabId;
-            if (w->DockNode->TabBar)
-                w->DockNode->TabBar->NextSelectedTabId = w->TabId;
-            appState.needsRedraw = true;
-        }
-    }
-    if (appState.sessionTab.multiWorkspaceOpen)
+    if (appState.sessionTab.multiWorkspaceOpen) {
         renderMultiWorkspace();
-    else
+    } else {
         renderSingleFile();
-    ImGui::End();
+    }
 }
 
-// Single-file mode: info pane + [Create Multi-Workspace…] (HL §3.5).
+// Single-file mode: info pane + [Create Multi-Workspace…] (HL §3.5), hosted in
+// the Datasets panel (the natural home — the other two panels keep their
+// empty states so the dock layout is stable across the mode switch).
 void SessionTab::renderSingleFile() {
-    ImGui::Spacing();
-    ImGui::TextWrapped("Not a multi-workspace environment.\n\n"
-                       "This session holds a single dataset. Create a multi-workspace "
-                       "file to embed datasets and open them side by side as tabs.");
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
-    const bool anyWorkspace = !appState.sessions.empty();
-    const int src = (appState.activeTabKind == ActiveTabKind::Workspace &&
-                     appState.activeSessionIdx >= 0)
-                        ? appState.activeSessionIdx
-                        : appState.lastActiveSessionIdx;
-    const bool refEmbedded = anyWorkspace && src >= 0 &&
-                             appState.sessions[src]->path.empty();
-    if (anyWorkspace) {
-        if (refEmbedded) ImGui::BeginDisabled(true);
-        if (ImGui::Button("Create Multi-Workspace...", ImVec2(240, 0))) {
-            std::string defaultFolder;
-            if (std::filesystem::is_directory(appState.currentDirectory))
-                defaultFolder = appState.currentDirectory;
-            else if (appState.configPtr && !appState.configPtr->lastMultiWorkspacePath.empty())
-                defaultFolder = std::filesystem::path(
-                    appState.configPtr->lastMultiWorkspacePath).parent_path().string();
-            std::string path = FileBrowser::showFileSaveDialog(
-                "New Multi-Workspace", "workspace.cross.h5", "*.h5",
-                defaultFolder, glfwGetCurrentContext());
-            if (!path.empty()) {
-                // Embed a copy of the most relevant open dataset from disk.
-                const std::string srcPath = appState.sessions[src]->path;
-                std::string err;
-                if (crossCreateFromDataset(appState, path, srcPath, err)) {
-                    crossLoad(appState, path, err);
-                    rememberMultiWorkspace(appState, path);
-                    appState.needsRedraw = true;
-                } else {
-                    appState.adapterErrorMsg = "Create failed:\n" + err;
-                    appState.showAdapterErrorPopup = true;
+    renderSessionPanel("Datasets", [this]() {
+        ImGui::Spacing();
+        ImGui::TextWrapped("Not a multi-workspace environment.\n\n"
+                           "This session holds a single dataset. Create a multi-workspace "
+                           "file to embed datasets and open them side by side as tabs.");
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+        const bool anyWorkspace = !appState.sessions.empty();
+        const int src = (appState.activeTabKind == ActiveTabKind::Workspace &&
+                         appState.activeSessionIdx >= 0)
+                            ? appState.activeSessionIdx
+                            : appState.lastActiveSessionIdx;
+        const bool refEmbedded = anyWorkspace && src >= 0 &&
+                                 appState.sessions[src]->path.empty();
+        if (anyWorkspace) {
+            if (refEmbedded) ImGui::BeginDisabled(true);
+            if (ImGui::Button("Create Multi-Workspace...", ImVec2(240, 0))) {
+                std::string defaultFolder;
+                if (std::filesystem::is_directory(appState.currentDirectory))
+                    defaultFolder = appState.currentDirectory;
+                else if (appState.configPtr && !appState.configPtr->lastMultiWorkspacePath.empty())
+                    defaultFolder = std::filesystem::path(
+                        appState.configPtr->lastMultiWorkspacePath).parent_path().string();
+                std::string path = FileBrowser::showFileSaveDialog(
+                    "New Multi-Workspace", "workspace.cross.h5", "*.h5",
+                    defaultFolder, glfwGetCurrentContext());
+                if (!path.empty()) {
+                    // Embed a copy of the most relevant open dataset from disk.
+                    const std::string srcPath = appState.sessions[src]->path;
+                    std::string err;
+                    if (crossCreateFromDataset(appState, path, srcPath, err)) {
+                        crossLoad(appState, path, err);
+                        rememberMultiWorkspace(appState, path);
+                        appState.needsRedraw = true;
+                    } else {
+                        appState.adapterErrorMsg = "Create failed:\n" + err;
+                        appState.showAdapterErrorPopup = true;
+                    }
                 }
             }
+            if (refEmbedded) {
+                ImGui::EndDisabled();
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("The reference tab is embedded in a multi-workspace. "
+                                      "Create from a filesystem dataset instead.");
+            } else if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Creates an empty .cross.h5 and embeds the currently "
+                                  "open dataset into it.");
+            }
+        } else {
+            ImGui::TextDisabled("Open a workspace first — the Session tab can then "
+                                "turn it into a multi-workspace.");
         }
-        if (refEmbedded) {
-            ImGui::EndDisabled();
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("The reference tab is embedded in a multi-workspace. "
-                                  "Create from a filesystem dataset instead.");
-        } else if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Creates an empty .cross.h5 and embeds the currently "
-                              "open dataset into it.");
-        }
-    } else {
-        ImGui::TextDisabled("Open a workspace first — the Session tab can then "
-                            "turn it into a multi-workspace.");
-    }
+    });
+    renderSessionPanel("Active Environments", [this]() { renderActiveEnvironmentsPanel(); });
+    renderSessionPanel("Available Environments", [this]() { renderAvailableEnvironmentsPanel(); });
 }
 
-// Multi-workspace mode: 3 columns (HL §3.5).
+// Multi-workspace mode (bugfix 3): three dockable panels docked DIRECTLY in
+// the main dock space — Datasets (left), Active Environments and Available
+// Environments (stacked right) per the default layout in rebuildDefaultLayout.
+// Bugfix 4: each panel is a scrollable list; no intermediate host window.
 void SessionTab::renderMultiWorkspace() {
-    ImGui::TextWrapped("Multi-workspace: %s",
-                       appState.sessionTab.multiWorkspacePath.c_str());
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
+    renderSessionPanel("Datasets", [this]() {
+        ImGui::TextDisabled("Multi-workspace: %s",
+                            appState.sessionTab.multiWorkspacePath.c_str());
+        ImGui::Spacing();
+        renderDatasetsPanel();
+    });
+    renderSessionPanel("Active Environments", [this]() { renderActiveEnvironmentsPanel(); });
+    renderSessionPanel("Available Environments", [this]() { renderAvailableEnvironmentsPanel(); });
+}
 
-    ImGui::Columns(3, "##sessionColumns", true);
-    ImGui::Separator();
-
-    // ── (a) embedded datasets ───────────────────────────────────────────────
-    ImGui::Text("Datasets");
-    ImGui::Separator();
+// (a) embedded datasets: scrollable list + [+ Add Dataset] pinned at the bottom.
+void SessionTab::renderDatasetsPanel() {
+    const float rowH = ImGui::GetFrameHeight();
+    ImGui::BeginChild("##datasetsList", ImVec2(0.0f, -rowH * 2.6f), false,
+                      ImGuiWindowFlags_AlwaysVerticalScrollbar);
     if (appState.sessionTab.sources.empty()) {
         ImGui::TextDisabled("No datasets embedded yet.");
     }
-    const float rowH = ImGui::GetFrameHeight();
     for (size_t i = 0; i < appState.sessionTab.sources.size(); ++i) {
         const auto& src = appState.sessionTab.sources[i];
         ImGui::PushID(static_cast<int>(i));
@@ -201,6 +231,8 @@ void SessionTab::renderMultiWorkspace() {
         }
         ImGui::SameLine();
         const std::string label = src.name + "##open" + src.id;
+        // Width 0 = fill the panel's remaining width (Selectable does NOT
+        // support negative sizes here — -FLT_MIN shrank the box to ~1 letter).
         if (ImGui::Selectable(label.c_str(), false, 0,
                               ImVec2(0.0f, rowH))) {
             openEmbeddedInNewTab(appState, appState.sessionTab.multiWorkspacePath,
@@ -211,7 +243,7 @@ void SessionTab::renderMultiWorkspace() {
                               src.memberCount, src.memberCount == 1 ? "" : "s");
         ImGui::PopID();
     }
-    ImGui::Spacing();
+    ImGui::EndChild();
     if (ImGui::Button("+ Add Dataset", ImVec2(-FLT_MIN, 0))) {
         std::string defaultFolder;
         if (std::filesystem::is_directory(appState.currentDirectory))
@@ -233,19 +265,20 @@ void SessionTab::renderMultiWorkspace() {
     }
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Embeds a copy of the dataset into the multi-workspace file.");
+}
 
-    ImGui::NextColumn();
-
-    // ── (b) active environments (Phase 3 populates) ────────────────────────
-    ImGui::Text("Active Environments");
-    ImGui::Separator();
+// (b) active environments (Phase 3 populates).
+void SessionTab::renderActiveEnvironmentsPanel() {
+    ImGui::BeginChild("##activeEnvsList", ImVec2(0.0f, 0.0f), false,
+                      ImGuiWindowFlags_AlwaysVerticalScrollbar);
     ImGui::TextDisabled("No environments open — create one on the right.");
+    ImGui::EndChild();
+}
 
-    ImGui::NextColumn();
-
-    // ── (c) available environment types (Phase 3) ──────────────────────────
-    ImGui::Text("Available Environments");
-    ImGui::Separator();
+// (c) available environment types (Phase 3).
+void SessionTab::renderAvailableEnvironmentsPanel() {
+    ImGui::BeginChild("##availableEnvsList", ImVec2(0.0f, 0.0f), false,
+                      ImGuiWindowFlags_AlwaysVerticalScrollbar);
     ImGui::BeginDisabled(true);
     if (ImGui::Selectable("Absorbance", false)) {}
     if (ImGui::IsItemHovered())
@@ -254,6 +287,5 @@ void SessionTab::renderMultiWorkspace() {
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Available in the next phase.");
     ImGui::EndDisabled();
-
-    ImGui::Columns(1);
+    ImGui::EndChild();
 }

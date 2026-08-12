@@ -14,14 +14,17 @@ class SessionTab : public SessionBase {
 public:
     const std::string& title() const override;   // "Session"
     bool isDirty() const override { return false; }
-    void render() override;                      // the 3-column browser window
+    void render() override;                      // 3 dockable panels, directly in the main dock
     void tickAsync() override {}                 // no async state
     void onActivate() override {}                // AppLoop sets needsRedraw
     void onDeactivate() override {}              // Phase 4: layout save
     void closeRequest() override {}              // unreachable: never closable
 
 private:
-    void renderMultiWorkspace();                 // 3-column browser
-    void renderSingleFile();                     // info pane + create button
+    void renderMultiWorkspace();                 // Datasets / Active / Available panels
+    void renderSingleFile();                     // info pane + create button (Datasets panel)
+    void renderDatasetsPanel();                  // scrollable dataset list
+    void renderActiveEnvironmentsPanel();        // scrollable list (Phase 3)
+    void renderAvailableEnvironmentsPanel();     // scrollable type list
     std::string titleCache_ = "Session";
 };

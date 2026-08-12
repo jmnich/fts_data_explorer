@@ -435,9 +435,6 @@ void dispatchPendingAction(AppState& s) {
             }
             break;
         }
-        case PendingWorkspaceAction::Exit:
-            glfwSetWindowShouldClose(glfwGetCurrentContext(), GLFW_TRUE);
-            break;
         case PendingWorkspaceAction::None:
             break;
     }

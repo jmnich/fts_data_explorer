@@ -27,7 +27,7 @@ struct GLFWwindow;
 std::string shortenFilename(const std::string& filename);
 
 #if FTS_BUILD_HDF5
-enum class PendingWorkspaceAction { None, CloseWorkspace, OpenPath, OpenMultiWorkspace, Exit };
+enum class PendingWorkspaceAction { None, CloseWorkspace, OpenPath, OpenMultiWorkspace };
 #endif
 
 #if FTS_BUILD_HDF5

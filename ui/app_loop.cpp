@@ -65,7 +65,10 @@ ImVec4 modalAccent() {
 static void renderUnsavedPromptModal() {
     static int focus = 0;
     static bool wasOpen = false;
-    if (!appState.showUnsavedPrompt) {
+    // One modal at a time: while the exit modal is up, its OpenPopup would
+    // close this one (and vice versa) — both would render stacked, with the
+    // later one hiding the other (bugfix 5).
+    if (!appState.showUnsavedPrompt || appState.showExitDirtyModal) {
         wasOpen = false;
         return;
     }
@@ -177,7 +180,8 @@ static void renderUnsavedPromptModal() {
 static void renderStaleDropPromptModal() {
     static int focus = 0;
     static bool wasOpen = false;
-    if (!appState.showStaleDropPrompt) {
+    // One modal at a time — see renderUnsavedPromptModal.
+    if (!appState.showStaleDropPrompt || appState.showExitDirtyModal) {
         wasOpen = false;
         return;
     }
@@ -339,6 +343,19 @@ static void advanceExitSaveAll() {
     }
 }
 
+// White outline around a hovered tab item (bugfix 1). Called right after
+// BeginTabItem (inside its shown gate) so LastItemData holds the tab rect.
+static void drawTabHoverOutline() {
+    if (!ImGui::IsItemHovered()) return;
+    const ImVec2 minRect = ImGui::GetItemRectMin();
+    const ImVec2 maxRect = ImGui::GetItemRectMax();
+    const ImVec2 min(minRect.x - 1.0f, minRect.y - 1.0f);
+    const ImVec2 max(maxRect.x + 1.0f, maxRect.y + 1.0f);
+    ImGui::GetWindowDrawList()->AddRect(min, max,
+        IM_COL32(255, 255, 255, 190), ImGui::GetStyle().TabRounding,
+        ImDrawFlags_None, 1.5f);
+}
+
 // Tab strip (M2.2) — OUTSIDE the DockSpace window, between the menu bar and
 // the DockSpace Begin. ONE tab bar: the Session tab is a real tab item as the
 // FIRST entry (NoReorder: neither draggable nor crossable — order-pinned),
@@ -356,7 +373,10 @@ static float renderTabStrip() {
     ImGuiViewport* vp = ImGui::GetMainViewport();
     const ImGuiStyle& style = ImGui::GetStyle();
     const float tabH = ImGui::GetFrameHeight();
-    const float stripH = tabH + style.TabBarBorderSize + 1.0f;
+    // Visual separation from the menu ribbon above: a gap band (shown in a
+    // slightly lighter bg) + a 1px border line under it (bugfix 2).
+    const float gap = 4.0f;
+    const float stripH = gap + tabH + style.TabBarBorderSize + 1.0f;
 
     ImGui::SetNextWindowPos(ImVec2(vp->Pos.x, vp->Pos.y + ImGui::GetFrameHeight()),
                             ImGuiCond_Always);
@@ -367,9 +387,16 @@ static float renderTabStrip() {
     // bar's border — the dead strip of black that made the selector look
     // "crowded/junky".
     ImGui::SetNextWindowSizeConstraints(ImVec2(0.0f, 0.0f), ImVec2(FLT_MAX, FLT_MAX));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, gap));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.08f, 0.08f, 0.08f, 1.0f));
+    // TabHovered overridden to the full accent so a hovered tab lights up
+    // instead of dimming the active tab to near-black (bugfix 1: the theme's
+    // TabHovered is ~as dark as the idle Tab color). Pushed BEFORE Begin so
+    // it is balanced by the PopStyleColor(2) after End.
+    ImGui::PushStyleColor(ImGuiCol_TabHovered,
+                          ImGui::GetStyleColorVec4(ImGuiCol_TabSelected));
     ImGui::Begin("##TabStrip", nullptr,
                  ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                  ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
@@ -389,6 +416,15 @@ static float renderTabStrip() {
             if (sw->DC.CursorMaxPos.y > stripH) sw->DC.CursorMaxPos.y = stripH;
         }
     }
+    // 1px border line at the top of the tab area (under the gap band) — the
+    // visual separation between the menu ribbon and the tab selector (bugfix
+    // 2). Drawn before the tab bar so the tabs overdraw it where they sit.
+    {
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        dl->AddLine(ImVec2(0.0f, gap - 1.0f),
+                    ImVec2(ImGui::GetWindowSize().x, gap - 1.0f),
+                    ImGui::GetColorU32(ImGuiCol_Border));
+    }
 
     // Reorderable: the visual strip order may differ from sessions[] (session
     // order is fixed at creation); selection/click/close are bound to the
@@ -404,6 +440,7 @@ static float renderTabStrip() {
             (sessionActive ? ImGuiTabItemFlags_SetSelected : 0));
         if (ImGui::IsItemClicked() && !sessionActive) focusSessionTab(appState);
         if (sessionShown) {
+            drawTabHoverOutline();
             ImGui::EndTabItem();
         }
 
@@ -445,6 +482,7 @@ static float renderTabStrip() {
                     if (ImGui::MenuItem("Close")) open = false;
                     ImGui::EndPopup();
                 }
+                drawTabHoverOutline();
                 ImGui::EndTabItem();
             }
             if (!open) {
@@ -456,6 +494,7 @@ static float renderTabStrip() {
     }
 
     ImGui::End();
+    ImGui::PopStyleColor(2);
     ImGui::PopStyleVar(3);
     // Return the ACTUAL window height (the size clamp above caps the tab
     // bar's reserved contents space, so this equals the tab bar's real
@@ -601,6 +640,13 @@ static void rebuildDefaultLayout(ImGuiID dockspace_id, float topOffset) {
     ImGui::DockBuilderSplitNode(dock_right_panel, ImGuiDir_Up, 0.50f, &dock_right_top, &dock_right_bottom);
 
     ImGui::DockBuilderDockWindow("Files",              dock_left_top);
+    // Session-tab panels dock directly in the main dock space (no
+    // intermediate "Session" host window): Datasets shares the left-top node
+    // with Files, Active/Available Environments the right column — the
+    // requested "Datasets left, other two stacked right". Each node shows the
+    // session panel only while the Session tab is active (the workspace
+    // panels are gated out); forceDockSelection keeps it the selected tab.
+    ImGui::DockBuilderDockWindow("Datasets",              dock_left_top);
     ImGui::DockBuilderDockWindow("Metadata",           dock_left_bottom_top);
     ImGui::DockBuilderDockWindow("Export",             dock_left_bottom_top);
     ImGui::DockBuilderDockWindow("SNR",                dock_left_bottom_top);
@@ -614,8 +660,9 @@ static void rebuildDefaultLayout(ImGuiID dockspace_id, float topOffset) {
     ImGui::DockBuilderDockWindow("Allan View",         dock_center);
     ImGui::DockBuilderDockWindow("SNR View",           dock_right_top);
     ImGui::DockBuilderDockWindow("Average View",       dock_right_top);
+    ImGui::DockBuilderDockWindow("Active Environments", dock_right_top);
     ImGui::DockBuilderDockWindow("Spectrum View",      dock_right_bottom);
-    ImGui::DockBuilderDockWindow("Session",             dock_center);
+    ImGui::DockBuilderDockWindow("Available Environments", dock_right_bottom);
 
     ImGui::DockBuilderFinish(dockspace_id);
 }
@@ -766,7 +813,8 @@ void AppLoop::pollEvents() {
         // active workspace's dirty flag lives in the flat fields; parked
         // sessions answer via their latch.
         if (glfwWindowShouldClose(window_) && !appState.showExitDirtyModal &&
-            !appState.showUnsavedPrompt && appState.exitSaveAllRunning == false &&
+            !appState.showUnsavedPrompt && !appState.showStaleDropPrompt &&
+            appState.exitSaveAllRunning == false &&
             appState.pendingWorkspaceAction == PendingWorkspaceAction::None) {
             std::vector<int> dirtyTabs;
             std::vector<std::string> dirtyLabels;
@@ -794,17 +842,21 @@ void AppLoop::pollEvents() {
         // close: the pending prompt would be skipped and the dirty tab
         // silently dropped (e.g. the tab-close "Unsaved Changes" modal is up,
         // or the exit modal itself, or Save All is mid-run). Defer the close
-        // and re-apply it once the pending flow resolves.
+        // and re-apply it once the pending flow resolves. needsRedraw is set
+        // so the pending prompt re-renders — the X press never goes by
+        // silently (bugfix 5).
         if (glfwWindowShouldClose(window_)) {
             if (appState.showUnsavedPrompt || appState.showExitDirtyModal ||
-                appState.exitSaveAllRunning ||
+                appState.showStaleDropPrompt || appState.exitSaveAllRunning ||
                 appState.pendingWorkspaceAction != PendingWorkspaceAction::None) {
                 glfwSetWindowShouldClose(window_, GLFW_FALSE);
                 appState.exitDeferredClose = true;
+                appState.needsRedraw = true;
             }
         }
         if (appState.exitDeferredClose && !appState.showUnsavedPrompt &&
-            !appState.showExitDirtyModal && !appState.exitSaveAllRunning &&
+            !appState.showExitDirtyModal && !appState.showStaleDropPrompt &&
+            !appState.exitSaveAllRunning &&
             appState.pendingWorkspaceAction == PendingWorkspaceAction::None) {
             appState.exitDeferredClose = false;
             glfwSetWindowShouldClose(window_, GLFW_TRUE);
@@ -1429,20 +1481,26 @@ void AppLoop::renderUI() {
             // Create docking space
             ImGuiID dockspace_id = ImGui::GetID("MainDockSpace_v2");
 
-                // Session tab active: force the dock node's selection BEFORE
-                // DockSpace() runs its tab-bar layout. DockNodeUpdateTabBar
-                // computes node->VisibleWindow from VisibleTabId (derived from
-                // SelectedTabId/NextSelectedTabId); the Session window's Begin
-                // then reads it via BeginDocked -> DockTabIsVisible. Setting
-                // the selection inside SessionTab::render() (after Begin) is
-                // one frame too late — with idle rendering that next frame may
-                // never happen, so the Session content stays invisible.
+                // Session tab active: force each session panel's dock node
+                // selection BEFORE DockSpace() runs its tab-bar layout.
+                // DockNodeUpdateTabBar computes node->VisibleWindow from
+                // VisibleTabId (derived from SelectedTabId/NextSelectedTabId);
+                // the panels' Begin then reads it via BeginDocked ->
+                // DockTabIsVisible. Setting the selection inside
+                // SessionTab::render() (after Begin) is one frame too late —
+                // with idle rendering that next frame may never happen, so the
+                // session content stays invisible.
                 if (appState.activeTabKind == ActiveTabKind::Session) {
-                    if (ImGuiWindow* sw = ImGui::FindWindowByName("Session")) {
-                        if (sw->DockNode) {
-                            sw->DockNode->SelectedTabId = sw->TabId;
-                            if (sw->DockNode->TabBar)
-                                sw->DockNode->TabBar->NextSelectedTabId = sw->TabId;
+                    const char* sessionPanels[3] = {"Datasets",
+                                                    "Active Environments",
+                                                    "Available Environments"};
+                    for (const char* name : sessionPanels) {
+                        if (ImGuiWindow* pw = ImGui::FindWindowByName(name)) {
+                            if (pw->DockNode) {
+                                pw->DockNode->SelectedTabId = pw->TabId;
+                                if (pw->DockNode->TabBar)
+                                    pw->DockNode->TabBar->NextSelectedTabId = pw->TabId;
+                            }
                         }
                     }
                 }
@@ -1457,6 +1515,18 @@ void AppLoop::renderUI() {
                 if (!appState.defaultLayoutApplied) {
                     appState.defaultLayoutApplied = true;
                     config_.defaultLayoutApplied = true;
+                    config_.saveToFile(configFilePath_);
+                    rebuildDefaultLayout(dockspace_id, topOffset);
+                }
+                // Session-panel layout version (bugfix 2026-08-13): the panels
+                // moved from a nested dock space into the main dock; their old
+                // imgui.ini DockIds point at the retired nested nodes, which
+                // ImGui recreates as implicit floating windows at stale
+                // positions. One rebuild re-docks them (DockBuilderDockWindow
+                // overwrites the DockIds); the persisted version fires this
+                // exactly once.
+                if (config_.sessionPanelLayoutVersion < 1) {
+                    config_.sessionPanelLayoutVersion = 1;
                     config_.saveToFile(configFilePath_);
                     rebuildDefaultLayout(dockspace_id, topOffset);
                 }
@@ -1534,18 +1604,15 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
         // Close the panel condition (welcome screen)
         }
 
-        // Session tab: its own browser window (M2.5). Renders whenever the
-        // Session tab is focused — MUST be outside the workspace gate above
-        // (a bug here once left the dock area empty/black and the strip
-        // unresponsive). Docked into the main dock space on first use so it
-        // never appears as a stray floating box over the dock area.
+        // Session tab: three dockable panels rendered directly in the main
+        // dock space (M2.5). Renders whenever the Session tab is focused —
+        // MUST be outside the workspace gate above (a bug here once left the
+        // dock area empty/black and the strip unresponsive).
+        // NOTE: no SetNextWindowFocus here — a per-frame FocusWindow() steals
+        // the active id of the panels' tabs on the frame after a press
+        // (activeWinRoot != focus root), killing their drag/undock. The dock
+        // nodes' tab selections are forced above (pre-DockSpace) instead.
         if (appState.activeTabKind == ActiveTabKind::Session) {
-            ImGui::SetNextWindowDockID(dockspace_id, ImGuiCond_FirstUseEver);
-            // The Session window lives as a tab in a dock node (it shares
-            // dock_center with "Interferogram View" in the default layout).
-            // Without this it stays a background tab: it renders (vertices
-            // exist) but the node never shows it — a black dock area.
-            ImGui::SetNextWindowFocus();
             sessionTab_.render();
         }
         
