@@ -361,6 +361,12 @@ static float renderTabStrip() {
     ImGui::SetNextWindowPos(ImVec2(vp->Pos.x, vp->Pos.y + ImGui::GetFrameHeight()),
                             ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2(vp->Size.x, stripH), ImGuiCond_Always);
+    // Allow a height below ImGui's default 32px WindowMinSize: the strip's
+    // content is only the ~21px tab bar; without this the window auto-grows
+    // to 32px and the DockSpace (offset by stripH) sits 10px below the tab
+    // bar's border — the dead strip of black that made the selector look
+    // "crowded/junky".
+    ImGui::SetNextWindowSizeConstraints(ImVec2(0.0f, 0.0f), ImVec2(FLT_MAX, FLT_MAX));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
@@ -370,6 +376,19 @@ static float renderTabStrip() {
                  ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings |
                  ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoBringToFrontOnFocus |
                  ImGuiWindowFlags_NoFocusOnAppearing);
+    // The tab bar reserves a FontSize-high (13px) "contents" area below the
+    // tabs, which inflates the window's SizeContents to ~32px and makes the
+    // window auto-grow past the requested stripH (the dead black band under
+    // the tabs). The strip has no tab content — clamp the window to the tab
+    // bar's real extent (tabs + border) so the DockSpace sits directly below
+    // the tab bar instead of 10px lower.
+    if (ImGuiWindow* sw = ImGui::GetCurrentWindow()) {
+        if (sw->Size.y > stripH) {
+            sw->Size.y = stripH;
+            sw->SizeFull.y = stripH;
+            if (sw->DC.CursorMaxPos.y > stripH) sw->DC.CursorMaxPos.y = stripH;
+        }
+    }
 
     // Reorderable: the visual strip order may differ from sessions[] (session
     // order is fixed at creation); selection/click/close are bound to the
@@ -438,6 +457,12 @@ static float renderTabStrip() {
 
     ImGui::End();
     ImGui::PopStyleVar(3);
+    // Return the ACTUAL window height (the size clamp above caps the tab
+    // bar's reserved contents space, so this equals the tab bar's real
+    // extent). The DockSpace Y offset uses this value — a mismatch makes the
+    // DockSpace overlap the strip's bottom edge.
+    if (ImGuiWindow* strip = ImGui::FindWindowByName("##TabStrip"))
+        return strip->Size.y;
     return stripH;
 }
 
@@ -1404,6 +1429,24 @@ void AppLoop::renderUI() {
             // Create docking space
             ImGuiID dockspace_id = ImGui::GetID("MainDockSpace_v2");
 
+                // Session tab active: force the dock node's selection BEFORE
+                // DockSpace() runs its tab-bar layout. DockNodeUpdateTabBar
+                // computes node->VisibleWindow from VisibleTabId (derived from
+                // SelectedTabId/NextSelectedTabId); the Session window's Begin
+                // then reads it via BeginDocked -> DockTabIsVisible. Setting
+                // the selection inside SessionTab::render() (after Begin) is
+                // one frame too late — with idle rendering that next frame may
+                // never happen, so the Session content stays invisible.
+                if (appState.activeTabKind == ActiveTabKind::Session) {
+                    if (ImGuiWindow* sw = ImGui::FindWindowByName("Session")) {
+                        if (sw->DockNode) {
+                            sw->DockNode->SelectedTabId = sw->TabId;
+                            if (sw->DockNode->TabBar)
+                                sw->DockNode->TabBar->NextSelectedTabId = sw->TabId;
+                        }
+                    }
+                }
+
                 // Handle manual layout restore request (from Settings menu)
                 if (appState.restoreLayoutRequested) {
                     appState.restoreLayoutRequested = false;
@@ -1419,6 +1462,22 @@ void AppLoop::renderUI() {
                 }
 
 ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
+
+                // White-panel fix: dock nodes whose windows do not render this
+                // frame (e.g. workspace panels parked while the Session tab is
+                // focused) are painted by DockContextEndFrame with their stale
+                // LastBgColor — IM_COL32_WHITE at node creation. Force every
+                // leaf node's bg to the window bg; windows that render later in
+                // the frame overwrite it (imgui.cpp:7633 sets LastBgColor +
+                // IsBgDrawnThisFrame at each docked window's render).
+                {
+                    ImGuiDockContext* dc = &ImGui::GetCurrentContext()->DockContext;
+                    const ImU32 winBg = ImGui::GetColorU32(ImGuiCol_WindowBg);
+                    for (int n = 0; n < dc->Nodes.Data.Size; n++)
+                        if (ImGuiDockNode* node = (ImGuiDockNode*)dc->Nodes.Data[n].val_p)
+                            if (node->IsLeafNode() && node->HostWindow)
+                                node->LastBgColor = winBg;
+                }
                 
                 ImGui::End();
             
@@ -1489,17 +1548,6 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             ImGui::SetNextWindowFocus();
             sessionTab_.render();
         }
-        for (ImGuiWindow* w : ImGui::GetCurrentContext()->Windows) {
-            fprintf(stderr, "WIN-DEBUG %-28s act=%d child=%d flags=0x%X pos=(%.0f,%.0f) size=(%.0f,%.0f)\n",
-                    w->Name, w->Active, (w->Flags & ImGuiWindowFlags_ChildWindow) != 0,
-                    w->Flags, w->Pos.x, w->Pos.y, w->Size.x, w->Size.y);
-        }
-        fprintf(stderr, "WINCOUNT=%d hasSession=%d\n", (int)ImGui::GetCurrentContext()->Windows.Size,
-                ImGui::FindWindowByName("Session") != nullptr);
-        fprintf(stderr, "SWAP-DEBUG kind=%d activeIdx=%d pendingSwapIdx=%d pendingToSession=%d welcome=%d/%d\n",
-                (int)appState.activeTabKind, appState.activeSessionIdx, appState.pendingSwapIdx,
-                (int)appState.pendingSwapToSession, (int)appState.showWelcomeScreen,
-                (int)appState.welcomeScreenInitialized);
         
         // Close the docking condition
         }
@@ -1578,7 +1626,6 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
 }
 
 void AppLoop::present() {
-        fprintf(stderr, "PRESENT-DEBUG kind=%d\n", (int)appState.activeTabKind);
         // Rendering
         ImGui::Render();
         int display_w, display_h;

@@ -13,7 +13,7 @@
 
 #include <GLFW/glfw3.h>
 #include <imgui.h>
-#include "imgui_internal.h"   // SESSION-BEGIN debug (temporary)
+#include "imgui_internal.h"   // ImGuiWindow::DockNode (dock-selection fallback)
 
 namespace {
 
@@ -90,69 +90,29 @@ const std::string& SessionTab::title() const {
 }
 
 void SessionTab::render() {
-    fprintf(stderr, "SESSION-RENDER kind=%d multi=%d\n",
-            (int)appState.activeTabKind, (int)appState.sessionTab.multiWorkspaceOpen);
     renderRemoveConfirm();
     if (!ImGui::Begin("Session")) {
-        fprintf(stderr, "SESSION-BEGIN false\n");
         ImGui::End();
         return;
     }
-    fprintf(stderr, "SESSION-BEGIN ok name=%s clip=(%.0f,%.0f,%.0f,%.0f) cmds=%d\n",
-            ImGui::GetCurrentWindow()->Name,
-            ImGui::GetCurrentWindow()->ClipRect.Min.x, ImGui::GetCurrentWindow()->ClipRect.Min.y,
-            ImGui::GetCurrentWindow()->ClipRect.Max.x, ImGui::GetCurrentWindow()->ClipRect.Max.y,
-            (int)ImGui::GetCurrentWindow()->DrawList->CmdBuffer.Size);
-    // Force the dock node to show this window: without it the Session window
-    // stays a background tab in its node (renders vertices, never shown).
+    // Fallback: if the pre-DockSpace selection force (renderUI) had no window
+    // to act on (very first Session frame), the node's tab bar already
+    // processed this frame without us — force the selection here and render
+    // one more frame so the content is actually shown (BeginDocked reads
+    // node->VisibleWindow set by the tab-bar layout).
     {
         ImGuiWindow* w = ImGui::GetCurrentWindow();
-        if (w->DockNode) {
-            // The dock node draws its background with LastBgColor (defaults to
-            // WHITE on node creation). If the node never hosted another window
-            // it stays white — the Session tab then renders white-on-white and
-            // looks empty. Pull the node bg to the window bg.
-            w->DockNode->LastBgColor = ImGui::GetColorU32(ImGuiCol_WindowBg);
-            if (w->DockNode->SelectedTabId != w->TabId) {
-                w->DockNode->SelectedTabId = w->TabId;
-                if (w->DockNode->TabBar)
-                    w->DockNode->TabBar->NextSelectedTabId = w->TabId;
-            }
+        if (w->DockNode && w->DockNode->SelectedTabId != w->TabId) {
+            w->DockNode->SelectedTabId = w->TabId;
+            if (w->DockNode->TabBar)
+                w->DockNode->TabBar->NextSelectedTabId = w->TabId;
+            appState.needsRedraw = true;
         }
     }
     if (appState.sessionTab.multiWorkspaceOpen)
         renderMultiWorkspace();
     else
         renderSingleFile();
-    {
-        ImGuiWindow* w = ImGui::GetCurrentWindow();
-        const ImDrawList* dl = w->DrawList;
-        ImDrawList* hostDl = w->ParentWindow ? w->ParentWindow->DrawList : nullptr;
-        fprintf(stderr, "SESSION-DL ownCmds=%d ownVtx=%d hostCmds=%d parent=%s\n",
-                (int)dl->CmdBuffer.Size, (int)dl->VtxBuffer.Size,
-                hostDl ? (int)hostDl->CmdBuffer.Size : -1,
-                w->ParentWindow ? w->ParentWindow->Name : "(none)");
-        if (dl->VtxBuffer.Size > 5)
-            fprintf(stderr, "SESSION-DL vtx0=(%.0f,%.0f) clip0=(%.0f,%.0f,%.0f,%.0f)\n",
-                    dl->VtxBuffer[0].pos.x, dl->VtxBuffer[0].pos.y,
-                    dl->CmdBuffer[0].ClipRect.x, dl->CmdBuffer[0].ClipRect.y,
-                    dl->CmdBuffer[0].ClipRect.z, dl->CmdBuffer[0].ClipRect.w);
-    }
-    fprintf(stderr, "SESSION-END cmds=%d vtx=%d cursor=(%.0f,%.0f)\n",
-            (int)ImGui::GetCurrentWindow()->DrawList->CmdBuffer.Size,
-            (int)ImGui::GetCurrentWindow()->DrawList->VtxBuffer.Size,
-            ImGui::GetCursorPos().x, ImGui::GetCursorPos().y);
-    if (ImGui::GetCurrentWindow()->DrawList->VtxBuffer.Size > 5) {
-        const auto& v = ImGui::GetCurrentWindow()->DrawList->VtxBuffer;
-        fprintf(stderr, "SESSION-VTX vtx[0..3]: pos=(%.0f,%.0f)(%.0f,%.0f)(%.0f,%.0f)(%.0f,%.0f) col0=%08X col2=%08X cmd0vtx=%d\n",
-                v[0].pos.x, v[0].pos.y, v[1].pos.x, v[1].pos.y,
-                v[2].pos.x, v[2].pos.y, v[3].pos.x, v[3].pos.y,
-                v[0].col, v[2].col,
-                ImGui::GetCurrentWindow()->DrawList->CmdBuffer[0].ElemCount);
-        const ImDrawCmd& c0 = ImGui::GetCurrentWindow()->DrawList->CmdBuffer[1];
-        fprintf(stderr, "SESSION-CMD1 clip=(%.0f,%.0f,%.0f,%.0f)\n",
-                c0.ClipRect.x, c0.ClipRect.y, c0.ClipRect.z, c0.ClipRect.w);
-    }
     ImGui::End();
 }
 

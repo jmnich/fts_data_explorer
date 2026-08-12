@@ -403,8 +403,7 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
     ImGui::Text("Recent Multi-Workspaces");
     ImGui::Separator();
     if (ImGui::BeginChild("RecentCrossChild", ImVec2(0, crossChildH), true)) {
-        if (config.recentMultiWorkspaces.empty()) {
-            float childHeight = ImGui::GetContentRegionAvail().y;
+        if (config.recentMultiWorkspaces.empty()) {            float childHeight = ImGui::GetContentRegionAvail().y;
             float textHeight = ImGui::GetTextLineHeightWithSpacing() * 3;
             float offsetY = (childHeight - textHeight) * 0.5f;
             if (offsetY > 0) ImGui::SetCursorPosY(ImGui::GetCursorPosY() + offsetY);
