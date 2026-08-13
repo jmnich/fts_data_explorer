@@ -380,6 +380,7 @@ add_executable(fts_session_roundtrip
     session/workspace_session.cpp
     session/spectral_pool.cpp
     session/environment_session.cpp
+    session/cross_store.cpp
     spectrum.cpp
     average_spectrum.cpp
     snr_spectrum.cpp

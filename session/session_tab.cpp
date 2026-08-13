@@ -12,6 +12,7 @@
 #include "popup_utils.h"
 #include "theme.h"
 #include "workspace_session.h"
+#include "wrap_text.h"
 
 #include <GLFW/glfw3.h>
 #include <imgui.h>
@@ -125,33 +126,6 @@ void renderSessionPanel(const char* name, const std::function<void()>& content) 
 // All colors from theme.h; no new fonts, textures, or dependencies. Sticks to
 // the app's accent language (modalAccent is reused throughout).
 
-// Section header: accent title, right-aligned count chip (omitted when
-// count < 0), thin accent underline.
-void renderSectionHeader(const char* title, int count = -1) {
-    ImGui::PushStyleColor(ImGuiCol_Text, modalAccent());
-    ImGui::TextUnformatted(title);
-    ImGui::PopStyleColor();
-    if (count >= 0) {
-        const std::string chip = "· " + std::to_string(count);
-        ImGui::SameLine();
-        ImGui::SetCursorPosX(ImGui::GetWindowWidth() -
-                             ImGui::CalcTextSize(chip.c_str()).x -
-                             ImGui::GetStyle().WindowPadding.x);
-        ImGui::PushStyleColor(ImGuiCol_Text,
-                              ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-        ImGui::TextUnformatted(chip.c_str());
-        ImGui::PopStyleColor();
-    }
-    const ImVec2 pos = ImGui::GetWindowPos();
-    const float y = ImGui::GetCursorScreenPos().y;
-    ImVec4 accent = modalAccent();
-    accent.w = 0.35f;
-    ImGui::GetWindowDrawList()->AddLine(
-        ImVec2(pos.x, y), ImVec2(pos.x + ImGui::GetWindowWidth(), y),
-        ImGui::ColorConvertFloat4ToU32(accent));
-    ImGui::Spacing();
-}
-
 // True when the source has an open workspace tab.
 bool sourceOpenInTab(const std::string& id) {
     const std::string key = appState.sessionTab.multiWorkspacePath + "#" + id;
@@ -181,13 +155,14 @@ void addDatasetFromFileDialog() {
     }
 }
 
-// Accent-tinted, full-width pinned footer button.
+// Accent-tinted, full-width pinned footer button (2x frame height).
 void renderAddDatasetButton() {
     const AccentColor ac = StringToAccentColor(appState.currentAccentColor);
     ImGui::PushStyleColor(ImGuiCol_Button, GetAccentMuted(ac));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, GetAccentHovered(ac));
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, GetAccentActive(ac));
-    if (ImGui::Button("+ Add Dataset", ImVec2(-FLT_MIN, 0))) {
+    if (ImGui::Button("+ Add Dataset",
+                      ImVec2(-FLT_MIN, ImGui::GetFrameHeight() * 2.0f))) {
         addDatasetFromFileDialog();
     }
     ImGui::PopStyleColor(3);
@@ -196,34 +171,43 @@ void renderAddDatasetButton() {
 }
 
 // Accent-framed identity card: filename, shortened path (tooltip = full),
-// dataset/member counts.
+// dataset/measurement counts. Path wraps (clamped to 2 lines) instead of the
+// old manual "…" truncation.
+std::vector<std::string> wrapToLines(const std::string& text, float maxWidth,
+                                     int maxLines);   // defined below
 void renderMultiWorkspaceCard(const std::string& path) {
     const AccentColor ac = StringToAccentColor(appState.currentAccentColor);
+    const float cardW =
+        ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x * 2.0f - 2.0f;
+    const std::vector<std::string> nameLines =
+        wrapToLines("Name: " + std::filesystem::path(path).filename().string(),
+                    cardW - 20.0f, 2);
+    const std::vector<std::string> pathLines = wrapToLines(path, cardW - 20.0f, 2);
+    const float lineH = ImGui::GetTextLineHeightWithSpacing();
     ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, 8.0f));
     ImGui::PushStyleColor(ImGuiCol_ChildBg, GetAccentVeryMuted(ac));
     ImGui::PushStyleColor(ImGuiCol_Border, GetAccentSubtle(ac));
-    const bool open = ImGui::BeginChild("##crossCard", ImVec2(0.0f, 62.0f), true);
+    const bool open = ImGui::BeginChild(
+        "##crossCard",
+        ImVec2(0.0f, 16.0f + (nameLines.size() + pathLines.size() + 1) * lineH),
+        true);
     ImGui::PopStyleColor(2);
     ImGui::PopStyleVar(3);
     if (open) {
-        ImGui::TextUnformatted(std::filesystem::path(path).filename().string().c_str());
-        std::string shortPath = path;
-        if (shortPath.size() > 56)
-            shortPath = shortPath.substr(0, 10) + "..." +
-                        shortPath.substr(shortPath.size() - 40);
+        for (const auto& l : nameLines) ImGui::TextUnformatted(l.c_str());
         ImGui::PushStyleColor(ImGuiCol_Text,
                               ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-        ImGui::TextUnformatted(shortPath.c_str());
+        for (const auto& l : pathLines) ImGui::TextUnformatted(l.c_str());
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", path.c_str());
-        size_t members = 0;
+        size_t measurements = 0;
         for (const auto& src : appState.sessionTab.sources)
-            members += src.memberCount;
-        ImGui::Text("%zu dataset%s · %zu member%s",
+            measurements += src.memberCount;
+        ImGui::Text("%zu dataset%s · %zu measurement%s",
                     appState.sessionTab.sources.size(),
                     appState.sessionTab.sources.size() == 1 ? "" : "s",
-                    members, members == 1 ? "" : "s");
+                    measurements, measurements == 1 ? "" : "s");
         ImGui::PopStyleColor();
     }
     ImGui::EndChild();
@@ -238,6 +222,80 @@ void renderCenteredEmptyLine(const char* line, float offsetFrac) {
     ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
         (ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(line).x) * 0.5f);
     ImGui::TextDisabled("%s", line);
+}
+
+// Word-wrap `text` to fit `maxWidth` px, at most `maxLines` lines. When
+// clamped, the last line is trimmed and suffixed with "…". Char-based wrap
+// via CalcTextSize (no dependency on ImGui's internal wrap code).
+std::vector<std::string> wrapToLines(const std::string& text, float maxWidth,
+                                     int maxLines) {
+    return wrapToLinesCore(text, maxWidth, maxLines,
+                           [](char c) {
+                               return ImGui::CalcTextSize(&c, &c + 1).x;
+                           },
+                           ImGui::CalcTextSize("…").x);
+}
+
+// One clickable row whose content is pre-wrapped lines drawn manually inside
+// the Selectable's rect (Selectable labels never wrap — hidden ##row label).
+// The first `titleLines` lines are the title (default color), the rest are
+// metadata (dim) — the whole title stays highlighted across wrap lines.
+struct WrappedRow {
+    bool clicked = false;
+    bool hovered = false;
+    ImVec2 min = {0.0f, 0.0f};
+    ImVec2 max = {0.0f, 0.0f};
+};
+
+WrappedRow renderWrappedRow(int id, const std::vector<std::string>& lines,
+                            int titleLines) {
+    const float lineH = ImGui::GetTextLineHeightWithSpacing();
+    const float padY = 4.0f;
+    const float padX = 10.0f;
+    const float height = padY * 2.0f + static_cast<float>(lines.size()) * lineH;
+    WrappedRow out;
+    ImGui::PushID(id);
+    out.clicked = ImGui::Selectable("##row", false, 0, ImVec2(0.0f, height));
+    out.hovered = ImGui::IsItemHovered();
+    const ImVec2 rmin = ImGui::GetItemRectMin();
+    const ImVec2 rmax = ImGui::GetItemRectMax();
+    out.min = rmin;
+    out.max = rmax;
+    // Text drawn via the draw list — SetCursorScreenPos inside/after the
+    // Selectable trips ImGui's boundary guard (items never registered there).
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImU32 normal = ImGui::GetColorU32(ImGuiCol_Text);
+    const ImU32 dim = ImGui::GetColorU32(ImGuiCol_TextDisabled);
+    ImVec2 pos(rmin.x + padX, rmin.y + padY);
+    for (size_t l = 0; l < lines.size(); ++l) {
+        dl->AddText(ImGui::GetFont(), ImGui::GetFontSize(), pos,
+                    static_cast<int>(l) < titleLines ? normal : dim,
+                    lines[l].c_str());
+        pos.y += lineH;
+    }
+    ImGui::PopID();
+    return out;
+}
+
+// Small square row-leader button (dim, brightens on hover — no layout jump).
+bool renderRowRemoveButton(int id) {
+    const float rowH = ImGui::GetFrameHeight();
+    ImGui::PushID(id);
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+    ImGui::PushStyleColor(ImGuiCol_Text,
+                          ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    const bool pressed = ImGui::Button("×", ImVec2(rowH, rowH));
+    ImGui::PopStyleColor(2);
+    ImGui::PopID();
+    ImGui::SameLine();
+    return pressed;
+}
+
+// Accent dot at the row's left edge (open-in-tab / active indicator).
+void renderRowDot(const ImVec2& min, const ImVec2& max) {
+    ImGui::GetWindowDrawList()->AddCircleFilled(
+        ImVec2(min.x + 2.5f, (min.y + max.y) * 0.5f), 2.0f,
+        ImGui::ColorConvertFloat4ToU32(modalAccent()));
 }
 
 // Create Multi-Workspace button (single-file mode): accent-tinted, with the
@@ -320,7 +378,6 @@ void SessionTab::render() {
 // empty states so the dock layout is stable across the mode switch).
 void SessionTab::renderSingleFile() {
     renderSessionPanel("Datasets", [this]() {
-        renderSectionHeader("DATASETS");
         const AccentColor ac = StringToAccentColor(appState.currentAccentColor);
         ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
         ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
@@ -355,8 +412,6 @@ void SessionTab::renderSingleFile() {
 // Environments (stacked right) per the default layout in rebuildDefaultLayout.
 void SessionTab::renderMultiWorkspace() {
     renderSessionPanel("Datasets", [this]() {
-        renderSectionHeader("DATASETS",
-                            static_cast<int>(appState.sessionTab.sources.size()));
         renderMultiWorkspaceCard(appState.sessionTab.multiWorkspacePath);
         renderDatasetsPanel();
     });
@@ -364,13 +419,12 @@ void SessionTab::renderMultiWorkspace() {
     renderSessionPanel("Available Environments", [this]() { renderAvailableEnvironmentsPanel(); });
 }
 
-// (a) embedded datasets: two-line rows (name + metadata) in a scrollable list,
-// [+ Add Dataset] pinned at the bottom.
+// (a) embedded datasets: wrapped two-line rows (name + metadata) in a
+// scrollable list, [+ Add Dataset] pinned at the bottom.
 void SessionTab::renderDatasetsPanel() {
     const float rowH = ImGui::GetFrameHeight();
-    const float twoLineH = rowH + ImGui::GetTextLineHeightWithSpacing() + 2.0f;
     ImGui::BeginChild("##datasetsList",
-                      ImVec2(0.0f, -(rowH + ImGui::GetStyle().ItemSpacing.y * 2.0f)),
+                      ImVec2(0.0f, -(rowH * 2.0f + ImGui::GetStyle().ItemSpacing.y * 2.0f)),
                       false, ImGuiWindowFlags_AlwaysVerticalScrollbar);
     if (appState.sessionTab.sources.empty()) {
         renderCenteredEmptyLine("No datasets embedded yet.", 0.25f);
@@ -378,55 +432,39 @@ void SessionTab::renderDatasetsPanel() {
     }
     for (size_t i = 0; i < appState.sessionTab.sources.size(); ++i) {
         const auto& src = appState.sessionTab.sources[i];
-        ImGui::PushID(static_cast<int>(i));
-
-        // Remove: square, dim, brightens on hover (no layout jump).
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-        ImGui::PushStyleColor(ImGuiCol_Text,
-                              ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-        if (ImGui::Button("×", ImVec2(rowH, rowH))) {
+        if (renderRowRemoveButton(static_cast<int>(i))) {
             g_removeSourceId = src.id;
             g_showRemoveConfirm = true;
             appState.needsRedraw = true;
         }
-        ImGui::PopStyleColor(2);
-        ImGui::SameLine();
 
-        const std::string label = src.name + "##open" + src.id;
-        // Width 0 = fill the panel's remaining width (Selectable does NOT
-        // support negative sizes here — -FLT_MIN shrank the box to ~1 letter).
-        if (ImGui::Selectable(label.c_str(), false, 0, ImVec2(0.0f, twoLineH))) {
+        const float availW = ImGui::GetContentRegionAvail().x - 10.0f;
+        const std::vector<std::string> nameLines =
+            wrapToLines(src.name, availW, 2);
+        const std::string meta =
+            std::to_string(src.memberCount) + " measurement" +
+            (src.memberCount == 1 ? "" : "s") + " · created " + src.createdIso;
+        std::vector<std::string> lines = nameLines;
+        for (auto& l : wrapToLines(meta, availW, 2)) lines.push_back(std::move(l));
+        const WrappedRow row =
+            renderWrappedRow(static_cast<int>(i), lines,
+                             static_cast<int>(nameLines.size()));
+        if (row.clicked) {
             openEmbeddedInNewTab(appState, appState.sessionTab.multiWorkspacePath,
                                  src.id);
         }
-        // Open-in-tab indicator: accent dot at the row's left edge (drawn over
-        // the Selectable's padding, clear of the name text).
-        if (sourceOpenInTab(src.id)) {
-            const ImVec2 min = ImGui::GetItemRectMin();
-            const ImVec2 max = ImGui::GetItemRectMax();
-            ImGui::GetWindowDrawList()->AddCircleFilled(
-                ImVec2(min.x + 2.5f, (min.y + max.y) * 0.5f), 2.0f,
-                ImGui::ColorConvertFloat4ToU32(modalAccent()));
-        }
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("%s (%zu member%s)", src.originPath.c_str(),
+        if (sourceOpenInTab(src.id)) renderRowDot(row.min, row.max);
+        if (row.hovered)
+            ImGui::SetTooltip("%s (%zu measurement%s)", src.originPath.c_str(),
                               src.memberCount, src.memberCount == 1 ? "" : "s");
-
-        // Metadata line, indented to the name column.
-        ImGui::Indent(rowH + ImGui::GetStyle().ItemSpacing.x);
-        ImGui::PushStyleColor(ImGuiCol_Text,
-                              ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-        ImGui::Text("%zu member%s · created %s", src.memberCount,
-                    src.memberCount == 1 ? "" : "s", src.createdIso.c_str());
-        ImGui::PopStyleColor();
-        ImGui::Unindent();
-        ImGui::PopID();
     }
     ImGui::EndChild();
     renderAddDatasetButton();
 }
 
-// (b) active environments: live instances (Phase 3). Click → activate tab.
+// (b) active environments: live instances (Phase 3). Rows match the Datasets
+// list style (× + wrapped title/metadata, accent dot when active). The
+// comment (if any) is shown grey below the name. Click → activate tab.
 void SessionTab::renderActiveEnvironmentsPanel() {
     ImGui::BeginChild("##activeEnvsList", ImVec2(0.0f, 0.0f), false,
                       ImGuiWindowFlags_AlwaysVerticalScrollbar);
@@ -437,11 +475,30 @@ void SessionTab::renderActiveEnvironmentsPanel() {
         const auto* env = appState.environments[i].get();
         const bool isActive = (appState.activeTabKind == ActiveTabKind::Environment &&
                                appState.activeEnvIdx == static_cast<int>(i));
-        const std::string label = env->title() + "##active" + std::to_string(i);
-        if (ImGui::Selectable(label.c_str(), isActive)) {
+        if (renderRowRemoveButton(static_cast<int>(i))) {
+            removeEnvironment(appState, static_cast<int>(i));
+            break;   // environments vector changed
+        }
+
+        const float availW = ImGui::GetContentRegionAvail().x - 10.0f;
+        const std::vector<std::string> titleLines =
+            wrapToLines(env->title(), availW, 2);
+        const std::string meta =
+            std::to_string(env->samples.size()) + " sample" +
+            (env->samples.size() == 1 ? "" : "s") + " · " + envTypeName(env->type);
+        std::vector<std::string> lines = titleLines;
+        for (auto& l : wrapToLines(meta, availW, 1)) lines.push_back(std::move(l));
+        if (!env->comment.empty())
+            for (auto& l : wrapToLines(env->comment, availW, 2))
+                lines.push_back(std::move(l));
+        const WrappedRow row =
+            renderWrappedRow(static_cast<int>(i), lines,
+                             static_cast<int>(titleLines.size()));
+        if (row.clicked) {
             activateEnvironment(appState, static_cast<int>(i));
         }
-        if (ImGui::IsItemHovered()) {
+        if (isActive) renderRowDot(row.min, row.max);
+        if (row.hovered) {
             ImGui::SetTooltip("%s",
                 env->type == EnvType::Absorbance ? "Absorbance against a stored reference."
                                                  : "Average-spectrum comparison overlay.");

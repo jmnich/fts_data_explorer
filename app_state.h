@@ -108,6 +108,9 @@ struct SessionTabState {
     bool multiWorkspaceOpen = false;    // mode: false = single-file, true = multi
     std::string multiWorkspacePath;     // open .cross.h5
     std::vector<SourceSummary> sources; // column (a); manifest-derived, no data loaded
+    // Embedded-source workspaces not open in a tab (comparator reads raw
+    // artifacts from these without opening a tab). Cleared on crossLoad.
+    std::map<std::string, Workspace> sourceCache;   // sourceId -> workspace
 };
 
 // Application state structure

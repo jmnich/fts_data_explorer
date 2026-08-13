@@ -222,6 +222,7 @@ bool crossLoadInto(SessionTabState& st, const std::string& path, std::string& er
         if (file.id < 0) throw H5Error("crossLoad: cannot open '" + path + "'");
         const nlohmann::json manifest = readManifest(file.id);
         st.sources.clear();
+        st.sourceCache.clear();   // source workspaces may have changed
         for (const auto& e : manifest.value("sources", nlohmann::json::array())) {
             SourceSummary sum;
             sum.id = e.value("id", "");

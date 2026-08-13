@@ -1308,55 +1308,113 @@ void test10_t100Parity() {
 // M3.4: Comparator data contract — average X converted per session's own
 // unit to the instance's unit; Y passthrough; label format.
 void test11_comparator() {
-    std::printf("test11: comparator (average X conversion + labels)...\n");
+    std::printf("test11: comparator (artifact extraction + labels + member pick)...\n");
     AppState s;
     auto sessA = std::make_unique<WorkspaceSession>();
     sessA->key = "/tmp/cmp_a.h5";
     sessA->path = "/tmp/cmp_a.h5";
     sessA->workspace = makeFixtureWorkspace("cmpA");
     sessA->workspacePath = sessA->path;
-    sessA->averageSpectrum.averageAvailable = true;
-    sessA->averageSpectrum.averageCount = 2;
-    sessA->averageSpectrum.xUnitSelector = 0;        // cm-1
-    sessA->averageSpectrum.cachedAverageX = {1000.0, 2000.0, 3000.0};
-    sessA->averageSpectrum.cachedAverageY = {0.5, 0.6, 0.7};
+
+    // Persisted average members (the comparator reads the workspace model).
+    TwoColumnMember avgA;
+    avgA.id = "average";
+    avgA.units = {"cm-1", "a.u."};
+    avgA.config = nlohmann::json{{"count", 2}}.dump();
+    avgA.x = {1000.0, 2000.0, 3000.0};
+    avgA.y = {0.5, 0.6, 0.7};
+    sessA->workspace.averageSpectra.members.push_back(avgA);
 
     auto sessB = std::make_unique<WorkspaceSession>();
     sessB->key = "/tmp/cmp_b.h5";
     sessB->path = "/tmp/cmp_b.h5";
     sessB->workspace = makeFixtureWorkspace("cmpB");
     sessB->workspacePath = sessB->path;
-    sessB->averageSpectrum.averageAvailable = true;
-    sessB->averageSpectrum.averageCount = 3;
-    sessB->averageSpectrum.xUnitSelector = 1;        // um
-    sessB->averageSpectrum.cachedAverageX = {5.0, 6.0};
-    sessB->averageSpectrum.cachedAverageY = {0.9, 0.8};
+
+    TwoColumnMember avgB;
+    avgB.id = "average";
+    avgB.units = {"um", "a.u."};
+    avgB.config = nlohmann::json{{"count", 3}}.dump();
+    avgB.x = {5.0, 6.0};
+    avgB.y = {0.9, 0.8};
+    sessB->workspace.averageSpectra.members.push_back(avgB);
+
     s.sessions.push_back(std::move(sessA));
     s.sessions.push_back(std::move(sessB));
 
-    // The comparator's per-session conversion (render body): X converted
-    // from the session's unit to the instance's unit; Y passthrough.
-    EnvironmentSession env(EnvType::Comparator, "Comparator test");
-    env.xUnitSelector = 0;                           // cm-1
-    using ST = SpectralToolbox::SpectrumXUnit;
-    const auto& avgA = s.sessions[0]->averageSpectrum;
-    CHECK(avgA.cachedAverageY.size() == 3);
-    for (size_t i = 0; i < avgA.cachedAverageX.size(); ++i) {
-        double xc = SpectralToolbox::convertXValue(avgA.cachedAverageX[i],
-            static_cast<ST>(avgA.xUnitSelector), static_cast<ST>(env.xUnitSelector));
-        CHECK(xc == avgA.cachedAverageX[i]);         // cm-1 → cm-1 identity
-        CHECK(avgA.cachedAverageY[i] == 0.5 + 0.1 * i);
-    }
-    const auto& avgB = s.sessions[1]->averageSpectrum;
-    for (size_t i = 0; i < avgB.cachedAverageX.size(); ++i) {
-        double xc = SpectralToolbox::convertXValue(avgB.cachedAverageX[i],
-            static_cast<ST>(avgB.xUnitSelector), static_cast<ST>(env.xUnitSelector));
-        double want = SpectralToolbox::convertXValue(avgB.cachedAverageX[i], ST::Um, ST::CmInv);
-        CHECK(std::fabs(xc - want) <= std::fabs(want) * 1e-15 + 1e-300);
-    }
-    // Label format: "<label> (avg of N)".
-    CHECK(s.sessions[0]->label() + " (avg of 2)" == std::string("cmp_a (avg of 2)"));
-    CHECK(s.sessions[1]->label() + " (avg of 3)" == std::string("cmp_b (avg of 3)"));
+    // gatherCurves: average-spectrum artifact, both datasets, cm-1 display.
+    EnvironmentSession cmp(EnvType::Comparator, "Comparator curves");
+    cmp.xUnitSelector = 0;   // cm-1
+    auto curves = cmp.gatherCurves(s);
+    CHECK(curves.size() == 2);
+    CHECK(curves[0].label == "cmp_a (avg of 2)");
+    CHECK(curves[0].x.size() == 3 && curves[0].y.size() == 3);
+    CHECK(curves[0].x[0] == 1000.0);                    // cm-1 → cm-1 identity
+    CHECK(curves[1].label == "cmp_b (avg of 3)");
+    CHECK(curves[1].x.size() == 2 && curves[1].y.size() == 2);
+    // um → cm-1 conversion for the second dataset.
+    CHECK(std::fabs(curves[1].x[0] -
+                    SpectralToolbox::convertXValue(5.0,
+                        SpectralToolbox::SpectrumXUnit::Um,
+                        SpectralToolbox::SpectrumXUnit::CmInv)) < 1e-9);
+
+    // Selection: only the second dataset.
+    cmp.comparatorKeys = {"/tmp/cmp_b.h5"};
+    curves = cmp.gatherCurves(s);
+    CHECK(curves.size() == 1 && curves[0].label == "cmp_b (avg of 3)");
+
+    // Explicit-empty selection = nothing selected (not "all").
+    cmp.comparatorKeys.clear();
+    cmp.comparatorKeysExplicit = true;
+    CHECK(cmp.gatherCurves(s).empty());
+    cmp.comparatorKeysExplicit = false;
+
+    // SNR artifact: none yet → empty.
+    cmp.artifactSelector = static_cast<int>(ComparatorArtifact::Snr);
+    CHECK(cmp.gatherCurves(s).empty());
+
+    // SNR artifact with data.
+    TwoColumnMember snr;
+    snr.id = "snr";
+    snr.units = {"cm-1", ""};
+    snr.config = nlohmann::json{{"fileCount", 4}}.dump();
+    snr.x = {1000.0, 2000.0};
+    snr.y = {0.1, 0.2};
+    s.sessions[0]->workspace.snrSpectra.members.push_back(snr);
+    cmp.comparatorKeys.clear();
+    curves = cmp.gatherCurves(s);
+    CHECK(curves.size() == 1);
+    CHECK(curves[0].label == "cmp_a (SNR of 4)");
+    CHECK(curves[0].x.size() == 2);
+
+    // T100 artifact: one member with two per-file curves → default picks first.
+    cmp.artifactSelector = static_cast<int>(ComparatorArtifact::T100);
+    T100Member t100m;
+    t100m.id = "t100";
+    t100m.reference.units = {"cm-1", "a.u."};
+    t100m.curves.push_back({"f1", {2000.0, 3000.0}, {80.0, 90.0}});
+    t100m.curves.push_back({"f2", {2000.0, 3000.0}, {50.0, 60.0}});
+    s.sessions[0]->workspace.t100.members.push_back(t100m);
+    curves = cmp.gatherCurves(s);
+    CHECK(curves.size() == 1);                         // one per dataset (picked member)
+    CHECK(curves[0].label == "cmp_a/f1");              // default = first curve
+
+    // Member pick: choose f2.
+    cmp.memberPicks["/tmp/cmp_a.h5"] = "f2";
+    curves = cmp.gatherCurves(s);
+    CHECK(curves.size() == 1 && curves[0].label == "cmp_a/f2");
+    CHECK(curves[0].y[0] == 50.0);
+
+    // Interferogram artifact: primary detector vs sample index.
+    cmp.memberPicks.clear();
+    cmp.artifactSelector = static_cast<int>(ComparatorArtifact::Interferogram);
+    cmp.comparatorKeys = {"/tmp/cmp_a.h5"};   // one dataset → one curve
+    curves = cmp.gatherCurves(s);
+    CHECK(curves.size() == 1);
+    CHECK(curves[0].label == "cmp_a/record_0");
+    CHECK(curves[0].x.size() == 4);
+    for (size_t i = 0; i < 4; ++i) CHECK(curves[0].x[i] == (double)i);   // sample index
+    CHECK(curves[0].y[0] == 5.0 && curves[0].y[3] == 8.0);               // col1
 }
 
 }  // namespace

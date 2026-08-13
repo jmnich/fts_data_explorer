@@ -1578,11 +1578,14 @@ void AppLoop::renderUI() {
                     appState.activeEnvIdx >= 0 &&
                     appState.activeEnvIdx < static_cast<int>(appState.environments.size())) {
                     const std::string winName = appState.environments[appState.activeEnvIdx]->title();
-                    if (ImGuiWindow* pw = ImGui::FindWindowByName(winName.c_str())) {
-                        if (pw->DockNode) {
-                            pw->DockNode->SelectedTabId = pw->TabId;
-                            if (pw->DockNode->TabBar)
-                                pw->DockNode->TabBar->NextSelectedTabId = pw->TabId;
+                    const std::string viewName = winName + " View";
+                    for (const std::string& n : {winName, viewName}) {
+                        if (ImGuiWindow* pw = ImGui::FindWindowByName(n.c_str())) {
+                            if (pw->DockNode) {
+                                pw->DockNode->SelectedTabId = pw->TabId;
+                                if (pw->DockNode->TabBar)
+                                    pw->DockNode->TabBar->NextSelectedTabId = pw->TabId;
+                            }
                         }
                     }
                 }
@@ -1607,8 +1610,8 @@ void AppLoop::renderUI() {
                 // positions. One rebuild re-docks them (DockBuilderDockWindow
                 // overwrites the DockIds); the persisted version fires this
                 // exactly once.
-                if (config_.sessionPanelLayoutVersion < 1) {
-                    config_.sessionPanelLayoutVersion = 1;
+                if (config_.sessionPanelLayoutVersion < 3) {
+                    config_.sessionPanelLayoutVersion = 3;
                     config_.saveToFile(configFilePath_);
                     rebuildDefaultLayout(dockspace_id, topOffset);
                 }
