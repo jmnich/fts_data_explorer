@@ -120,6 +120,210 @@ void renderSessionPanel(const char* name, const std::function<void()>& content) 
     ImGui::End();
 }
 
+// ── Session panel styling (polish 2026-08) ────────────────────────────────
+// All colors from theme.h; no new fonts, textures, or dependencies. Sticks to
+// the app's accent language (modalAccent is reused throughout).
+
+// Section header: accent title, right-aligned count chip (omitted when
+// count < 0), thin accent underline.
+void renderSectionHeader(const char* title, int count = -1) {
+    ImGui::PushStyleColor(ImGuiCol_Text, modalAccent());
+    ImGui::TextUnformatted(title);
+    ImGui::PopStyleColor();
+    if (count >= 0) {
+        const std::string chip = "· " + std::to_string(count);
+        ImGui::SameLine();
+        ImGui::SetCursorPosX(ImGui::GetWindowWidth() -
+                             ImGui::CalcTextSize(chip.c_str()).x -
+                             ImGui::GetStyle().WindowPadding.x);
+        ImGui::PushStyleColor(ImGuiCol_Text,
+                              ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::TextUnformatted(chip.c_str());
+        ImGui::PopStyleColor();
+    }
+    const ImVec2 pos = ImGui::GetWindowPos();
+    const float y = ImGui::GetCursorScreenPos().y;
+    ImVec4 accent = modalAccent();
+    accent.w = 0.35f;
+    ImGui::GetWindowDrawList()->AddLine(
+        ImVec2(pos.x, y), ImVec2(pos.x + ImGui::GetWindowWidth(), y),
+        ImGui::ColorConvertFloat4ToU32(accent));
+    ImGui::Spacing();
+}
+
+// True when the source has an open workspace tab.
+bool sourceOpenInTab(const std::string& id) {
+    const std::string key = appState.sessionTab.multiWorkspacePath + "#" + id;
+    for (const auto& sess : appState.sessions)
+        if (sess->key == key) return true;
+    return false;
+}
+
+// File-browser → embed flow (shared by the pinned footer button).
+void addDatasetFromFileDialog() {
+    std::string defaultFolder;
+    if (std::filesystem::is_directory(appState.currentDirectory))
+        defaultFolder = appState.currentDirectory;
+    std::string path = FileBrowser::showFileOpenDialog(
+        "Add Dataset to Multi-Workspace", "HDF5 files", "*.h5",
+        glfwGetCurrentContext(), defaultFolder);
+    if (!path.empty()) {
+        std::string err, newId;
+        if (crossAddSource(appState.sessionTab.multiWorkspacePath, path, newId, err)) {
+            std::string err2;
+            crossLoad(appState, appState.sessionTab.multiWorkspacePath, err2);
+            appState.needsRedraw = true;
+        } else {
+            appState.adapterErrorMsg = "Add failed:\n" + err;
+            appState.showAdapterErrorPopup = true;
+        }
+    }
+}
+
+// Accent-tinted, full-width pinned footer button.
+void renderAddDatasetButton() {
+    const AccentColor ac = StringToAccentColor(appState.currentAccentColor);
+    ImGui::PushStyleColor(ImGuiCol_Button, GetAccentMuted(ac));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, GetAccentHovered(ac));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, GetAccentActive(ac));
+    if (ImGui::Button("+ Add Dataset", ImVec2(-FLT_MIN, 0))) {
+        addDatasetFromFileDialog();
+    }
+    ImGui::PopStyleColor(3);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Embeds a copy of the dataset into the multi-workspace file.");
+}
+
+// Accent-framed identity card: filename, shortened path (tooltip = full),
+// dataset/member counts.
+void renderMultiWorkspaceCard(const std::string& path) {
+    const AccentColor ac = StringToAccentColor(appState.currentAccentColor);
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, 8.0f));
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, GetAccentVeryMuted(ac));
+    ImGui::PushStyleColor(ImGuiCol_Border, GetAccentSubtle(ac));
+    const bool open = ImGui::BeginChild("##crossCard", ImVec2(0.0f, 62.0f), true);
+    ImGui::PopStyleColor(2);
+    ImGui::PopStyleVar(3);
+    if (open) {
+        ImGui::TextUnformatted(std::filesystem::path(path).filename().string().c_str());
+        std::string shortPath = path;
+        if (shortPath.size() > 56)
+            shortPath = shortPath.substr(0, 10) + "..." +
+                        shortPath.substr(shortPath.size() - 40);
+        ImGui::PushStyleColor(ImGuiCol_Text,
+                              ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::TextUnformatted(shortPath.c_str());
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", path.c_str());
+        size_t members = 0;
+        for (const auto& src : appState.sessionTab.sources)
+            members += src.memberCount;
+        ImGui::Text("%zu dataset%s · %zu member%s",
+                    appState.sessionTab.sources.size(),
+                    appState.sessionTab.sources.size() == 1 ? "" : "s",
+                    members, members == 1 ? "" : "s");
+        ImGui::PopStyleColor();
+    }
+    ImGui::EndChild();
+    ImGui::Spacing();
+}
+
+// "Coming soon" card for a Phase-3 environment type.
+void renderComingSoonCard(const char* title, const char* desc) {
+    const AccentColor ac = StringToAccentColor(appState.currentAccentColor);
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, 8.0f));
+    ImGui::PushStyleColor(ImGuiCol_Border, GetAccentSubtle(ac));
+    const bool open = ImGui::BeginChild(title,
+        ImVec2(0.0f, ImGui::GetTextLineHeightWithSpacing() * 2.0f + 16.0f), true);
+    ImGui::PopStyleColor();
+    ImGui::PopStyleVar(3);
+    if (open) {
+        ImGui::TextUnformatted(title);
+        ImGui::SameLine();
+        ImGui::SetCursorPosX(ImGui::GetWindowWidth() -
+                             ImGui::CalcTextSize("Phase 3").x -
+                             ImGui::GetStyle().WindowPadding.x);
+        ImGui::TextDisabled("Phase 3");
+        ImGui::PushStyleColor(ImGuiCol_Text,
+                              ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::PushTextWrapPos(ImGui::GetContentRegionMax().x);
+        ImGui::TextWrapped("%s", desc);
+        ImGui::PopTextWrapPos();
+        ImGui::PopStyleColor();
+    }
+    ImGui::EndChild();
+    ImGui::Spacing();
+}
+
+// Centered dim message inside a scrollable panel (empty state).
+void renderCenteredEmptyLine(const char* line, float offsetFrac) {
+    const float avail = ImGui::GetContentRegionAvail().y;
+    if (avail > 90.0f)
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + avail * offsetFrac);
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
+        (ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(line).x) * 0.5f);
+    ImGui::TextDisabled("%s", line);
+}
+
+// Create Multi-Workspace button (single-file mode): accent-tinted, with the
+// disabled/hint variants of the original flow.
+void renderCreateMultiWorkspaceButton() {
+    const AccentColor ac = StringToAccentColor(appState.currentAccentColor);
+    const bool anyWorkspace = !appState.sessions.empty();
+    const int src = (appState.activeTabKind == ActiveTabKind::Workspace &&
+                     appState.activeSessionIdx >= 0)
+                        ? appState.activeSessionIdx
+                        : appState.lastActiveSessionIdx;
+    const bool refEmbedded = anyWorkspace && src >= 0 &&
+                             appState.sessions[src]->path.empty();
+    if (anyWorkspace && !refEmbedded) {
+        ImGui::PushStyleColor(ImGuiCol_Button, GetAccentMuted(ac));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, GetAccentHovered(ac));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, GetAccentActive(ac));
+        if (ImGui::Button("Create Multi-Workspace...", ImVec2(240, 0))) {
+            std::string defaultFolder;
+            if (std::filesystem::is_directory(appState.currentDirectory))
+                defaultFolder = appState.currentDirectory;
+            else if (appState.configPtr && !appState.configPtr->lastMultiWorkspacePath.empty())
+                defaultFolder = std::filesystem::path(
+                    appState.configPtr->lastMultiWorkspacePath).parent_path().string();
+            std::string path = FileBrowser::showFileSaveDialog(
+                "New Multi-Workspace", "workspace.cross.h5", "*.h5",
+                defaultFolder, glfwGetCurrentContext());
+            if (!path.empty()) {
+                // Embed a copy of the most relevant open dataset from disk.
+                const std::string srcPath = appState.sessions[src]->path;
+                std::string err;
+                if (crossCreateFromDataset(appState, path, srcPath, err)) {
+                    crossLoad(appState, path, err);
+                    rememberMultiWorkspace(appState, path);
+                    appState.needsRedraw = true;
+                } else {
+                    appState.adapterErrorMsg = "Create failed:\n" + err;
+                    appState.showAdapterErrorPopup = true;
+                }
+            }
+        }
+        ImGui::PopStyleColor(3);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Creates an empty .cross.h5 and embeds the currently "
+                              "open dataset into it.");
+    } else if (refEmbedded) {
+        ImGui::BeginDisabled(true);
+        ImGui::Button("Create Multi-Workspace...", ImVec2(240, 0));
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("The reference tab is embedded in a multi-workspace. "
+                              "Create from a filesystem dataset instead.");
+    } else {
+        ImGui::TextDisabled("Open a workspace first — the Session tab can then "
+                            "turn it into a multi-workspace.");
+    }
+}
+
 }  // namespace
 
 const std::string& SessionTab::title() const {
@@ -135,157 +339,131 @@ void SessionTab::render() {
     }
 }
 
-// Single-file mode: info pane + [Create Multi-Workspace…] (HL §3.5), hosted in
+// Single-file mode: hero card + [Create Multi-Workspace…] (HL §3.5), hosted in
 // the Datasets panel (the natural home — the other two panels keep their
 // empty states so the dock layout is stable across the mode switch).
 void SessionTab::renderSingleFile() {
     renderSessionPanel("Datasets", [this]() {
-        ImGui::Spacing();
-        ImGui::TextWrapped("Not a multi-workspace environment.\n\n"
-                           "This session holds a single dataset. Create a multi-workspace "
-                           "file to embed datasets and open them side by side as tabs.");
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-        const bool anyWorkspace = !appState.sessions.empty();
-        const int src = (appState.activeTabKind == ActiveTabKind::Workspace &&
-                         appState.activeSessionIdx >= 0)
-                            ? appState.activeSessionIdx
-                            : appState.lastActiveSessionIdx;
-        const bool refEmbedded = anyWorkspace && src >= 0 &&
-                                 appState.sessions[src]->path.empty();
-        if (anyWorkspace) {
-            if (refEmbedded) ImGui::BeginDisabled(true);
-            if (ImGui::Button("Create Multi-Workspace...", ImVec2(240, 0))) {
-                std::string defaultFolder;
-                if (std::filesystem::is_directory(appState.currentDirectory))
-                    defaultFolder = appState.currentDirectory;
-                else if (appState.configPtr && !appState.configPtr->lastMultiWorkspacePath.empty())
-                    defaultFolder = std::filesystem::path(
-                        appState.configPtr->lastMultiWorkspacePath).parent_path().string();
-                std::string path = FileBrowser::showFileSaveDialog(
-                    "New Multi-Workspace", "workspace.cross.h5", "*.h5",
-                    defaultFolder, glfwGetCurrentContext());
-                if (!path.empty()) {
-                    // Embed a copy of the most relevant open dataset from disk.
-                    const std::string srcPath = appState.sessions[src]->path;
-                    std::string err;
-                    if (crossCreateFromDataset(appState, path, srcPath, err)) {
-                        crossLoad(appState, path, err);
-                        rememberMultiWorkspace(appState, path);
-                        appState.needsRedraw = true;
-                    } else {
-                        appState.adapterErrorMsg = "Create failed:\n" + err;
-                        appState.showAdapterErrorPopup = true;
-                    }
-                }
-            }
-            if (refEmbedded) {
-                ImGui::EndDisabled();
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("The reference tab is embedded in a multi-workspace. "
-                                      "Create from a filesystem dataset instead.");
-            } else if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Creates an empty .cross.h5 and embeds the currently "
-                                  "open dataset into it.");
-            }
-        } else {
-            ImGui::TextDisabled("Open a workspace first — the Session tab can then "
-                                "turn it into a multi-workspace.");
+        renderSectionHeader("DATASETS");
+        const AccentColor ac = StringToAccentColor(appState.currentAccentColor);
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f, 10.0f));
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, GetAccentVeryMuted(ac));
+        ImGui::PushStyleColor(ImGuiCol_Border, GetAccentSubtle(ac));
+        const bool open = ImGui::BeginChild("##singleCard", ImVec2(0.0f, 0.0f), true);
+        ImGui::PopStyleColor(2);
+        ImGui::PopStyleVar(3);
+        if (open) {
+            ImGui::TextUnformatted("Single dataset session");
+            ImGui::Spacing();
+            ImGui::PushStyleColor(ImGuiCol_Text,
+                                  ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+            ImGui::PushTextWrapPos(ImGui::GetContentRegionMax().x);
+            ImGui::TextWrapped("This session holds a single dataset. Create a "
+                               "multi-workspace file to embed datasets and open "
+                               "them side by side as tabs.");
+            ImGui::PopTextWrapPos();
+            ImGui::PopStyleColor();
+            ImGui::Spacing();
+            renderCreateMultiWorkspaceButton();
         }
+        ImGui::EndChild();
     });
     renderSessionPanel("Active Environments", [this]() { renderActiveEnvironmentsPanel(); });
     renderSessionPanel("Available Environments", [this]() { renderAvailableEnvironmentsPanel(); });
 }
 
-// Multi-workspace mode (bugfix 3): three dockable panels docked DIRECTLY in
-// the main dock space — Datasets (left), Active Environments and Available
+// Multi-workspace mode: three dockable panels docked DIRECTLY in the main
+// dock space — Datasets (left), Active Environments and Available
 // Environments (stacked right) per the default layout in rebuildDefaultLayout.
-// Bugfix 4: each panel is a scrollable list; no intermediate host window.
 void SessionTab::renderMultiWorkspace() {
     renderSessionPanel("Datasets", [this]() {
-        ImGui::TextDisabled("Multi-workspace: %s",
-                            appState.sessionTab.multiWorkspacePath.c_str());
-        ImGui::Spacing();
+        renderSectionHeader("DATASETS",
+                            static_cast<int>(appState.sessionTab.sources.size()));
+        renderMultiWorkspaceCard(appState.sessionTab.multiWorkspacePath);
         renderDatasetsPanel();
     });
     renderSessionPanel("Active Environments", [this]() { renderActiveEnvironmentsPanel(); });
     renderSessionPanel("Available Environments", [this]() { renderAvailableEnvironmentsPanel(); });
 }
 
-// (a) embedded datasets: scrollable list + [+ Add Dataset] pinned at the bottom.
+// (a) embedded datasets: two-line rows (name + metadata) in a scrollable list,
+// [+ Add Dataset] pinned at the bottom.
 void SessionTab::renderDatasetsPanel() {
     const float rowH = ImGui::GetFrameHeight();
-    ImGui::BeginChild("##datasetsList", ImVec2(0.0f, -rowH * 2.6f), false,
-                      ImGuiWindowFlags_AlwaysVerticalScrollbar);
+    const float twoLineH = rowH + ImGui::GetTextLineHeightWithSpacing() + 2.0f;
+    ImGui::BeginChild("##datasetsList",
+                      ImVec2(0.0f, -(rowH + ImGui::GetStyle().ItemSpacing.y * 2.0f)),
+                      false, ImGuiWindowFlags_AlwaysVerticalScrollbar);
     if (appState.sessionTab.sources.empty()) {
-        ImGui::TextDisabled("No datasets embedded yet.");
+        renderCenteredEmptyLine("No datasets embedded yet.", 0.25f);
+        renderCenteredEmptyLine("Use \"+ Add Dataset\" below to embed one.", 0.05f);
     }
     for (size_t i = 0; i < appState.sessionTab.sources.size(); ++i) {
         const auto& src = appState.sessionTab.sources[i];
         ImGui::PushID(static_cast<int>(i));
-        if (ImGui::Button("x", ImVec2(rowH, rowH))) {
+
+        // Remove: square, dim, brightens on hover (no layout jump).
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text,
+                              ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        if (ImGui::Button("×", ImVec2(rowH, rowH))) {
             g_removeSourceId = src.id;
             g_showRemoveConfirm = true;
             appState.needsRedraw = true;
         }
+        ImGui::PopStyleColor(2);
         ImGui::SameLine();
+
         const std::string label = src.name + "##open" + src.id;
         // Width 0 = fill the panel's remaining width (Selectable does NOT
         // support negative sizes here — -FLT_MIN shrank the box to ~1 letter).
-        if (ImGui::Selectable(label.c_str(), false, 0,
-                              ImVec2(0.0f, rowH))) {
+        if (ImGui::Selectable(label.c_str(), false, 0, ImVec2(0.0f, twoLineH))) {
             openEmbeddedInNewTab(appState, appState.sessionTab.multiWorkspacePath,
                                  src.id);
+        }
+        // Open-in-tab indicator: accent dot at the row's left edge (drawn over
+        // the Selectable's padding, clear of the name text).
+        if (sourceOpenInTab(src.id)) {
+            const ImVec2 min = ImGui::GetItemRectMin();
+            const ImVec2 max = ImGui::GetItemRectMax();
+            ImGui::GetWindowDrawList()->AddCircleFilled(
+                ImVec2(min.x + 2.5f, (min.y + max.y) * 0.5f), 2.0f,
+                ImGui::ColorConvertFloat4ToU32(modalAccent()));
         }
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("%s (%zu member%s)", src.originPath.c_str(),
                               src.memberCount, src.memberCount == 1 ? "" : "s");
+
+        // Metadata line, indented to the name column.
+        ImGui::Indent(rowH + ImGui::GetStyle().ItemSpacing.x);
+        ImGui::PushStyleColor(ImGuiCol_Text,
+                              ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::Text("%zu member%s · created %s", src.memberCount,
+                    src.memberCount == 1 ? "" : "s", src.createdIso.c_str());
+        ImGui::PopStyleColor();
+        ImGui::Unindent();
         ImGui::PopID();
     }
     ImGui::EndChild();
-    if (ImGui::Button("+ Add Dataset", ImVec2(-FLT_MIN, 0))) {
-        std::string defaultFolder;
-        if (std::filesystem::is_directory(appState.currentDirectory))
-            defaultFolder = appState.currentDirectory;
-        std::string path = FileBrowser::showFileOpenDialog(
-            "Add Dataset to Multi-Workspace", "HDF5 files", "*.h5",
-            glfwGetCurrentContext(), defaultFolder);
-        if (!path.empty()) {
-            std::string err, newId;
-            if (crossAddSource(appState.sessionTab.multiWorkspacePath, path, newId, err)) {
-                std::string err2;
-                crossLoad(appState, appState.sessionTab.multiWorkspacePath, err2);
-                appState.needsRedraw = true;
-            } else {
-                appState.adapterErrorMsg = "Add failed:\n" + err;
-                appState.showAdapterErrorPopup = true;
-            }
-        }
-    }
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Embeds a copy of the dataset into the multi-workspace file.");
+    renderAddDatasetButton();
 }
 
 // (b) active environments (Phase 3 populates).
 void SessionTab::renderActiveEnvironmentsPanel() {
     ImGui::BeginChild("##activeEnvsList", ImVec2(0.0f, 0.0f), false,
                       ImGuiWindowFlags_AlwaysVerticalScrollbar);
-    ImGui::TextDisabled("No environments open — create one on the right.");
+    renderCenteredEmptyLine("No environments open.", 0.45f);
     ImGui::EndChild();
 }
 
-// (c) available environment types (Phase 3).
+// (c) available environment types (Phase 3): "coming soon" cards.
 void SessionTab::renderAvailableEnvironmentsPanel() {
     ImGui::BeginChild("##availableEnvsList", ImVec2(0.0f, 0.0f), false,
                       ImGuiWindowFlags_AlwaysVerticalScrollbar);
-    ImGui::BeginDisabled(true);
-    if (ImGui::Selectable("Absorbance", false)) {}
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Available in the next phase.");
-    if (ImGui::Selectable("Comparator", false)) {}
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Available in the next phase.");
-    ImGui::EndDisabled();
+    renderComingSoonCard("Absorbance",
+                         "Absorbance spectra against a stored background reference.");
+    renderComingSoonCard("Comparator", "Pairwise comparison of two datasets.");
     ImGui::EndChild();
 }

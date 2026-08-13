@@ -62,6 +62,12 @@ void openWorkspaceInNewTab(AppState& s, const std::string& path) {
     if (crossIsCrossFile(path)) {
         if (s.sessionTab.multiWorkspaceOpen && s.sessionTab.multiWorkspacePath == path) {
             focusSessionTab(s);        // already the open session file
+            // The Session tab state survives Ctrl+H go-home, so this branch
+            // is also reachable from the launch welcome — dismissing it here
+            // is what makes the welcome's recent-cross click work (bugfix
+            // 2026-08-13: focusSessionTab alone left the welcome overlay up).
+            s.showWelcomeScreen = false;
+            s.welcomeScreenInitialized = true;
         } else if (s.sessionTab.multiWorkspaceOpen) {
             // A different multi-workspace: replace the session file (confirm
             // via the discard flow when the active workspace is dirty).

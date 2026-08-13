@@ -58,19 +58,34 @@ void requestWorkspaceDiscard(AppState& s, PendingWorkspaceAction action, const s
 void dispatchPendingAction(AppState& s);
 #endif
 
-// Ctrl+H "back to home": clear data/selection/panel caches of the ACTIVE
-// workspace tab (or the most-recently-active one when a non-workspace tab is
-// focused). The tab itself stays open. Shared by the main-window shortcut and
-// the Convert modal.
+// Reset-only workspace clear (no tab close, no welcome screen): clears the
+// ACTIVE workspace tab's panels/selection (or the most-recently-active one
+// when a non-workspace tab is focused). The tab stays open. Used by the
+// Convert modal's Ctrl+H mirror.
 void resetActiveWorkspaceTab(AppState& s);
 
 // The single workspace-reset path: clears all per-workspace panel state,
-// selection, and caches. openWorkspace/closeWorkspace/clearPanelCaches and
-// resetToWelcomeScreen all route through this.
+// selection, and caches. openWorkspace/closeWorkspace/clearPanelCaches all
+// route through this.
 void clearWorkspacePanels(AppState& s);
-// Same reset applied to a PARKED session's mirrors (Ctrl+H on a non-active
-// workspace tab) — the operation is field-identical, only the target differs.
+// Same reset applied to a PARKED session's mirrors — the operation is
+// field-identical, only the target differs.
 void clearSessionPanels(WorkspaceSession& sess);
+
+#if FTS_BUILD_HDF5
+// Ctrl+H "go home" (full-home semantics): closes EVERY workspace tab and
+// re-shows the launch welcome screen. Dirty tabs route through the shared
+// Save All / Discard All modal first (exitTargetIsGoHome picks the terminal
+// action). No-op while any close/discard flow is pending.
+void requestGoHome(AppState& s);
+// Frame-top finalizer: every tab is clean when this runs — remove all tabs,
+// clear the flat fields, re-show the welcome screen.
+void finalizeGoHome(AppState& s);
+// Shared dirty-tab scan (Exit intercept + go-home): active tab first, then
+// parked tabs in sessions order.
+void collectDirtyTabs(const AppState& s, std::vector<int>& tabs,
+                      std::vector<std::string>& labels);
+#endif
 
 // Active tab discriminator (Amendment 4): the active concept spans three tab
 // types, so activeSessionIdx alone is insufficient. AppLoop dispatches on this
@@ -311,6 +326,11 @@ struct AppState {
     // was deferred (GLFW close flag cleared); re-applied by pollEvents once
     // the pending flow resolves — never exit past an open prompt.
     bool exitDeferredClose = false;
+    // Ctrl+H "go home": close-all flow. pendingGoHome finalizes at frame top
+    // (all tabs clean by then); exitTargetIsGoHome makes the shared Exit
+    // modal resolve to "go home" instead of closing the window.
+    bool pendingGoHome = false;
+    bool exitTargetIsGoHome = false;
 
     // Peak-finding X correction state
     int    xCorrectionMethod = 0;           // 0=Hilbert, 1=PeakFinding

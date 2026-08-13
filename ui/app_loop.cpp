@@ -238,9 +238,10 @@ static void renderStaleDropPromptModal() {
     }
     endModal();
 }
-// Multi-dirty Exit modal (M2.2): lists every dirty tab; Save All saves each
+// Multi-dirty modal (M2.2): lists every dirty tab; Save All saves each
 // sequentially at frame top (one swap per frame), Discard All clears the
-// latches, Cancel defers the close.
+// latches, Cancel defers. Shared by the Exit flow (terminal action: close
+// the window) and Ctrl+H go-home (terminal action: pendingGoHome).
 static void renderExitDirtyModal() {
     static int focus = 0;
     static bool wasOpen = false;
@@ -252,7 +253,8 @@ static void renderExitDirtyModal() {
     beginModal(560.0f, modalAccent());
     if (ImGui::BeginPopupModal("Exit with Unsaved Changes##confirm", nullptr,
                                ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
-        ImGui::Text("Unsaved Changes");
+        ImGui::Text("%s", appState.exitTargetIsGoHome ? "Go Home with Unsaved Changes"
+                                                      : "Unsaved Changes");
         ImGui::Spacing();
         ImGui::TextWrapped("The following tabs have unsaved changes:");
         ImGui::Spacing();
@@ -287,13 +289,19 @@ static void renderExitDirtyModal() {
             appState.exitDirtyTabs.clear();
             appState.exitDirtyLabels.clear();
             appState.showExitDirtyModal = false;
-            glfwSetWindowShouldClose(glfwGetCurrentContext(), GLFW_TRUE);
+            if (appState.exitTargetIsGoHome) {
+                appState.pendingGoHome = true;   // frame top closes all tabs
+            } else {
+                glfwSetWindowShouldClose(glfwGetCurrentContext(), GLFW_TRUE);
+            }
+            appState.needsRedraw = true;
             ImGui::CloseCurrentPopup();
         } else if (pressed == 2 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
             appState.exitDirtyTabs.clear();
             appState.exitDirtyLabels.clear();
             appState.showExitDirtyModal = false;
             appState.exitDeferredClose = false;   // Cancel drops a deferred close
+            appState.exitTargetIsGoHome = false;
             ImGui::CloseCurrentPopup();
         }
         drawModalAccentFrame(modalAccent());
@@ -309,13 +317,15 @@ static void renderExitDirtyModal() {
 // (after the queued swap) so every save sees the tab's data in the flat
 // fields. Pauses while an unsaved/stale confirmation modal is up; a stale
 // "Cancel" is treated as save-skip (the user declined the drop; Save All is
-// best-effort).
+// best-effort). Completion dispatches to the exitTargetIsGoHome terminal:
+// window close for Exit, pendingGoHome for Ctrl+H.
 static void advanceExitSaveAll() {
     if (!appState.exitSaveAllRunning) return;
     if (appState.showUnsavedPrompt || appState.showStaleDropPrompt) return;
     if (appState.pendingSwapIdx >= 0) return;   // swap queued, not yet executed
     if (appState.exitDirtyTabs.empty()) {
         appState.exitSaveAllRunning = false;
+        appState.exitTargetIsGoHome = false;
         return;
     }
     if (appState.activeSessionIdx != appState.exitDirtyTabs[appState.exitSaveAllCursor]) {
@@ -330,6 +340,7 @@ static void advanceExitSaveAll() {
         appState.exitSaveAllRunning = false;
         appState.exitDirtyTabs.clear();
         appState.exitDirtyLabels.clear();
+        appState.exitTargetIsGoHome = false;
         return;
     }
     appState.exitSaveAllCursor++;
@@ -337,7 +348,12 @@ static void advanceExitSaveAll() {
         appState.exitSaveAllRunning = false;
         appState.exitDirtyTabs.clear();
         appState.exitDirtyLabels.clear();
-        glfwSetWindowShouldClose(glfwGetCurrentContext(), GLFW_TRUE);
+        if (appState.exitTargetIsGoHome) {
+            appState.exitTargetIsGoHome = false;
+            appState.pendingGoHome = true;
+        } else {
+            glfwSetWindowShouldClose(glfwGetCurrentContext(), GLFW_TRUE);
+        }
     } else {
         swapInSession(appState, appState.exitDirtyTabs[appState.exitSaveAllCursor]);
     }
@@ -782,6 +798,14 @@ bool AppLoop::runFrame() {
     }
     // Exit "Save All": sequential per-tab saves, one swap per frame.
     advanceExitSaveAll();
+    // Ctrl+H go-home finalizer: every tab is clean here (clean at request
+    // time, or saved/discarded via the shared modal). Must run AFTER
+    // advanceExitSaveAll — its completion sets pendingGoHome.
+    if (appState.pendingGoHome) {
+#if FTS_BUILD_HDF5
+        finalizeGoHome(appState);
+#endif
+    }
 
     pollEvents();
     if (glfwWindowShouldClose(window_)) return false;
@@ -818,18 +842,7 @@ void AppLoop::pollEvents() {
             appState.pendingWorkspaceAction == PendingWorkspaceAction::None) {
             std::vector<int> dirtyTabs;
             std::vector<std::string> dirtyLabels;
-            if (appState.activeTabKind == ActiveTabKind::Workspace &&
-                appState.activeSessionIdx >= 0 && appState.workspaceDirty()) {
-                dirtyTabs.push_back(appState.activeSessionIdx);
-                dirtyLabels.push_back(appState.sessions[appState.activeSessionIdx]->label() + " *");
-            }
-            for (int i = 0; i < static_cast<int>(appState.sessions.size()); ++i) {
-                if (i == appState.activeSessionIdx) continue;
-                if (appState.sessions[i]->isDirty()) {
-                    dirtyTabs.push_back(i);
-                    dirtyLabels.push_back(appState.sessions[i]->title());
-                }
-            }
+            collectDirtyTabs(appState, dirtyTabs, dirtyLabels);
             if (!dirtyTabs.empty()) {
                 glfwSetWindowShouldClose(window_, GLFW_FALSE);   // defer
                 appState.showExitDirtyModal = true;
@@ -1170,12 +1183,6 @@ void AppLoop::handleInput() {
             appState.needsRedraw = true;
         }
 
-        // Ctrl+H (M2.2): reset the ACTIVE workspace tab's panels/selection;
-        // with a non-workspace tab focused, reset the most-recent workspace.
-        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) && ImGui::IsKeyPressed(ImGuiKey_H) && ImGui::GetIO().KeyCtrl) {
-            resetActiveWorkspaceTab(appState);
-        }
-
         // 'Left/Right Arrow' - Pan left by 10% of current visible range
         if (glfwGetKey(window_, GLFW_KEY_LEFT) == GLFW_PRESS && !appState.leftArrowPressedLastFrame) {
 
@@ -1310,6 +1317,19 @@ void AppLoop::handleInput() {
             }
         }
         }   // end wsActive gate
+
+        // Ctrl+H: go back to home — close every workspace tab and re-show the
+        // launch welcome screen (dirty tabs route through the Save All /
+        // Discard All modal first). GLOBAL shortcut: lives OUTSIDE the
+        // wsActive gate so it works from the Session tab too (bugfix
+        // 2026-08-13).
+        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) && ImGui::IsKeyPressed(ImGuiKey_H) && ImGui::GetIO().KeyCtrl) {
+#if FTS_BUILD_HDF5
+            requestGoHome(appState);
+#else
+            resetActiveWorkspaceTab(appState);
+#endif
+        }
 
 }
 

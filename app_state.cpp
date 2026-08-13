@@ -69,9 +69,10 @@ AppState::AppState()
     // Constructor body
 }
 
-// Ctrl+H "back to home" (M2.2): reset the ACTIVE workspace tab's panels and
+// Reset-only workspace clear: resets the ACTIVE workspace tab's panels and
 // selection (clears but keeps the tab); when a non-workspace tab is focused,
-// reset the most-recently-active workspace tab instead.
+// resets the most-recently-active workspace tab instead. The main-window
+// Ctrl+H no longer routes here — it goes home via requestGoHome.
 void resetActiveWorkspaceTab(AppState& s) {
     int target = (s.activeTabKind == ActiveTabKind::Workspace && s.activeSessionIdx >= 0)
                      ? s.activeSessionIdx
@@ -84,6 +85,69 @@ void resetActiveWorkspaceTab(AppState& s) {
     }
     s.needsRedraw = true;
 }
+
+#if FTS_BUILD_HDF5
+void collectDirtyTabs(const AppState& s, std::vector<int>& tabs,
+                      std::vector<std::string>& labels) {
+    if (s.activeTabKind == ActiveTabKind::Workspace &&
+        s.activeSessionIdx >= 0 && s.workspaceDirty()) {
+        tabs.push_back(s.activeSessionIdx);
+        labels.push_back(s.sessions[s.activeSessionIdx]->label() + " *");
+    }
+    for (int i = 0; i < static_cast<int>(s.sessions.size()); ++i) {
+        if (i == s.activeSessionIdx) continue;
+        if (s.sessions[i]->isDirty()) {
+            tabs.push_back(i);
+            labels.push_back(s.sessions[i]->title());
+        }
+    }
+}
+
+void requestGoHome(AppState& s) {
+    // Never close tabs underneath an open prompt/flow — its resolution would
+    // be skipped and dirty data silently dropped.
+    if (s.showUnsavedPrompt || s.showExitDirtyModal || s.showStaleDropPrompt ||
+        s.exitSaveAllRunning ||
+        s.pendingWorkspaceAction != PendingWorkspaceAction::None)
+        return;
+    // Already home.
+    if (s.showWelcomeScreen && !s.welcomeScreenInitialized) return;
+
+    std::vector<int> dirtyTabs;
+    std::vector<std::string> dirtyLabels;
+    collectDirtyTabs(s, dirtyTabs, dirtyLabels);
+    if (!dirtyTabs.empty()) {
+        s.exitDirtyTabs = std::move(dirtyTabs);
+        s.exitDirtyLabels = std::move(dirtyLabels);
+        s.exitTargetIsGoHome = true;
+        s.showExitDirtyModal = true;
+    } else {
+        s.pendingGoHome = true;
+    }
+    s.needsRedraw = true;
+}
+
+// Frame-top finalizer for the go-home flow. Every tab is clean here (saved or
+// discarded via the shared modal), so removal never recurses into a prompt.
+void finalizeGoHome(AppState& s) {
+    s.pendingGoHome = false;
+    s.exitTargetIsGoHome = false;
+    // Back-to-front: removeTab's index fix-ups never move an entry we still
+    // have to process.
+    for (int i = static_cast<int>(s.sessions.size()) - 1; i >= 0; --i)
+        removeTab(s, i);
+    s.exitDirtyTabs.clear();
+    s.exitDirtyLabels.clear();
+    // removeTab leaves the active tab's data in the flat fields (the normal
+    // active-close path tolerates that until the next swap) — clear them so
+    // the launch welcome renders against a pristine state.
+    clearWorkspacePanels(s);
+    s.lastActiveSessionIdx = -1;
+    s.showWelcomeScreen = true;
+    s.welcomeScreenInitialized = false;
+    s.needsRedraw = true;
+}
+#endif
 
 // The single workspace-reset path.
 // Order matters: futures first (abandoned → workers finish into moved-from

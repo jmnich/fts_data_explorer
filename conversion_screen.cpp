@@ -280,9 +280,11 @@ void renderConversionScreen(AppState& s) {
 
     if (ImGui::BeginPopupModal("Convert Dataset##conversion", nullptr,
                                ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar)) {
-        // Ctrl+H: reset the active workspace tab (mirrors the main-window
-        // shortcut). The modal stays open — the conversion flow is unrelated
-        // to workspace state.
+        // Ctrl+H: reset-only mirror — clears the active workspace tab but
+        // does NOT go home (showing the launch welcome underneath this modal
+        // would look broken). The main-window shortcut goes home via
+        // requestGoHome. The modal stays open — the conversion flow is
+        // unrelated to workspace state.
         if (ImGui::IsKeyPressed(ImGuiKey_H) && ImGui::GetIO().KeyCtrl) {
             resetActiveWorkspaceTab(s);
         }
