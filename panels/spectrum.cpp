@@ -66,7 +66,8 @@ static void SetupAxisTicksLimited(ImAxis axis, double min, double max, int maxTi
 }
 
 Spectrum::Spectrum()
-    : spectrumDirty(true),
+    : appState(nullptr),
+      spectrumDirty(true),
       isSelectingXRange(false),
       selectionStartX(0.0),
       selectionEndX(0.0),
@@ -83,7 +84,6 @@ Spectrum::Spectrum()
       rightArrowPressedLastFrame(false),
       leftArrowHandleFlag(false),
       rightArrowHandleFlag(false),
-      appState(nullptr),
       xUnitSelector(0), // Default to cm-1
       prevXUnitSelector(0),
       yScaleSelector(0), // Default linear Y-axis
@@ -1041,12 +1041,6 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                 const auto& fileData = primaryDetectors[i];
                 const std::string& fileId = fileData.first;
 
-                // Check if this file has a pending async computation
-                bool isPending = false;
-                for (const auto& p : pendingSpectra_) {
-                    if (p.fileId == fileId) { isPending = true; break; }
-                }
-
                 auto specIt = cachedSpectra.find(fileId);
                 auto freqIt = cachedFrequencies.find(fileId);
                 bool hasCache = (specIt != cachedSpectra.end() && freqIt != cachedFrequencies.end() &&
@@ -1359,7 +1353,7 @@ void Spectrum::renderPanel(AppState& s) {
                     invalidateSpectrumCaches();
                 }
                 if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("Rectangular window width fraction (0.05-1.0).\n1.0 = full signal, 0.05 = 5% of signal.");
+                    ImGui::SetTooltip("Rectangular window width fraction (0.05-1.0).\n1.0 = full signal, 0.05 = 5%% of signal.");
                 }
             } else if (s.active->spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::NortonBeer)) {
                 if (ImGui::SliderFloat("FWHM##NortonBeerFwhm", &s.active->spectrum.apodizationParams.nortonBeerFwhm,

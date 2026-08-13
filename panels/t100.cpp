@@ -75,13 +75,13 @@ T100Spectrum::T100Spectrum()
       calcStdInProgress(false),
       stdProgressTotal(0),
       stdProgressCurrent(0),
-      calcStdBins(0),
-      calcStdValidFiles(0),
-      calcStdFirstFile(true),
       ratioStatsAvailable(false),
       ratioAvgA(0.0), ratioAvgB(0.0), ratioAvgC(0.0),
       ratioSpreadA(0.0), ratioSpreadB(0.0), ratioSpreadC(0.0),
-      ratioStdDevA(0.0), ratioStdDevB(0.0), ratioStdDevC(0.0)
+      ratioStdDevA(0.0), ratioStdDevB(0.0), ratioStdDevC(0.0),
+      calcStdBins(0),
+      calcStdValidFiles(0),
+      calcStdFirstFile(true)
 {
     csvPathBuffer[0] = '\0';
     energyRatioNumA[0] = '\0';
@@ -235,7 +235,7 @@ void T100Spectrum::setReferenceFromCSV(const std::string& path) {
     }
 
     fprintf(stderr, "[t100] setReferenceFromCSV: path=%s rawX.size=%zu csvUnit=%d spectrumUnit=%d\n",
-            path, rawX.size(), csvUnit, spectrumUnit);
+            path.c_str(), rawX.size(), csvUnit, spectrumUnit);
 
     refX = std::move(rawX);
     refY = std::move(rawY);
@@ -795,31 +795,12 @@ static EnergyRatios computeEnergyRatios(const std::string& fileId,
                                         int spectrumXUnit,
                                         const std::map<std::string, std::vector<double>>& cachedFreqs,
                                         const std::map<std::string, std::vector<double>>& cachedSpecs) {
-    EnergyRatios r = {0, 0, 0, false, false, false};
-
     auto freqIt = cachedFreqs.find(fileId);
     auto specIt = cachedSpecs.find(fileId);
     if (freqIt == cachedFreqs.end() || specIt == cachedSpecs.end())
-        return r;
-    const auto& freqs = freqIt->second;
-    const auto& spec = specIt->second;
-
-    auto computePair = [&](const char* numStr, const char* denStr, double& outRatio) -> bool {
-        bool numMax, denMax;
-        double numWn, denWn;
-        if (!parseEnergyWavenumber(numStr, numMax, numWn)) return false;
-        if (!parseEnergyWavenumber(denStr, denMax, denWn)) return false;
-        double eNum = getEnergyAtWavenumber(freqs, spec, numMax, numWn, spectrumXUnit);
-        double eDen = getEnergyAtWavenumber(freqs, spec, denMax, denWn, spectrumXUnit);
-        if (eDen <= 1e-15) return false;
-        outRatio = eNum / eDen;
-        return true;
-    };
-
-    r.validA = computePair(numA, denA, r.a);
-    r.validB = computePair(numB, denB, r.b);
-    r.validC = computePair(numC, denC, r.c);
-    return r;
+        return {};
+    return computeEnergyRatiosDirect(numA, denA, numB, denB, numC, denC,
+                                     spectrumXUnit, freqIt->second, specIt->second);
 }
 
 static EnergyRatios computeEnergyRatiosDirect(const char* numA, const char* denA,

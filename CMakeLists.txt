@@ -239,6 +239,13 @@ include_directories(
     ${OPENGL_INCLUDE_DIR}
     ${glfw_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/core
+    ${CMAKE_SOURCE_DIR}/ui
+    ${CMAKE_SOURCE_DIR}/panels
+    ${CMAKE_SOURCE_DIR}/session
+    ${CMAKE_SOURCE_DIR}/workspace
+    ${CMAKE_SOURCE_DIR}/io
+    ${CMAKE_SOURCE_DIR}/headless
     ${imgui_SOURCE_DIR}
     ${imgui_SOURCE_DIR}/backends
     ${implot_SOURCE_DIR}
@@ -250,7 +257,7 @@ include_directories(
 
 # Platform-specific sources
 set(PLATFORM_SOURCES
-    glibc_compat.cpp
+    core/glibc_compat.cpp
 )
 if(WIN32)
     set(PLATFORM_SOURCES)  # glibc_compat.cpp is Linux/GLIBC-specific
@@ -259,23 +266,23 @@ endif()
 # Add executable
 add_executable(fts_data_explorer
     main.cpp
-    app_state.cpp
-    headless.cpp
-    spectrum.cpp
-    average_spectrum.cpp
-    snr_spectrum.cpp
-    allan_variance.cpp
-    t100.cpp
-    spectral_toolbox.cpp
-    apodization.cpp
-    export.cpp
-    theme.cpp
-    converter.cpp
-    conversion_screen.cpp
-    app_dirs.cpp
-    file_browser.cpp
-    welcome.cpp
-    about.cpp
+    core/app_state.cpp
+    headless/headless.cpp
+    panels/spectrum.cpp
+    panels/average_spectrum.cpp
+    panels/snr_spectrum.cpp
+    panels/allan_variance.cpp
+    panels/t100.cpp
+    workspace/spectral_toolbox.cpp
+    workspace/apodization.cpp
+    panels/export.cpp
+    ui/theme.cpp
+    io/converter.cpp
+    panels/conversion_screen.cpp
+    io/app_dirs.cpp
+    ui/file_browser.cpp
+    panels/welcome.cpp
+    panels/about.cpp
     ui/window.cpp
     ui/app_loop.cpp
     ui/menu_bar.cpp
@@ -293,7 +300,7 @@ add_executable(fts_data_explorer
 )
 
 # fts_hdf integration (unconditional — .h5 is the only runtime input)
-target_sources(fts_data_explorer PRIVATE workspace_reader.cpp)
+target_sources(fts_data_explorer PRIVATE workspace/workspace_reader.cpp)
 target_link_libraries(fts_data_explorer fts_hdf)
 target_compile_definitions(fts_data_explorer PRIVATE FTS_BUILD_HDF5=1)
 
@@ -377,23 +384,23 @@ install(TARGETS fts_data_explorer DESTINATION bin)
 # ImGui/ImPlot/GLFW symbols even though this binary never opens a window).
 add_executable(fts_session_roundtrip
     session/session_roundtrip.cpp
-    app_state.cpp
+    core/app_state.cpp
     session/workspace_session.cpp
     session/spectral_pool.cpp
     session/environment_session.cpp
     session/cross_store.cpp
     ui/layout_persistence.cpp
-    spectrum.cpp
-    average_spectrum.cpp
-    snr_spectrum.cpp
-    allan_variance.cpp
-    t100.cpp
-    export.cpp
-    spectral_toolbox.cpp
-    apodization.cpp
-    workspace_reader.cpp
-    file_browser.cpp
-    theme.cpp
+    panels/spectrum.cpp
+    panels/average_spectrum.cpp
+    panels/snr_spectrum.cpp
+    panels/allan_variance.cpp
+    panels/t100.cpp
+    panels/export.cpp
+    workspace/spectral_toolbox.cpp
+    workspace/apodization.cpp
+    workspace/workspace_reader.cpp
+    ui/file_browser.cpp
+    ui/theme.cpp
     ${PLATFORM_SOURCES}
     ${EXTRA_SOURCES}
 )
@@ -415,6 +422,13 @@ target_compile_definitions(fts_session_roundtrip PRIVATE
 )
 target_include_directories(fts_session_roundtrip PRIVATE
     ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/core
+    ${CMAKE_SOURCE_DIR}/ui
+    ${CMAKE_SOURCE_DIR}/panels
+    ${CMAKE_SOURCE_DIR}/session
+    ${CMAKE_SOURCE_DIR}/workspace
+    ${CMAKE_SOURCE_DIR}/io
+    ${CMAKE_SOURCE_DIR}/headless
     ${imgui_SOURCE_DIR}
     ${imgui_SOURCE_DIR}/backends
     ${implot_SOURCE_DIR}
@@ -448,6 +462,11 @@ target_compile_definitions(fts_cross_roundtrip PRIVATE
 )
 target_include_directories(fts_cross_roundtrip PRIVATE
     ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/core
+    ${CMAKE_SOURCE_DIR}/session
+    ${CMAKE_SOURCE_DIR}/workspace
+    ${CMAKE_SOURCE_DIR}/io
+    ${CMAKE_SOURCE_DIR}/headless
     ${imgui_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/fftw-3.3.10/api
 )

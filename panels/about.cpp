@@ -38,19 +38,19 @@ void renderAboutPopup() {
     // ── Project info (easily editable) ─────────────────────────────────────
     ImGui::Text("Lightweight, fast scientific program for rapid exploration");
     ImGui::Text("of raw data produced by Fourier spectrometers.");
-    ImGui::Text("");
+    ImGui::Text(" ");
     ImGui::Text("Version: %s", APP_VERSION);
-    ImGui::Text("");
+    ImGui::Text(" ");
     ImGui::Text("Author: Jakub Mnich");
     ImGui::Text("Affiliation: Wroclaw University of Science and Technology, Poland");
     ImGui::Text("Email: jakub.mnich@pwr.edu.pl");
     ImGui::Text("GitHub: https://github.com/jmnich/fts_data_explorer");
-    ImGui::Text("");
+    ImGui::Text(" ");
     ImGui::Text("Licensed under: GNU GPLv3");
     ImGui::Text("https://www.gnu.org/licenses/gpl-3.0.en.html");
-    ImGui::Text("");
+    ImGui::Text(" ");
     ImGui::Separator();
-    ImGui::Text("");
+    ImGui::Text(" ");
     // ── Third-party libraries (easily editable) ────────────────────────────
     ImGui::Text("Third-Party Libraries:");
     ImGui::BulletText("Dear ImGui (MIT) - github.com/ocornut/imgui");
@@ -61,9 +61,9 @@ void renderAboutPopup() {
     ImGui::BulletText("tinyfiledialogs (zlib/libpng) - sourceforge.net/projects/tinyfiledialogs");
     ImGui::BulletText("stb_image (MIT/public domain) - github.com/nothings/stb");
     ImGui::BulletText("Nlohmann JSON (MIT) - github.com/nlohmann/json");
-    ImGui::Text("");
+    ImGui::Text(" ");
     ImGui::Separator();
-    ImGui::Text("");
+    ImGui::Text(" ");
     // ── Papers ────────────────────────────
     ImGui::Text("Underlying literature");
     ImGui::BulletText("Norton-Beer apodization windows:");
@@ -84,7 +84,7 @@ void renderAboutPopup() {
     ImGui::BulletText("General FTS handbook:");
     ImGui::Text("    P. R. Griffiths and J. A. De Haseth, Fourier transform infrared spectrometry.");
     ImGui::Text("    No. v. 171 in Chemical analysis, Hoboken, N.J: Wiley-Interscience, 2nd ed ed., 2007");
-    ImGui::Text("");
+    ImGui::Text(" ");
 
     // ── Disclosure ────────────────────────────
     ImGui::Separator();

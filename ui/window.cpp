@@ -272,8 +272,7 @@ void cleanupApplication(GLFWwindow* window) {
 
 
 // One-time post-window setup (extracted from main(), Phase-1 M1.2b).
-void setupApplication(AppConfig& config, const std::string& configFilePath,
-                      GLFWwindow* window) {
+void setupApplication(AppConfig& config, GLFWwindow* window) {
     // Get ImGui IO (context already created in initializeApplication)
     ImGuiIO& io = ImGui::GetIO(); (void)io;
 
@@ -304,7 +303,6 @@ void setupApplication(AppConfig& config, const std::string& configFilePath,
     // Customize plot colors
     ImVec4 yellow_color = ImVec4(1.0f, 1.0f, 0.0f, 1.0f); // Bright yellow
     ImVec4 purple_color = ImVec4(0.5f, 0.0f, 0.5f, 1.0f); // Purple for selection
-    ImVec4 background_color = ImVec4(0.0f, 0.0f, 0.0f, 1.0f); // Black background
 
     // Set plot colors
     style.Colors[ImGuiCol_PlotLines] = yellow_color;

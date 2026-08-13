@@ -17,8 +17,7 @@ bool initializeApplication(AppConfig& config, GLFWwindow*& window);
 // One-time post-window setup (Phase-1 M1.2b): ImGui backends, theme, window
 // icon, welcome texture, DPI/UI scaling, config -> appState wiring, and the
 // panel back-pointer wiring. Called from main() after initializeApplication.
-void setupApplication(AppConfig& config, const std::string& configFilePath,
-                      GLFWwindow* window);
+void setupApplication(AppConfig& config, GLFWwindow* window);
 void handleWindowEvents(GLFWwindow* window, AppConfig& config);
 void handleUIScaling(ImGuiIO& io, float& uiScale,
                      const std::string& currentUiSize, bool& uiSizeChanged);

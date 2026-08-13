@@ -4,8 +4,9 @@
 > contains `ImGui::`, `ImPlot::`, `ImPlot3D::`, `glfwSet*Callback`, `io.MouseWheel`,
 > or is a panel header/source.
 >
-> This includes: `main.cpp`, `app_state.h`, all panel files, scroll/zoom/pan/drag input,
-> window/popup/modal management, plot rendering, async UI updates, docking, tables.
+> This includes: `main.cpp`, `core/app_state.h`, all panel files (`panels/`),
+> scroll/zoom/pan/drag input, window/popup/modal management, plot rendering,
+> async UI updates, docking, tables.
 >
 > **Before you start:** state which sections of IMGUI_GUIDE.md are relevant to your task.
 
@@ -36,15 +37,39 @@ FTS Data Explorer is a scientific GUI for rapid exploration of fourier spectrome
 
 **Interaction (all plots):** Shift+drag = X range select. Mouse wheel = zoom. Arrows = pan (10%) / navigate files. ESC = reset zoom. Ctrl+Y = auto-fit Y, Ctrl+A = max-at-zero, Ctrl+D = downsample. >50k points: auto-downsample, no AA, `NoInputs`, "LARGE DATA" indicator.
 
-**Modal styling** (`popup_utils.h`): all dialogs use the "Saved"-toast look — rounded-8 corners, 2px accent border, dark fill, no title bar (`NoTitleBar`), plus the 3px accent ring via `drawModalAccentFrame`. Frame every modal with the `beginModal(width, accent, pinWidth)` / `endModal()` pair (`endModal()` unconditionally after the `BeginPopupModal` if-block so styles always pop; `pinWidth=false` for resizable dialogs like Convert). Titles move into a body label when the header is removed — never drop the title text. The Welcome screen, native FileBrowser dialogs, and the FPS HUD are exempt.
+**Modal styling** (`core/popup_utils.h`): all dialogs use the "Saved"-toast look — rounded-8 corners, 2px accent border, dark fill, no title bar (`NoTitleBar`), plus the 3px accent ring via `drawModalAccentFrame`. Frame every modal with the `beginModal(width, accent, pinWidth)` / `endModal()` pair (`endModal()` unconditionally after the `BeginPopupModal` if-block so styles always pop; `pinWidth=false` for resizable dialogs like Convert). Titles move into a body label when the header is removed — never drop the title text. The Welcome screen, native FileBrowser dialogs, and the FPS HUD are exempt.
+
+# Directory layout
+
+```
+main.cpp                  thin entry (~100 lines) + headless dispatch
+core/        app_state, config.h, version.h, imconfig_custom.h,
+             popup_utils.h, pthread_compat.h, glibc_compat.cpp
+ui/          app_loop, window, menu_bar, theme, file_browser, layout_persistence
+panels/      spectrum, average_spectrum, snr_spectrum, allan_variance, t100,
+             export, welcome, about, conversion_screen, files_panel,
+             interferogram_view, metadata_panel
+session/     session_base, workspace_session, session_tab, environment_session,
+             spectral_pool, cross_store, wrap_text, round-trip harnesses
+workspace/   workspace_reader, interferogram_data.h, spectral_toolbox,
+             apodization, thread_pool.h
+io/          converter, app_dirs
+headless/    headless
+hdf/         fts_hdf exchange layer (unchanged)
+```
+
+All directories are on the CMake include path — `#include "app_state.h"` style bare
+includes work from anywhere; `hdf/`, `session/`, `ui/`, `panels/` are also reachable
+with a directory prefix. CMake keeps explicit source lists (no GLOB). `version.h` is
+generated at the repo root (gitignored); `stb_image.h` is vendored at the root.
 
 # Spectrum pipeline
 
-Pipeline: Hilbert X correction, resample, remove mean, apodize, zero-pad, FFT, magnitude, unit conversion. Spectra cached per-file; invalidated on K/xUnit/wavelength/apodization/raw data change (Y-scale/mode changes do NOT invalidate). First load: sync compute (no blink). Stale cache: async via `pollPendingSpectra()`.
+Pipeline: Hilbert X correction, resample, remove mean, apodize, zero-pad, FFT, magnitude, unit conversion. Spectra cached per-file; invalidated on K/wavelength/apodization/raw data change (Y-scale/mode changes do NOT invalidate; xUnit converts in place and does NOT invalidate). First load: sync compute (no blink). Stale cache: async via `pollPendingSpectra()`.
 
 # Batch-computation panels (Average/SNR/Allan/T100)
 
-All four share: file selection via Files panel checkboxes, independent X unit (cm-1/um/THz) and Y mode (all/tight/force) per panel, ESC/arrows/shift+drag/scroll interaction, batch-submit to thread pool on first `tickCalculation()`, poll on subsequent calls, cumulative `completedCount_`. Config persisted per panel (`[AverageWindow]`, etc.).
+All four share: file selection via Files panel checkboxes, independent X unit (cm-1/um/THz) and Y mode (all/tight/force) per panel, ESC/arrows/shift+drag/scroll interaction, batch-submit to thread pool on first `tickCalculation()`, poll on subsequent calls, cumulative `completedCount_`. Per-panel view state persists with the workspace session (`workspace.json` inside the .h5) — the legacy `[AverageWindow]`-style config keys were removed in the Phase-5 sweep.
 
 Panel-specific (see source headers for full detail):
 
@@ -52,12 +77,12 @@ Panel-specific (see source headers for full detail):
 |-------|---------------|
 | Average | Workers: `workspaceRead` + `processSpectrum()`. Main: interpolate, accumulate, divide. |
 | SNR | Workers: same. Main: online variance (sum + sum-of-squares), SNR = mean/stddev. |
-| Allan | 3-phase: avg spectrum, T%, `computeAllanVariance()` per bin (pool if >20 bins). MxN flat array. |
+| Allan | 3-phase: avg spectrum, T%, `computeAllanVariance()` per bin (always pool-parallel). MxN flat array. |
 | 100% T | Ref source: file/CSV/Average. T% = interpY/refY*100. Std dev from all checked files. |
 
 # Dataset conversion (phase 5)
 
-`.h5` is the **only** runtime input. Foreign formats enter through self-contained Python converter scripts discovered by `ConverterRegistry` (`converter.{h,cpp}`), which parse the magic-line manifest:
+`.h5` is the **only** runtime input. Foreign formats enter through self-contained Python converter scripts discovered by `ConverterRegistry` (`io/converter.{h,cpp}`), which parse the magic-line manifest:
 
 ```
 #FTS_CONVERTER {"id":"wust_mini_fts","name":"WUST Mini FTS CSV", ...}
@@ -69,21 +94,21 @@ Invocation contract: `<interpreter> <script> <input> <output.h5> [--param v]`; t
 
 **Discovery** (`ConverterRegistry::refresh`): scan `appDataDir()/converters` (user's own scripts), then `config.converterPaths` (extra dirs), then the repo clone — **local wins on id**. Broken manifests are listed with the parse error, never executed.
 
-**Repo sync** (`git` shell-out, `clone --depth 1` / `pull --ff-only`): clone dir defaults to `appDataDir()/converter-repo` (Linux `$XDG_DATA_HOME`, Windows `%LOCALAPPDATA%` — `app_dirs.{h,cpp}`). First clone is explicit only (button), never automatic; a non-empty non-repo dir is renamed to `.broken-<timestamp>` and re-cloned. Startup refresh pulls an existing clone silently.
+**Repo sync** (`git` shell-out, `clone --depth 1` / `pull --ff-only`): clone dir defaults to `appDataDir()/converter-repo` (Linux `$XDG_DATA_HOME`, Windows `%LOCALAPPDATA%` — `io/app_dirs.{h,cpp}`). First clone is explicit only (button), never automatic; a non-empty non-repo dir is renamed to `.broken-<timestamp>` and re-cloned. Startup refresh pulls an existing clone silently.
 
-**Conversion screen** (`conversion_screen.{h,cpp}`): Setup group (repo URL / clone dir / interpreter, each persisted to `~/.fts_data_explorer_config` on edit — never to `workspace.json`), dependency banners (git/python/h5py probes, cached per session), converter list + format pane, Convert with live log tail, success → Open Workspace via `requestWorkspaceDiscard(OpenPath, …)`. Jobs run in `std::thread` + `popen` with a mutex-protected log; the frame loop joins on the `finished()` false edge (IMGUI_GUIDE §13).
+**Conversion screen** (`panels/conversion_screen.{h,cpp}`): Setup group (repo URL / clone dir / interpreter, each persisted to `~/.fts_data_explorer_config` on edit — never to `workspace.json`), dependency banners (git/python/h5py probes, cached per session), converter list + format pane, Convert with live log tail, success → Open Workspace via `requestWorkspaceDiscard(OpenPath, …)`. Jobs run in `std::thread` + `popen` with a mutex-protected log; the frame loop joins on the `finished()` false edge (IMGUI_GUIDE §13).
 
 **Built-in converters** (delivered by the separate [fts_data_explorer_converters](https://github.com/jmnich/fts_data_explorer_converters) repo — the app repo ships none): `wust_mini_fts.py` (raw_data/*.csv, dual IFG), `arcoptix_igms.py` (OPD vs IGM .txt, file or directory → `igm_corrected_x/`), `arcoptix_spectra.py` (spectra .txt, file or directory → `spectra/` originals). Playground harnesses also invoke these scripts directly via `FTS_CONVERTERS_DIR`.
 
-# AppState & idle rendering# AppState & idle rendering
+# AppState & idle rendering
 
-Key fields (`app_state.h`): file list, loaded data, axis limits, per-panel state structs, `filesSelectedForAveraging`, `computationPool`. `needsRedraw` (`std::atomic<bool>`) -- GLFW callbacks set it, main loop skips frame + sleeps 10ms when false. `scrollAccumX`/`scrollAccumY` (float) -- raw GLFW wheel deltas accumulated in the scroll callback and drained at one notch/frame by the rate limiter; `lastScrollEventTime` gates the drain (~80 ms grace) so zoom stops promptly after the wheel stops (see IMGUI_GUIDE.md 20).
+Key fields (`core/app_state.h`): file list, loaded data, axis limits, per-panel state structs, `filesSelectedForAveraging`, `computationPool`. `needsRedraw` (`std::atomic<bool>`) -- GLFW callbacks set it, main loop skips frame + sleeps 10ms when false. `scrollAccumX`/`scrollAccumY` (float) -- raw GLFW wheel deltas accumulated in the scroll callback and drained at one notch/frame by the rate limiter; `lastScrollEventTime` gates the drain (~80 ms grace) so zoom stops promptly after the wheel stops (see IMGUI_GUIDE.md 20).
 
 Config stored at `~/.fts_data_explorer_config`.
 
 # Parallel processing
 
-Custom `ThreadPool` (`thread_pool.h`, header-only, raw pthreads):
+Custom `ThreadPool` (`workspace/thread_pool.h`, header-only, raw pthreads):
 
 ```
 Main: pollEvents -> pollSpectra -> tick -> render -> swap
@@ -141,7 +166,7 @@ hide ordering bugs): `rm -rf build/windows-mingw && cmake --preset windows-mingw
 
 # Coding style
 
-camelCase vars/funcs, PascalCase classes. Functions <50 lines. Doxygen for public APIs. RAII, const-correct, move semantics. `imconfig_custom.h` sets 32-bit `ImDrawIdx` (ImPlot3D requirement).
+camelCase vars/funcs, PascalCase classes. Functions <50 lines. Doxygen for public APIs. RAII, const-correct, move semantics. `core/imconfig_custom.h` sets 32-bit `ImDrawIdx` (ImPlot3D requirement).
 
 # Versioning
 
@@ -157,12 +182,12 @@ Format: `<YY>.<MM>.<minor>` from `VERSION` file. `./build_script.sh` shows last 
 | FFTW planner not thread-safe | Mutex around `fftw_plan_dft_1d` |
 | Cumulative counters go local | Use member `std::atomic<int> completedCount_` |
 | Submit inside `BeginPlot`/`EndPlot` | Submit/poll before `BeginPlot` |
-| `std::mutex`/`condition_variable` on GCC 16+ | Include `pthread_compat.h` first; `_GNU_SOURCE` undefined |
+| `std::mutex`/`condition_variable` on GCC 16+ | Include `core/pthread_compat.h` first; `_GNU_SOURCE` undefined |
 | File delete cross button / Delete key | Calls `performFileDeletion()` which cleans `csvFiles`, `sortedFiles`, selection, cache |
 | `computeTransmittanceForFile` no cache | Must fall back to synchronous CSV load + compute |
 | `waitAll()` before pool reconfigure | Destructor joins workers directly (stop flag); call `waitAll()` first |
 | `SetKeyboardFocusHere` | Not used -- activates ImGui nav, conflicts with manual arrow-key handling |
-| `std::stod`/`std::strtod` in data-parse loops | Windows CRT `strtod` is globally locked: more worker threads = slower parsing. Use `parseDoubleFromChars()` (interferogram_data.h, `std::from_chars`-based, exact `stod` semantics). Do NOT "simplify" it back to `std::stod` |
+| `std::stod`/`std::strtod` in data-parse loops | Windows CRT `strtod` is globally locked: more worker threads = slower parsing. Use `parseDoubleFromChars()` (workspace/interferogram_data.h, `std::from_chars`-based, exact `stod` semantics). Do NOT "simplify" it back to `std::stod` |
 | Converter thread join | `startConverter`/`startRepoSync` spawn joinable `std::thread`s; the frame loop polls `finished()` and joins on the false edge — never detach |
 | Manifest JSON parse | `#FTS_CONVERTER` line may span `#`-prefixed continuation lines; parse must stop at `#FTS_` markers |
 
@@ -178,6 +203,6 @@ Test data lives in `playground/test_data/` (there is no `example_datasets/`). Vi
 
 # Working with the codebase
 
-1. Converter/conversion code: `converter.{h,cpp}`, `conversion_screen.{h,cpp}`, `app_dirs.{h,cpp}`, and `headless.cpp` (`-c`/`-sync-converters`).
-2. Spectrum logic: read `spectrum.h`, `spectral_toolbox.h`, and Spectrum panel together.
+1. Converter/conversion code: `io/converter.{h,cpp}`, `panels/conversion_screen.{h,cpp}`, `io/app_dirs.{h,cpp}`, and `headless/headless.cpp` (`-c`/`-sync-converters`).
+2. Spectrum logic: read `panels/spectrum.h`, `workspace/spectral_toolbox.h`, and the Spectrum panel together.
 3. Batch-calculation panels: batch-submit to pool on first `tickCalculation()`, poll `wait_for(0s)` + `get()` on subsequent frames, track with cumulative `completedCount_`, finalize when `completedCount_ >= totalSubmitted_`.

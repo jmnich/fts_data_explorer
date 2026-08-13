@@ -56,12 +56,12 @@ static void SetupAxisTicksLimited(ImAxis axis, double min, double max, int maxTi
 }
 
 AverageSpectrum::AverageSpectrum()
-    : averageCount(0),
+    : appState(nullptr),
+      averageCount(0),
       averageAvailable(false),
       calcInProgress(false),
       progressTotal(0),
       progressCurrent(0),
-      appState(nullptr),
       isSelectingXRange(false),
       selectionStartX(0.0),
       selectionEndX(0.0),

@@ -393,35 +393,6 @@ static void applyJsonConfig(AppState& state, const json& j) {
 }
 
 // ---------------------------------------------------------------------------
-// Natural sort (replicated from main.cpp since it's static there)
-// ---------------------------------------------------------------------------
-static bool naturalSortCompare(const std::string& a, const std::string& b) {
-    size_t i = 0, j = 0;
-    while (i < a.size() && j < b.size()) {
-        if (!std::isdigit(a[i]) || !std::isdigit(b[j])) {
-            if (a[i] != b[j]) return a[i] < b[j];
-            i++; j++;
-        } else {
-            // Compare numeric sequences by length then lexicographically.
-            // Throw-free: std::stoi would throw std::out_of_range for digit runs
-            // longer than INT_MAX, and a throwing sort comparator is UB.
-            size_t numStartA = i;
-            size_t numStartB = j;
-            while (i < a.size() && std::isdigit(a[i])) i++;
-            while (j < b.size() && std::isdigit(b[j])) j++;
-            size_t lenA = i - numStartA;
-            size_t lenB = j - numStartB;
-            if (lenA != lenB) {
-                return lenA < lenB;
-            }
-            int cmp = a.compare(numStartA, lenA, b, numStartB, lenB);
-            if (cmp != 0) {
-                return cmp < 0;
-            }
-        }
-    }
-    return a.size() < b.size();
-}
 
 // ---------------------------------------------------------------------------
 // Compute spectrum for a single file and cache it in appState
@@ -616,7 +587,8 @@ static void handleWorkspace(const HeadlessConfig& cfg) {
     appState.lastActiveSessionIdx = appState.activeSessionIdx;
     appState.activeTabKind = ActiveTabKind::Workspace;
 
-    // TODO(multi-ws): -w cross-store support (Phase 4, optional)
+    // Note: -w stays single-workspace only; .cross.h5 multi-workspace export
+    // (P18, beyond committed scope) would land here as a new -w output type.
     // 3. Open workspace (loads, sets datasetInfo/csvFiles, applyViewState,
     //    seedPanels, AdapterRegistry::s_workspace, currentDatasetName)
     try {

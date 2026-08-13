@@ -3,9 +3,7 @@
 // Constructor implementation (globals only — per-workspace state lives in
 // WorkspaceSession, M4.5 canonical model).
 AppState::AppState()
-    : MAX_SELECTABLE_FILES(5),
-      maxPointsBeforeDownsampling(50000),
-      currentUiSize("normal"),
+    : currentUiSize("normal"),
       uiScale(1.0f),
       uiSizeChanged(false),
       currentAccentColor("default"),
@@ -15,6 +13,8 @@ AppState::AppState()
       dKeyPressedLastFrame(false),
       qKeyPressedLastFrame(false),
       sKeyPressedLastFrame(false),
+      MAX_SELECTABLE_FILES(5),
+      maxPointsBeforeDownsampling(50000),
       showFPS(false),
       gridAlpha(1.0f),
       fps(0.0f),
@@ -183,6 +183,41 @@ std::string shortenFilename(const std::string& filename) {
     const size_t keepStart = 8;
     const size_t keepEnd = 24;
     return filename.substr(0, keepStart) + "..." + filename.substr(filename.length() - keepEnd);
+}
+
+bool naturalSortCompare(const std::string& a, const std::string& b) {
+    size_t i = 0, j = 0;
+    while (i < a.size() && j < b.size()) {
+        const bool digA = std::isdigit(static_cast<unsigned char>(a[i]));
+        const bool digB = std::isdigit(static_cast<unsigned char>(b[j]));
+        if (!digA || !digB) {
+            if (a[i] != b[j]) return a[i] < b[j];
+            i++; j++;
+        } else {
+            // Compare numeric runs by length then lexicographically.
+            // Throw-free: std::stoi would throw for runs beyond INT_MAX, and a
+            // throwing sort comparator is UB.
+            size_t numStartA = i;
+            size_t numStartB = j;
+            while (i < a.size() && std::isdigit(static_cast<unsigned char>(a[i]))) i++;
+            while (j < b.size() && std::isdigit(static_cast<unsigned char>(b[j]))) j++;
+            size_t lenA = i - numStartA;
+            size_t lenB = j - numStartB;
+            if (lenA != lenB) return lenA < lenB;
+            int cmp = a.compare(numStartA, lenA, b, numStartB, lenB);
+            if (cmp != 0) return cmp < 0;
+        }
+    }
+    return a.size() < b.size();
+}
+
+bool naturalBasenameLess(const std::string& a, const std::string& b) {
+    std::string nameA = a, nameB = b;
+    size_t slashA = nameA.find_last_of("/\\");
+    size_t slashB = nameB.find_last_of("/\\");
+    if (slashA != std::string::npos) nameA = nameA.substr(slashA + 1);
+    if (slashB != std::string::npos) nameB = nameB.substr(slashB + 1);
+    return naturalSortCompare(nameA, nameB);
 }
 
 // Global application state instance

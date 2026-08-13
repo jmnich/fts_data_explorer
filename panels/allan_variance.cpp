@@ -34,21 +34,20 @@ static void SetupAxisTicksLimited(ImAxis axis, double min, double max, int maxTi
 }
 
 static double convertToUm(double value, int unit) {
-    using ST = SpectralToolbox::SpectrumXUnit;
     if (unit == 0) return SpectralToolbox::convertCmToUm(value);
     if (unit == 2) return SpectralToolbox::convertTHzToUm(value);
     return value;
 }
 
 static double convertFromUmToDisplay(double um, int unit) {
-    using ST = SpectralToolbox::SpectrumXUnit;
     if (unit == 0) return SpectralToolbox::convertUmToCm(um);
     if (unit == 2) return SpectralToolbox::convertUmToTHz(um);
     return um;
 }
 
 AllanVariance::AllanVariance()
-    : numSurfaceWavelengths(0),
+    : appState(nullptr),
+      numSurfaceWavelengths(0),
       numSurfaceTaus(0),
       fileCount(0),
       allanAvailable(false),
@@ -56,7 +55,6 @@ AllanVariance::AllanVariance()
       calcInProgress(false),
       progressTotal(0),
       progressCurrent(0),
-      appState(nullptr),
       isSelectingXRange(false),
       selectionStartX(0.0),
       selectionEndX(0.0),
@@ -118,7 +116,7 @@ void AllanVariance::reset() {
 }
 
 static std::vector<double> getSliceData(const std::vector<double>& surfaceZ,
-                                         int sliceIdx, int numWavelengths, int numTaus) {
+                                         int sliceIdx, int numTaus) {
     std::vector<double> slice(numTaus);
     for (int j = 0; j < numTaus; ++j)
         slice[j] = surfaceZ[sliceIdx * numTaus + j];
@@ -319,7 +317,6 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
             if (ImGui::GetItemRectSize().x > 0.0f && ImGui::GetItemRectSize().y > 0.0f) {
                 ImDrawList* drawList = ImGui::GetWindowDrawList();
                 ImVec2 plotMin = ImGui::GetItemRectMin();
-                ImVec2 plotMax = ImGui::GetItemRectMax();
                 const char* label = (calcBaseSelector == 0) ? "100% T" : "Spectrum";
                 ImVec2 textSize = ImGui::CalcTextSize(label);
                 ImVec2 textPos = ImVec2(plotMin.x + 8.0f, plotMin.y + 8.0f);
@@ -335,7 +332,6 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
 
     std::vector<double> sliceY = getSliceData(cachedSurfaceAllanVar,
                                                selectedSliceIndex,
-                                               numSurfaceWavelengths,
                                                numSurfaceTaus);
 
     if (plot2dHeight > 40.0f) {

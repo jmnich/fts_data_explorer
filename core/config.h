@@ -22,23 +22,19 @@ struct AppConfig {
     // Recent multi-workspace (.cross.h5) files (M2.5) — the Welcome screen's
     // right column + the Session tab's file pickers.
     std::vector<std::string> recentMultiWorkspaces;
-    size_t maxRecentMultiWorkspaces = 10;
     // Last opened/created multi-workspace file (default folder hint).
     std::string lastMultiWorkspacePath;
     bool autoFitYAxis = true;
-    bool maxAtZero = false;
     bool showFPS = false; // FPS counter display setting
     bool showTimestamps = false; // "Show timestamps" ribbon toggle
     float gridAlpha = 1.0f; // Grid opacity (0.0 = invisible, 1.0 = full)
     bool enableDownsampling = true;
-    int xAxisBase = 0;
     std::string lastWorkingDirectory;
     std::string uiSize = "normal"; // tiny, small, normal, large, huge
     std::string accentColor = "default"; // default, green, purple, red, brown
-    
-    // X correction config
-    int   xCorrectionMethod = 0;
-    float peakProminence = 0.02f;
+
+    // X correction config (peak indicator visibility only; the method and
+    // prominence values live per-workspace in WorkspaceSession)
     bool  showPeakIndicators = false;
 
     // Thread pool config
@@ -74,59 +70,6 @@ struct AppConfig {
     int windowPosY = -1; // -1 means centered
     bool windowMaximized = false;
     
-    // Spectrum window state
-    int spectrumYAxisMode = 0; // 0: all, 1: tight, 2: force
-    int spectrumXUnitSelector = 0; // 0: cm-1, 1: um, 2: THz
-    int spectrumYScaleSelector = 0; // 0: linear, 1: log10, 2: dB
-    double spectrumForcedYMin = 0.0;
-    double spectrumForcedYMax = 1.0;
-
-    int apodizationSelector = 0;
-    float apodGaussSigma = 1.0f;
-    float apodRectWidth = 1.0f;
-    float apodNortonBeerFwhm = 1.5f; // Norton-Beer FWHM parameter (1.0-2.0)
-    float apodDolphChebyshevAt = 60.0f; // Dolph-Chebyshev attenuation in dB
-    float apodHammingAlpha = 0.54f; // Generalized Hamming mixing coefficient (0.36-1.0)
-    float apodKaiserBeta = 6.0f; // Kaiser beta (0.5-12.0), higher = lower sidelobes
-    bool apodRectAsymMode = true; // Rectangular window: true=asymmetric, false=symmetric
-    float spectrumDetectorSensitivity = 0.0f; // Detector sensitivity in kV/W
-    float spectrumRefLaser = 1.550f; // Reference laser wavelength in um
-
-    // Average window state (independent from SpectrumWindow, persisted subset)
-    int avgYAxisMode = 0;
-    int avgXUnitSelector = 0;
-    int avgYScaleSelector = 0;
-    double avgForcedYMin = 0.0;
-    double avgForcedYMax = 1.0;
-
-    // SNR window state (independent from SpectrumWindow, persisted subset)
-    int snrYAxisMode = 0;
-    int snrXUnitSelector = 0;
-    int snrYScaleSelector = 0;
-    double snrForcedYMin = 0.0;
-    double snrForcedYMax = 1.0;
-
-    // Allan window state
-    int allanXUnitSelector = 1;
-    int allanWavelengthDecimation = 5;
-    int allanSliceIndex = 0;
-    double allanXRangeMin = 1.0;
-    double allanXRangeMax = 30.0;
-    int allanCalcBaseSelector = 0;
-
-    // T100 window state
-    int t100YAxisMode = 0;
-    int t100XUnitSelector = 0;
-    double t100ForcedYMin = 0.0;
-    double t100ForcedYMax = 1.0;
-    char t100EnergyRatioNumA[32] = "";
-    char t100EnergyRatioDenA[32] = "";
-    char t100EnergyRatioNumB[32] = "";
-    char t100EnergyRatioDenB[32] = "";
-    char t100EnergyRatioNumC[32] = "";
-    char t100EnergyRatioDenC[32] = "";
-    
-    // Add a dataset to recent list (maintains max size, deduplicates)
     void addRecentDataset(const std::string& datasetPath) {
         // Normalize path: strip trailing slash to prevent formatting mismatches
         std::string normalized = datasetPath;
@@ -153,8 +96,8 @@ struct AppConfig {
             std::remove(recentMultiWorkspaces.begin(), recentMultiWorkspaces.end(), path),
             recentMultiWorkspaces.end());
         recentMultiWorkspaces.insert(recentMultiWorkspaces.begin(), path);
-        if (recentMultiWorkspaces.size() > maxRecentMultiWorkspaces)
-            recentMultiWorkspaces.resize(maxRecentMultiWorkspaces);
+        if (recentMultiWorkspaces.size() > maxRecentDatasets)
+            recentMultiWorkspaces.resize(maxRecentDatasets);
     }
 
     void removeRecentDataset(const std::string& datasetPath) {

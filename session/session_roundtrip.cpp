@@ -1100,7 +1100,7 @@ void test10_t100Parity() {
     // lives in the flat fields — t100 reads the flat fields (panel
     // back-pointer) and the pool's active branch reads the same fields, so
     // both see identical spectra (the parity contract).
-    auto* sess = makeSession(s, "parity", "/tmp/parity.h5");
+    makeSession(s, "parity", "/tmp/parity.h5");
     activateSession(s, 0);
     s.active->datasetInfo = workspaceDatasetInfo(s.active->workspace);
     s.active->spectrum.xUnitSelector = 0;
@@ -1342,7 +1342,7 @@ void test12_experimentPersistence() {
     s.pendingEnvIdx = -1;
 
     // Workspace with a panel-cache spectrum pair (test10 pattern).
-    auto* sess = makeSession(s, "exp", "/tmp/parity.h5");
+    makeSession(s, "exp", "/tmp/parity.h5");
     activateSession(s, 0);
     s.active->datasetInfo = workspaceDatasetInfo(s.active->workspace);
     s.active->xCorrectionMethod = 0;               // default fingerprint params

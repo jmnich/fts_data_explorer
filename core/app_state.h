@@ -28,6 +28,14 @@ struct GLFWwindow;
 // chars and last 24, ellipsize the middle.
 std::string shortenFilename(const std::string& filename);
 
+// Natural (digit-run-aware) ascending comparison for sort, throw-free for
+// digit runs beyond INT_MAX. Single shared implementation (was replicated in
+// app_loop.cpp, headless.cpp, workspace_reader.cpp).
+bool naturalSortCompare(const std::string& a, const std::string& b);
+// naturalSortCompare applied to the directory-stripped basenames — the file
+// list order used by the frame loop and the view-state restore.
+bool naturalBasenameLess(const std::string& a, const std::string& b);
+
 #if FTS_BUILD_HDF5
 enum class PendingWorkspaceAction { None, CloseWorkspace, OpenPath, OpenMultiWorkspace };
 #endif

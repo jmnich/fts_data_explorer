@@ -33,12 +33,12 @@ static void SetupAxisTicksLimited(ImAxis axis, double min, double max, int maxTi
 }
 
 SnrSpectrum::SnrSpectrum()
-    : fileCount(0),
+    : appState(nullptr),
+      fileCount(0),
       snrAvailable(false),
       calcInProgress(false),
       progressTotal(0),
       progressCurrent(0),
-      appState(nullptr),
       isSelectingXRange(false),
       selectionStartX(0.0),
       selectionEndX(0.0),
@@ -261,10 +261,6 @@ void SnrSpectrum::renderSnrContents(bool showTrackingCursor) {
 
         if (yScaleSelector == 1)
             ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Log10);
-
-        auto toDisplay = [&](double raw) -> double {
-            return raw;
-        };
 
         const bool effectiveForceY = (yAxisMode == 2) && (forcedYMin < forcedYMax);
         if (effectiveForceY) {

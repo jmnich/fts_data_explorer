@@ -183,7 +183,7 @@ bool spectrumMemberFresh(const Workspace& ws, const AppState& s, const TwoColumn
            (*it)[0].is_string() && (*it)[0].get<std::string>() == p;
 }
 
-bool panelMemberFresh(const Workspace& ws, const AppState& s, const MemberBase& m,
+bool panelMemberFresh(const AppState& s, const MemberBase& m,
                       const std::vector<std::string>& checked) {
     if (m.kind != MemberKind::Derivative) return false;
     nlohmann::json cfg = parseConfig(m.config);
@@ -227,33 +227,6 @@ std::string memberOriginJson() {
     return makeOriginJson(kAppName, APP_VERSION).dump();
 }
 
-// Mirror of main.cpp's naturalSortCompare (basename + digit-run aware), used to
-// rebuild sortedFiles in applyViewState so the restored checkbox id-match aligns
-// with the frame-loop list order.
-bool naturalBasenameLess(const std::string& a, const std::string& b) {
-    std::string nameA = a, nameB = b;
-    size_t slashA = nameA.find_last_of("/\\");
-    size_t slashB = nameB.find_last_of("/\\");
-    if (slashA != std::string::npos) nameA = nameA.substr(slashA + 1);
-    if (slashB != std::string::npos) nameB = nameB.substr(slashB + 1);
-    size_t i = 0, j = 0;
-    while (i < nameA.size() && j < nameB.size()) {
-        if (!std::isdigit(static_cast<unsigned char>(nameA[i])) ||
-            !std::isdigit(static_cast<unsigned char>(nameB[j]))) {
-            if (nameA[i] != nameB[j]) return nameA[i] < nameB[j];
-            i++; j++;
-        } else {
-            size_t na = i, nb = j;
-            while (i < nameA.size() && std::isdigit(static_cast<unsigned char>(nameA[i]))) i++;
-            while (j < nameB.size() && std::isdigit(static_cast<unsigned char>(nameB[j]))) j++;
-            size_t lenA = i - na, lenB = j - nb;
-            if (lenA != lenB) return lenA < lenB;
-            int cmp = nameA.compare(na, lenA, nameB, nb, lenB);
-            if (cmp != 0) return cmp < 0;
-        }
-    }
-    return nameA.size() < nameB.size();
-}
 
 // Inverse of makeApodizationJson: apply a stored apodization object to the
 // Spectrum-panel selectors/params. Missing keys keep current values.
@@ -884,11 +857,11 @@ void markConfigStale(Workspace& ws, const AppState& s) {
         m.stale = !spectrumMemberFresh(ws, s, m);
     }
     for (auto& m : ws.averageSpectra.members)
-        m.stale = !panelMemberFresh(ws, s, m, checked);
+        m.stale = !panelMemberFresh(s, m, checked);
     for (auto& m : ws.snrSpectra.members)
-        m.stale = !panelMemberFresh(ws, s, m, checked);
+        m.stale = !panelMemberFresh(s, m, checked);
     for (auto& m : ws.allanWerle.members)
-        m.stale = !panelMemberFresh(ws, s, m, checked);
+        m.stale = !panelMemberFresh(s, m, checked);
     for (auto& m : ws.t100.members)
         m.stale = !t100MemberFresh(ws, s, m) || !configInputsEqual(parseConfig(m.config), checked);
 }
@@ -898,7 +871,7 @@ bool averageOutdated(const AppState& s) {
     if (!s.hasWorkspace()) return false;
     for (const auto& m : s.active->workspace.averageSpectra.members)
         if (m.id == "average")
-            return !panelMemberFresh(s.active->workspace, s, m, checkedInputPaths(s));
+            return !panelMemberFresh(s, m, checkedInputPaths(s));
     return false;
 }
 
@@ -906,7 +879,7 @@ bool snrOutdated(const AppState& s) {
     if (!s.hasWorkspace()) return false;
     for (const auto& m : s.active->workspace.snrSpectra.members)
         if (m.id == "snr")
-            return !panelMemberFresh(s.active->workspace, s, m, checkedInputPaths(s));
+            return !panelMemberFresh(s, m, checkedInputPaths(s));
     return false;
 }
 
@@ -914,7 +887,7 @@ bool allanOutdated(const AppState& s) {
     if (!s.hasWorkspace()) return false;
     for (const auto& m : s.active->workspace.allanWerle.members)
         if (m.id == "allan")
-            return !panelMemberFresh(s.active->workspace, s, m, checkedInputPaths(s));
+            return !panelMemberFresh(s, m, checkedInputPaths(s));
     return false;
 }
 
@@ -978,7 +951,7 @@ void seedPanelsFromWorkspace(AppState& s) {
 
     // Average.
     for (const auto& m : ws.averageSpectra.members) {
-        if (m.id != "average" || !panelMemberFresh(ws, s, m, checkedInputPaths(s))) continue;
+        if (m.id != "average" || !panelMemberFresh(s, m, checkedInputPaths(s))) continue;
         auto unit = xUnitFromString(configXUnit(parseConfig(m.config)));
         auto ui = s.active->averageSpectrum.xUnitSelector;
         std::vector<double> x = m.x;
@@ -995,7 +968,7 @@ void seedPanelsFromWorkspace(AppState& s) {
 
     // SNR.
     for (const auto& m : ws.snrSpectra.members) {
-        if (m.id != "snr" || !panelMemberFresh(ws, s, m, checkedInputPaths(s))) continue;
+        if (m.id != "snr" || !panelMemberFresh(s, m, checkedInputPaths(s))) continue;
         auto unit = xUnitFromString(configXUnit(parseConfig(m.config)));
         auto ui = s.active->snrSpectrum.xUnitSelector;
         std::vector<double> x = m.x;
@@ -1012,7 +985,7 @@ void seedPanelsFromWorkspace(AppState& s) {
 
     // Allan.
     for (const auto& m : ws.allanWerle.members) {
-        if (m.id != "allan" || !panelMemberFresh(ws, s, m, checkedInputPaths(s))) continue;
+        if (m.id != "allan" || !panelMemberFresh(s, m, checkedInputPaths(s))) continue;
         s.active->allanVariance.cachedSurfaceTaus = m.taus;
         s.active->allanVariance.cachedSurfaceWavelengths = m.wavelengths;
         s.active->allanVariance.cachedSurfaceAllanVar = m.surface;

@@ -19,6 +19,17 @@
 #include <algorithm>
 #include <cstring>
 
+// Basename without the last extension, used for export file/column names.
+// Handles both path separators (Windows member ids can carry '\').
+static std::string exportBaseName(const std::string& p) {
+    std::string name = p;
+    size_t ls = name.find_last_of("/\\");
+    if (ls != std::string::npos) name = name.substr(ls + 1);
+    size_t dot = name.rfind('.');
+    if (dot != std::string::npos) name = name.substr(0, dot);
+    return name;
+}
+
 ExportPanel::ExportPanel()
 {
     artifactLabels = {
@@ -270,9 +281,7 @@ void ExportPanel::writeCorrectedIFGCsv(const std::string& dir)
             for (double& v : opdX) v *= 2.0;
         }
 
-        std::string fname = appState->active->selectedFilenames[i];
-        size_t dot = fname.rfind('.');
-        if (dot != std::string::npos) fname = fname.substr(0, dot);
+        std::string fname = exportBaseName(appState->active->selectedFilenames[i]);
         fname = sanitizeFilename(fname);
 
         std::string path = dir + "/" + dsName + "_corrected_ifg_" + fname + ".csv";
@@ -421,9 +430,7 @@ void ExportPanel::writeSpectraCsv(const std::string& dir)
 
     ofs << xLabel;
     for (size_t i = 0; i < nFiles; i++) {
-        std::string fn = checkedShort[i];
-        size_t dot = fn.rfind('.');
-        if (dot != std::string::npos) fn = fn.substr(0, dot);
+        std::string fn = exportBaseName(checkedShort[i]);
         ofs << ",Magnitude_" << i << " [" << fn << "]";
     }
     ofs << "\n";
@@ -535,7 +542,6 @@ void ExportPanel::writeAllanSliceCsv(const std::string& dir)
     ofs << "Tau [measurements],Allan Variance\n";
 
     int N = al.numSurfaceTaus;
-    int M = al.numSurfaceWavelengths;
     for (int j = 0; j < N; ++j) {
         ofs << al.cachedSurfaceTaus[j] << "," << al.cachedSurfaceAllanVar[idx * N + j] << "\n";
     }
@@ -556,11 +562,7 @@ void ExportPanel::writeT100TransCsv(const std::string& dir)
     const auto& yv = yIt->second;
     if (xv.empty() || yv.empty()) return;
 
-    std::string srcName = fileId;
-    size_t ls = srcName.find_last_of("/\\");
-    if (ls != std::string::npos) srcName = srcName.substr(ls + 1);
-    size_t dot = srcName.rfind('.');
-    if (dot != std::string::npos) srcName = srcName.substr(0, dot);
+    std::string srcName = exportBaseName(fileId);
 
     std::string dsName = sanitizeFilename(appState->active->currentDatasetName);
     std::string path = dir + "/" + dsName + "_t100_transmission_" + srcName + ".csv";
@@ -647,11 +649,7 @@ void ExportPanel::writeT100AllTransCsv(const std::string& dir)
     ofs << xLabel;
     for (size_t i = 0; i < checkedFiles.size(); i++) {
         if (!allTransX[i].empty()) {
-            std::string fn = checkedFiles[i];
-            size_t ls = fn.find_last_of("/\\");
-            if (ls != std::string::npos) fn = fn.substr(ls + 1);
-            size_t dot = fn.rfind('.');
-            if (dot != std::string::npos) fn = fn.substr(0, dot);
+            std::string fn = exportBaseName(checkedFiles[i]);
             ofs << ",T%_" << i << " [" << fn << "]";
         }
     }

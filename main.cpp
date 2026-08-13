@@ -494,7 +494,7 @@ int main(int argc, char* argv[]) {
     }
 
     // One-time UI/theme/DPI setup + config wiring
-    setupApplication(config, configFilePath, window);
+    setupApplication(config, window);
 
     // Main loop — encapsulated frame pipeline (Phase-1 M1.2b)
     AppLoop loop(config, configFilePath, window);

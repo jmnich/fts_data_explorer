@@ -38,8 +38,6 @@ void renderInterferogramPanel() {
             size_t ref_end =  appState.active->datasetInfo.hasReferenceChannel
                               ? appState.active->loadedData[0].referenceDetector.size()
                               : appState.active->loadedData[0].dataSize();
-            size_t prim_start =  0;
-            size_t prim_end =  appState.active->loadedData[0].primaryDetector.size();
             // Compute peak positions for X-axis alignment (from raw data for OPD accuracy)
             std::vector<size_t> peakPositions;
             if (appState.active->maxAtZero) {
@@ -155,7 +153,6 @@ void renderInterferogramPanel() {
 
             // Handle box selection zoom manually using ImGui mouse input
             // This completely bypasses ImPlot's input system
-            ImVec2 mousePos = ImGui::GetMousePos();
             bool isOverPlot = ImGui::IsWindowHovered();
             appState.active->isMouseOverPlot = isOverPlot;
 
