@@ -59,6 +59,13 @@ struct AppConfig {
     // retired nested nodes get re-docked (ImGui otherwise recreates those
     // nodes as implicit floating windows at their stale positions).
     int sessionPanelLayoutVersion = 0;
+
+    // Environment-instance defaults (Phase-3 M3.3, [EnvWindow]): new-instance
+    // type (0 Absorbance, 1 Comparator), X unit (0 cm-1, 1 um, 2 THz), and
+    // Y mode (Absorbance: 0 T%, 1 A).
+    int envWindowMode = 0;
+    int envWindowXUnit = 0;
+    int envWindowYMode = 0;
     
     // Window state
     int windowWidth = 1280;
@@ -219,6 +226,10 @@ struct AppConfig {
             configFile << "last_multi_workspace=" << lastMultiWorkspacePath << "\n";
             configFile << "default_layout_applied=" << (defaultLayoutApplied ? "true" : "false") << "\n";
             configFile << "session_panel_layout_version=" << sessionPanelLayoutVersion << "\n";
+            configFile << "\n[EnvWindow]\n";
+            configFile << "mode=" << envWindowMode << "\n";
+            configFile << "x_unit=" << envWindowXUnit << "\n";
+            configFile << "y_mode=" << envWindowYMode << "\n";
 
             // Converter settings (only non-defaults are persisted; empty
             // strings keep the platform defaults)
@@ -329,6 +340,14 @@ struct AppConfig {
                             defaultLayoutApplied = (value == "true");
                         } else if (key == "session_panel_layout_version") {
                             sessionPanelLayoutVersion = std::stoi(value);
+                        }
+                    } else if (currentSection == "EnvWindow") {
+                        if (key == "mode") {
+                            envWindowMode = std::stoi(value);
+                        } else if (key == "x_unit") {
+                            envWindowXUnit = std::stoi(value);
+                        } else if (key == "y_mode") {
+                            envWindowYMode = std::stoi(value);
                         }
                     } else if (currentSection == "Window") {
                         if (key == "width") {

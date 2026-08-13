@@ -106,29 +106,6 @@ void openWorkspaceInNewTab(AppState& s, const std::string& path) {
     s.needsRedraw = true;
 }
 
-// Open an EMBEDDED source of a .cross.h5 in a new workspace tab (M2.5).
-// Stable key: "<crossPath>#<sourceId>"; path stays empty (the tab's save
-// target is the .cross.h5 itself). Loads in-memory via crossLoadSource —
-// workspaceRead is in-memory, so no temp files exist.
-void openEmbeddedInNewTab(AppState& s, const std::string& crossPath,
-                          const std::string& sourceId) {
-    ensureSessionTab(s);
-    const std::string key = crossPath + "#" + sourceId;
-    for (int i = 0; i < static_cast<int>(s.sessions.size()); ++i) {
-        if (s.sessions[i]->key == key) {
-            swapInSession(s, i);      // duplicate → activate the existing tab
-            return;
-        }
-    }
-    auto sess = std::make_unique<WorkspaceSession>();
-    sess->key = key;
-    s.sessions.push_back(std::move(sess));
-    swapInSession(s, static_cast<int>(s.sessions.size()) - 1);
-    s.pendingOpenPath = crossPath;
-    s.pendingOpenSourceId = sourceId;
-    s.needsRedraw = true;
-}
-
 // Remember an opened/created .cross.h5 (last path + recent list, persisted).
 void rememberMultiWorkspace(AppState& s, const std::string& path) {
     if (!s.configPtr) return;

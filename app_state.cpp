@@ -136,6 +136,11 @@ void finalizeGoHome(AppState& s) {
     // have to process.
     for (int i = static_cast<int>(s.sessions.size()) - 1; i >= 0; --i)
         removeTab(s, i);
+    // Environment instances reference the closed workspaces (Phase 3) —
+    // close them too; nothing to save (results are RAM-only in Phase 3).
+    s.environments.clear();
+    s.activeEnvIdx = -1;
+    s.pendingEnvIdx = -1;          // stale queued activation must not fire
     s.exitDirtyTabs.clear();
     s.exitDirtyLabels.clear();
     // removeTab leaves the active tab's data in the flat fields (the normal
@@ -180,6 +185,12 @@ static void clearWorkspacePanelsImpl(S& s) {
 
 void clearWorkspacePanels(AppState& s) {
     clearWorkspacePanelsImpl(s);
+    // Pool entries of the active session are stale by definition (its panels
+    // and caches just got cleared) — evict so poolSpectrum recomputes
+    // (audit §5.3 Amendment 4).
+    if (s.activeTabKind == ActiveTabKind::Workspace && s.activeSessionIdx >= 0 &&
+        s.activeSessionIdx < static_cast<int>(s.sessions.size()))
+        poolEvictKey(s, s.sessions[s.activeSessionIdx]->key);
 }
 
 void clearSessionPanels(WorkspaceSession& sess) {

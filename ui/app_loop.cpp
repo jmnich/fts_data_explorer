@@ -132,6 +132,11 @@ static void renderUnsavedPromptModal() {
                         appState.pendingTabCloseIdx = -1;
                         appState.pendingWorkspaceAction = PendingWorkspaceAction::None;
                         appState.pendingRemoveIdx = idx;   // frame top removes
+                        // Bugfix 2026-08-13: without this the modal re-opens
+                        // every frame after the tab is removed (showUnsavedPrompt
+                        // stays latched; the reopened modal's dispatch is a no-op
+                        // with no pending action — only ESC could dismiss it).
+                        appState.showUnsavedPrompt = false;
                         appState.needsRedraw = true;
                     } else {
                         dispatchPendingAction(appState);
@@ -156,6 +161,9 @@ static void renderUnsavedPromptModal() {
                 appState.pendingTabCloseIdx = -1;
                 appState.pendingWorkspaceAction = PendingWorkspaceAction::None;
                 appState.pendingRemoveIdx = idx;   // frame top removes
+                // Bugfix 2026-08-13: clear the latch so the modal does not
+                // re-open after the removal (see the Save branch comment).
+                appState.showUnsavedPrompt = false;
                 appState.needsRedraw = true;
             } else {
                 dispatchPendingAction(appState);   // discard RAM workspace
@@ -460,9 +468,11 @@ static float renderTabStrip() {
             ImGui::EndTabItem();
         }
 
-        // Environment tabs (Phase 3) are not in this bar: with one focused,
-        // no tab is active — clear the bar's stale selection so no workspace
-        // tab stays highlighted (Session/workspace tabs carry their own).
+        // Environment tabs (Phase 3): after the workspace tabs, in the same
+        // scrollable bar. LIVE instances (never folded); activation is direct
+        // (no park/resume) — click sets activeTabKind + activeEnvIdx.
+        // With one focused, no workspace tab is active — clear the bar's stale
+        // selection so no workspace tab stays highlighted.
         if (appState.activeTabKind == ActiveTabKind::Environment) {
             ImGuiTabBar* bar = ImGui::GetCurrentTabBar();
             if (bar && bar->SelectedTabId != 0) {
@@ -504,6 +514,33 @@ static float renderTabStrip() {
             if (!open) {
                 closeTab(appState, i);
                 break;   // sessions vector changed — stop iterating
+            }
+        }
+        // Environment instances (Phase 3): live tabs, same close affordances
+        // (hover [x] / middle-click / context). IDs ##env<i> resolve to the
+        // environments vector — a reorder remaps only the strip order.
+        for (int i = 0; i < static_cast<int>(appState.environments.size()); ++i) {
+            auto* env = appState.environments[i].get();
+            const bool isActive = (appState.activeTabKind == ActiveTabKind::Environment &&
+                                   appState.activeEnvIdx == i);
+            const std::string label = env->title() + "##env" + std::to_string(i);
+            bool open = true;
+            const bool shown = ImGui::BeginTabItem(label.c_str(), &open,
+                isActive ? ImGuiTabItemFlags_SetSelected : 0);
+            if (ImGui::IsItemClicked() && !isActive) activateEnvironment(appState, i);
+            if (shown) {
+                if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Middle))
+                    open = false;
+                if (ImGui::BeginPopupContextItem("##envClose")) {
+                    if (ImGui::MenuItem("Close")) open = false;
+                    ImGui::EndPopup();
+                }
+                drawTabHoverOutline();
+                ImGui::EndTabItem();
+            }
+            if (!open) {
+                env->closeRequest();
+                break;   // environments vector changed — stop iterating
             }
         }
         ImGui::EndTabBar();
@@ -632,7 +669,9 @@ void handleKeyboardNavigation(const std::vector<std::string>& csvFiles,
  * @param currentUiSize Current UI size setting
  * @param uiSizeChanged Reference to UI size changed flag
  */
-// TODO(multi-ws): environment instance windows docked here (Phase 3)
+// Environment windows are docked dynamically (SetNextWindowDockID FirstUseEver
+// in EnvironmentSession::render) — no default-layout entry needed; per-tab-type
+// layout persistence arrives in Phase 4 (P16).
 static void rebuildDefaultLayout(ImGuiID dockspace_id, float topOffset) {
     ImGui::DockBuilderRemoveNode(dockspace_id);
     ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
@@ -918,10 +957,17 @@ void AppLoop::pollAsyncComputations() {
 
 // Per-tab async polls (M2.3): workspace tabs are no-ops here — their
 // polling runs on the flat fields in pollAsyncComputations while active;
-// Session/environment tabs (M2.5/Phase 3) poll their own futures.
+// Session/environment tabs (M2.5/Phase 3) poll their own futures. The
+// ACTIVE environment instance polls only (audit §5.5): inactive instances
+// drain on re-activation.
 void AppLoop::tickSessions() {
     sessionTab_.tickAsync();
     for (auto& sess : appState.sessions) sess->tickAsync();
+    if (appState.activeTabKind == ActiveTabKind::Environment &&
+        appState.activeEnvIdx >= 0 &&
+        appState.activeEnvIdx < static_cast<int>(appState.environments.size())) {
+        appState.environments[appState.activeEnvIdx]->tickAsync();
+    }
 }
 
 void AppLoop::scheduleRedraws() {
@@ -1524,6 +1570,22 @@ void AppLoop::renderUI() {
                         }
                     }
                 }
+                // Phase 3: same forced selection for the active environment
+                // instance's window (its dock tab must be visible after a
+                // strip click; the instance's render arms the next frame via
+                // IsWindowAppearing + needsRedraw).
+                if (appState.activeTabKind == ActiveTabKind::Environment &&
+                    appState.activeEnvIdx >= 0 &&
+                    appState.activeEnvIdx < static_cast<int>(appState.environments.size())) {
+                    const std::string winName = appState.environments[appState.activeEnvIdx]->title();
+                    if (ImGuiWindow* pw = ImGui::FindWindowByName(winName.c_str())) {
+                        if (pw->DockNode) {
+                            pw->DockNode->SelectedTabId = pw->TabId;
+                            if (pw->DockNode->TabBar)
+                                pw->DockNode->TabBar->NextSelectedTabId = pw->TabId;
+                        }
+                    }
+                }
 
                 // Handle manual layout restore request (from Settings menu)
                 if (appState.restoreLayoutRequested) {
@@ -1634,6 +1696,14 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
         // nodes' tab selections are forced above (pre-DockSpace) instead.
         if (appState.activeTabKind == ActiveTabKind::Session) {
             sessionTab_.render();
+        }
+        // Environment instance (Phase 3): the ACTIVE instance's window body.
+        // Live object — no park/resume; the dock-node selection is forced
+        // above (pre-DockSpace) so the window's tab is visible.
+        if (appState.activeTabKind == ActiveTabKind::Environment &&
+            appState.activeEnvIdx >= 0 &&
+            appState.activeEnvIdx < static_cast<int>(appState.environments.size())) {
+            appState.environments[appState.activeEnvIdx]->render();
         }
         
         // Close the docking condition

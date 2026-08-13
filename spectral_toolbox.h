@@ -7,7 +7,6 @@
 #include <fftw3.h>
 #include "apodization.h"
 
-// TODO(multi-ws): poolSpectrum/buildPoolMatrix reuse resampleToGrid for cross-workspace alignment (Phase 3)
 // Interpolate (srcX, srcY) onto targetX. Handles ascending and descending srcX.
 // Linear, endpoint-clamped. Empty input -> empty output; degenerate (size 1)
 // srcX -> srcY copy. The ONLY linear-interp path in the codebase (Phase-1 M1.3).

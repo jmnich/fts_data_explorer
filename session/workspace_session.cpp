@@ -8,6 +8,7 @@
 #include <cstring>
 
 #include "app_state.h"
+#include "spectral_pool.h"
 
 WorkspaceSession::WorkspaceSession() {
     metadataCommentBuffer[0] = '\0';
@@ -200,21 +201,42 @@ std::string WorkspaceSession::label() const {
 void swapInSession(AppState& s, int idx) {
     s.pendingSwapIdx = idx;
     s.pendingSwapToSession = false;
+    s.pendingEnvIdx = -1;      // last-wins across the three queue types
     s.needsRedraw = true;
 }
 
 void focusSessionTab(AppState& s) {
     s.pendingSwapIdx = -1;
     s.pendingSwapToSession = true;
+    s.pendingEnvIdx = -1;      // last-wins across the three queue types
     s.needsRedraw = true;
 }
 
 void executePendingSwap(AppState& s) {
-    if (!s.pendingSwapToSession && s.pendingSwapIdx < 0) return;
+    if (!s.pendingSwapToSession && s.pendingSwapIdx < 0 && s.pendingEnvIdx < 0)
+        return;
     // Park the currently active workspace tab first (if any).
     if (s.activeTabKind == ActiveTabKind::Workspace && s.activeSessionIdx >= 0 &&
         s.activeSessionIdx < static_cast<int>(s.sessions.size())) {
         s.sessions[s.activeSessionIdx]->park(s);
+    }
+    if (s.pendingEnvIdx >= 0) {
+        // Environment activation (bugfix 2026-08-13): the park above ran, so
+        // the workspace data is back in its mirror before we leave the
+        // workspace kind — the flat-fields invariant holds (data lives in
+        // the flat fields ⟺ a workspace tab is active).
+        const int idx = s.pendingEnvIdx;
+        s.pendingEnvIdx = -1;
+        s.pendingSwapIdx = -1;
+        s.pendingSwapToSession = false;
+        if (idx >= 0 && idx < static_cast<int>(s.environments.size())) {
+            s.activeTabKind = ActiveTabKind::Environment;
+            s.activeEnvIdx = idx;
+        } else {
+            s.activeEnvIdx = -1;
+        }
+        s.needsRedraw = true;
+        return;
     }
     if (s.pendingSwapToSession) {
         s.activeTabKind = ActiveTabKind::Session;
@@ -241,6 +263,30 @@ void ensureSessionTab(AppState& s) {
     s.needsRedraw = true;
 }
 
+// Open an EMBEDDED source of a .cross.h5 in a new workspace tab (M2.5;
+// moved here from main.cpp so the session harness can link it). Stable key:
+// "<crossPath>#<sourceId>"; path stays empty (the tab's save target is the
+// .cross.h5 itself). Loads in-memory via crossLoadSource — workspaceRead is
+// in-memory, so no temp files exist.
+void openEmbeddedInNewTab(AppState& s, const std::string& crossPath,
+                          const std::string& sourceId) {
+    ensureSessionTab(s);
+    const std::string key = crossPath + "#" + sourceId;
+    for (int i = 0; i < static_cast<int>(s.sessions.size()); ++i) {
+        if (s.sessions[i]->key == key) {
+            swapInSession(s, i);      // duplicate → activate the existing tab
+            return;
+        }
+    }
+    auto sess = std::make_unique<WorkspaceSession>();
+    sess->key = key;
+    s.sessions.push_back(std::move(sess));
+    swapInSession(s, static_cast<int>(s.sessions.size()) - 1);
+    s.pendingOpenPath = crossPath;
+    s.pendingOpenSourceId = sourceId;
+    s.needsRedraw = true;
+}
+
 // ── Close flow (M2.2) ───────────────────────────────────────────────────────
 // The unsaved modal runs against the ACTIVE tab's flat fields, so a dirty
 // PARKED tab must be swapped in before its modal shows. The modal dispatch is
@@ -248,8 +294,10 @@ void ensureSessionTab(AppState& s) {
 
 // Remove a parked session. Indexes shift; cross-references never store raw
 // indices (they resolve via stable keys), so a simple index fix-up suffices.
+// Pool entries of the closed workspace are evicted (audit §5.3 Amendment 4).
 void removeTab(AppState& s, int idx) {
     if (idx < 0 || idx >= static_cast<int>(s.sessions.size())) return;
+    poolEvictKey(s, s.sessions[idx]->key);
     s.sessions.erase(s.sessions.begin() + idx);
     if (s.activeSessionIdx > idx) s.activeSessionIdx--;
     else if (s.activeSessionIdx == idx) {

@@ -15,6 +15,8 @@
 #include "interferogram_data.h"
 #include "conversion_screen.h"
 #include "session/workspace_session.h"
+#include "session/environment_session.h"
+#include "session/spectral_pool.h"
 #if FTS_BUILD_HDF5
 #include "hdf/workspace.h"
 #endif
@@ -295,10 +297,34 @@ struct AppState {
     ActiveTabKind activeTabKind = ActiveTabKind::Workspace;
     SessionTabState sessionTab;         // Session tab: GLOBAL, never folded
     bool sessionTabPresent = false;     // set by ensureSessionTab; never unset
-    // Queued tab switch (Amendment 4): swapInSession/focusSessionTab only
-    // stash this; executePendingSwap runs at the top of the next frame.
+    // Queued tab switch (Amendment 4): swapInSession/focusSessionTab/
+    // activateEnvironment only stash these; executePendingSwap runs at the
+    // top of the next frame (never mid-frame — the park/resume must not
+    // interleave with panel renders or polls).
     int pendingSwapIdx = -1;
     bool pendingSwapToSession = false;
+    // Queued ENVIRONMENT activation (Phase 3, bugfix 2026-08-13): env tabs
+    // are live objects, but switching to one must still PARK the active
+    // workspace tab first — otherwise the flat fields keep a workspace's
+    // data while its mirror is empty, and the next swap resumes an empty
+    // mirror over the live fields (wipe). Same last-wins semantics as the
+    // workspace/Session queues; valid only while activeTabKind is not yet
+    // switched. -1 = none queued.
+    int pendingEnvIdx = -1;
+
+    // ── Phase-3 environment instances (M3.2) ───────────────────────────────
+    // LIVE objects, never folded (multiple instances of a type coexist; each
+    // owns its state + futures). Column (b) lists them; column (c) creates.
+    std::vector<std::unique_ptr<EnvironmentSession>> environments;
+    // Monotonic auto-name counters per type ("Absorbance N" / "Comparator N").
+    // Increment on create; never reused after an instance closes.
+    int envAbsorbanceCounter = 0;
+    int envComparatorCounter = 0;
+    // Spectral pool cache (M3.1): cm-1 canonical, keyed (workspaceKey,
+    // memberId) + ParamFingerprint re-verified on every read. Global, shared
+    // by all environment instances. Evicted on workspace-tab close, source
+    // removal, and clearWorkspacePanels.
+    std::map<std::pair<std::string, std::string>, PoolEntry> poolCache;
 
     // ── M2.2 lifecycle queues ──────────────────────────────────────────────
     // Close of a dirty tab: target index while its unsaved modal is up.

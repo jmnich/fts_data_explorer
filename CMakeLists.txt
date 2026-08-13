@@ -285,6 +285,8 @@ add_executable(fts_data_explorer
     session/workspace_session.cpp
     session/cross_store.cpp
     session/session_tab.cpp
+    session/spectral_pool.cpp
+    session/environment_session.cpp
     ${PLATFORM_SOURCES}
     ${EXTRA_SOURCES}
 )
@@ -376,6 +378,8 @@ add_executable(fts_session_roundtrip
     session/session_roundtrip.cpp
     app_state.cpp
     session/workspace_session.cpp
+    session/spectral_pool.cpp
+    session/environment_session.cpp
     spectrum.cpp
     average_spectrum.cpp
     snr_spectrum.cpp

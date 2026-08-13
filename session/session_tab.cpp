@@ -7,6 +7,7 @@
 #include "app_state.h"
 #include "config.h"
 #include "cross_store.h"
+#include "environment_session.h"
 #include "file_browser.h"
 #include "popup_utils.h"
 #include "theme.h"
@@ -229,35 +230,6 @@ void renderMultiWorkspaceCard(const std::string& path) {
     ImGui::Spacing();
 }
 
-// "Coming soon" card for a Phase-3 environment type.
-void renderComingSoonCard(const char* title, const char* desc) {
-    const AccentColor ac = StringToAccentColor(appState.currentAccentColor);
-    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, 8.0f));
-    ImGui::PushStyleColor(ImGuiCol_Border, GetAccentSubtle(ac));
-    const bool open = ImGui::BeginChild(title,
-        ImVec2(0.0f, ImGui::GetTextLineHeightWithSpacing() * 2.0f + 16.0f), true);
-    ImGui::PopStyleColor();
-    ImGui::PopStyleVar(3);
-    if (open) {
-        ImGui::TextUnformatted(title);
-        ImGui::SameLine();
-        ImGui::SetCursorPosX(ImGui::GetWindowWidth() -
-                             ImGui::CalcTextSize("Phase 3").x -
-                             ImGui::GetStyle().WindowPadding.x);
-        ImGui::TextDisabled("Phase 3");
-        ImGui::PushStyleColor(ImGuiCol_Text,
-                              ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-        ImGui::PushTextWrapPos(ImGui::GetContentRegionMax().x);
-        ImGui::TextWrapped("%s", desc);
-        ImGui::PopTextWrapPos();
-        ImGui::PopStyleColor();
-    }
-    ImGui::EndChild();
-    ImGui::Spacing();
-}
-
 // Centered dim message inside a scrollable panel (empty state).
 void renderCenteredEmptyLine(const char* line, float offsetFrac) {
     const float avail = ImGui::GetContentRegionAvail().y;
@@ -325,6 +297,10 @@ void renderCreateMultiWorkspaceButton() {
 }
 
 }  // namespace
+
+// One environment-type card (column c) — defined below (file scope, after
+// the anonymous namespace), used by renderAvailableEnvironmentsPanel.
+static void renderEnvTypeCard(const char* title, const char* desc, EnvType type);
 
 const std::string& SessionTab::title() const {
     return titleCache_;
@@ -450,20 +426,75 @@ void SessionTab::renderDatasetsPanel() {
     renderAddDatasetButton();
 }
 
-// (b) active environments (Phase 3 populates).
+// (b) active environments: live instances (Phase 3). Click → activate tab.
 void SessionTab::renderActiveEnvironmentsPanel() {
     ImGui::BeginChild("##activeEnvsList", ImVec2(0.0f, 0.0f), false,
                       ImGuiWindowFlags_AlwaysVerticalScrollbar);
-    renderCenteredEmptyLine("No environments open.", 0.45f);
+    if (appState.environments.empty()) {
+        renderCenteredEmptyLine("No environments open.", 0.45f);
+    }
+    for (size_t i = 0; i < appState.environments.size(); ++i) {
+        const auto* env = appState.environments[i].get();
+        const bool isActive = (appState.activeTabKind == ActiveTabKind::Environment &&
+                               appState.activeEnvIdx == static_cast<int>(i));
+        const std::string label = env->title() + "##active" + std::to_string(i);
+        if (ImGui::Selectable(label.c_str(), isActive)) {
+            activateEnvironment(appState, static_cast<int>(i));
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s",
+                env->type == EnvType::Absorbance ? "Absorbance against a stored reference."
+                                                 : "Average-spectrum comparison overlay.");
+        }
+    }
     ImGui::EndChild();
 }
 
-// (c) available environment types (Phase 3): "coming soon" cards.
+// (c) available environment types: clickable cards → create instance (Phase 3).
 void SessionTab::renderAvailableEnvironmentsPanel() {
     ImGui::BeginChild("##availableEnvsList", ImVec2(0.0f, 0.0f), false,
                       ImGuiWindowFlags_AlwaysVerticalScrollbar);
-    renderComingSoonCard("Absorbance",
-                         "Absorbance spectra against a stored background reference.");
-    renderComingSoonCard("Comparator", "Pairwise comparison of two datasets.");
+    renderEnvTypeCard("Absorbance",
+                      "Absorbance spectra against a stored background reference.",
+                      EnvType::Absorbance);
+    renderEnvTypeCard("Comparator", "Pairwise comparison of two datasets.",
+                      EnvType::Comparator);
     ImGui::EndChild();
+}
+
+// One environment-type card: accent-framed, clickable — creates a new
+// instance (auto-name, activated).
+static void renderEnvTypeCard(const char* title, const char* desc, EnvType type) {
+    const AccentColor ac = StringToAccentColor(appState.currentAccentColor);
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, 8.0f));
+    ImGui::PushStyleColor(ImGuiCol_Border, GetAccentSubtle(ac));
+    const bool open = ImGui::BeginChild(title,
+        ImVec2(0.0f, ImGui::GetTextLineHeightWithSpacing() * 2.0f + 16.0f), true);
+    ImGui::PopStyleColor();
+    ImGui::PopStyleVar(3);
+    if (open) {
+        ImGui::TextUnformatted(title);
+        ImGui::SameLine();
+        ImGui::SetCursorPosX(ImGui::GetWindowWidth() -
+                             ImGui::CalcTextSize("+ New").x -
+                             ImGui::GetStyle().WindowPadding.x);
+        ImGui::PushStyleColor(ImGuiCol_Text, modalAccent());
+        ImGui::TextUnformatted("+ New");
+        ImGui::PopStyleColor();
+        ImGui::PushStyleColor(ImGuiCol_Text,
+                              ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::PushTextWrapPos(ImGui::GetContentRegionMax().x);
+        ImGui::TextWrapped("%s", desc);
+        ImGui::PopTextWrapPos();
+        ImGui::PopStyleColor();
+    }
+    ImGui::EndChild();
+    if (ImGui::IsItemClicked()) {
+        createEnvironment(appState, type);
+    }
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Create a new %s instance.", title);
+    ImGui::Spacing();
 }

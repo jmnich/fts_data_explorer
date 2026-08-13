@@ -9,11 +9,14 @@
 #include <cstdio>
 #include <cstring>
 #include <chrono>
+#include <thread>
 #include <string>
 #include <vector>
 
 #include "app_state.h"
 #include "workspace_session.h"
+#include "environment_session.h"
+#include "spectral_pool.h"
 #include "hdf/h5_store.h"
 #include "workspace_reader.h"
 
@@ -907,6 +910,455 @@ void test7_blankSessionResume() {
     CHECK(s.averageSpectrum.averageAvailable == false);
 }
 
+// M3.1: spectral pool — parity (precomputed cm-1 session == cachedSpectra),
+// unit guard (um/THz panel cache re-converted to cm-1, <=1 ULP), fingerprint
+// invalidation, buildPoolMatrix grid alignment, parked-session read.
+void test8_pool() {
+    std::printf("test8: spectral pool (parity / unit guard / fingerprint / matrix / parked)...\n");
+    using ST = SpectralToolbox::SpectrumXUnit;
+
+    // A session whose panel cache holds a cm-1 spectrum ("specA"). The tab
+    // is PARKED (activeTabKind == Session) so the pool reads the session
+    // mirror (ownership rule); the active-tab flat-field branch is covered
+    // below in the parked-session sub-test.
+    AppState s;
+    auto sess = std::make_unique<WorkspaceSession>();
+    sess->key = "/tmp/pool_a.h5";
+    sess->path = "/tmp/pool_a.h5";
+    sess->workspace = makeFixtureWorkspace("poolA");
+    sess->workspacePath = sess->path;
+    sess->datasetInfo = workspaceDatasetInfo(sess->workspace);
+    sess->spectrum.xUnitSelector = 0;                 // cm-1
+    sess->spectrum.refLaserTextbox = 1.55f;
+    sess->spectrum.Kpadding = 2;
+    const std::vector<double> xCm = {1000.0, 1500.0, 2000.0, 2500.0, 3000.0};
+    const std::vector<double> yA = {0.5, 0.7, 1.0, 0.7, 0.5};
+    sess->spectrum.cachedFrequencies["specA"] = xCm;
+    sess->spectrum.cachedSpectra["specA"] = yA;
+    s.sessions.push_back(std::move(sess));
+    s.activeTabKind = ActiveTabKind::Session;         // parked (mirror read)
+
+    const SpectralRef refA{"/tmp/pool_a.h5", "specA"};
+
+    // Parity: precomputed path with a cm-1 panel cache is an exact copy.
+    SpectralToolbox::ProcessedSpectrum p1 = poolSpectrum(s, refA, 0);
+    CHECK(p1.spectrumX.size() == xCm.size());
+    checkVecEq(p1.spectrumX, xCm, "pool X (cm-1)");
+    checkVecEq(p1.spectrumY, yA, "pool Y");
+    CHECK(s.poolCache.size() == 1);                  // cache populated
+
+    // Cache hit: same result, no recompute.
+    SpectralToolbox::ProcessedSpectrum p2 = poolSpectrum(s, refA, 0);
+    checkVecEq(p2.spectrumX, xCm, "pool X hit");
+    CHECK(s.poolCache.size() == 1);
+
+    // Unit guard: panel unit um — the cache is display-unit, so the pool
+    // must re-convert X back to cm-1 (audit §3.2). <=1 ULP.
+    {
+        s.sessions[0]->spectrum.xUnitSelector = 1;   // um
+        // Convert the panel cache in place the way the Spectrum panel does.
+        for (double& x : s.sessions[0]->spectrum.cachedFrequencies["specA"])
+            x = SpectralToolbox::convertXValue(x, ST::CmInv, ST::Um);
+        s.poolCache.clear();                         // drop the cm-1 entry
+        SpectralToolbox::ProcessedSpectrum pu = poolSpectrum(s, refA, 0);
+        CHECK(pu.spectrumX.size() == xCm.size());
+        for (size_t i = 0; i < xCm.size(); ++i) {
+            double roundTrip = pu.spectrumX[i] - xCm[i];
+            CHECK(std::fabs(roundTrip) <= std::fabs(xCm[i]) * 1e-15 + 1e-300);
+        }
+        checkVecEq(pu.spectrumY, yA, "pool Y unit-guard");
+        // And the requested unit works: um output.
+        SpectralToolbox::ProcessedSpectrum pu2 = poolSpectrum(s, refA, 1);
+        CHECK(pu2.spectrumX.size() == xCm.size());
+        for (size_t i = 0; i < xCm.size(); ++i) {
+            double want = SpectralToolbox::convertXValue(xCm[i], ST::CmInv, ST::Um);
+            CHECK(std::fabs(pu2.spectrumX[i] - want) <= std::fabs(want) * 1e-15 + 1e-300);
+        }
+        // Restore cm-1 state for the next sub-test.
+        s.sessions[0]->spectrum.xUnitSelector = 0;
+        for (double& x : s.sessions[0]->spectrum.cachedFrequencies["specA"])
+            x = SpectralToolbox::convertXValue(x, ST::Um, ST::CmInv);
+    }
+
+    // Fingerprint invalidation: K change makes the cached entry stale.
+    {
+        s.poolCache.clear();
+        poolSpectrum(s, refA, 0);
+        CHECK(s.poolCache.size() == 1);
+        s.sessions[0]->spectrum.Kpadding = 4;        // param change
+        SpectralToolbox::ProcessedSpectrum stale;
+        CHECK(poolTryCache(s, refA, stale) == false);   // fp mismatch
+        poolSpectrum(s, refA, 0);                    // recompute + replace
+        CHECK(s.poolCache.size() == 1);
+        s.sessions[0]->spectrum.Kpadding = 2;
+    }
+
+    // buildPoolMatrix: gridX = first ref's X; rows resampled onto it.
+    {
+        s.poolCache.clear();
+        s.sessions[0]->spectrum.cachedFrequencies["specB"] = {1100.0, 1600.0, 2100.0, 2600.0, 3100.0};
+        s.sessions[0]->spectrum.cachedSpectra["specB"] = {0.4, 0.6, 0.9, 0.6, 0.4};
+        std::vector<SpectralRef> refs = {refA, {"/tmp/pool_a.h5", "specB"}};
+        std::vector<double> gridX;
+        std::vector<std::vector<double>> matrix;
+        CHECK(buildPoolMatrix(s, refs, 0, gridX, matrix) == true);
+        CHECK(gridX.size() == xCm.size());
+        CHECK(matrix.size() == 2);
+        checkVecEq(matrix[0], yA, "matrix row 0 (grid owner)");
+        for (size_t i = 0; i < gridX.size(); ++i)
+            CHECK(matrix[1].size() == gridX.size());
+        // Row 1 must equal resampleToGrid of specB onto the ref grid.
+        std::vector<double> want = resampleToGrid(
+            s.sessions[0]->spectrum.cachedFrequencies["specB"],
+            s.sessions[0]->spectrum.cachedSpectra["specB"], gridX);
+        checkVecEq(matrix[1], want, "matrix row 1");
+    }
+
+    // Active-tab (flat-fields) read: resume the session — the ownership rule
+    // switches to the flat fields; the pool must return identical data.
+    {
+        s.poolCache.clear();
+        s.activeTabKind = ActiveTabKind::Workspace;  // frame-top swap effect
+        s.activeSessionIdx = 0;
+        s.sessions[0]->resume(s);
+        CHECK(s.spectrum.cachedSpectra.count("specA") == 1);
+        SpectralToolbox::ProcessedSpectrum pp = poolSpectrum(s, refA, 0);
+        checkVecEq(pp.spectrumX, xCm, "pool X active");
+        checkVecEq(pp.spectrumY, yA, "pool Y active");
+        s.sessions[0]->park(s);                      // back to parked
+        s.activeTabKind = ActiveTabKind::Session;
+    }
+
+    // poolEvictKey removes the workspace's entries.
+    {
+        poolSpectrum(s, refA, 0);
+        CHECK(s.poolCache.size() == 1);
+        poolEvictKey(s, "/tmp/pool_a.h5");
+        CHECK(s.poolCache.empty());
+    }
+}
+
+// M3.2: environment instances — independent state, lifecycle fixups, async
+// compute via the pool. Activation is QUEUED (bugfix 2026-08-13: the park/
+// resume must run at frame top so the active workspace's data is parked
+// before the env tab takes over).
+void test9_env() {
+    std::printf("test9: environment instances (registry / async compute / close)...\n");
+    AppState s;
+
+    // Registry: auto-names per type, activation, independent picks.
+    EnvironmentSession* a1 = createEnvironment(s, EnvType::Absorbance);
+    EnvironmentSession* c1 = createEnvironment(s, EnvType::Comparator);
+    EnvironmentSession* a2 = createEnvironment(s, EnvType::Absorbance);
+    CHECK(a1->instanceName == "Absorbance 1");
+    CHECK(c1->instanceName == "Comparator 1");
+    CHECK(a2->instanceName == "Absorbance 2");
+    CHECK(s.environments.size() == 3);
+    CHECK(s.pendingEnvIdx == 2);                     // queued, not yet active
+    executePendingSwap(s);                           // frame-top executor
+    CHECK(s.activeEnvIdx == 2);
+    CHECK(s.activeTabKind == ActiveTabKind::Environment);
+
+    a1->refKey = "wsA"; a1->refMember = "specA";
+    a1->samples = {{"wsA", "specB"}};
+    CHECK(a2->refKey.empty());                       // independent state
+    CHECK(a2->samples.empty());
+
+    // Activation + removal index fixups.
+    activateEnvironment(s, 0);
+    executePendingSwap(s);
+    CHECK(s.activeEnvIdx == 0);
+    removeEnvironment(s, 0);                         // remove active → Session
+    CHECK(s.environments.size() == 2);
+    CHECK(s.activeEnvIdx == -1);
+    CHECK(s.pendingSwapToSession == true);           // focus queued (frame top)
+    executePendingSwap(s);                           // frame-top executor
+    CHECK(s.activeTabKind == ActiveTabKind::Session);
+    activateEnvironment(s, 1);
+    executePendingSwap(s);
+    CHECK(s.activeEnvIdx == 1);
+    removeEnvironment(s, 0);                         // remove parked (0 < active 1)
+    CHECK(s.activeEnvIdx == 0);
+    CHECK(s.environments.size() == 1);
+    removeEnvironment(s, 0);                         // clean up
+    CHECK(s.environments.empty());
+
+    // Queued-activation-of-removed-instance guard: a queue fired after the
+    // instance is gone must not resurrect it as active.
+    EnvironmentSession* tmp = createEnvironment(s, EnvType::Absorbance);
+    CHECK(tmp != nullptr);
+    CHECK(s.pendingEnvIdx == 0);                     // queued
+    removeEnvironment(s, 0);                         // removed before frame top
+    CHECK(s.pendingEnvIdx == -1);                    // queue invalidated
+    executePendingSwap(s);
+    CHECK(s.environments.empty());
+    CHECK(s.activeEnvIdx == -1);
+}
+
+// Bugfix regression (2026-08-13): switching to an environment tab must PARK
+// the active workspace tab first. Before the fix the direct activation left
+// workspace data in the flat fields with an empty mirror; the next queued
+// swap resumed that empty mirror over the live fields — wiping the tab.
+void test9b_envActivationParksWorkspace() {
+    std::printf("test9b: env activation parks the active workspace tab (no wipe)...\n");
+    AppState s;
+
+    // Workspace A active (data in flat fields), workspace B parked.
+    populateAppState(s, "A", "/tmp/ws_a.h5");
+    auto sessA = std::make_unique<WorkspaceSession>();
+    sessA->key = "/tmp/ws_a.h5";
+    sessA->path = "/tmp/ws_a.h5";
+    sessA->park(s);                                  // A parked (mirror holds A)
+    populateAppState(s, "B", "/tmp/ws_b.h5");
+    auto sessB = std::make_unique<WorkspaceSession>();
+    sessB->key = "/tmp/ws_b.h5";
+    sessB->path = "/tmp/ws_b.h5";
+    sessB->park(s);                                  // B parked
+    sessA->resume(s);                                // A active (flat fields = A)
+    s.sessions.push_back(std::move(sessA));
+    s.sessions.push_back(std::move(sessB));
+    s.activeTabKind = ActiveTabKind::Workspace;
+    s.activeSessionIdx = 0;
+    // Invariant: ACTIVE tab's data lives in the flat fields; the mirror is
+    // only populated while PARKED (resume MOVES the data back).
+    CHECK(s.currentDatasetName == "A");
+    CHECK(s.csvFiles.size() == 1);
+
+    // Click the env tab: queued; frame top parks A (data back in mirror[0]).
+    createEnvironment(s, EnvType::Absorbance);
+    executePendingSwap(s);
+    CHECK(s.activeTabKind == ActiveTabKind::Environment);
+    CHECK(s.activeEnvIdx == 0);
+    CHECK(s.sessions[0]->currentDatasetName == "A"); // A parked, data retained
+    CHECK(s.csvFiles.empty());                       // flat fields parked away
+
+    // Click workspace B: frame top resumes B; A's mirror must be untouched.
+    swapInSession(s, 1);
+    executePendingSwap(s);
+    CHECK(s.activeTabKind == ActiveTabKind::Workspace);
+    CHECK(s.activeSessionIdx == 1);
+    CHECK(s.currentDatasetName == "B");
+    CHECK(s.sessions[0]->currentDatasetName == "A"); // THE regression: no wipe
+
+    // Env tab again, then back to A — A's data must survive the round trip.
+    activateEnvironment(s, 0);
+    executePendingSwap(s);
+    swapInSession(s, 0);
+    executePendingSwap(s);
+    CHECK(s.activeSessionIdx == 0);
+    CHECK(s.currentDatasetName == "A");
+    CHECK(!s.csvFiles.empty());
+    CHECK(s.sessions[1]->currentDatasetName == "B"); // B parked intact
+
+    // Alternate env <-> workspace several times: no tab may blank.
+    for (int i = 0; i < 3; ++i) {
+        activateEnvironment(s, 0);
+        executePendingSwap(s);
+        swapInSession(s, 0);
+        executePendingSwap(s);
+        swapInSession(s, 1);
+        executePendingSwap(s);
+        CHECK(s.currentDatasetName == "B");
+        CHECK(s.sessions[0]->currentDatasetName == "A");
+    }
+    // End on A: both tabs' data intact after the alternation.
+    swapInSession(s, 0);
+    executePendingSwap(s);
+    CHECK(s.currentDatasetName == "A");
+    CHECK(s.sessions[1]->currentDatasetName == "B");
+}
+
+// M3.3: T%/A parity vs the t100 panel (same-workspace ref+sample), clamp
+// cases, and the yMode toggle. Runs on the GLOBAL appState: the env
+// instance's tickAsync/finalizeCompute read the global (codebase
+// convention), so the pool-cache round-trip is only observable there.
+void test10_t100Parity() {
+    std::printf("test10: T%%/A parity vs t100 panel + clamps...\n");
+    AppState& s = ::appState;
+    // Fresh global state (tests run sequentially; nothing else holds it).
+    s.sessions.clear();
+    s.environments.clear();
+    s.poolCache.clear();
+    s.activeTabKind = ActiveTabKind::Session;
+    s.activeSessionIdx = -1;
+    s.activeEnvIdx = -1;
+    s.pendingSwapIdx = -1;
+    s.pendingSwapToSession = false;
+
+    // Session with a panel-cache spectrum pair (cm-1). ACTIVE tab: the data
+    // lives in the flat fields — t100 reads the flat fields (panel
+    // back-pointer) and the pool's active branch reads the same fields, so
+    // both see identical spectra (the parity contract).
+    auto sess = std::make_unique<WorkspaceSession>();
+    sess->key = "/tmp/parity.h5";
+    sess->path = "/tmp/parity.h5";
+    sess->workspace = makeFixtureWorkspace("parity");
+    sess->workspacePath = sess->path;
+    s.sessions.push_back(std::move(sess));
+    wirePanels(s);
+    s.activeTabKind = ActiveTabKind::Workspace;
+    s.activeSessionIdx = 0;
+    s.datasetInfo = workspaceDatasetInfo(s.workspace);
+    s.spectrum.xUnitSelector = 0;
+    s.spectrum.refLaserTextbox = 1.55f;
+    s.spectrum.Kpadding = 2;
+    const std::vector<double> refX = {1000.0, 1250.0, 1500.0, 1750.0, 2000.0};
+    const std::vector<double> refY = {1.0, 1.0, 1.0, 1.0, 1.0};       // unit ref
+    const std::vector<double> smpX = {1000.0, 1500.0, 2000.0};
+    const std::vector<double> smpY = {0.8, 0.8, 0.8};                  // ratio 0.8
+    s.spectrum.cachedFrequencies["specRef"] = refX;
+    s.spectrum.cachedSpectra["specRef"] = refY;
+    s.spectrum.cachedFrequencies["specSmp"] = smpX;
+    s.spectrum.cachedSpectra["specSmp"] = smpY;
+
+    // t100 panel: reference = specRef, sample = specSmp.
+    s.t100.xUnitSelector = 0;
+    s.t100.refX = refX;
+    s.t100.refY = refY;
+    s.t100.refXUnit = 0;
+    s.t100.referenceAvailable = true;
+    CHECK(s.t100.computeTransmittanceForFile("specSmp") == true);
+    const std::vector<double> t100Y = s.t100.cachedTransY["specSmp"];
+    CHECK(t100Y.size() == refX.size());              // overlap = full ref grid
+    for (double v : t100Y) CHECK(std::fabs(v - 80.0) < 1e-12);   // 0.8*100
+
+    // Environment instance: same ref/sample pair through the pool.
+    EnvironmentSession* env = createEnvironment(s, EnvType::Absorbance);
+    s.activeTabKind = ActiveTabKind::Workspace;      // pool reads flat fields
+    s.activeSessionIdx = 0;
+    env->refKey = "/tmp/parity.h5";
+    env->refMember = "specRef";
+    env->samples = {{"/tmp/parity.h5", "specSmp"}};
+    env->xUnitSelector = 0;
+    env->startCompute(s);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (env->batchActive_ && std::chrono::steady_clock::now() < deadline) {
+        env->tickAsync();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(env->batchActive_ == false);
+    CHECK(env->computed == true);
+    checkVecEq(env->gridX, refX, "env gridX == ref X");
+    const auto rkey = std::make_pair(std::string("/tmp/parity.h5"), std::string("specSmp"));
+    CHECK(env->ratioY.count(rkey) == 1);
+    for (double v : env->ratioY[rkey]) CHECK(std::fabs(v - 0.8) < 1e-12);
+    for (double v : env->curveY[rkey]) CHECK(std::fabs(v - 80.0) < 1e-12);   // T% mode
+
+    // yMode toggle: A = -log10(ratio).
+    env->yMode = 1;
+    env->applyYMode();
+    const double wantA = -std::log10(0.8);
+    for (double v : env->curveY[rkey]) CHECK(std::fabs(v - wantA) < 1e-12);
+    env->yMode = 0;
+    env->applyYMode();
+
+    // Recompute with identical params: the pool cache now hits (trivial
+    // tasks); the store-time fingerprint must match the session's current
+    // one so the entry stays valid (poolTryCache re-verification).
+    env->startCompute(s);
+    while (env->batchActive_ && std::chrono::steady_clock::now() < deadline) {
+        env->tickAsync();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(env->computed == true);
+    SpectralToolbox::ProcessedSpectrum cachedAgain;
+    CHECK(poolTryCache(s, SpectralRef{"/tmp/parity.h5", "specSmp"}, cachedAgain) == true);
+    CHECK(cachedAgain.spectrumY.size() == smpY.size());
+
+    // Clamp: zero reference value → ratio 0, T% 0, A 0 (no NaN/Inf).
+    // Raw-data change → the app evicts the pool (clearWorkspacePanels /
+    // source reload); mirror that here so the stale entry can't mask the
+    // recompute.
+    std::vector<double> refY0 = refY;
+    refY0[2] = 0.0;                                  // division-by-zero trap
+    s.spectrum.cachedSpectra["specRef"] = refY0;
+    poolEvictKey(s, "/tmp/parity.h5");
+    env->startCompute(s);
+    while (env->batchActive_ && std::chrono::steady_clock::now() < deadline) {
+        env->tickAsync();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(env->computed == true);
+    const auto& ratio = env->ratioY[rkey];
+    CHECK(ratio[2] == 0.0);                          // clamped, not NaN
+    env->yMode = 1;
+    env->applyYMode();
+    CHECK(env->curveY[rkey][2] == 0.0);              // A(0) = 0
+    CHECK(std::isfinite(env->curveY[rkey][2]));
+    env->yMode = 0;
+    env->applyYMode();
+
+    // Tiny ratio clamp: sample ≈ 0 → ratio ≤ 1e-15 → 0.
+    std::vector<double> smpY0 = {0.0, 0.0, 0.0};
+    s.spectrum.cachedSpectra["specSmp"] = smpY0;
+    poolEvictKey(s, "/tmp/parity.h5");               // raw-data change → evict
+    env->startCompute(s);
+    while (env->batchActive_ && std::chrono::steady_clock::now() < deadline) {
+        env->tickAsync();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(env->computed == true);
+    for (double v : env->ratioY[rkey]) CHECK(v == 0.0);
+    env->yMode = 1;
+    env->applyYMode();
+    for (double v : env->curveY[rkey]) CHECK(v == 0.0);
+    removeEnvironment(s, 0);
+}
+
+// M3.4: Comparator data contract — average X converted per session's own
+// unit to the instance's unit; Y passthrough; label format.
+void test11_comparator() {
+    std::printf("test11: comparator (average X conversion + labels)...\n");
+    AppState s;
+    auto sessA = std::make_unique<WorkspaceSession>();
+    sessA->key = "/tmp/cmp_a.h5";
+    sessA->path = "/tmp/cmp_a.h5";
+    sessA->workspace = makeFixtureWorkspace("cmpA");
+    sessA->workspacePath = sessA->path;
+    sessA->averageSpectrum.averageAvailable = true;
+    sessA->averageSpectrum.averageCount = 2;
+    sessA->averageSpectrum.xUnitSelector = 0;        // cm-1
+    sessA->averageSpectrum.cachedAverageX = {1000.0, 2000.0, 3000.0};
+    sessA->averageSpectrum.cachedAverageY = {0.5, 0.6, 0.7};
+
+    auto sessB = std::make_unique<WorkspaceSession>();
+    sessB->key = "/tmp/cmp_b.h5";
+    sessB->path = "/tmp/cmp_b.h5";
+    sessB->workspace = makeFixtureWorkspace("cmpB");
+    sessB->workspacePath = sessB->path;
+    sessB->averageSpectrum.averageAvailable = true;
+    sessB->averageSpectrum.averageCount = 3;
+    sessB->averageSpectrum.xUnitSelector = 1;        // um
+    sessB->averageSpectrum.cachedAverageX = {5.0, 6.0};
+    sessB->averageSpectrum.cachedAverageY = {0.9, 0.8};
+    s.sessions.push_back(std::move(sessA));
+    s.sessions.push_back(std::move(sessB));
+
+    // The comparator's per-session conversion (render body): X converted
+    // from the session's unit to the instance's unit; Y passthrough.
+    EnvironmentSession env(EnvType::Comparator, "Comparator test");
+    env.xUnitSelector = 0;                           // cm-1
+    using ST = SpectralToolbox::SpectrumXUnit;
+    const auto& avgA = s.sessions[0]->averageSpectrum;
+    CHECK(avgA.cachedAverageY.size() == 3);
+    for (size_t i = 0; i < avgA.cachedAverageX.size(); ++i) {
+        double xc = SpectralToolbox::convertXValue(avgA.cachedAverageX[i],
+            static_cast<ST>(avgA.xUnitSelector), static_cast<ST>(env.xUnitSelector));
+        CHECK(xc == avgA.cachedAverageX[i]);         // cm-1 → cm-1 identity
+        CHECK(avgA.cachedAverageY[i] == 0.5 + 0.1 * i);
+    }
+    const auto& avgB = s.sessions[1]->averageSpectrum;
+    for (size_t i = 0; i < avgB.cachedAverageX.size(); ++i) {
+        double xc = SpectralToolbox::convertXValue(avgB.cachedAverageX[i],
+            static_cast<ST>(avgB.xUnitSelector), static_cast<ST>(env.xUnitSelector));
+        double want = SpectralToolbox::convertXValue(avgB.cachedAverageX[i], ST::Um, ST::CmInv);
+        CHECK(std::fabs(xc - want) <= std::fabs(want) * 1e-15 + 1e-300);
+    }
+    // Label format: "<label> (avg of N)".
+    CHECK(s.sessions[0]->label() + " (avg of 2)" == std::string("cmp_a (avg of 2)"));
+    CHECK(s.sessions[1]->label() + " (avg of 3)" == std::string("cmp_b (avg of 3)"));
+}
+
 }  // namespace
 
 int main() {
@@ -917,6 +1369,11 @@ int main() {
     test5_labels();
     test6_futureMigration();
     test7_blankSessionResume();
+    test8_pool();
+    test9_env();
+    test9b_envActivationParksWorkspace();
+    test10_t100Parity();
+    test11_comparator();
     std::printf("fts_session_roundtrip: all %d checks passed\n", g_checks);
     return 0;
 }
