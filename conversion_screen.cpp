@@ -637,7 +637,8 @@ void renderConversionScreen(AppState& s) {
         ImGui::SetCursorPosY(rowTop + hOut);
         // Conflict: the derived .h5 would overwrite the currently open workspace.
         const std::string outFile = derivedOutputH5(st);
-        bool outputConflicts = !s.workspacePath.empty() && outFile == s.workspacePath;
+        bool outputConflicts = s.active && !s.active->workspacePath.empty() &&
+                               outFile == s.active->workspacePath;
         if (outputConflicts) {
             ImGui::TextWrapped("Cannot overwrite the currently open workspace.");
         }

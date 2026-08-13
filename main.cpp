@@ -53,8 +53,9 @@
 #if FTS_BUILD_HDF5
 // Open a workspace in a NEW tab (M2.2). Dedupes by stable key (path); the
 // blank session is queued for swap and the actual load runs at frame top
-// AFTER the swap (pendingOpenPath) so the previous active tab's flat fields
-// are already parked when openWorkspace overwrites them.
+// AFTER the swap (pendingOpenPath) so the previous tab's session is out of
+// AppState::active when openWorkspace loads into the new one (M4.5 canonical
+// model — the load writes the session's own fields).
 // M2.4 sniff: archive.json marks a .cross.h5 — route it to crossLoad (Session
 // tab), never to H5Store::load (which throws on the missing root @format).
 void openWorkspaceInNewTab(AppState& s, const std::string& path) {
@@ -100,6 +101,8 @@ void openWorkspaceInNewTab(AppState& s, const std::string& path) {
     auto sess = std::make_unique<WorkspaceSession>();
     sess->key = path;
     sess->path = path;
+    wireSessionPanels(s, *sess);
+    applySessionDefaults(s, *sess);
     s.sessions.push_back(std::move(sess));
     swapInSession(s, static_cast<int>(s.sessions.size()) - 1);
     s.pendingOpenPath = path;
@@ -131,16 +134,16 @@ void executePendingOpen(AppState& s) {
             if (!err.empty()) throw H5Error(err);
             // Same open flow as a filesystem workspace, minus the path-based
             // bits: the tab's save target is the .cross.h5 itself (M2.4).
-            s.workspace = std::move(ws);
-            s.workspacePath.clear();
+            s.active->workspace = std::move(ws);
+            s.active->workspacePath.clear();
             s.pendingWorkspaceAction = PendingWorkspaceAction::None;
             s.pendingWorkspacePath.clear();
             s.showUnsavedPrompt = false;
             s.pendingSaveAsPath.clear();
             s.showStaleDropPrompt = false;
-            s.showWorkspaceDeleteConfirmPopup = false;
-            s.pendingWorkspaceDeletionPath.clear();
-            s.workspaceDirtyRebaselinePending = true;
+            s.active->showWorkspaceDeleteConfirmPopup = false;
+            s.active->pendingWorkspaceDeletionPath.clear();
+            s.active->workspaceDirtyRebaselinePending = true;
             finishWorkspaceLoad(s, sourceId, "");
         }
     } catch (const std::exception& e) {
@@ -160,28 +163,28 @@ void executePendingOpen(AppState& s) {
 void finishWorkspaceLoad(AppState& s, const std::string& displayName,
                          const std::string& recentPath) {
     // Populate engine state
-    s.datasetInfo = workspaceDatasetInfo(s.workspace);
-    s.csvFiles = workspaceFileList(s.workspace);
+    s.active->datasetInfo = workspaceDatasetInfo(s.active->workspace);
+    s.active->csvFiles = workspaceFileList(s.active->workspace);
 
     // Feature gate
-    if (s.datasetInfo.axisIsCorrected)
-        s.xAxisBase = 1; // Force OPD mode
+    if (s.active->datasetInfo.axisIsCorrected)
+        s.active->xAxisBase = 1; // Force OPD mode
 
     // Clear all caches
     clearWorkspacePanels(s);
     // Spectrum panel is not reset by the clears above; reset its zoom/param
     // state too so a fresh workspace starts autoscaled (applyViewState below
     // restores the saved subset when present).
-    s.spectrum.resetSpectrumWindow();
-    s.filesChanged = true;
-    s.currentSortedFileIndex = 0;
-    s.isFirstDataLoad = true;
+    s.active->spectrum.resetSpectrumWindow();
+    s.active->filesChanged = true;
+    s.active->currentSortedFileIndex = 0;
+    s.active->isFirstDataLoad = true;
     s.showWelcomeScreen = false;
     s.welcomeScreenInitialized = true;
 
     // Dataset display name
-    s.currentDatasetName = displayName;
-    s.currentDirectory = "";
+    s.active->currentDatasetName = displayName;
+    s.active->currentDirectory = "";
 
     // Recent datasets (configPtr is set at startup; guard for robustness).
     // Embedded sources never enter the recent-dataset list.
@@ -197,14 +200,14 @@ void finishWorkspaceLoad(AppState& s, const std::string& displayName,
     // Re-baseline the dirty latch: opening never dirties the workspace. The
     // baseline is finalized at the end of the FIRST rendered frame (first-load
     // autoscale finalizes zoom ranges mid-frame).
-    s.viewStateBaseline = nlohmann::json::object();
-    s.viewStateBaselinePending = true;
+    s.active->viewStateBaseline = nlohmann::json::object();
+    s.active->viewStateBaselinePending = true;
 
     // Fill the editable comment/tags buffers from the loaded workspace.
-    snprintf(s.metadataCommentBuffer, sizeof(s.metadataCommentBuffer), "%s",
-             s.workspace.measurementComment.c_str());
-    snprintf(s.metadataTagsBuffer, sizeof(s.metadataTagsBuffer), "%s",
-             s.workspace.tags.c_str());
+    snprintf(s.active->metadataCommentBuffer, sizeof(s.active->metadataCommentBuffer), "%s",
+             s.active->workspace.measurementComment.c_str());
+    snprintf(s.active->metadataTagsBuffer, sizeof(s.active->metadataTagsBuffer), "%s",
+             s.active->workspace.tags.c_str());
 
     // Restore-on-open: fill panel caches from matching saved members.
     seedPanelsFromWorkspace(s);
@@ -218,8 +221,8 @@ void openWorkspace(AppState& s, const std::string& path) {
         || std::filesystem::path(path).extension() != ".h5") {
         return;
     }
-    s.workspace = H5Store::load(path);   // throws H5Error on failure
-    s.workspacePath = path;
+    s.active->workspace = H5Store::load(path);   // throws H5Error on failure
+    s.active->workspacePath = path;
 
     // Clear any pending discard/save modal state from a previous flow.
     s.pendingWorkspaceAction = PendingWorkspaceAction::None;
@@ -227,12 +230,12 @@ void openWorkspace(AppState& s, const std::string& path) {
     s.showUnsavedPrompt = false;
     s.pendingSaveAsPath.clear();
     s.showStaleDropPrompt = false;
-    s.showWorkspaceDeleteConfirmPopup = false;
-    s.pendingWorkspaceDeletionPath.clear();
+    s.active->showWorkspaceDeleteConfirmPopup = false;
+    s.active->pendingWorkspaceDeletionPath.clear();
 
     // The fresh load is pristine; the first frame's auto-computes (spectrum
     // mirror) are re-baselined at its end so opening alone is never "dirty".
-    s.workspaceDirtyRebaselinePending = true;
+    s.active->workspaceDirtyRebaselinePending = true;
 
     finishWorkspaceLoad(s, std::filesystem::path(path).stem().string(), path);
 }
@@ -256,14 +259,14 @@ void clearPanelDerivedResults(AppState& s) {
     s.clearSnrSpectrum();
     s.clearAllanVariance();
     s.clearT100Spectrum();
-    s.spectrum.cachedSpectra.clear();
-    s.spectrum.cachedFrequencies.clear();
-    s.spectrum.lastPrimaryDetectors.clear();
-    s.spectrum.lastSpectrumParams.clear();
-    s.spectrum.pendingSpectra_.clear();
-    s.t100.cachedTransX.clear();
-    s.t100.cachedTransY.clear();
-    s.t100.needsRecompute = true;
+    s.active->spectrum.cachedSpectra.clear();
+    s.active->spectrum.cachedFrequencies.clear();
+    s.active->spectrum.lastPrimaryDetectors.clear();
+    s.active->spectrum.lastSpectrumParams.clear();
+    s.active->spectrum.pendingSpectra_.clear();
+    s.active->t100.cachedTransX.clear();
+    s.active->t100.cachedTransY.clear();
+    s.active->t100.needsRecompute = true;
 }
 
 // True when the ACTIVE tab is an embedded source (stable key
@@ -281,14 +284,14 @@ void doSaveWorkspace(AppState& s, const std::string& asPath) {
     // Phase 3: merge the current view state into workspace.json BEFORE the
     // pruneStale copy, so Save As copies the captured view state too.
     captureViewState(s);
-    const Workspace* toSave = &s.workspace;
+    const Workspace* toSave = &s.active->workspace;
     Workspace copy;
     if (!asPath.empty()) {
-        copy = s.workspace.pruneStale();
+        copy = s.active->workspace.pruneStale();
         copy.created.clear();                // reset @created (spec §2.2)
         toSave = &copy;
-    } else if (!s.workspace.staleCategories().empty()) {
-        copy = s.workspace.pruneStale();     // §1.5 confirmed: drop stale
+    } else if (!s.active->workspace.staleCategories().empty()) {
+        copy = s.active->workspace.pruneStale();     // §1.5 confirmed: drop stale
         toSave = &copy;
     }
     if (asPath.empty() && activeTabIsEmbedded(s)) {
@@ -300,35 +303,35 @@ void doSaveWorkspace(AppState& s, const std::string& asPath) {
         std::string err;
         crossSaveSource(crossPath, sourceId, *toSave, err);
         if (!err.empty()) throw H5Error(err);
-        s.workspace.dirty = false;
-        s.workspace.changeLog.clear();
-        s.viewStateBaseline = viewStateJson(s);
-        s.viewStateBaselinePending = false;
+        s.active->workspace.dirty = false;
+        s.active->workspace.changeLog.clear();
+        s.active->viewStateBaseline = viewStateJson(s);
+        s.active->viewStateBaselinePending = false;
         s.needsRedraw = true;
         s.saveToastUntil = glfwGetTime() + 1.5;
         return;
     }
-    H5Store::save(asPath.empty() ? s.workspacePath : asPath, *toSave);   // throws H5Error
+    H5Store::save(asPath.empty() ? s.active->workspacePath : asPath, *toSave);   // throws H5Error
     if (!asPath.empty()) {
-        s.workspacePath = asPath;
-        s.currentDatasetName = std::filesystem::path(asPath).stem().string();
+        s.active->workspacePath = asPath;
+        s.active->currentDatasetName = std::filesystem::path(asPath).stem().string();
         if (s.configPtr)
             addToRecentDatasets(*s.configPtr, s.configFilePath, asPath);
     }
-    s.workspace.dirty = false;
-    s.workspace.changeLog.clear();   // saved: the change list starts fresh
+    s.active->workspace.dirty = false;
+    s.active->workspace.changeLog.clear();   // saved: the change list starts fresh
     // Phase 3: re-baseline the latch against the just-saved state so the frame
     // loop does not immediately re-dirty a clean workspace (decision 5).
-    s.viewStateBaseline = viewStateJson(s);
-    s.viewStateBaselinePending = false;
+    s.active->viewStateBaseline = viewStateJson(s);
+    s.active->viewStateBaselinePending = false;
     s.needsRedraw = true;
     // The save was effective (no exception, no cancel): show the "Saved" toast.
     s.saveToastUntil = glfwGetTime() + 1.5;
 }
 
 void requestSaveWorkspace(AppState& s, const std::string& asPath) {
-    markConfigStale(s.workspace, s);
-    if (s.workspace.staleCategories().empty()) {
+    markConfigStale(s.active->workspace, s);
+    if (s.active->workspace.staleCategories().empty()) {
         doSaveWorkspace(s, asPath);
         return;
     }
@@ -338,11 +341,11 @@ void requestSaveWorkspace(AppState& s, const std::string& asPath) {
 }
 
 void saveWorkspaceAs(AppState& s, GLFWwindow* window) {
-    std::string defaultFolder = s.workspacePath.empty()
-        ? (std::filesystem::is_directory(s.currentDirectory) ? s.currentDirectory : "")
-        : std::filesystem::path(s.workspacePath).parent_path().string();
-    std::string displayName = s.workspacePath.empty()
-        ? "workspace.h5" : std::filesystem::path(s.workspacePath).filename().string();
+    std::string defaultFolder = s.active->workspacePath.empty()
+        ? (std::filesystem::is_directory(s.active->currentDirectory) ? s.active->currentDirectory : "")
+        : std::filesystem::path(s.active->workspacePath).parent_path().string();
+    std::string displayName = s.active->workspacePath.empty()
+        ? "workspace.h5" : std::filesystem::path(s.active->workspacePath).filename().string();
     std::string path = FileBrowser::showFileSaveDialog(
         "Save Workspace As", displayName, "*.h5", defaultFolder, window);
     if (path.empty()) return;
@@ -382,7 +385,7 @@ void requestWorkspaceDiscard(AppState& s, PendingWorkspaceAction action, const s
     bool envDirty = false;
     for (const auto& env : s.environments)
         if (env->dirty) { envDirty = true; break; }
-    if ((!s.hasWorkspace() || !s.workspace.dirty) && !envDirty) {
+    if ((!s.hasWorkspace() || !s.active->workspace.dirty) && !envDirty) {
         dispatchPendingAction(s);
         return;
     }
@@ -502,17 +505,21 @@ int main(int argc, char* argv[]) {
     cleanupApplication(window);
 
     // Save configuration before exiting. View-state (panels, plotDefaults,
-    // selection) is persisted in workspace.json (Phase 3), not here.
-    config.autoFitYAxis = appState.autoFitYAxis;
-    config.enableDownsampling = appState.enableDownsampling;
-    config.lastWorkingDirectory = appState.currentDirectory;
+    // selection) is persisted in workspace.json (Phase 3), not here. The
+    // active session's panel defaults seed the config when a workspace tab is
+    // (or was) open; otherwise keep the config's stored values.
+    if (appState.active) {
+        config.autoFitYAxis = appState.active->autoFitYAxis;
+        config.enableDownsampling = appState.active->enableDownsampling;
+        config.lastWorkingDirectory = appState.active->currentDirectory;
+        config.showPeakIndicators = appState.active->showPeakIndicators;
+    }
     config.uiSize = appState.currentUiSize;
 
     // Update config with current FPS setting before saving
     config.showFPS = appState.showFPS;
     config.showTimestamps = appState.showTimestamps;
     config.gridAlpha = appState.gridAlpha;
-    config.showPeakIndicators = appState.showPeakIndicators;
     config.accentColor = appState.currentAccentColor;
 
     // Save accent color

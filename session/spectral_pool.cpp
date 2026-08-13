@@ -53,8 +53,8 @@ namespace {
 
 using ST = SpectralToolbox::SpectrumXUnit;
 
-// Ownership indirection (HL §3.1 step 4): the ref's session resolves to the
-// active tab → read flat fields; otherwise the parked session mirrors.
+// Sessions are canonical (M4.5): a ref's session is ALWAYS read from
+// sessions[idx] — there are no flat fields to prefer for the active tab.
 struct RefSession {
     const Workspace* ws = nullptr;
     const Spectrum* sp = nullptr;
@@ -65,28 +65,16 @@ struct RefSession {
 
 // Returns false when the workspace is not open (degraded reference).
 bool resolveRefSession(const AppState& s, const std::string& workspaceKey, RefSession& out) {
-    int idx = -1;
-    for (int i = 0; i < static_cast<int>(s.sessions.size()); ++i) {
-        if (s.sessions[i]->key == workspaceKey) { idx = i; break; }
+    for (const auto& sess : s.sessions) {
+        if (sess->key != workspaceKey) continue;
+        out.ws = &sess->workspace;
+        out.sp = &sess->spectrum;
+        out.info = &sess->datasetInfo;
+        out.xMethod = sess->xCorrectionMethod;
+        out.prominence = sess->peakProminenceThreshold;
+        return true;
     }
-    if (idx < 0) return false;
-    const bool isActive = (s.activeTabKind == ActiveTabKind::Workspace &&
-                           s.activeSessionIdx == idx);
-    const WorkspaceSession& sess = *s.sessions[idx];
-    if (isActive) {
-        out.ws = &s.workspace;
-        out.sp = &s.spectrum;
-        out.info = &s.datasetInfo;
-        out.xMethod = s.xCorrectionMethod;
-        out.prominence = s.peakProminenceThreshold;
-    } else {
-        out.ws = &sess.workspace;
-        out.sp = &sess.spectrum;
-        out.info = &sess.datasetInfo;
-        out.xMethod = sess.xCorrectionMethod;
-        out.prominence = sess.peakProminenceThreshold;
-    }
-    return true;
+    return false;
 }
 
 ParamFingerprint fingerprintOf(const RefSession& r) {

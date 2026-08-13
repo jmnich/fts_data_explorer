@@ -137,8 +137,8 @@ bool sourceOpenInTab(const std::string& id) {
 // File-browser → embed flow (shared by the pinned footer button).
 void addDatasetFromFileDialog() {
     std::string defaultFolder;
-    if (std::filesystem::is_directory(appState.currentDirectory))
-        defaultFolder = appState.currentDirectory;
+    if (appState.active && std::filesystem::is_directory(appState.active->currentDirectory))
+        defaultFolder = appState.active->currentDirectory;
     std::string path = FileBrowser::showFileOpenDialog(
         "Add Dataset to Multi-Workspace", "HDF5 files", "*.h5",
         glfwGetCurrentContext(), defaultFolder);
@@ -315,8 +315,8 @@ void renderCreateMultiWorkspaceButton() {
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, GetAccentActive(ac));
         if (ImGui::Button("Create Multi-Workspace...", ImVec2(240, 0))) {
             std::string defaultFolder;
-            if (std::filesystem::is_directory(appState.currentDirectory))
-                defaultFolder = appState.currentDirectory;
+            if (appState.active && std::filesystem::is_directory(appState.active->currentDirectory))
+                defaultFolder = appState.active->currentDirectory;
             else if (appState.configPtr && !appState.configPtr->lastMultiWorkspacePath.empty())
                 defaultFolder = std::filesystem::path(
                     appState.configPtr->lastMultiWorkspacePath).parent_path().string();

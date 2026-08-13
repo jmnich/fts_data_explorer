@@ -138,16 +138,16 @@ bool cfgNumEq(const nlohmann::json& cfg, const char* key, double value) {
 }
 
 bool configParamsMatch(const nlohmann::json& cfg, const AppState& s) {
-    if (!cfgNumEq(cfg, "refLaserUm", s.spectrum.refLaserTextbox)) return false;
-    if (!cfgNumEq(cfg, "zeroPadK", s.spectrum.Kpadding)) return false;
-    std::string xcm = s.xCorrectionMethod == 0 ? "hilbert" : "peaks";
+    if (!cfgNumEq(cfg, "refLaserUm", s.active->spectrum.refLaserTextbox)) return false;
+    if (!cfgNumEq(cfg, "zeroPadK", s.active->spectrum.Kpadding)) return false;
+    std::string xcm = s.active->xCorrectionMethod == 0 ? "hilbert" : "peaks";
     auto it = cfg.find("xCorrectionMethod");
     if (it == cfg.end() || !it->is_string() || it->get<std::string>() != xcm) return false;
-    if (!cfgNumEq(cfg, "prominenceThreshold", s.peakProminenceThreshold)) return false;
-    if (!cfgNumEq(cfg, "detectorSensitivityKVPerW", s.spectrum.detectorSensitivity)) return false;
+    if (!cfgNumEq(cfg, "prominenceThreshold", s.active->peakProminenceThreshold)) return false;
+    if (!cfgNumEq(cfg, "detectorSensitivityKVPerW", s.active->spectrum.detectorSensitivity)) return false;
     auto a = cfg.find("apodization");
     if (a == cfg.end() || !a->is_object()) return false;
-    return *a == makeApodizationJson(s.spectrum.apodizationSelector, s.spectrum.apodizationParams);
+    return *a == makeApodizationJson(s.active->spectrum.apodizationSelector, s.active->spectrum.apodizationParams);
 }
 
 bool configInputsEqual(const nlohmann::json& cfg, const std::vector<std::string>& paths) {
@@ -202,7 +202,7 @@ bool t100MemberFresh(const Workspace& ws, const AppState& s, const T100Member& m
     if (ref == cfg.end() || !ref->is_object()) return false;
     auto src = ref->find("source");
     if (src == ref->end() || !src->is_string()) return false;
-    if (src->get<std::string>() != t100SourceString(s.t100.referenceSource)) return false;
+    if (src->get<std::string>() != t100SourceString(s.active->t100.referenceSource)) return false;
     if (src->get<std::string>() == "csv") return true;   // path empty by construction
     auto path = ref->find("path");
     if (path == ref->end() || !path->is_string()) return false;
@@ -321,67 +321,67 @@ void restorePanelZoom(const nlohmann::json& vs, const char* sub,
 }
 
 void applyPanelViewState(AppState& s, const nlohmann::json& vs) {
-    s.spectrum.xUnitSelector = viewInt(vs, "spectrumView", "xUnit", s.spectrum.xUnitSelector);
-    s.spectrum.yScaleSelector = viewInt(vs, "spectrumView", "yScale", s.spectrum.yScaleSelector);
-    s.spectrum.yAxisMode = viewInt(vs, "spectrumView", "yAxisMode", s.spectrum.yAxisMode);
-    s.spectrum.forcedYMin = viewDouble(vs, "spectrumView", "forcedYMin", s.spectrum.forcedYMin);
-    s.spectrum.forcedYMax = viewDouble(vs, "spectrumView", "forcedYMax", s.spectrum.forcedYMax);
-    s.spectrum.detectorSensitivity = static_cast<float>(viewDouble(vs, "spectrumView",
-        "detectorSensitivityKVPerW", s.spectrum.detectorSensitivity));
-    if (s.spectrum.detectorSensitivity == 0.0f)
-        snprintf(s.spectrum.detectorSensitivityText,
-                 sizeof(s.spectrum.detectorSensitivityText), "NA");
+    s.active->spectrum.xUnitSelector = viewInt(vs, "spectrumView", "xUnit", s.active->spectrum.xUnitSelector);
+    s.active->spectrum.yScaleSelector = viewInt(vs, "spectrumView", "yScale", s.active->spectrum.yScaleSelector);
+    s.active->spectrum.yAxisMode = viewInt(vs, "spectrumView", "yAxisMode", s.active->spectrum.yAxisMode);
+    s.active->spectrum.forcedYMin = viewDouble(vs, "spectrumView", "forcedYMin", s.active->spectrum.forcedYMin);
+    s.active->spectrum.forcedYMax = viewDouble(vs, "spectrumView", "forcedYMax", s.active->spectrum.forcedYMax);
+    s.active->spectrum.detectorSensitivity = static_cast<float>(viewDouble(vs, "spectrumView",
+        "detectorSensitivityKVPerW", s.active->spectrum.detectorSensitivity));
+    if (s.active->spectrum.detectorSensitivity == 0.0f)
+        snprintf(s.active->spectrum.detectorSensitivityText,
+                 sizeof(s.active->spectrum.detectorSensitivityText), "NA");
     else
-        snprintf(s.spectrum.detectorSensitivityText,
-                 sizeof(s.spectrum.detectorSensitivityText), "%.4f",
-                 s.spectrum.detectorSensitivity);
-    s.spectrum.refLaserTextbox = static_cast<float>(viewDouble(vs, "spectrumView",
-        "refLaserUm", s.spectrum.refLaserTextbox));
-    s.spectrum.Kpadding = viewInt(vs, "spectrumView", "zeroPadK", s.spectrum.Kpadding);
+        snprintf(s.active->spectrum.detectorSensitivityText,
+                 sizeof(s.active->spectrum.detectorSensitivityText), "%.4f",
+                 s.active->spectrum.detectorSensitivity);
+    s.active->spectrum.refLaserTextbox = static_cast<float>(viewDouble(vs, "spectrumView",
+        "refLaserUm", s.active->spectrum.refLaserTextbox));
+    s.active->spectrum.Kpadding = viewInt(vs, "spectrumView", "zeroPadK", s.active->spectrum.Kpadding);
     auto a = vs.find("spectrumView");
     if (a != vs.end() && a->is_object()) {
         auto ap = a->find("apodization");
-        if (ap != a->end()) applyApodizationFromJson(*ap, s.spectrum);
+        if (ap != a->end()) applyApodizationFromJson(*ap, s.active->spectrum);
     }
-    s.spectrum.prevXUnitSelector = s.spectrum.xUnitSelector;
-    s.spectrum.prevYScaleSelector = s.spectrum.yScaleSelector;
-    s.spectrum.prevYAxisMode = s.spectrum.yAxisMode;
+    s.active->spectrum.prevXUnitSelector = s.active->spectrum.xUnitSelector;
+    s.active->spectrum.prevYScaleSelector = s.active->spectrum.yScaleSelector;
+    s.active->spectrum.prevYAxisMode = s.active->spectrum.yAxisMode;
 
-    s.averageSpectrum.xUnitSelector = viewInt(vs, "averageView", "xUnit", s.averageSpectrum.xUnitSelector);
-    s.averageSpectrum.yScaleSelector = viewInt(vs, "averageView", "yScale", s.averageSpectrum.yScaleSelector);
-    s.averageSpectrum.yAxisMode = viewInt(vs, "averageView", "yAxisMode", s.averageSpectrum.yAxisMode);
-    s.averageSpectrum.forcedYMin = viewDouble(vs, "averageView", "forcedYMin", s.averageSpectrum.forcedYMin);
-    s.averageSpectrum.forcedYMax = viewDouble(vs, "averageView", "forcedYMax", s.averageSpectrum.forcedYMax);
-    s.averageSpectrum.prevXUnitSelector = s.averageSpectrum.xUnitSelector;
-    s.averageSpectrum.prevYScaleSelector = s.averageSpectrum.yScaleSelector;
-    s.averageSpectrum.prevYAxisMode = s.averageSpectrum.yAxisMode;
+    s.active->averageSpectrum.xUnitSelector = viewInt(vs, "averageView", "xUnit", s.active->averageSpectrum.xUnitSelector);
+    s.active->averageSpectrum.yScaleSelector = viewInt(vs, "averageView", "yScale", s.active->averageSpectrum.yScaleSelector);
+    s.active->averageSpectrum.yAxisMode = viewInt(vs, "averageView", "yAxisMode", s.active->averageSpectrum.yAxisMode);
+    s.active->averageSpectrum.forcedYMin = viewDouble(vs, "averageView", "forcedYMin", s.active->averageSpectrum.forcedYMin);
+    s.active->averageSpectrum.forcedYMax = viewDouble(vs, "averageView", "forcedYMax", s.active->averageSpectrum.forcedYMax);
+    s.active->averageSpectrum.prevXUnitSelector = s.active->averageSpectrum.xUnitSelector;
+    s.active->averageSpectrum.prevYScaleSelector = s.active->averageSpectrum.yScaleSelector;
+    s.active->averageSpectrum.prevYAxisMode = s.active->averageSpectrum.yAxisMode;
 
-    s.snrSpectrum.xUnitSelector = viewInt(vs, "snrView", "xUnit", s.snrSpectrum.xUnitSelector);
-    s.snrSpectrum.yScaleSelector = viewInt(vs, "snrView", "yScale", s.snrSpectrum.yScaleSelector);
-    s.snrSpectrum.yAxisMode = viewInt(vs, "snrView", "yAxisMode", s.snrSpectrum.yAxisMode);
-    s.snrSpectrum.forcedYMin = viewDouble(vs, "snrView", "forcedYMin", s.snrSpectrum.forcedYMin);
-    s.snrSpectrum.forcedYMax = viewDouble(vs, "snrView", "forcedYMax", s.snrSpectrum.forcedYMax);
-    s.snrSpectrum.prevXUnitSelector = s.snrSpectrum.xUnitSelector;
-    s.snrSpectrum.prevYScaleSelector = s.snrSpectrum.yScaleSelector;
-    s.snrSpectrum.prevYAxisMode = s.snrSpectrum.yAxisMode;
+    s.active->snrSpectrum.xUnitSelector = viewInt(vs, "snrView", "xUnit", s.active->snrSpectrum.xUnitSelector);
+    s.active->snrSpectrum.yScaleSelector = viewInt(vs, "snrView", "yScale", s.active->snrSpectrum.yScaleSelector);
+    s.active->snrSpectrum.yAxisMode = viewInt(vs, "snrView", "yAxisMode", s.active->snrSpectrum.yAxisMode);
+    s.active->snrSpectrum.forcedYMin = viewDouble(vs, "snrView", "forcedYMin", s.active->snrSpectrum.forcedYMin);
+    s.active->snrSpectrum.forcedYMax = viewDouble(vs, "snrView", "forcedYMax", s.active->snrSpectrum.forcedYMax);
+    s.active->snrSpectrum.prevXUnitSelector = s.active->snrSpectrum.xUnitSelector;
+    s.active->snrSpectrum.prevYScaleSelector = s.active->snrSpectrum.yScaleSelector;
+    s.active->snrSpectrum.prevYAxisMode = s.active->snrSpectrum.yAxisMode;
 
-    s.allanVariance.xUnitSelector = viewInt(vs, "allanView", "xUnit", s.allanVariance.xUnitSelector);
+    s.active->allanVariance.xUnitSelector = viewInt(vs, "allanView", "xUnit", s.active->allanVariance.xUnitSelector);
     // Clamped to the UI range (1..): a saved 0/negative decimation would make
     // the phase-2a wavelength loop (i += wavelengthDecimation) spin forever.
-    s.allanVariance.wavelengthDecimation = std::max(
-        1, viewInt(vs, "allanView", "wavelengthDecimation", s.allanVariance.wavelengthDecimation));
-    s.allanVariance.selectedSliceIndex = viewInt(vs, "allanView", "sliceIndex", s.allanVariance.selectedSliceIndex);
-    s.allanVariance.xRangeMin = viewDouble(vs, "allanView", "xRangeMin", s.allanVariance.xRangeMin);
-    s.allanVariance.xRangeMax = viewDouble(vs, "allanView", "xRangeMax", s.allanVariance.xRangeMax);
-    s.allanVariance.calcBaseSelector = viewInt(vs, "allanView", "calcBase", s.allanVariance.calcBaseSelector);
+    s.active->allanVariance.wavelengthDecimation = std::max(
+        1, viewInt(vs, "allanView", "wavelengthDecimation", s.active->allanVariance.wavelengthDecimation));
+    s.active->allanVariance.selectedSliceIndex = viewInt(vs, "allanView", "sliceIndex", s.active->allanVariance.selectedSliceIndex);
+    s.active->allanVariance.xRangeMin = viewDouble(vs, "allanView", "xRangeMin", s.active->allanVariance.xRangeMin);
+    s.active->allanVariance.xRangeMax = viewDouble(vs, "allanView", "xRangeMax", s.active->allanVariance.xRangeMax);
+    s.active->allanVariance.calcBaseSelector = viewInt(vs, "allanView", "calcBase", s.active->allanVariance.calcBaseSelector);
 
-    s.t100.xUnitSelector = viewInt(vs, "t100View", "xUnit", s.t100.xUnitSelector);
-    s.t100.yAxisMode = viewInt(vs, "t100View", "yAxisMode", s.t100.yAxisMode);
-    s.t100.forcedYMin = viewDouble(vs, "t100View", "forcedYMin", s.t100.forcedYMin);
-    s.t100.forcedYMax = viewDouble(vs, "t100View", "forcedYMax", s.t100.forcedYMax);
-    s.t100.referenceSource = viewInt(vs, "t100View", "referenceSource", s.t100.referenceSource);
-    s.t100.prevXUnitSelector = s.t100.xUnitSelector;
-    s.t100.prevYAxisMode = s.t100.yAxisMode;
+    s.active->t100.xUnitSelector = viewInt(vs, "t100View", "xUnit", s.active->t100.xUnitSelector);
+    s.active->t100.yAxisMode = viewInt(vs, "t100View", "yAxisMode", s.active->t100.yAxisMode);
+    s.active->t100.forcedYMin = viewDouble(vs, "t100View", "forcedYMin", s.active->t100.forcedYMin);
+    s.active->t100.forcedYMax = viewDouble(vs, "t100View", "forcedYMax", s.active->t100.forcedYMax);
+    s.active->t100.referenceSource = viewInt(vs, "t100View", "referenceSource", s.active->t100.referenceSource);
+    s.active->t100.prevXUnitSelector = s.active->t100.xUnitSelector;
+    s.active->t100.prevYAxisMode = s.active->t100.yAxisMode;
 
     auto t = vs.find("t100View");
     if (t != vs.end() && t->is_object()) {
@@ -394,8 +394,8 @@ void applyPanelViewState(AppState& s, const nlohmann::json& vs) {
             };
             for (size_t k = 0; k < 3; ++k) {
                 if (!(*ratios)[k].is_object()) continue;
-                char* num = k == 0 ? s.t100.energyRatioNumA : k == 1 ? s.t100.energyRatioNumB : s.t100.energyRatioNumC;
-                char* den = k == 0 ? s.t100.energyRatioDenA : k == 1 ? s.t100.energyRatioDenB : s.t100.energyRatioDenC;
+                char* num = k == 0 ? s.active->t100.energyRatioNumA : k == 1 ? s.active->t100.energyRatioNumB : s.active->t100.energyRatioNumC;
+                char* den = k == 0 ? s.active->t100.energyRatioDenA : k == 1 ? s.active->t100.energyRatioDenB : s.active->t100.energyRatioDenC;
                 copyStr((*ratios)[k], "num", num, 32);
                 copyStr((*ratios)[k], "den", den, 32);
             }
@@ -403,19 +403,19 @@ void applyPanelViewState(AppState& s, const nlohmann::json& vs) {
     }
 
     // X zoom restore (decision: saved units + ranges get restored on reopen).
-    restorePanelZoom(vs, "spectrumView", s.spectrum.manualXMin, s.spectrum.manualXMax,
-                     s.spectrum.pendingNextXMin, s.spectrum.pendingNextXMax, s.spectrum.shouldAutoscale);
-    restorePanelZoom(vs, "averageView", s.averageSpectrum.manualXMin, s.averageSpectrum.manualXMax,
-                     s.averageSpectrum.pendingNextXMin, s.averageSpectrum.pendingNextXMax,
-                     s.averageSpectrum.shouldAutoscale);
-    restorePanelZoom(vs, "snrView", s.snrSpectrum.manualXMin, s.snrSpectrum.manualXMax,
-                     s.snrSpectrum.pendingNextXMin, s.snrSpectrum.pendingNextXMax,
-                     s.snrSpectrum.shouldAutoscale);
-    restorePanelZoom(vs, "allanView", s.allanVariance.manualXMin, s.allanVariance.manualXMax,
-                     s.allanVariance.pendingNextXMin, s.allanVariance.pendingNextXMax,
-                     s.allanVariance.shouldAutoscale);
-    restorePanelZoom(vs, "t100View", s.t100.manualXMin, s.t100.manualXMax,
-                     s.t100.pendingNextXMin, s.t100.pendingNextXMax, s.t100.shouldAutoscale);
+    restorePanelZoom(vs, "spectrumView", s.active->spectrum.manualXMin, s.active->spectrum.manualXMax,
+                     s.active->spectrum.pendingNextXMin, s.active->spectrum.pendingNextXMax, s.active->spectrum.shouldAutoscale);
+    restorePanelZoom(vs, "averageView", s.active->averageSpectrum.manualXMin, s.active->averageSpectrum.manualXMax,
+                     s.active->averageSpectrum.pendingNextXMin, s.active->averageSpectrum.pendingNextXMax,
+                     s.active->averageSpectrum.shouldAutoscale);
+    restorePanelZoom(vs, "snrView", s.active->snrSpectrum.manualXMin, s.active->snrSpectrum.manualXMax,
+                     s.active->snrSpectrum.pendingNextXMin, s.active->snrSpectrum.pendingNextXMax,
+                     s.active->snrSpectrum.shouldAutoscale);
+    restorePanelZoom(vs, "allanView", s.active->allanVariance.manualXMin, s.active->allanVariance.manualXMax,
+                     s.active->allanVariance.pendingNextXMin, s.active->allanVariance.pendingNextXMax,
+                     s.active->allanVariance.shouldAutoscale);
+    restorePanelZoom(vs, "t100View", s.active->t100.manualXMin, s.active->t100.manualXMax,
+                     s.active->t100.pendingNextXMin, s.active->t100.pendingNextXMax, s.active->t100.shouldAutoscale);
 }
 
 } // namespace
@@ -448,107 +448,107 @@ bool persistedSpectrumParams(const Workspace& ws, Spectrum& out,
 nlohmann::json viewStateJson(const AppState& s) {
     nlohmann::json j;
     j["plotDefaults"] = {
-        {"maxAtZero", s.maxAtZero},
-        {"xAxisBase", s.xAxisBase},
-        {"xCorrectionMethod", s.xCorrectionMethod},
-        {"peakProminence", s.peakProminenceThreshold}
+        {"maxAtZero", s.active->maxAtZero},
+        {"xAxisBase", s.active->xAxisBase},
+        {"xCorrectionMethod", s.active->xCorrectionMethod},
+        {"peakProminence", s.active->peakProminenceThreshold}
     };
     j["selection"] = {
-        {"sortedFiles", s.sortedFiles},
-        {"filesSelectedForAveraging", s.filesSelectedForAveraging},
-        {"currentSortedFileIndex", s.currentSortedFileIndex}
+        {"sortedFiles", s.active->sortedFiles},
+        {"filesSelectedForAveraging", s.active->filesSelectedForAveraging},
+        {"currentSortedFileIndex", s.active->currentSortedFileIndex}
     };
     j["spectrumView"] = {
-        {"xUnit", s.spectrum.xUnitSelector},
-        {"yScale", s.spectrum.yScaleSelector},
-        {"yAxisMode", s.spectrum.yAxisMode},
-        {"forcedYMin", s.spectrum.forcedYMin},
-        {"forcedYMax", s.spectrum.forcedYMax},
-        {"manualXMin", s.spectrum.manualXMin},
-        {"manualXMax", s.spectrum.manualXMax},
-        {"detectorSensitivityKVPerW", s.spectrum.detectorSensitivity},
-        {"refLaserUm", s.spectrum.refLaserTextbox},
-        {"zeroPadK", s.spectrum.Kpadding},
-        {"apodization", makeApodizationJson(s.spectrum.apodizationSelector,
-                                            s.spectrum.apodizationParams)}
+        {"xUnit", s.active->spectrum.xUnitSelector},
+        {"yScale", s.active->spectrum.yScaleSelector},
+        {"yAxisMode", s.active->spectrum.yAxisMode},
+        {"forcedYMin", s.active->spectrum.forcedYMin},
+        {"forcedYMax", s.active->spectrum.forcedYMax},
+        {"manualXMin", s.active->spectrum.manualXMin},
+        {"manualXMax", s.active->spectrum.manualXMax},
+        {"detectorSensitivityKVPerW", s.active->spectrum.detectorSensitivity},
+        {"refLaserUm", s.active->spectrum.refLaserTextbox},
+        {"zeroPadK", s.active->spectrum.Kpadding},
+        {"apodization", makeApodizationJson(s.active->spectrum.apodizationSelector,
+                                            s.active->spectrum.apodizationParams)}
     };
     j["averageView"] = {
-        {"xUnit", s.averageSpectrum.xUnitSelector},
-        {"yScale", s.averageSpectrum.yScaleSelector},
-        {"yAxisMode", s.averageSpectrum.yAxisMode},
-        {"forcedYMin", s.averageSpectrum.forcedYMin},
-        {"forcedYMax", s.averageSpectrum.forcedYMax},
-        {"manualXMin", s.averageSpectrum.manualXMin},
-        {"manualXMax", s.averageSpectrum.manualXMax}
+        {"xUnit", s.active->averageSpectrum.xUnitSelector},
+        {"yScale", s.active->averageSpectrum.yScaleSelector},
+        {"yAxisMode", s.active->averageSpectrum.yAxisMode},
+        {"forcedYMin", s.active->averageSpectrum.forcedYMin},
+        {"forcedYMax", s.active->averageSpectrum.forcedYMax},
+        {"manualXMin", s.active->averageSpectrum.manualXMin},
+        {"manualXMax", s.active->averageSpectrum.manualXMax}
     };
     j["snrView"] = {
-        {"xUnit", s.snrSpectrum.xUnitSelector},
-        {"yScale", s.snrSpectrum.yScaleSelector},
-        {"yAxisMode", s.snrSpectrum.yAxisMode},
-        {"forcedYMin", s.snrSpectrum.forcedYMin},
-        {"forcedYMax", s.snrSpectrum.forcedYMax},
-        {"manualXMin", s.snrSpectrum.manualXMin},
-        {"manualXMax", s.snrSpectrum.manualXMax}
+        {"xUnit", s.active->snrSpectrum.xUnitSelector},
+        {"yScale", s.active->snrSpectrum.yScaleSelector},
+        {"yAxisMode", s.active->snrSpectrum.yAxisMode},
+        {"forcedYMin", s.active->snrSpectrum.forcedYMin},
+        {"forcedYMax", s.active->snrSpectrum.forcedYMax},
+        {"manualXMin", s.active->snrSpectrum.manualXMin},
+        {"manualXMax", s.active->snrSpectrum.manualXMax}
     };
     j["allanView"] = {
-        {"xUnit", s.allanVariance.xUnitSelector},
-        {"wavelengthDecimation", s.allanVariance.wavelengthDecimation},
-        {"sliceIndex", s.allanVariance.selectedSliceIndex},
-        {"xRangeMin", s.allanVariance.xRangeMin},
-        {"xRangeMax", s.allanVariance.xRangeMax},
-        {"calcBase", s.allanVariance.calcBaseSelector},
-        {"manualXMin", s.allanVariance.manualXMin},
-        {"manualXMax", s.allanVariance.manualXMax}
+        {"xUnit", s.active->allanVariance.xUnitSelector},
+        {"wavelengthDecimation", s.active->allanVariance.wavelengthDecimation},
+        {"sliceIndex", s.active->allanVariance.selectedSliceIndex},
+        {"xRangeMin", s.active->allanVariance.xRangeMin},
+        {"xRangeMax", s.active->allanVariance.xRangeMax},
+        {"calcBase", s.active->allanVariance.calcBaseSelector},
+        {"manualXMin", s.active->allanVariance.manualXMin},
+        {"manualXMax", s.active->allanVariance.manualXMax}
     };
     j["t100View"] = {
-        {"xUnit", s.t100.xUnitSelector},
-        {"yAxisMode", s.t100.yAxisMode},
-        {"forcedYMin", s.t100.forcedYMin},
-        {"forcedYMax", s.t100.forcedYMax},
-        {"referenceSource", s.t100.referenceSource},
-        {"manualXMin", s.t100.manualXMin},
-        {"manualXMax", s.t100.manualXMax},
+        {"xUnit", s.active->t100.xUnitSelector},
+        {"yAxisMode", s.active->t100.yAxisMode},
+        {"forcedYMin", s.active->t100.forcedYMin},
+        {"forcedYMax", s.active->t100.forcedYMax},
+        {"referenceSource", s.active->t100.referenceSource},
+        {"manualXMin", s.active->t100.manualXMin},
+        {"manualXMax", s.active->t100.manualXMax},
         {"energyRatios", nlohmann::json::array({
-            {{"num", std::string(s.t100.energyRatioNumA)}, {"den", std::string(s.t100.energyRatioDenA)}},
-            {{"num", std::string(s.t100.energyRatioNumB)}, {"den", std::string(s.t100.energyRatioDenB)}},
-            {{"num", std::string(s.t100.energyRatioNumC)}, {"den", std::string(s.t100.energyRatioDenC)}}
+            {{"num", std::string(s.active->t100.energyRatioNumA)}, {"den", std::string(s.active->t100.energyRatioDenA)}},
+            {{"num", std::string(s.active->t100.energyRatioNumB)}, {"den", std::string(s.active->t100.energyRatioDenB)}},
+            {{"num", std::string(s.active->t100.energyRatioNumC)}, {"den", std::string(s.active->t100.energyRatioDenC)}}
         })}
     };
     return j;
 }
 
 void captureViewState(AppState& s) {
-    nlohmann::json& j = s.workspace.workspaceJson;
+    nlohmann::json& j = s.active->workspace.workspaceJson;
     j["applications"][kAppName] = viewStateJson(s);
     // Transient plotted set: written to the file (decision 3 preserves it) but
     // deliberately absent from viewStateJson so the frame-loop latch never
     // false-dirties on first-load selection.
-    j["applications"][kAppName]["selection"]["selectedFiles"] = s.selectedFiles;
+    j["applications"][kAppName]["selection"]["selectedFiles"] = s.active->selectedFiles;
     j["app"] = {{"name", kAppName}, {"version", APP_VERSION}};
 }
 
 void applyViewState(AppState& s) {
     if (!s.hasWorkspace()) return;
-    const nlohmann::json& j = s.workspace.workspaceJson;
+    const nlohmann::json& j = s.active->workspace.workspaceJson;
     auto apps = j.find("applications");
     if (apps == j.end() || !apps->is_object()) return;
     auto vsIt = apps->find(kAppName);
     if (vsIt == apps->end() || !vsIt->is_object()) return;
     const nlohmann::json& vs = *vsIt;
 
-    s.maxAtZero = viewBool(vs, "plotDefaults", "maxAtZero", s.maxAtZero);
-    s.xAxisBase = viewInt(vs, "plotDefaults", "xAxisBase", s.xAxisBase);
-    s.xCorrectionMethod = viewInt(vs, "plotDefaults", "xCorrectionMethod", s.xCorrectionMethod);
-    s.peakProminenceThreshold = static_cast<float>(
-        viewDouble(vs, "plotDefaults", "peakProminence", s.peakProminenceThreshold));
+    s.active->maxAtZero = viewBool(vs, "plotDefaults", "maxAtZero", s.active->maxAtZero);
+    s.active->xAxisBase = viewInt(vs, "plotDefaults", "xAxisBase", s.active->xAxisBase);
+    s.active->xCorrectionMethod = viewInt(vs, "plotDefaults", "xCorrectionMethod", s.active->xCorrectionMethod);
+    s.active->peakProminenceThreshold = static_cast<float>(
+        viewDouble(vs, "plotDefaults", "peakProminence", s.active->peakProminenceThreshold));
     applyPanelViewState(s, vs);
 
     // Rebuild sortedFiles (natural order — mirrors the frame loop) so the
     // id-matched checkbox set and clamped focus index align with the list the
     // UI actually renders.
-    if (s.sortedFiles.empty() && !s.csvFiles.empty()) {
-        s.sortedFiles = s.csvFiles;
-        std::sort(s.sortedFiles.begin(), s.sortedFiles.end(), naturalBasenameLess);
+    if (s.active->sortedFiles.empty() && !s.active->csvFiles.empty()) {
+        s.active->sortedFiles = s.active->csvFiles;
+        std::sort(s.active->sortedFiles.begin(), s.active->sortedFiles.end(), naturalBasenameLess);
     }
     auto sel = vs.find("selection");
     if (sel != vs.end() && sel->is_object()) {
@@ -561,17 +561,17 @@ void applyViewState(AppState& s) {
             for (size_t i = 0; i < n; ++i)
                 if ((*storedFiles)[i].is_string() && (*storedChk)[i].is_boolean())
                     checked[(*storedFiles)[i].get<std::string>()] = (*storedChk)[i].get<bool>();
-            s.filesSelectedForAveraging.assign(s.sortedFiles.size(), true);
-            for (size_t i = 0; i < s.sortedFiles.size(); ++i) {
-                auto it = checked.find(s.sortedFiles[i]);
-                if (it != checked.end()) s.filesSelectedForAveraging[i] = it->second;
+            s.active->filesSelectedForAveraging.assign(s.active->sortedFiles.size(), true);
+            for (size_t i = 0; i < s.active->sortedFiles.size(); ++i) {
+                auto it = checked.find(s.active->sortedFiles[i]);
+                if (it != checked.end()) s.active->filesSelectedForAveraging[i] = it->second;
             }
         }
         auto idx = sel->find("currentSortedFileIndex");
-        if (idx != sel->end() && idx->is_number() && !s.sortedFiles.empty()) {
+        if (idx != sel->end() && idx->is_number() && !s.active->sortedFiles.empty()) {
             long v = idx->get<long>();
-            s.currentSortedFileIndex = static_cast<size_t>(std::clamp<long>(
-                v, 0, static_cast<long>(s.sortedFiles.size() - 1)));
+            s.active->currentSortedFileIndex = static_cast<size_t>(std::clamp<long>(
+                v, 0, static_cast<long>(s.active->sortedFiles.size() - 1)));
         }
     }
 }
@@ -644,10 +644,10 @@ std::string memberPathOf(const Workspace& ws, const std::string& id) {
 
 std::vector<std::string> checkedInputPaths(const AppState& s) {
     std::vector<std::string> paths;
-    size_t n = std::min(s.sortedFiles.size(), s.filesSelectedForAveraging.size());
+    size_t n = std::min(s.active->sortedFiles.size(), s.active->filesSelectedForAveraging.size());
     for (size_t i = 0; i < n; ++i) {
-        if (!s.filesSelectedForAveraging[i]) continue;
-        std::string p = memberPathOf(s.workspace, s.sortedFiles[i]);
+        if (!s.active->filesSelectedForAveraging[i]) continue;
+        std::string p = memberPathOf(s.active->workspace, s.active->sortedFiles[i]);
         if (!p.empty()) paths.push_back(p);
     }
     return paths;
@@ -655,14 +655,14 @@ std::vector<std::string> checkedInputPaths(const AppState& s) {
 
 nlohmann::json spectrumParamsJson(const AppState& s) {
     nlohmann::json j;
-    j["xUnit"] = xUnitString(s.spectrum.xUnitSelector);
-    j["refLaserUm"] = s.spectrum.refLaserTextbox;
-    j["zeroPadK"] = s.spectrum.Kpadding;
-    j["xCorrectionMethod"] = s.xCorrectionMethod == 0 ? "hilbert" : "peaks";
-    j["prominenceThreshold"] = s.peakProminenceThreshold;
-    j["detectorSensitivityKVPerW"] = s.spectrum.detectorSensitivity;
-    j["apodization"] = makeApodizationJson(s.spectrum.apodizationSelector,
-                                           s.spectrum.apodizationParams);
+    j["xUnit"] = xUnitString(s.active->spectrum.xUnitSelector);
+    j["refLaserUm"] = s.active->spectrum.refLaserTextbox;
+    j["zeroPadK"] = s.active->spectrum.Kpadding;
+    j["xCorrectionMethod"] = s.active->xCorrectionMethod == 0 ? "hilbert" : "peaks";
+    j["prominenceThreshold"] = s.active->peakProminenceThreshold;
+    j["detectorSensitivityKVPerW"] = s.active->spectrum.detectorSensitivity;
+    j["apodization"] = makeApodizationJson(s.active->spectrum.apodizationSelector,
+                                           s.active->spectrum.apodizationParams);
     return j;
 }
 
@@ -784,17 +784,17 @@ void wsUpsertT100(Workspace& ws, const std::vector<std::string>& inputs,
 void wsMirrorSpectrum(AppState& s, const std::string& ifgId,
                       const std::vector<double>& x, const std::vector<double>& y) {
     if (!s.hasWorkspace()) return;
-    if (s.datasetInfo.hasPrecomputedSpectra) return;   // originals: never mirrored
-    std::string p = memberPathOf(s.workspace, ifgId);
+    if (s.active->datasetInfo.hasPrecomputedSpectra) return;   // originals: never mirrored
+    std::string p = memberPathOf(s.active->workspace, ifgId);
     if (p.empty()) return;
     nlohmann::json cfg = spectrumParamsJson(s);
     cfg["inputs"] = nlohmann::json::array({p});
-    wsUpsertSpectrum(s.workspace, ifgId, x, y, cfg);
+    wsUpsertSpectrum(s.active->workspace, ifgId, x, y, cfg);
 }
 
 nlohmann::json makeAverageConfig(const AppState& s, const std::vector<std::string>& inputs, int count) {
     nlohmann::json cfg = spectrumParamsJson(s);
-    cfg["xUnit"] = xUnitString(s.averageSpectrum.xUnitSelector);
+    cfg["xUnit"] = xUnitString(s.active->averageSpectrum.xUnitSelector);
     cfg["inputs"] = inputs;
     cfg["count"] = count;
     return cfg;
@@ -802,7 +802,7 @@ nlohmann::json makeAverageConfig(const AppState& s, const std::vector<std::strin
 
 nlohmann::json makeSnrConfig(const AppState& s, const std::vector<std::string>& inputs, int fileCount) {
     nlohmann::json cfg = spectrumParamsJson(s);
-    cfg["xUnit"] = xUnitString(s.snrSpectrum.xUnitSelector);
+    cfg["xUnit"] = xUnitString(s.active->snrSpectrum.xUnitSelector);
     cfg["inputs"] = inputs;
     cfg["fileCount"] = fileCount;
     return cfg;
@@ -810,24 +810,24 @@ nlohmann::json makeSnrConfig(const AppState& s, const std::vector<std::string>& 
 
 nlohmann::json makeAllanConfig(const AppState& s, const std::vector<std::string>& inputs) {
     nlohmann::json cfg = spectrumParamsJson(s);
-    cfg["xUnit"] = xUnitString(s.allanVariance.xUnitSelector);
+    cfg["xUnit"] = xUnitString(s.active->allanVariance.xUnitSelector);
     cfg["inputs"] = inputs;
-    cfg["calcBase"] = s.allanVariance.calcBaseSelector == 0 ? "t100" : "spectrum";
-    cfg["xRangeMin"] = s.allanVariance.xRangeMin;
-    cfg["xRangeMax"] = s.allanVariance.xRangeMax;
-    cfg["wavelengthDecimation"] = s.allanVariance.wavelengthDecimation;
-    cfg["sliceIndex"] = s.allanVariance.selectedSliceIndex;
+    cfg["calcBase"] = s.active->allanVariance.calcBaseSelector == 0 ? "t100" : "spectrum";
+    cfg["xRangeMin"] = s.active->allanVariance.xRangeMin;
+    cfg["xRangeMax"] = s.active->allanVariance.xRangeMax;
+    cfg["wavelengthDecimation"] = s.active->allanVariance.wavelengthDecimation;
+    cfg["sliceIndex"] = s.active->allanVariance.selectedSliceIndex;
     return cfg;
 }
 
 nlohmann::json makeT100Config(const AppState& s, const std::vector<std::string>& inputs) {
     nlohmann::json cfg = spectrumParamsJson(s);   // refX is stored in spectrum-unit
     cfg["inputs"] = inputs;
-    std::string src = t100SourceString(s.t100.referenceSource);
+    std::string src = t100SourceString(s.active->t100.referenceSource);
     std::string path = "";
-    if (s.t100.referenceSource == 0 && !s.selectedFilenames.empty()) {
-        path = memberPathOf(s.workspace, s.selectedFilenames[0]);
-    } else if (s.t100.referenceSource == 2) {
+    if (s.active->t100.referenceSource == 0 && !s.active->selectedFilenames.empty()) {
+        path = memberPathOf(s.active->workspace, s.active->selectedFilenames[0]);
+    } else if (s.active->t100.referenceSource == 2) {
         path = "/average_spectra/average";
     }
     cfg["reference"] = {{"source", src}, {"path", path}};
@@ -835,11 +835,11 @@ nlohmann::json makeT100Config(const AppState& s, const std::vector<std::string>&
 }
 
 void wsUpsertT100FromPanel(AppState& s) {
-    if (!s.hasWorkspace() || !s.t100.referenceAvailable) return;
+    if (!s.hasWorkspace() || !s.active->t100.referenceAvailable) return;
     std::vector<T100Member::Curve> curves;
-    for (const auto& kv : s.t100.cachedTransX) {
-        auto it = s.t100.cachedTransY.find(kv.first);
-        if (it == s.t100.cachedTransY.end()) continue;
+    for (const auto& kv : s.active->t100.cachedTransX) {
+        auto it = s.active->t100.cachedTransY.find(kv.first);
+        if (it == s.active->t100.cachedTransY.end()) continue;
         T100Member::Curve c;
         c.fileId = kv.first;
         c.x = kv.second;
@@ -855,12 +855,12 @@ void wsUpsertT100FromPanel(AppState& s) {
     // is data- and config-identical to the saved member, skip the replacement
     // so a pristine open (or an identical re-calculate) neither dirties the
     // workspace nor claims a change in the unsaved-changes modal.
-    for (const auto& m : s.workspace.t100.members) {
+    for (const auto& m : s.active->workspace.t100.members) {
         if (m.id != "t100") continue;
-        bool same = m.reference.x == s.t100.refX &&
-                    m.reference.y == s.t100.refY &&
-                    m.stddev.x == s.t100.cachedStdX &&
-                    m.stddev.y == s.t100.cachedStdY &&
+        bool same = m.reference.x == s.active->t100.refX &&
+                    m.reference.y == s.active->t100.refY &&
+                    m.stddev.x == s.active->t100.cachedStdX &&
+                    m.stddev.y == s.active->t100.cachedStdY &&
                     m.config == cfg &&
                     m.curves.size() == curves.size();
         if (same) {
@@ -873,8 +873,8 @@ void wsUpsertT100FromPanel(AppState& s) {
         if (same) return;   // identical artifact already saved: nothing changed
         break;
     }
-    wsUpsertT100(s.workspace, inputs, s.t100.refX, s.t100.refY,
-                 s.t100.cachedStdX, s.t100.cachedStdY, curves, cfgJson);
+    wsUpsertT100(s.active->workspace, inputs, s.active->t100.refX, s.active->t100.refY,
+                 s.active->t100.cachedStdX, s.active->t100.cachedStdY, curves, cfgJson);
 }
 
 void markConfigStale(Workspace& ws, const AppState& s) {
@@ -896,100 +896,100 @@ void markConfigStale(Workspace& ws, const AppState& s) {
 
 bool averageOutdated(const AppState& s) {
     if (!s.hasWorkspace()) return false;
-    for (const auto& m : s.workspace.averageSpectra.members)
+    for (const auto& m : s.active->workspace.averageSpectra.members)
         if (m.id == "average")
-            return !panelMemberFresh(s.workspace, s, m, checkedInputPaths(s));
+            return !panelMemberFresh(s.active->workspace, s, m, checkedInputPaths(s));
     return false;
 }
 
 bool snrOutdated(const AppState& s) {
     if (!s.hasWorkspace()) return false;
-    for (const auto& m : s.workspace.snrSpectra.members)
+    for (const auto& m : s.active->workspace.snrSpectra.members)
         if (m.id == "snr")
-            return !panelMemberFresh(s.workspace, s, m, checkedInputPaths(s));
+            return !panelMemberFresh(s.active->workspace, s, m, checkedInputPaths(s));
     return false;
 }
 
 bool allanOutdated(const AppState& s) {
     if (!s.hasWorkspace()) return false;
-    for (const auto& m : s.workspace.allanWerle.members)
+    for (const auto& m : s.active->workspace.allanWerle.members)
         if (m.id == "allan")
-            return !panelMemberFresh(s.workspace, s, m, checkedInputPaths(s));
+            return !panelMemberFresh(s.active->workspace, s, m, checkedInputPaths(s));
     return false;
 }
 
 bool t100Outdated(const AppState& s) {
     if (!s.hasWorkspace()) return false;
     auto checked = checkedInputPaths(s);
-    for (const auto& m : s.workspace.t100.members)
+    for (const auto& m : s.active->workspace.t100.members)
         if (m.id == "t100")
-            return !t100MemberFresh(s.workspace, s, m) ||
+            return !t100MemberFresh(s.active->workspace, s, m) ||
                    !configInputsEqual(parseConfig(m.config), checked);
     return false;
 }
 
 void seedPanelsFromWorkspace(AppState& s) {
     if (!s.hasWorkspace()) return;
-    Workspace& ws = s.workspace;
+    Workspace& ws = s.active->workspace;
 
     // Spectrum: spectra/spec_<ifgId> for each current file.
-    for (const std::string& ifgId : s.csvFiles) {
+    for (const std::string& ifgId : s.active->csvFiles) {
         const TwoColumnMember* m = findSpectrumMember(ws, ifgId);
         if (!m || !spectrumMemberFresh(ws, s, *m)) continue;
         auto memberUnit = static_cast<SpectralToolbox::SpectrumXUnit>(
             xUnitFromString(configXUnit(parseConfig(m->config))));
-        auto uiUnit = static_cast<SpectralToolbox::SpectrumXUnit>(s.spectrum.xUnitSelector);
+        auto uiUnit = static_cast<SpectralToolbox::SpectrumXUnit>(s.active->spectrum.xUnitSelector);
         std::vector<double> freqs = m->x;
         for (double& f : freqs)
             f = SpectralToolbox::convertXValue(f, memberUnit, uiUnit);
-        s.spectrum.cachedFrequencies[ifgId] = std::move(freqs);
-        s.spectrum.cachedSpectra[ifgId] = m->y;
+        s.active->spectrum.cachedFrequencies[ifgId] = std::move(freqs);
+        s.active->spectrum.cachedSpectra[ifgId] = m->y;
 
         // Fill the dirty-check inputs so isSpectrumDirty stays false: the raw
         // primary detector is immutable for originals, so capture it now.
         try {
             InterferogramData raw = workspaceRead(ws, ifgId);
-            s.spectrum.lastPrimaryDetectors[ifgId] = raw.primaryDetector;
+            s.active->spectrum.lastPrimaryDetectors[ifgId] = raw.primaryDetector;
         } catch (...) {
-            s.spectrum.lastPrimaryDetectors.erase(ifgId);
+            s.active->spectrum.lastPrimaryDetectors.erase(ifgId);
             continue;
         }
         double activeParam = 0.0;
-        auto as = static_cast<ApodizationWindow>(s.spectrum.apodizationSelector);
-        if (as == ApodizationWindow::Gauss) activeParam = s.spectrum.apodizationParams.gaussSigma;
-        else if (as == ApodizationWindow::Rectangular) activeParam = s.spectrum.apodizationParams.rectWidth;
-        else if (as == ApodizationWindow::NortonBeer) activeParam = s.spectrum.apodizationParams.nortonBeerFwhm;
-        else if (as == ApodizationWindow::DolphChebyshev) activeParam = s.spectrum.apodizationParams.dolphChebyshevAt;
-        else if (as == ApodizationWindow::Hamming) activeParam = s.spectrum.apodizationParams.hammingAlpha;
-        else if (as == ApodizationWindow::Kaiser) activeParam = s.spectrum.apodizationParams.kaiserBeta;
-        s.spectrum.lastSpectrumParams[ifgId] = {
-            static_cast<double>(s.spectrum.Kpadding),
-            static_cast<double>(s.spectrum.refLaserTextbox),
-            static_cast<double>(s.spectrum.apodizationSelector),
+        auto as = static_cast<ApodizationWindow>(s.active->spectrum.apodizationSelector);
+        if (as == ApodizationWindow::Gauss) activeParam = s.active->spectrum.apodizationParams.gaussSigma;
+        else if (as == ApodizationWindow::Rectangular) activeParam = s.active->spectrum.apodizationParams.rectWidth;
+        else if (as == ApodizationWindow::NortonBeer) activeParam = s.active->spectrum.apodizationParams.nortonBeerFwhm;
+        else if (as == ApodizationWindow::DolphChebyshev) activeParam = s.active->spectrum.apodizationParams.dolphChebyshevAt;
+        else if (as == ApodizationWindow::Hamming) activeParam = s.active->spectrum.apodizationParams.hammingAlpha;
+        else if (as == ApodizationWindow::Kaiser) activeParam = s.active->spectrum.apodizationParams.kaiserBeta;
+        s.active->spectrum.lastSpectrumParams[ifgId] = {
+            static_cast<double>(s.active->spectrum.Kpadding),
+            static_cast<double>(s.active->spectrum.refLaserTextbox),
+            static_cast<double>(s.active->spectrum.apodizationSelector),
             activeParam,
-            s.spectrum.apodizationParams.rectAsymMode ? 1.0 : 0.0,
-            static_cast<double>(s.xCorrectionMethod),
-            static_cast<double>(s.peakProminenceThreshold),
+            s.active->spectrum.apodizationParams.rectAsymMode ? 1.0 : 0.0,
+            static_cast<double>(s.active->xCorrectionMethod),
+            static_cast<double>(s.active->peakProminenceThreshold),
             0.0 };
     }
     // Without this the render path would convert the already-converted seed
     // arrays in place on the next unit switch (spectrum.cpp:490-518).
-    s.spectrum.prevXUnitSelector = s.spectrum.xUnitSelector;
+    s.active->spectrum.prevXUnitSelector = s.active->spectrum.xUnitSelector;
 
     // Average.
     for (const auto& m : ws.averageSpectra.members) {
         if (m.id != "average" || !panelMemberFresh(ws, s, m, checkedInputPaths(s))) continue;
         auto unit = xUnitFromString(configXUnit(parseConfig(m.config)));
-        auto ui = s.averageSpectrum.xUnitSelector;
+        auto ui = s.active->averageSpectrum.xUnitSelector;
         std::vector<double> x = m.x;
         for (double& v : x)
             v = SpectralToolbox::convertXValue(v, static_cast<SpectralToolbox::SpectrumXUnit>(unit),
                                                static_cast<SpectralToolbox::SpectrumXUnit>(ui));
-        s.averageSpectrum.cachedAverageX = std::move(x);
-        s.averageSpectrum.cachedAverageY = m.y;
+        s.active->averageSpectrum.cachedAverageX = std::move(x);
+        s.active->averageSpectrum.cachedAverageY = m.y;
         auto cfg = parseConfig(m.config);
-        s.averageSpectrum.averageCount = cfg.value("count", 0);
-        s.averageSpectrum.averageAvailable = !m.y.empty();
+        s.active->averageSpectrum.averageCount = cfg.value("count", 0);
+        s.active->averageSpectrum.averageAvailable = !m.y.empty();
         break;
     }
 
@@ -997,37 +997,37 @@ void seedPanelsFromWorkspace(AppState& s) {
     for (const auto& m : ws.snrSpectra.members) {
         if (m.id != "snr" || !panelMemberFresh(ws, s, m, checkedInputPaths(s))) continue;
         auto unit = xUnitFromString(configXUnit(parseConfig(m.config)));
-        auto ui = s.snrSpectrum.xUnitSelector;
+        auto ui = s.active->snrSpectrum.xUnitSelector;
         std::vector<double> x = m.x;
         for (double& v : x)
             v = SpectralToolbox::convertXValue(v, static_cast<SpectralToolbox::SpectrumXUnit>(unit),
                                                static_cast<SpectralToolbox::SpectrumXUnit>(ui));
-        s.snrSpectrum.cachedSnrX = std::move(x);
-        s.snrSpectrum.cachedSnrY = m.y;
+        s.active->snrSpectrum.cachedSnrX = std::move(x);
+        s.active->snrSpectrum.cachedSnrY = m.y;
         auto cfg = parseConfig(m.config);
-        s.snrSpectrum.fileCount = cfg.value("fileCount", 0);
-        s.snrSpectrum.snrAvailable = !m.y.empty();
+        s.active->snrSpectrum.fileCount = cfg.value("fileCount", 0);
+        s.active->snrSpectrum.snrAvailable = !m.y.empty();
         break;
     }
 
     // Allan.
     for (const auto& m : ws.allanWerle.members) {
         if (m.id != "allan" || !panelMemberFresh(ws, s, m, checkedInputPaths(s))) continue;
-        s.allanVariance.cachedSurfaceTaus = m.taus;
-        s.allanVariance.cachedSurfaceWavelengths = m.wavelengths;
-        s.allanVariance.cachedSurfaceAllanVar = m.surface;
-        s.allanVariance.numSurfaceTaus = static_cast<int>(m.taus.size());
-        s.allanVariance.numSurfaceWavelengths = static_cast<int>(m.wavelengths.size());
-        s.allanVariance.allanAvailable = !m.surface.empty();
+        s.active->allanVariance.cachedSurfaceTaus = m.taus;
+        s.active->allanVariance.cachedSurfaceWavelengths = m.wavelengths;
+        s.active->allanVariance.cachedSurfaceAllanVar = m.surface;
+        s.active->allanVariance.numSurfaceTaus = static_cast<int>(m.taus.size());
+        s.active->allanVariance.numSurfaceWavelengths = static_cast<int>(m.wavelengths.size());
+        s.active->allanVariance.allanAvailable = !m.surface.empty();
         // Clamp the restored slice index against the restored surface: the
         // render path indexes cachedSurfaceWavelengths/AllanVar before any
         // recalculation clamp runs (an out-of-range index would read OOB).
-        if (s.allanVariance.selectedSliceIndex >= s.allanVariance.numSurfaceWavelengths)
-            s.allanVariance.selectedSliceIndex =
-                s.allanVariance.numSurfaceWavelengths > 0
-                    ? s.allanVariance.numSurfaceWavelengths - 1 : 0;
-        if (s.allanVariance.selectedSliceIndex < 0)
-            s.allanVariance.selectedSliceIndex = 0;
+        if (s.active->allanVariance.selectedSliceIndex >= s.active->allanVariance.numSurfaceWavelengths)
+            s.active->allanVariance.selectedSliceIndex =
+                s.active->allanVariance.numSurfaceWavelengths > 0
+                    ? s.active->allanVariance.numSurfaceWavelengths - 1 : 0;
+        if (s.active->allanVariance.selectedSliceIndex < 0)
+            s.active->allanVariance.selectedSliceIndex = 0;
         break;
     }
 
@@ -1036,35 +1036,35 @@ void seedPanelsFromWorkspace(AppState& s) {
     for (const auto& m : ws.t100.members) {
         if (m.id != "t100" || !t100MemberFresh(ws, s, m)) continue;
         int unit = xUnitFromString(configXUnit(parseConfig(m.config)));
-        s.t100.refX = m.reference.x;
-        s.t100.refY = m.reference.y;
-        s.t100.refXUnit = unit;
-        s.t100.referenceAvailable = !m.reference.y.empty();
+        s.active->t100.refX = m.reference.x;
+        s.active->t100.refY = m.reference.y;
+        s.active->t100.refXUnit = unit;
+        s.active->t100.referenceAvailable = !m.reference.y.empty();
         auto cfg = parseConfig(m.config);
         auto ref = cfg.find("reference");
         std::string src = ref != cfg.end() && ref->is_object() ? ref->value("source", "") : "";
-        s.t100.referenceSource = (src == "csv") ? 1 : (src == "average") ? 2 : 0;
-        s.t100.refDescription = (src == "csv") ? "From CSV" : "From workspace";
-        s.t100.cachedTransX.clear();
-        s.t100.cachedTransY.clear();
+        s.active->t100.referenceSource = (src == "csv") ? 1 : (src == "average") ? 2 : 0;
+        s.active->t100.refDescription = (src == "csv") ? "From CSV" : "From workspace";
+        s.active->t100.cachedTransX.clear();
+        s.active->t100.cachedTransY.clear();
         // Eager restore: seed curves for every saved file still present in the
         // workspace. The old selectedFiles guard was always empty at seed time
         // (selection is populated later by the frame loop), so restore-on-open
         // never worked and the render path recomputed every curve on the first
         // frame — which rewrote the member and dirtied a pristine open.
         for (const auto& c : m.curves) {
-            if (std::find(s.csvFiles.begin(), s.csvFiles.end(), c.fileId) == s.csvFiles.end())
+            if (std::find(s.active->csvFiles.begin(), s.active->csvFiles.end(), c.fileId) == s.active->csvFiles.end())
                 continue;   // deleted/absent member: keep its curve out of caches
-            s.t100.cachedTransX[c.fileId] = c.x;
-            s.t100.cachedTransY[c.fileId] = c.y;
+            s.active->t100.cachedTransX[c.fileId] = c.x;
+            s.active->t100.cachedTransY[c.fileId] = c.y;
         }
-        s.t100.transmittanceAvailable = !s.t100.cachedTransY.empty();
+        s.active->t100.transmittanceAvailable = !s.active->t100.cachedTransY.empty();
         // Restore the saved plotted set so the first render sees no selection
         // diff and skips the needsRecompute wipe + lazy recompute. Absent in
         // older files -> stays empty -> the first-frame diff arms the lazy
         // fill instead (workspace_reader is engine-side; see t100.cpp:963).
-        s.t100.lastKnownSelection.clear();
-        const nlohmann::json& wsj = s.workspace.workspaceJson;
+        s.active->t100.lastKnownSelection.clear();
+        const nlohmann::json& wsj = s.active->workspace.workspaceJson;
         auto appsIt = wsj.find("applications");
         if (appsIt != wsj.end() && appsIt->is_object()) {
             auto appIt = appsIt->find(kAppName);
@@ -1076,17 +1076,17 @@ void seedPanelsFromWorkspace(AppState& s) {
                         for (const auto& f : *filesIt) {
                             if (!f.is_string()) continue;
                             const std::string& id = f.get<std::string>();
-                            if (std::find(s.csvFiles.begin(), s.csvFiles.end(), id) != s.csvFiles.end())
-                                s.t100.lastKnownSelection.push_back(id);
+                            if (std::find(s.active->csvFiles.begin(), s.active->csvFiles.end(), id) != s.active->csvFiles.end())
+                                s.active->t100.lastKnownSelection.push_back(id);
                         }
                     }
                 }
             }
         }
         if (!m.stddev.x.empty() && !m.stddev.y.empty()) {
-            s.t100.cachedStdX = m.stddev.x;
-            s.t100.cachedStdY = m.stddev.y;
-            s.t100.stddevAvailable = true;
+            s.active->t100.cachedStdX = m.stddev.x;
+            s.active->t100.cachedStdY = m.stddev.y;
+            s.active->t100.stddevAvailable = true;
         }
         break;
     }

@@ -75,12 +75,10 @@ bool sessionOpen(const std::string& key) {
 // mirror — resolve the same way the pool does.
 std::vector<std::pair<std::string, bool>> sessionMembers(const std::string& key) {
     std::vector<std::pair<std::string, bool>> out;
-    for (int i = 0; i < static_cast<int>(appState.sessions.size()); ++i) {
-        const auto& sess = appState.sessions[i];
+    for (const auto& sess : appState.sessions) {
         if (sess->key != key) continue;
-        const bool isActive = (appState.activeTabKind == ActiveTabKind::Workspace &&
-                               appState.activeSessionIdx == i);
-        const Workspace& ws = isActive ? appState.workspace : sess->workspace;
+        // Sessions are canonical (M4.5): always read the session's own fields.
+        const Workspace& ws = sess->workspace;
         for (const auto& m : ws.spectra.members)
             out.emplace_back(m.id, false);
         for (const auto& m : ws.uncorrectedIfg.members)
@@ -1258,8 +1256,8 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
 
 void EnvironmentSession::exportCsv() {
     std::string defaultFolder;
-    if (!appState.currentDirectory.empty())
-        defaultFolder = appState.currentDirectory;
+    if (appState.active && !appState.active->currentDirectory.empty())
+        defaultFolder = appState.active->currentDirectory;
     std::string path = FileBrowser::showFileSaveDialog(
         "Export Environment", instanceName + ".csv", "*.csv",
         defaultFolder, glfwGetCurrentContext());

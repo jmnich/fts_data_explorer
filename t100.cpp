@@ -152,31 +152,31 @@ void T100Spectrum::reset() {
 }
 
 void T100Spectrum::setReferenceFromCurrentSpectrum() {
-    if (!appState || appState->selectedFilenames.empty()) return;
+    if (!appState || appState->active->selectedFilenames.empty()) return;
 
-    const std::string& fileId = appState->selectedFilenames[0];
-    auto freqIt = appState->spectrum.cachedFrequencies.find(fileId);
-    auto specIt = appState->spectrum.cachedSpectra.find(fileId);
-    if (freqIt == appState->spectrum.cachedFrequencies.end() ||
-        specIt == appState->spectrum.cachedSpectra.end() ||
+    const std::string& fileId = appState->active->selectedFilenames[0];
+    auto freqIt = appState->active->spectrum.cachedFrequencies.find(fileId);
+    auto specIt = appState->active->spectrum.cachedSpectra.find(fileId);
+    if (freqIt == appState->active->spectrum.cachedFrequencies.end() ||
+        specIt == appState->active->spectrum.cachedSpectra.end() ||
         freqIt->second.empty() || specIt->second.empty())
         return;
 
     refX = freqIt->second;
     refY = specIt->second;
-    refXUnit = appState->spectrum.xUnitSelector;
+    refXUnit = appState->active->spectrum.xUnitSelector;
     referenceAvailable = true;
     referenceSource = 0;
 
     {
-        std::string shortName = appState->selectedFilenames[0];
+        std::string shortName = appState->active->selectedFilenames[0];
         size_t ls = shortName.find_last_of("/\\");
         if (ls != std::string::npos) shortName = shortName.substr(ls + 1);
         refDescription = std::string("From file: ") + shortName;
     }
 
     fprintf(stderr, "[t100] setReferenceFromCurrentSpectrum: refX.size=%zu refY.size=%zu refXUnit=%d spectrumXUnit=%d\n",
-            refX.size(), refY.size(), refXUnit, appState->spectrum.xUnitSelector);
+            refX.size(), refY.size(), refXUnit, appState->active->spectrum.xUnitSelector);
 
     cachedTransX.clear();
     cachedTransY.clear();
@@ -226,7 +226,7 @@ void T100Spectrum::setReferenceFromCSV(const std::string& path) {
 
     if (rawX.empty() || rawY.empty()) return;
 
-    int spectrumUnit = appState->spectrum.xUnitSelector;
+    int spectrumUnit = appState->active->spectrum.xUnitSelector;
     if (csvUnit != spectrumUnit) {
         auto csvU = static_cast<SpectralToolbox::SpectrumXUnit>(csvUnit);
         auto specU = static_cast<SpectralToolbox::SpectrumXUnit>(spectrumUnit);
@@ -258,13 +258,13 @@ void T100Spectrum::setReferenceFromCSV(const std::string& path) {
 }
 
 void T100Spectrum::setReferenceFromAverage() {
-    if (!appState || !appState->averageSpectrum.averageAvailable) return;
+    if (!appState || !appState->active->averageSpectrum.averageAvailable) return;
 
-    const auto& avg = appState->averageSpectrum;
+    const auto& avg = appState->active->averageSpectrum;
     std::vector<double> x = avg.cachedAverageX;
     std::vector<double> y = avg.cachedAverageY;
 
-    int spectrumUnit = appState->spectrum.xUnitSelector;
+    int spectrumUnit = appState->active->spectrum.xUnitSelector;
     if (avg.xUnitSelector != spectrumUnit) {
         auto avgU = static_cast<SpectralToolbox::SpectrumXUnit>(avg.xUnitSelector);
         auto specU = static_cast<SpectralToolbox::SpectrumXUnit>(spectrumUnit);
@@ -309,47 +309,47 @@ bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
     std::vector<double> localFreq, localSpec;
     bool useLocal = false;
 
-    auto freqIt = appState->spectrum.cachedFrequencies.find(fileId);
-    auto specIt = appState->spectrum.cachedSpectra.find(fileId);
-    if (freqIt == appState->spectrum.cachedFrequencies.end() ||
-        specIt == appState->spectrum.cachedSpectra.end() ||
+    auto freqIt = appState->active->spectrum.cachedFrequencies.find(fileId);
+    auto specIt = appState->active->spectrum.cachedSpectra.find(fileId);
+    if (freqIt == appState->active->spectrum.cachedFrequencies.end() ||
+        specIt == appState->active->spectrum.cachedSpectra.end() ||
         freqIt->second.empty() || specIt->second.empty()) {
         // Spectrum not yet cached — compute synchronously as fallback
         std::string fullPath = fileId;
         // fileId may be just a filename; find the full path in sortedFiles
-        for (const auto& sp : appState->sortedFiles) {
+        for (const auto& sp : appState->active->sortedFiles) {
             std::string fn = sp;
             size_t ls = fn.find_last_of("/\\");
             if (ls != std::string::npos) fn = fn.substr(ls + 1);
             if (fn == fileId) { fullPath = sp; break; }
         }
         try {
-            auto raw = workspaceRead(appState->workspace, fullPath);
+            auto raw = workspaceRead(appState->active->workspace, fullPath);
             SpectralToolbox::ProcessedSpectrum ps;
-            if (appState->datasetInfo.hasPrecomputedSpectra) {
+            if (appState->active->datasetInfo.hasPrecomputedSpectra) {
                 ps.spectrumX = raw.referenceDetector;
-                auto tgt = static_cast<SpectralToolbox::SpectrumXUnit>(appState->spectrum.xUnitSelector);
+                auto tgt = static_cast<SpectralToolbox::SpectrumXUnit>(appState->active->spectrum.xUnitSelector);
                 for (double& f : ps.spectrumX)
                     f = SpectralToolbox::convertXValue(f, SpectralToolbox::SpectrumXUnit::CmInv, tgt);
                 ps.spectrumY = std::move(raw.primaryDetector);
-            } else if (appState->datasetInfo.axisIsCorrected) {
+            } else if (appState->active->datasetInfo.axisIsCorrected) {
                 for (auto& v : raw.opdAxis) v *= 1e6;
                 ps = SpectralToolbox::processSpectrumFromCorrectedAxis(
                     raw.primaryDetector, raw.opdAxis,
-                    appState->spectrum.Kpadding,
-                    static_cast<SpectralToolbox::SpectrumXUnit>(appState->spectrum.xUnitSelector),
-                    static_cast<ApodizationWindow>(appState->spectrum.apodizationSelector),
-                    appState->spectrum.apodizationParams);
+                    appState->active->spectrum.Kpadding,
+                    static_cast<SpectralToolbox::SpectrumXUnit>(appState->active->spectrum.xUnitSelector),
+                    static_cast<ApodizationWindow>(appState->active->spectrum.apodizationSelector),
+                    appState->active->spectrum.apodizationParams);
             } else {
                 ps = SpectralToolbox::processSpectrum(
                     raw.primaryDetector, raw.referenceDetector,
-                    appState->spectrum.refLaserTextbox,
-                    appState->spectrum.Kpadding,
-                    static_cast<SpectralToolbox::SpectrumXUnit>(appState->spectrum.xUnitSelector),
-                    static_cast<ApodizationWindow>(appState->spectrum.apodizationSelector),
-                    appState->spectrum.apodizationParams,
-                    static_cast<SpectralToolbox::XCorrectionMethod>(appState->xCorrectionMethod),
-                    appState->peakProminenceThreshold);
+                    appState->active->spectrum.refLaserTextbox,
+                    appState->active->spectrum.Kpadding,
+                    static_cast<SpectralToolbox::SpectrumXUnit>(appState->active->spectrum.xUnitSelector),
+                    static_cast<ApodizationWindow>(appState->active->spectrum.apodizationSelector),
+                    appState->active->spectrum.apodizationParams,
+                    static_cast<SpectralToolbox::XCorrectionMethod>(appState->active->xCorrectionMethod),
+                    appState->active->peakProminenceThreshold);
             }
             if (ps.spectrumX.empty() || ps.spectrumY.empty())
                 return false;
@@ -367,7 +367,7 @@ bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
 
     using ST = SpectralToolbox::SpectrumXUnit;
     auto displayUnit = static_cast<ST>(xUnitSelector);
-    auto specU = static_cast<ST>(appState->spectrum.xUnitSelector);
+    auto specU = static_cast<ST>(appState->active->spectrum.xUnitSelector);
     auto refU = static_cast<ST>(refXUnit);
 
     std::vector<double> convertedRefX(refX.size());
@@ -408,7 +408,7 @@ bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
         return false;
 
     size_t origSize = newX.size();
-    if (appState && appState->enableDownsampling &&
+    if (appState && appState->active->enableDownsampling &&
         newX.size() > appState->maxPointsBeforeDownsampling) {
         size_t factor = newX.size() / appState->maxPointsBeforeDownsampling + 1;
         std::vector<double> dsX, dsY;
@@ -567,32 +567,32 @@ bool T100Spectrum::tickStdCalculation() {
         calcRatioB.clear();
         calcRatioC.clear();
 
-        double refLaser = appState->spectrum.refLaserTextbox;
-        int K = appState->spectrum.Kpadding;
+        double refLaser = appState->active->spectrum.refLaserTextbox;
+        int K = appState->active->spectrum.Kpadding;
         auto xUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
-        int apodSelector = appState->spectrum.apodizationSelector;
-        auto apodParams = appState->spectrum.apodizationParams;
+        int apodSelector = appState->active->spectrum.apodizationSelector;
+        auto apodParams = appState->active->spectrum.apodizationParams;
 
         // Capture energy ratio configs for use in worker threads
         std::string numA(energyRatioNumA), denA(energyRatioDenA);
         std::string numB(energyRatioNumB), denB(energyRatioDenB);
         std::string numC(energyRatioNumC), denC(energyRatioDenC);
 
-        for (size_t i = 0; i < appState->sortedFiles.size(); ++i) {
-            if (i >= appState->filesSelectedForAveraging.size() ||
-                !appState->filesSelectedForAveraging[i]) continue;
+        for (size_t i = 0; i < appState->active->sortedFiles.size(); ++i) {
+            if (i >= appState->active->filesSelectedForAveraging.size() ||
+                !appState->active->filesSelectedForAveraging[i]) continue;
 
-            std::string filePath = appState->sortedFiles[i];
-            bool axisCorr = appState->datasetInfo.axisIsCorrected;
-            bool hasPrecomp = appState->datasetInfo.hasPrecomputedSpectra;
+            std::string filePath = appState->active->sortedFiles[i];
+            bool axisCorr = appState->active->datasetInfo.axisIsCorrected;
+            bool hasPrecomp = appState->active->datasetInfo.hasPrecomputedSpectra;
             // Read the raw data on the main thread and capture it by value:
             // the workspace is mutated/replaced by the main thread (open,
             // close, member delete, Ctrl+H), so workers must never read it.
-            InterferogramData raw = workspaceRead(appState->workspace, filePath);
+            InterferogramData raw = workspaceRead(appState->active->workspace, filePath);
             auto fut = appState->computationPool->enqueue(
                 [raw = std::move(raw), refLaser, K, xUnit, apodSelector, apodParams, this, axisCorr, hasPrecomp,
-                 xMethod = static_cast<SpectralToolbox::XCorrectionMethod>(appState->xCorrectionMethod),
-                 promThresh = appState->peakProminenceThreshold]() mutable {
+                 xMethod = static_cast<SpectralToolbox::XCorrectionMethod>(appState->active->xCorrectionMethod),
+                 promThresh = appState->active->peakProminenceThreshold]() mutable {
                     if (hasPrecomp) {
                         SpectralToolbox::ProcessedSpectrum ps;
                         ps.spectrumX = raw.referenceDetector;
@@ -884,8 +884,8 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
 #endif
     // Detect file selection changes
     {
-        std::vector<std::string> currentSelection(appState->selectedFilenames.begin(),
-                                                   appState->selectedFilenames.end());
+        std::vector<std::string> currentSelection(appState->active->selectedFilenames.begin(),
+                                                   appState->active->selectedFilenames.end());
         if (currentSelection != lastKnownSelection) {
             needsRecompute = true;
             appState->needsRedraw = true;
@@ -904,7 +904,7 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
         return;
     }
 
-    if (appState->selectedFilenames.empty()) {
+    if (appState->active->selectedFilenames.empty()) {
         ImVec2 avail = ImGui::GetContentRegionAvail();
         const char* msg = "No data loaded.";
         ImVec2 textSize = ImGui::CalcTextSize(msg);
@@ -1471,9 +1471,9 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
                     energyRatioNumA, energyRatioDenA,
                     energyRatioNumB, energyRatioDenB,
                     energyRatioNumC, energyRatioDenC,
-                    appState->spectrum.xUnitSelector,
-                    appState->spectrum.cachedFrequencies,
-                    appState->spectrum.cachedSpectra);
+                    appState->active->spectrum.xUnitSelector,
+                    appState->active->spectrum.cachedFrequencies,
+                    appState->active->spectrum.cachedSpectra);
 
                 ImGui::TableNextRow();
 
@@ -1632,12 +1632,12 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
 }
 void renderT100Panel() {
         ImGui::Begin("100% T");
-        if (appState.dataLoaded) {
+        if (appState.active->dataLoaded) {
             ImGui::Text("Reference source:");
             ImGui::SameLine();
             {
-                int& refSrc = appState.t100.referenceSource;
-                bool avgAvail = appState.averageSpectrum.averageAvailable;
+                int& refSrc = appState.active->t100.referenceSource;
+                bool avgAvail = appState.active->averageSpectrum.averageAvailable;
                 const ImVec4 cfgBtnColors[2] = {
                     ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
                     ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
@@ -1680,48 +1680,48 @@ void renderT100Panel() {
 
             ImGui::Separator();
 
-            if (appState.t100.referenceSource == 0) {
+            if (appState.active->t100.referenceSource == 0) {
                 if (ImGui::Button("Set as reference##T100SetRef")) {
-                    appState.t100.setReferenceFromCurrentSpectrum();
+                    appState.active->t100.setReferenceFromCurrentSpectrum();
                     appState.needsRedraw = true;
                 }
-            } else if (appState.t100.referenceSource == 1) {
-                ImGui::InputText("Path##T100CsvPath", appState.t100.csvPathBuffer,
-                                 sizeof(appState.t100.csvPathBuffer));
+            } else if (appState.active->t100.referenceSource == 1) {
+                ImGui::InputText("Path##T100CsvPath", appState.active->t100.csvPathBuffer,
+                                 sizeof(appState.active->t100.csvPathBuffer));
                 ImGui::SameLine();
                 if (ImGui::Button("Browse...##T100Browse")) {
                     const char* filter = "*.csv";
                     const char* path = tinyfd_openFileDialog("Select Reference CSV", "", 1, &filter, "CSV Files", 0);
                     if (path) {
-                        strncpy(appState.t100.csvPathBuffer, path,
-                                     sizeof(appState.t100.csvPathBuffer) - 1);
-                        appState.t100.csvPathBuffer[sizeof(appState.t100.csvPathBuffer) - 1] = '\0';
+                        strncpy(appState.active->t100.csvPathBuffer, path,
+                                     sizeof(appState.active->t100.csvPathBuffer) - 1);
+                        appState.active->t100.csvPathBuffer[sizeof(appState.active->t100.csvPathBuffer) - 1] = '\0';
                         appState.needsRedraw = true;
                     }
                 }
-                if (appState.t100.csvPathBuffer[0] != '\0') {
+                if (appState.active->t100.csvPathBuffer[0] != '\0') {
                     if (ImGui::Button("Load##T100LoadCsv")) {
-                        appState.t100.setReferenceFromCSV(appState.t100.csvPathBuffer);
+                        appState.active->t100.setReferenceFromCSV(appState.active->t100.csvPathBuffer);
                         appState.needsRedraw = true;
                     }
                 }
-            } else if (appState.t100.referenceSource == 2) {
-                if (!appState.averageSpectrum.averageAvailable) ImGui::BeginDisabled();
+            } else if (appState.active->t100.referenceSource == 2) {
+                if (!appState.active->averageSpectrum.averageAvailable) ImGui::BeginDisabled();
                 if (ImGui::Button("Use average##T100UseAvg")) {
-                    appState.t100.setReferenceFromAverage();
+                    appState.active->t100.setReferenceFromAverage();
                     appState.needsRedraw = true;
                 }
-                if (!appState.averageSpectrum.averageAvailable) ImGui::EndDisabled();
+                if (!appState.active->averageSpectrum.averageAvailable) ImGui::EndDisabled();
             }
 
-            if (appState.t100.referenceAvailable) {
+            if (appState.active->t100.referenceAvailable) {
                 ImGui::TextColored(ImVec4(0.2f, 0.8f, 0.2f, 1.0f), "Reference loaded");
-                ImGui::TextWrapped("%s", appState.t100.refDescription.c_str());
-                const char* unitName = (appState.t100.refXUnit == 0) ? "cm-1"
-                                     : (appState.t100.refXUnit == 1) ? "um"
+                ImGui::TextWrapped("%s", appState.active->t100.refDescription.c_str());
+                const char* unitName = (appState.active->t100.refXUnit == 0) ? "cm-1"
+                                     : (appState.active->t100.refXUnit == 1) ? "um"
                                      : "THz";
                 ImGui::TextDisabled("%zu points, unit: %s",
-                    appState.t100.refX.size(), unitName);
+                    appState.active->t100.refX.size(), unitName);
             } else {
                 ImGui::TextColored(ImVec4(0.7f, 0.5f, 0.1f, 1.0f), "No reference");
             }
@@ -1742,48 +1742,48 @@ void renderT100Panel() {
                 ImGui::SetWindowFontScale(1.0f);
                 ImGui::SameLine();
                 if (ImGui::Button("ASTM E1421##T100AstmE1421")) {
-                    strncpy(appState.t100.energyRatioNumA, "4000", 31);
-                    strncpy(appState.t100.energyRatioDenA, "2000", 31);
-                    strncpy(appState.t100.energyRatioNumB, "2000", 31);
-                    strncpy(appState.t100.energyRatioDenB, "1000", 31);
-                    strncpy(appState.t100.energyRatioNumC, "150", 31);
-                    strncpy(appState.t100.energyRatioDenC, "max", 31);
+                    strncpy(appState.active->t100.energyRatioNumA, "4000", 31);
+                    strncpy(appState.active->t100.energyRatioDenA, "2000", 31);
+                    strncpy(appState.active->t100.energyRatioNumB, "2000", 31);
+                    strncpy(appState.active->t100.energyRatioDenB, "1000", 31);
+                    strncpy(appState.active->t100.energyRatioNumC, "150", 31);
+                    strncpy(appState.active->t100.energyRatioDenC, "max", 31);
                     appState.needsRedraw = true;
                 }
 
                 ImGui::Text("A: "); ImGui::SameLine();
-                ratioInput("##T100RatioNumA", appState.t100.energyRatioNumA,
-                           sizeof(appState.t100.energyRatioNumA));
+                ratioInput("##T100RatioNumA", appState.active->t100.energyRatioNumA,
+                           sizeof(appState.active->t100.energyRatioNumA));
                 ImGui::SameLine(); ImGui::Text("/"); ImGui::SameLine();
-                ratioInput("##T100RatioDenA", appState.t100.energyRatioDenA,
-                           sizeof(appState.t100.energyRatioDenA));
+                ratioInput("##T100RatioDenA", appState.active->t100.energyRatioDenA,
+                           sizeof(appState.active->t100.energyRatioDenA));
 
                 ImGui::Text("B: "); ImGui::SameLine();
-                ratioInput("##T100RatioNumB", appState.t100.energyRatioNumB,
-                           sizeof(appState.t100.energyRatioNumB));
+                ratioInput("##T100RatioNumB", appState.active->t100.energyRatioNumB,
+                           sizeof(appState.active->t100.energyRatioNumB));
                 ImGui::SameLine(); ImGui::Text("/"); ImGui::SameLine();
-                ratioInput("##T100RatioDenB", appState.t100.energyRatioDenB,
-                           sizeof(appState.t100.energyRatioDenB));
+                ratioInput("##T100RatioDenB", appState.active->t100.energyRatioDenB,
+                           sizeof(appState.active->t100.energyRatioDenB));
 
                 ImGui::Text("C: "); ImGui::SameLine();
-                ratioInput("##T100RatioNumC", appState.t100.energyRatioNumC,
-                           sizeof(appState.t100.energyRatioNumC));
+                ratioInput("##T100RatioNumC", appState.active->t100.energyRatioNumC,
+                           sizeof(appState.active->t100.energyRatioNumC));
                 ImGui::SameLine(); ImGui::Text("/"); ImGui::SameLine();
-                ratioInput("##T100RatioDenC", appState.t100.energyRatioDenC,
-                           sizeof(appState.t100.energyRatioDenC));
+                ratioInput("##T100RatioDenC", appState.active->t100.energyRatioDenC,
+                           sizeof(appState.active->t100.energyRatioDenC));
             }
 
             ImGui::Separator();
 
             // Force Y min/max (shown when force mode)
-            if (appState.t100.yAxisMode == 2) {
+            if (appState.active->t100.yAxisMode == 2) {
                 ImGui::Text("Force Y");
-                double vMin = appState.t100.forcedYMin;
-                double vMax = appState.t100.forcedYMax;
+                double vMin = appState.active->t100.forcedYMin;
+                double vMax = appState.active->t100.forcedYMax;
                 ImGui::SetNextItemWidth(100);
                 if (ImGui::InputDouble("Min##T100ForceYMin", &vMin, 0.0, 0.0, "%.4f")) {
                     if (vMax > vMin) {
-                        appState.t100.forcedYMin = vMin;
+                        appState.active->t100.forcedYMin = vMin;
                         appState.needsRedraw = true;
                     }
                 }
@@ -1791,7 +1791,7 @@ void renderT100Panel() {
                 ImGui::SetNextItemWidth(100);
                 if (ImGui::InputDouble("Max##T100ForceYMax", &vMax, 0.0, 0.0, "%.4f")) {
                     if (vMax > vMin) {
-                        appState.t100.forcedYMax = vMax;
+                        appState.active->t100.forcedYMax = vMax;
                         appState.needsRedraw = true;
                     }
                 }
@@ -1799,20 +1799,20 @@ void renderT100Panel() {
             }
 
             ImGui::Text("Std Deviation");
-            if (!appState.t100.calcStdInProgress) {
+            if (!appState.active->t100.calcStdInProgress) {
                 if (ImGui::Button("Calculate std##T100CalcStd")) {
-                    if (appState.t100.referenceAvailable) {
-                        appState.t100.startStdCalculation();
+                    if (appState.active->t100.referenceAvailable) {
+                        appState.active->t100.startStdCalculation();
                         appState.needsRedraw = true;
                     }
                 }
             } else {
-                float pct = appState.t100.stdProgressTotal > 0
-                    ? (float)appState.t100.stdProgressCurrent / (float)appState.t100.stdProgressTotal
+                float pct = appState.active->t100.stdProgressTotal > 0
+                    ? (float)appState.active->t100.stdProgressCurrent / (float)appState.active->t100.stdProgressTotal
                     : 0.0f;
                 ImGui::ProgressBar(pct, ImVec2(-1, 0), "");
-                ImGui::Text("Processing %d/%d", appState.t100.stdProgressCurrent,
-                            appState.t100.stdProgressTotal);
+                ImGui::Text("Processing %d/%d", appState.active->t100.stdProgressCurrent,
+                            appState.active->t100.stdProgressTotal);
             }
 
             ImGui::Separator();
@@ -1827,7 +1827,7 @@ void renderT100Panel() {
                 // Cursor On/Off
                 ImGui::Text("Cursor");
                 ImGui::SameLine();
-                const bool cursorOn = appState.spectrum.showTrackingCursor;
+                const bool cursorOn = appState.active->spectrum.showTrackingCursor;
                 ImVec4 cursorBtnColors[2] = {
                     ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
                     ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
@@ -1838,7 +1838,7 @@ void renderT100Panel() {
                 ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
                 if (ImGui::Button("On##T100CursorOn")) {
                     if (!cursorOn) {
-                        appState.spectrum.showTrackingCursor = true;
+                        appState.active->spectrum.showTrackingCursor = true;
                         appState.needsRedraw = true;
                     }
                 }
@@ -1851,7 +1851,7 @@ void renderT100Panel() {
                 ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
                 if (ImGui::Button("Off##T100CursorOff")) {
                     if (cursorOn) {
-                        appState.spectrum.showTrackingCursor = false;
+                        appState.active->spectrum.showTrackingCursor = false;
                         appState.needsRedraw = true;
                     }
                 }
@@ -1861,7 +1861,7 @@ void renderT100Panel() {
                 // X unit
                 ImGui::Text("X unit");
                 ImGui::SameLine();
-                int& sel = appState.t100.xUnitSelector;
+                int& sel = appState.active->t100.xUnitSelector;
                 ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[sel == 0 ? 1 : 0]);
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  sel == 0 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
@@ -1891,44 +1891,44 @@ void renderT100Panel() {
 
                 // Match X to Spectrum View
                 if (ImGui::Button("Match X to Spectrum View##T100MatchX")) {
-                    int newXUnit = appState.spectrum.xUnitSelector;
-                    int oldUnit = appState.t100.prevXUnitSelector;
-                    double specMin = appState.spectrum.manualXMin;
-                    double specMax = appState.spectrum.manualXMax;
+                    int newXUnit = appState.active->spectrum.xUnitSelector;
+                    int oldUnit = appState.active->t100.prevXUnitSelector;
+                    double specMin = appState.active->spectrum.manualXMin;
+                    double specMax = appState.active->spectrum.manualXMax;
 
                     if (specMin < specMax) {
-                        appState.t100.manualXMin = specMin;
-                        appState.t100.manualXMax = specMax;
-                        appState.t100.pendingNextXMin = specMin;
-                        appState.t100.pendingNextXMax = specMax;
-                        appState.t100.shouldAutoscale = false;
+                        appState.active->t100.manualXMin = specMin;
+                        appState.active->t100.manualXMax = specMax;
+                        appState.active->t100.pendingNextXMin = specMin;
+                        appState.active->t100.pendingNextXMax = specMax;
+                        appState.active->t100.shouldAutoscale = false;
                     } else {
-                        appState.t100.shouldAutoscale = true;
+                        appState.active->t100.shouldAutoscale = true;
                     }
 
-                    if (appState.t100.transmittanceAvailable && !appState.t100.cachedTransX.empty()) {
+                    if (appState.active->t100.transmittanceAvailable && !appState.active->t100.cachedTransX.empty()) {
                         auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(oldUnit);
                         auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(newXUnit);
-                        for (auto& [fid, vec] : appState.t100.cachedTransX)
+                        for (auto& [fid, vec] : appState.active->t100.cachedTransX)
                             for (double& x : vec)
                                 x = SpectralToolbox::convertXValue(x, oldU, newU);
                     }
-                    if (appState.t100.stddevAvailable && !appState.t100.cachedStdX.empty()) {
+                    if (appState.active->t100.stddevAvailable && !appState.active->t100.cachedStdX.empty()) {
                         auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(oldUnit);
                         auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(newXUnit);
-                        for (double& x : appState.t100.cachedStdX)
+                        for (double& x : appState.active->t100.cachedStdX)
                             x = SpectralToolbox::convertXValue(x, oldU, newU);
                     }
 
-                    appState.t100.xUnitSelector = newXUnit;
-                    appState.t100.prevXUnitSelector = newXUnit;
+                    appState.active->t100.xUnitSelector = newXUnit;
+                    appState.active->t100.prevXUnitSelector = newXUnit;
                     appState.needsRedraw = true;
                 }
 
                 // Y Axis
                 ImGui::Text("Y Axis");
                 ImGui::SameLine();
-                int& mode = appState.t100.yAxisMode;
+                int& mode = appState.active->t100.yAxisMode;
                 ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[mode == 0 ? 1 : 0]);
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  mode == 0 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
@@ -1966,129 +1966,6 @@ void renderT100Panel() {
 
 // ── Park/resume mirror support (M2.1) ───────────────────────────────────────
 
-void T100Spectrum::parkInto(T100Spectrum& dst) {
-    dst.appState = appState;
-    dst.refX = std::move(refX);
-    dst.refY = std::move(refY);
-    dst.refXUnit = refXUnit;
-    dst.referenceAvailable = referenceAvailable;
-    dst.referenceSource = referenceSource;
-    dst.refDescription = refDescription;
-    dst.cachedTransX = std::move(cachedTransX);
-    dst.cachedTransY = std::move(cachedTransY);
-    dst.transmittanceAvailable = transmittanceAvailable;
-    dst.isSelectingXRange = isSelectingXRange;
-    dst.selectionStartX = selectionStartX;
-    dst.selectionEndX = selectionEndX;
-    dst.shouldAutoscale = shouldAutoscale;
-    dst.firstLoadCompleted = firstLoadCompleted;
-    dst.manualXMin = manualXMin; dst.manualXMax = manualXMax;
-    dst.manualYMin = manualYMin; dst.manualYMax = manualYMax;
-    dst.savedYMin = savedYMin; dst.savedYMax = savedYMax;
-    dst.leftArrowPressedLastFrame = leftArrowPressedLastFrame;
-    dst.rightArrowPressedLastFrame = rightArrowPressedLastFrame;
-    dst.leftArrowHandleFlag = leftArrowHandleFlag;
-    dst.rightArrowHandleFlag = rightArrowHandleFlag;
-    dst.xUnitSelector = xUnitSelector;
-    dst.prevXUnitSelector = prevXUnitSelector;
-    dst.yAxisMode = yAxisMode;
-    dst.prevYAxisMode = prevYAxisMode;
-    dst.forcedYMin = forcedYMin; dst.forcedYMax = forcedYMax;
-    dst.pendingNextXMin = pendingNextXMin; dst.pendingNextXMax = pendingNextXMax;
-    dst.xUnitSwitchedThisFrame = xUnitSwitchedThisFrame;
-    dst.convertedXMin = convertedXMin; dst.convertedXMax = convertedXMax;
-    dst.needsRecompute = needsRecompute;
-    dst.lastKnownSelection = lastKnownSelection;
-    std::memcpy(dst.csvPathBuffer, csvPathBuffer, sizeof(csvPathBuffer));
-    std::memcpy(dst.energyRatioNumA, energyRatioNumA, sizeof(energyRatioNumA));
-    std::memcpy(dst.energyRatioDenA, energyRatioDenA, sizeof(energyRatioDenA));
-    std::memcpy(dst.energyRatioNumB, energyRatioNumB, sizeof(energyRatioNumB));
-    std::memcpy(dst.energyRatioDenB, energyRatioDenB, sizeof(energyRatioDenB));
-    std::memcpy(dst.energyRatioNumC, energyRatioNumC, sizeof(energyRatioNumC));
-    std::memcpy(dst.energyRatioDenC, energyRatioDenC, sizeof(energyRatioDenC));
-    dst.stddevAvailable = stddevAvailable;
-    dst.calcStdInProgress = calcStdInProgress;
-    dst.stdProgressTotal = stdProgressTotal;
-    dst.stdProgressCurrent = stdProgressCurrent;
-    dst.cachedStdX = std::move(cachedStdX);
-    dst.cachedStdY = std::move(cachedStdY);
-    dst.ratioStatsAvailable = ratioStatsAvailable;
-    dst.ratioAvgA = ratioAvgA; dst.ratioAvgB = ratioAvgB; dst.ratioAvgC = ratioAvgC;
-    dst.ratioSpreadA = ratioSpreadA; dst.ratioSpreadB = ratioSpreadB; dst.ratioSpreadC = ratioSpreadC;
-    dst.ratioStdDevA = ratioStdDevA; dst.ratioStdDevB = ratioStdDevB; dst.ratioStdDevC = ratioStdDevC;
-    dst.pendingFutures_ = std::move(pendingFutures_);
-    dst.totalSubmitted_ = totalSubmitted_;
-    dst.batchActive_ = batchActive_;
-    dst.calcStdCommonX = std::move(calcStdCommonX);
-    dst.calcStdSum = std::move(calcStdSum);
-    dst.calcStdSum2 = std::move(calcStdSum2);
-    dst.calcStdBins = calcStdBins;
-    dst.calcStdValidFiles = calcStdValidFiles;
-    dst.calcStdFirstFile = calcStdFirstFile;
-    dst.calcRatioA = std::move(calcRatioA);
-    dst.calcRatioB = std::move(calcRatioB);
-    dst.calcRatioC = std::move(calcRatioC);
-}
 
-void T100Spectrum::resumeFrom(T100Spectrum& src) {
-    refX = std::move(src.refX);
-    refY = std::move(src.refY);
-    refXUnit = src.refXUnit;
-    referenceAvailable = src.referenceAvailable;
-    referenceSource = src.referenceSource;
-    refDescription = src.refDescription;
-    cachedTransX = std::move(src.cachedTransX);
-    cachedTransY = std::move(src.cachedTransY);
-    transmittanceAvailable = src.transmittanceAvailable;
-    isSelectingXRange = src.isSelectingXRange;
-    selectionStartX = src.selectionStartX;
-    selectionEndX = src.selectionEndX;
-    shouldAutoscale = src.shouldAutoscale;
-    firstLoadCompleted = src.firstLoadCompleted;
-    manualXMin = src.manualXMin; manualXMax = src.manualXMax;
-    manualYMin = src.manualYMin; manualYMax = src.manualYMax;
-    savedYMin = src.savedYMin; savedYMax = src.savedYMax;
-    leftArrowPressedLastFrame = src.leftArrowPressedLastFrame;
-    rightArrowPressedLastFrame = src.rightArrowPressedLastFrame;
-    leftArrowHandleFlag = src.leftArrowHandleFlag;
-    rightArrowHandleFlag = src.rightArrowHandleFlag;
-    xUnitSelector = src.xUnitSelector;
-    prevXUnitSelector = src.prevXUnitSelector;
-    yAxisMode = src.yAxisMode;
-    prevYAxisMode = src.prevYAxisMode;
-    forcedYMin = src.forcedYMin; forcedYMax = src.forcedYMax;
-    pendingNextXMin = src.pendingNextXMin; pendingNextXMax = src.pendingNextXMax;
-    xUnitSwitchedThisFrame = src.xUnitSwitchedThisFrame;
-    convertedXMin = src.convertedXMin; convertedXMax = src.convertedXMax;
-    needsRecompute = src.needsRecompute;
-    lastKnownSelection = src.lastKnownSelection;
-    std::memcpy(csvPathBuffer, src.csvPathBuffer, sizeof(csvPathBuffer));
-    std::memcpy(energyRatioNumA, src.energyRatioNumA, sizeof(energyRatioNumA));
-    std::memcpy(energyRatioDenA, src.energyRatioDenA, sizeof(energyRatioDenA));
-    std::memcpy(energyRatioNumB, src.energyRatioNumB, sizeof(energyRatioNumB));
-    std::memcpy(energyRatioDenB, src.energyRatioDenB, sizeof(energyRatioDenB));
-    std::memcpy(energyRatioNumC, src.energyRatioNumC, sizeof(energyRatioNumC));
-    std::memcpy(energyRatioDenC, src.energyRatioDenC, sizeof(energyRatioDenC));
-    stddevAvailable = src.stddevAvailable;
-    calcStdInProgress = src.calcStdInProgress;
-    stdProgressTotal = src.stdProgressTotal;
-    stdProgressCurrent = src.stdProgressCurrent;
-    cachedStdX = std::move(src.cachedStdX);
-    cachedStdY = std::move(src.cachedStdY);
-    ratioStatsAvailable = src.ratioStatsAvailable;
-    ratioAvgA = src.ratioAvgA; ratioAvgB = src.ratioAvgB; ratioAvgC = src.ratioAvgC;
-    ratioSpreadA = src.ratioSpreadA; ratioSpreadB = src.ratioSpreadB; ratioSpreadC = src.ratioSpreadC;
-    ratioStdDevA = src.ratioStdDevA; ratioStdDevB = src.ratioStdDevB; ratioStdDevC = src.ratioStdDevC;
-    pendingFutures_ = std::move(src.pendingFutures_);
-    totalSubmitted_ = src.totalSubmitted_;
-    batchActive_ = src.batchActive_;
-    calcStdCommonX = std::move(src.calcStdCommonX);
-    calcStdSum = std::move(src.calcStdSum);
-    calcStdSum2 = std::move(src.calcStdSum2);
-    calcStdBins = src.calcStdBins;
-    calcStdValidFiles = src.calcStdValidFiles;
-    calcStdFirstFile = src.calcStdFirstFile;
-    calcRatioA = std::move(src.calcRatioA);
-    calcRatioB = std::move(src.calcRatioB);
-    calcRatioC = std::move(src.calcRatioC);
-}
+
+

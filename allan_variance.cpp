@@ -710,27 +710,27 @@ bool AllanVariance::tickPhase0_AverageSpectrum() {
         calcState.avgSumY.clear();
         calcState.fileSpectraY.clear();
 
-        double refLaser = appState->spectrum.refLaserTextbox;
-        int K = appState->spectrum.Kpadding;
+        double refLaser = appState->active->spectrum.refLaserTextbox;
+        int K = appState->active->spectrum.Kpadding;
         auto xUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
-        int apodSelector = appState->spectrum.apodizationSelector;
-        auto apodParams = appState->spectrum.apodizationParams;
+        int apodSelector = appState->active->spectrum.apodizationSelector;
+        auto apodParams = appState->active->spectrum.apodizationParams;
 
-        for (size_t i = 0; i < appState->sortedFiles.size(); ++i) {
-            if (i >= appState->filesSelectedForAveraging.size() ||
-                !appState->filesSelectedForAveraging[i]) continue;
+        for (size_t i = 0; i < appState->active->sortedFiles.size(); ++i) {
+            if (i >= appState->active->filesSelectedForAveraging.size() ||
+                !appState->active->filesSelectedForAveraging[i]) continue;
 
-            std::string filePath = appState->sortedFiles[i];
-            bool axisCorr = appState->datasetInfo.axisIsCorrected;
-            bool hasPrecomp = appState->datasetInfo.hasPrecomputedSpectra;
+            std::string filePath = appState->active->sortedFiles[i];
+            bool axisCorr = appState->active->datasetInfo.axisIsCorrected;
+            bool hasPrecomp = appState->active->datasetInfo.hasPrecomputedSpectra;
             // Read the raw data on the main thread and capture it by value:
             // the workspace is mutated/replaced by the main thread (open,
             // close, member delete, Ctrl+H), so workers must never read it.
-            InterferogramData raw = workspaceRead(appState->workspace, filePath);
+            InterferogramData raw = workspaceRead(appState->active->workspace, filePath);
             auto fut = appState->computationPool->enqueue([raw = std::move(raw), refLaser, K, xUnit,
                                                                apodSelector, apodParams, this, axisCorr, hasPrecomp,
-                                                               xMethod = static_cast<SpectralToolbox::XCorrectionMethod>(appState->xCorrectionMethod),
-                                                               promThresh = appState->peakProminenceThreshold]() mutable {
+                                                               xMethod = static_cast<SpectralToolbox::XCorrectionMethod>(appState->active->xCorrectionMethod),
+                                                               promThresh = appState->active->peakProminenceThreshold]() mutable {
                 if (hasPrecomp) {
                     SpectralToolbox::ProcessedSpectrum ps;
                     ps.spectrumX = raw.referenceDetector;
@@ -974,7 +974,7 @@ bool AllanVariance::tickPhase2_AllanVariance() {
 #if FTS_BUILD_HDF5
         if (appState && appState->hasWorkspace() && allanAvailable) {
             auto inputs = checkedInputPaths(*appState);
-            wsUpsertAllan(appState->workspace, inputs,
+            wsUpsertAllan(appState->active->workspace, inputs,
                           cachedSurfaceTaus, cachedSurfaceWavelengths, cachedSurfaceAllanVar,
                           makeAllanConfig(*appState, inputs));
         }
@@ -992,19 +992,19 @@ bool AllanVariance::tickPhase2_AllanVariance() {
 
 void renderAllanPanel() {
         ImGui::Begin("Allan");
-        if (appState.dataLoaded) {
-            if (!appState.allanVariance.calcInProgress) {
+        if (appState.active->dataLoaded) {
+            if (!appState.active->allanVariance.calcInProgress) {
                 int selCount = 0;
-                for (size_t i = 0; i < appState.filesSelectedForAveraging.size(); i++)
-                    if (appState.filesSelectedForAveraging[i]) selCount++;
+                for (size_t i = 0; i < appState.active->filesSelectedForAveraging.size(); i++)
+                    if (appState.active->filesSelectedForAveraging[i]) selCount++;
                 ImGui::Text("Selected: %d files", selCount);
 
                 ImGui::Text("Decimation");
                 ImGui::SameLine();
                 ImGui::SetNextItemWidth(80.0f);
-                if (ImGui::InputInt("##AllanDecimation", &appState.allanVariance.wavelengthDecimation, 1, 1)) {
-                    if (appState.allanVariance.wavelengthDecimation < 1)
-                        appState.allanVariance.wavelengthDecimation = 1;
+                if (ImGui::InputInt("##AllanDecimation", &appState.active->allanVariance.wavelengthDecimation, 1, 1)) {
+                    if (appState.active->allanVariance.wavelengthDecimation < 1)
+                        appState.active->allanVariance.wavelengthDecimation = 1;
                     appState.needsRedraw = true;
                 }
 
@@ -1015,22 +1015,22 @@ void renderAllanPanel() {
 
                 ImGui::Text("Calc base");
                 ImGui::SameLine();
-                const bool allanCalcBase100T = (appState.allanVariance.calcBaseSelector == 0);
-                const bool allanCalcBaseSpectrum = (appState.allanVariance.calcBaseSelector == 1);
+                const bool allanCalcBase100T = (appState.active->allanVariance.calcBaseSelector == 0);
+                const bool allanCalcBaseSpectrum = (appState.active->allanVariance.calcBaseSelector == 1);
                 ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[allanCalcBase100T ? 1 : 0]);
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allanCalcBase100T ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-                if (ImGui::Button("100% T##AllanCalcBase100T")) { appState.allanVariance.calcBaseSelector = 0; appState.needsRedraw = true; }
+                if (ImGui::Button("100% T##AllanCalcBase100T")) { appState.active->allanVariance.calcBaseSelector = 0; appState.needsRedraw = true; }
                 ImGui::PopStyleColor(3);
                 ImGui::SameLine();
                 ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[allanCalcBaseSpectrum ? 1 : 0]);
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allanCalcBaseSpectrum ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-                if (ImGui::Button("Spectrum##AllanCalcBaseSpectrum")) { appState.allanVariance.calcBaseSelector = 1; appState.needsRedraw = true; }
+                if (ImGui::Button("Spectrum##AllanCalcBaseSpectrum")) { appState.active->allanVariance.calcBaseSelector = 1; appState.needsRedraw = true; }
                 ImGui::PopStyleColor(3);
 
                 if (ImGui::Button("Calculate Allan")) {
-                    appState.allanVariance.startCalculation();
+                    appState.active->allanVariance.startCalculation();
                     appState.needsRedraw = true;
             }
 
@@ -1046,34 +1046,34 @@ void renderAllanPanel() {
                     // X unit
                     ImGui::Text("X unit");
                     ImGui::SameLine();
-                    const bool allanCmSel  = (appState.allanVariance.xUnitSelector == 0);
-                    const bool allanUmSel  = (appState.allanVariance.xUnitSelector == 1);
-                    const bool allanThzSel = (appState.allanVariance.xUnitSelector == 2);
+                    const bool allanCmSel  = (appState.active->allanVariance.xUnitSelector == 0);
+                    const bool allanUmSel  = (appState.active->allanVariance.xUnitSelector == 1);
+                    const bool allanThzSel = (appState.active->allanVariance.xUnitSelector == 2);
 
                     ImGui::PushStyleColor(ImGuiCol_Button,        navBtnColors[allanCmSel ? 1 : 0]);
                     ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allanCmSel ? navBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
                     ImGui::PushStyleColor(ImGuiCol_ButtonActive,   navBtnColors[1]);
-                    if (ImGui::Button("cm-1##AllanXUnitCm")) { appState.allanVariance.xUnitSelector = 0; appState.needsRedraw = true; }
+                    if (ImGui::Button("cm-1##AllanXUnitCm")) { appState.active->allanVariance.xUnitSelector = 0; appState.needsRedraw = true; }
                     ImGui::PopStyleColor(3);
                     ImGui::SameLine(0.0f, 0.0f);
 
                     ImGui::PushStyleColor(ImGuiCol_Button,        navBtnColors[allanUmSel ? 1 : 0]);
                     ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allanUmSel ? navBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
                     ImGui::PushStyleColor(ImGuiCol_ButtonActive,   navBtnColors[1]);
-                    if (ImGui::Button("\xC2\xB5""m##AllanXUnitUm")) { appState.allanVariance.xUnitSelector = 1; appState.needsRedraw = true; }
+                    if (ImGui::Button("\xC2\xB5""m##AllanXUnitUm")) { appState.active->allanVariance.xUnitSelector = 1; appState.needsRedraw = true; }
                     ImGui::PopStyleColor(3);
                     ImGui::SameLine(0.0f, 0.0f);
 
                     ImGui::PushStyleColor(ImGuiCol_Button,        navBtnColors[allanThzSel ? 1 : 0]);
                     ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allanThzSel ? navBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
                     ImGui::PushStyleColor(ImGuiCol_ButtonActive,   navBtnColors[1]);
-                    if (ImGui::Button("THz##AllanXUnitTHz")) { appState.allanVariance.xUnitSelector = 2; appState.needsRedraw = true; }
+                    if (ImGui::Button("THz##AllanXUnitTHz")) { appState.active->allanVariance.xUnitSelector = 2; appState.needsRedraw = true; }
                     ImGui::PopStyleColor(3);
 
                     // Cursor On/Off
                     ImGui::Text("Cursor");
                     ImGui::SameLine();
-                    const bool cursorOn = appState.spectrum.showTrackingCursor;
+                    const bool cursorOn = appState.active->spectrum.showTrackingCursor;
                     const ImVec4 cursorBtnColors[2] = {
                         ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
                         ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
@@ -1084,7 +1084,7 @@ void renderAllanPanel() {
                     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
                     if (ImGui::Button("On##AllanCursorOn")) {
                         if (!cursorOn) {
-                            appState.spectrum.showTrackingCursor = true;
+                            appState.active->spectrum.showTrackingCursor = true;
                             appState.needsRedraw = true;
                         }
                     }
@@ -1097,7 +1097,7 @@ void renderAllanPanel() {
                     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
                     if (ImGui::Button("Off##AllanCursorOff")) {
                         if (cursorOn) {
-                            appState.spectrum.showTrackingCursor = false;
+                            appState.active->spectrum.showTrackingCursor = false;
                             appState.needsRedraw = true;
                         }
                     }
@@ -1105,17 +1105,17 @@ void renderAllanPanel() {
                     ImGui::PopStyleColor(3);
 
                     // X range min/max (stored in um, displayed in selected unit)
-                    double displayMin = appState.allanVariance.xRangeMin;
-                    double displayMax = appState.allanVariance.xRangeMax;
-                    if (appState.allanVariance.xUnitSelector == 0) {
-                        displayMin = SpectralToolbox::convertUmToCm(appState.allanVariance.xRangeMin);
-                        displayMax = SpectralToolbox::convertUmToCm(appState.allanVariance.xRangeMax);
-                    } else if (appState.allanVariance.xUnitSelector == 2) {
-                        displayMin = SpectralToolbox::convertUmToTHz(appState.allanVariance.xRangeMin);
-                        displayMax = SpectralToolbox::convertUmToTHz(appState.allanVariance.xRangeMax);
+                    double displayMin = appState.active->allanVariance.xRangeMin;
+                    double displayMax = appState.active->allanVariance.xRangeMax;
+                    if (appState.active->allanVariance.xUnitSelector == 0) {
+                        displayMin = SpectralToolbox::convertUmToCm(appState.active->allanVariance.xRangeMin);
+                        displayMax = SpectralToolbox::convertUmToCm(appState.active->allanVariance.xRangeMax);
+                    } else if (appState.active->allanVariance.xUnitSelector == 2) {
+                        displayMin = SpectralToolbox::convertUmToTHz(appState.active->allanVariance.xRangeMin);
+                        displayMax = SpectralToolbox::convertUmToTHz(appState.active->allanVariance.xRangeMax);
                     }
-                    const char* unitStr = (appState.allanVariance.xUnitSelector == 0) ? "cm-1"
-                                        : (appState.allanVariance.xUnitSelector == 1) ? "\xC2\xB5""m"
+                    const char* unitStr = (appState.active->allanVariance.xUnitSelector == 0) ? "cm-1"
+                                        : (appState.active->allanVariance.xUnitSelector == 1) ? "\xC2\xB5""m"
                                                                                        : "THz";
                     ImGui::Text("X range (%s)", unitStr);
                     ImGui::SameLine();
@@ -1123,12 +1123,12 @@ void renderAllanPanel() {
                     ImGui::SameLine();
                     ImGui::SetNextItemWidth(90.0f);
                     if (ImGui::InputDouble("##AllanXRangeMin", &displayMin, 0.0, 0.0, "%.6g")) {
-                        if (appState.allanVariance.xUnitSelector == 0)
-                            appState.allanVariance.xRangeMin = SpectralToolbox::convertCmToUm(displayMin);
-                        else if (appState.allanVariance.xUnitSelector == 2)
-                            appState.allanVariance.xRangeMin = SpectralToolbox::convertTHzToUm(displayMin);
+                        if (appState.active->allanVariance.xUnitSelector == 0)
+                            appState.active->allanVariance.xRangeMin = SpectralToolbox::convertCmToUm(displayMin);
+                        else if (appState.active->allanVariance.xUnitSelector == 2)
+                            appState.active->allanVariance.xRangeMin = SpectralToolbox::convertTHzToUm(displayMin);
                         else
-                            appState.allanVariance.xRangeMin = displayMin;
+                            appState.active->allanVariance.xRangeMin = displayMin;
                         appState.needsRedraw = true;
                     }
                     ImGui::SameLine();
@@ -1136,15 +1136,15 @@ void renderAllanPanel() {
                     ImGui::SameLine();
                     ImGui::SetNextItemWidth(90.0f);
                     if (ImGui::InputDouble("##AllanXRangeMax", &displayMax, 0.0, 0.0, "%.6g")) {
-                        if (appState.allanVariance.xUnitSelector == 0)
-                            appState.allanVariance.xRangeMax = SpectralToolbox::convertCmToUm(displayMax);
-                        else if (appState.allanVariance.xUnitSelector == 2)
-                            appState.allanVariance.xRangeMax = SpectralToolbox::convertTHzToUm(displayMax);
+                        if (appState.active->allanVariance.xUnitSelector == 0)
+                            appState.active->allanVariance.xRangeMax = SpectralToolbox::convertCmToUm(displayMax);
+                        else if (appState.active->allanVariance.xUnitSelector == 2)
+                            appState.active->allanVariance.xRangeMax = SpectralToolbox::convertTHzToUm(displayMax);
                         else
-                            appState.allanVariance.xRangeMax = displayMax;
+                            appState.active->allanVariance.xRangeMax = displayMax;
                         appState.needsRedraw = true;
                     }
-                    if (appState.allanVariance.xRangeMin >= appState.allanVariance.xRangeMax) {
+                    if (appState.active->allanVariance.xRangeMin >= appState.active->allanVariance.xRangeMax) {
                         ImGui::SameLine();
                         ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "(min<max!)");
                     }
@@ -1152,9 +1152,9 @@ void renderAllanPanel() {
             } else {
                 ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.2f, 0.6f, 0.5f, 1.0f));
                 char pctBuf[48];
-                float pct = appState.allanVariance.progressTotal > 0
-                    ? (float)appState.allanVariance.progressCurrent /
-                      (float)appState.allanVariance.progressTotal
+                float pct = appState.active->allanVariance.progressTotal > 0
+                    ? (float)appState.active->allanVariance.progressCurrent /
+                      (float)appState.active->allanVariance.progressTotal
                     : 0.0f;
                 std::snprintf(pctBuf, sizeof(pctBuf), "Calculating Allan (%.0f%%)", pct * 100.0f);
                 ImGui::ProgressBar(pct,
@@ -1173,103 +1173,6 @@ void renderAllanPanel() {
 // calcState (private) holds the futures + atomic counters of the multi-phase
 // computation; the snapshot/restore here covers it wholesale.
 
-void AllanVariance::parkInto(AllanVariance& dst) {
-    dst.appState = appState;
-    dst.cachedSurfaceWavelengths = std::move(cachedSurfaceWavelengths);
-    dst.cachedSurfaceTaus = std::move(cachedSurfaceTaus);
-    dst.cachedSurfaceAllanVar = std::move(cachedSurfaceAllanVar);
-    dst.numSurfaceWavelengths = numSurfaceWavelengths;
-    dst.numSurfaceTaus = numSurfaceTaus;
-    dst.fileCount = fileCount;
-    dst.allanAvailable = allanAvailable;
-    dst.selectedSliceIndex = selectedSliceIndex;
-    dst.calcInProgress = calcInProgress;
-    dst.progressTotal = progressTotal;
-    dst.progressCurrent = progressCurrent;
-    dst.isSelectingXRange = isSelectingXRange;
-    dst.selectionStartX = selectionStartX;
-    dst.selectionEndX = selectionEndX;
-    dst.shouldAutoscale = shouldAutoscale;
-    dst.firstLoadCompleted = firstLoadCompleted;
-    dst.manualXMin = manualXMin; dst.manualXMax = manualXMax;
-    dst.manualYMin = manualYMin; dst.manualYMax = manualYMax;
-    dst.savedYMin = savedYMin; dst.savedYMax = savedYMax;
-    dst.leftArrowPressedLastFrame = leftArrowPressedLastFrame;
-    dst.rightArrowPressedLastFrame = rightArrowPressedLastFrame;
-    dst.leftArrowHandleFlag = leftArrowHandleFlag;
-    dst.rightArrowHandleFlag = rightArrowHandleFlag;
-    dst.pendingNextXMin = pendingNextXMin; dst.pendingNextXMax = pendingNextXMax;
-    dst.xUnitSelector = xUnitSelector;
-    dst.wavelengthDecimation = wavelengthDecimation;
-    dst.xRangeMin = xRangeMin; dst.xRangeMax = xRangeMax;
-    dst.calcBaseSelector = calcBaseSelector;
 
-    dst.calcState.phase = calcState.phase;
-    dst.calcState.progressCurrent = calcState.progressCurrent;
-    dst.calcState.progressTotal = calcState.progressTotal;
-    dst.calcState.avgSumY = std::move(calcState.avgSumY);
-    dst.calcState.avgX = std::move(calcState.avgX);
-    dst.calcState.avgNumBins = calcState.avgNumBins;
-    dst.calcState.avgValidFiles = calcState.avgValidFiles;
-    dst.calcState.avgFirstFile = calcState.avgFirstFile;
-    dst.calcState.fileSpectraY = std::move(calcState.fileSpectraY);
-    dst.calcState.transmittanceCurves = std::move(calcState.transmittanceCurves);
-    dst.calcState.pendingAvgFutures = std::move(calcState.pendingAvgFutures);
-    dst.calcState.completedAvgCount.store(calcState.completedAvgCount.load());
-    dst.calcState.totalAvgSubmitted = calcState.totalAvgSubmitted;
-    dst.calcState.batchAvgActive = calcState.batchAvgActive;
-    dst.calcState.pendingAllanFutures = std::move(calcState.pendingAllanFutures);
-    dst.calcState.completedAllanCount.store(calcState.completedAllanCount.load());
-    dst.calcState.totalAllanSubmitted = calcState.totalAllanSubmitted;
-    dst.calcState.batchAllanActive = calcState.batchAllanActive;
-}
 
-void AllanVariance::resumeFrom(AllanVariance& src) {
-    cachedSurfaceWavelengths = std::move(src.cachedSurfaceWavelengths);
-    cachedSurfaceTaus = std::move(src.cachedSurfaceTaus);
-    cachedSurfaceAllanVar = std::move(src.cachedSurfaceAllanVar);
-    numSurfaceWavelengths = src.numSurfaceWavelengths;
-    numSurfaceTaus = src.numSurfaceTaus;
-    fileCount = src.fileCount;
-    allanAvailable = src.allanAvailable;
-    selectedSliceIndex = src.selectedSliceIndex;
-    calcInProgress = src.calcInProgress;
-    progressTotal = src.progressTotal;
-    progressCurrent = src.progressCurrent;
-    isSelectingXRange = src.isSelectingXRange;
-    selectionStartX = src.selectionStartX;
-    selectionEndX = src.selectionEndX;
-    shouldAutoscale = src.shouldAutoscale;
-    firstLoadCompleted = src.firstLoadCompleted;
-    manualXMin = src.manualXMin; manualXMax = src.manualXMax;
-    manualYMin = src.manualYMin; manualYMax = src.manualYMax;
-    savedYMin = src.savedYMin; savedYMax = src.savedYMax;
-    leftArrowPressedLastFrame = src.leftArrowPressedLastFrame;
-    rightArrowPressedLastFrame = src.rightArrowPressedLastFrame;
-    leftArrowHandleFlag = src.leftArrowHandleFlag;
-    rightArrowHandleFlag = src.rightArrowHandleFlag;
-    pendingNextXMin = src.pendingNextXMin; pendingNextXMax = src.pendingNextXMax;
-    xUnitSelector = src.xUnitSelector;
-    wavelengthDecimation = src.wavelengthDecimation;
-    xRangeMin = src.xRangeMin; xRangeMax = src.xRangeMax;
-    calcBaseSelector = src.calcBaseSelector;
 
-    calcState.phase = src.calcState.phase;
-    calcState.progressCurrent = src.calcState.progressCurrent;
-    calcState.progressTotal = src.calcState.progressTotal;
-    calcState.avgSumY = std::move(src.calcState.avgSumY);
-    calcState.avgX = std::move(src.calcState.avgX);
-    calcState.avgNumBins = src.calcState.avgNumBins;
-    calcState.avgValidFiles = src.calcState.avgValidFiles;
-    calcState.avgFirstFile = src.calcState.avgFirstFile;
-    calcState.fileSpectraY = std::move(src.calcState.fileSpectraY);
-    calcState.transmittanceCurves = std::move(src.calcState.transmittanceCurves);
-    calcState.pendingAvgFutures = std::move(src.calcState.pendingAvgFutures);
-    calcState.completedAvgCount.store(src.calcState.completedAvgCount.load());
-    calcState.totalAvgSubmitted = src.calcState.totalAvgSubmitted;
-    calcState.batchAvgActive = src.calcState.batchAvgActive;
-    calcState.pendingAllanFutures = std::move(src.calcState.pendingAllanFutures);
-    calcState.completedAllanCount.store(src.calcState.completedAllanCount.load());
-    calcState.totalAllanSubmitted = src.calcState.totalAllanSubmitted;
-    calcState.batchAllanActive = src.calcState.batchAllanActive;
-}

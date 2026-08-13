@@ -41,24 +41,24 @@ bool ExportPanel::isArtifactAvailable(const char* label) const
     if (!appState) return false;
     std::string lbl(label);
     if (lbl == ARTIFACT_CORR_IFG || lbl == ARTIFACT_UNCORR_IFG)
-        return appState->dataLoaded && !appState->selectedFiles.empty()
-               && appState->datasetInfo.hasInterferograms;
+        return appState->active->dataLoaded && !appState->active->selectedFiles.empty()
+               && appState->active->datasetInfo.hasInterferograms;
     if (lbl == ARTIFACT_SPECTRA) {
-        if (!appState->dataLoaded) return false;
-        for (bool v : appState->filesSelectedForAveraging)
+        if (!appState->active->dataLoaded) return false;
+        for (bool v : appState->active->filesSelectedForAveraging)
             if (v) return true;
         return false;
     }
     if (lbl == ARTIFACT_AVG_SPECT)
-        return appState->averageSpectrum.averageAvailable;
+        return appState->active->averageSpectrum.averageAvailable;
     if (lbl == ARTIFACT_SNR_SPECT)
-        return appState->snrSpectrum.snrAvailable;
+        return appState->active->snrSpectrum.snrAvailable;
     if (lbl == ARTIFACT_ALLAN_3D || lbl == ARTIFACT_ALLAN_SLICE)
-        return appState->allanVariance.allanAvailable;
+        return appState->active->allanVariance.allanAvailable;
     if (lbl == ARTIFACT_T100_TRANS || lbl == ARTIFACT_T100_ALL_TRANS)
-        return appState->t100.transmittanceAvailable;
+        return appState->active->t100.transmittanceAvailable;
     if (lbl == ARTIFACT_T100_STDDEV)
-        return appState->t100.stddevAvailable;
+        return appState->active->t100.stddevAvailable;
     return false;
 }
 
@@ -93,15 +93,15 @@ void ExportPanel::render()
     // artifacts become temporarily unavailable during recomputation.
     bool anyCalcInProgress = false;
     if (appState) {
-        anyCalcInProgress = appState->averageSpectrum.calcInProgress
-                         || appState->snrSpectrum.calcInProgress
-                         || appState->allanVariance.calcInProgress
-                         || appState->t100.calcStdInProgress;
+        anyCalcInProgress = appState->active->averageSpectrum.calcInProgress
+                         || appState->active->snrSpectrum.calcInProgress
+                         || appState->active->allanVariance.calcInProgress
+                         || appState->active->t100.calcStdInProgress;
     }
     if (!anyCalcInProgress)
         refreshArtifacts();
 
-    if (!appState || !appState->dataLoaded) {
+    if (!appState || !appState->active->dataLoaded) {
         ImGui::Text("No data loaded.");
         return;
     }
@@ -241,13 +241,13 @@ bool ExportPanel::exportArtifact(const std::string& label, const std::string& di
 
 void ExportPanel::writeCorrectedIFGCsv(const std::string& dir)
 {
-    std::string dsName = sanitizeFilename(appState->currentDatasetName);
-    for (size_t i = 0; i < appState->selectedFiles.size(); i++) {
-        if (i >= appState->rawDataCache.size()) continue;
-        const auto& raw = appState->rawDataCache[i];
+    std::string dsName = sanitizeFilename(appState->active->currentDatasetName);
+    for (size_t i = 0; i < appState->active->selectedFiles.size(); i++) {
+        if (i >= appState->active->rawDataCache.size()) continue;
+        const auto& raw = appState->active->rawDataCache[i];
 
         std::vector<double> opdX;
-        if (appState->datasetInfo.axisIsCorrected) {
+        if (appState->active->datasetInfo.axisIsCorrected) {
             // Axis already corrected: opdAxis is OPD; convert to um (m -> um).
             if (raw.opdAxis.empty() || raw.primaryDetector.empty()) continue;
             opdX.resize(raw.opdAxis.size());
@@ -257,20 +257,20 @@ void ExportPanel::writeCorrectedIFGCsv(const std::string& dir)
             if (raw.referenceDetector.empty() || raw.primaryDetector.empty()) continue;
             // Reference-based axis is mirror displacement; double to round-trip OPD
             // (matches spectral_toolbox.cpp processSpectrum: OPD = 2.0 * maxOPD).
-            if (appState->xCorrectionMethod == 1) {
+            if (appState->active->xCorrectionMethod == 1) {
                 SpectralToolbox::xAxisFromPeaks(
-                    raw.referenceDetector, appState->spectrum.refLaserTextbox,
-                    appState->peakProminenceThreshold, opdX);
+                    raw.referenceDetector, appState->active->spectrum.refLaserTextbox,
+                    appState->active->peakProminenceThreshold, opdX);
             } else {
                 SpectralToolbox::xAxisFromHilbert(raw.referenceDetector,
-                                                  appState->spectrum.refLaserTextbox,
+                                                  appState->active->spectrum.refLaserTextbox,
                                                   opdX);
             }
             if (opdX.empty()) continue;
             for (double& v : opdX) v *= 2.0;
         }
 
-        std::string fname = appState->selectedFilenames[i];
+        std::string fname = appState->active->selectedFilenames[i];
         size_t dot = fname.rfind('.');
         if (dot != std::string::npos) fname = fname.substr(0, dot);
         fname = sanitizeFilename(fname);
@@ -288,16 +288,16 @@ void ExportPanel::writeCorrectedIFGCsv(const std::string& dir)
 }
 void ExportPanel::writeUncorrectedIFGCsv(const std::string& dir)
 {
-    std::string dsName = sanitizeFilename(appState->currentDatasetName);
+    std::string dsName = sanitizeFilename(appState->active->currentDatasetName);
     std::string path = dir + "/" + dsName + "_uncorrected_ifgs.csv";
     std::ofstream ofs(path);
     if (!ofs.is_open()) return;
 
-    size_t nFiles = std::min(appState->selectedFiles.size(), appState->rawDataCache.size());
+    size_t nFiles = std::min(appState->active->selectedFiles.size(), appState->active->rawDataCache.size());
     size_t maxLen = 0;
     for (size_t i = 0; i < nFiles; i++) {
-        maxLen = std::max(maxLen, appState->rawDataCache[i].referenceDetector.size());
-        maxLen = std::max(maxLen, appState->rawDataCache[i].primaryDetector.size());
+        maxLen = std::max(maxLen, appState->active->rawDataCache[i].referenceDetector.size());
+        maxLen = std::max(maxLen, appState->active->rawDataCache[i].primaryDetector.size());
     }
 
     ofs << "Index";
@@ -309,7 +309,7 @@ void ExportPanel::writeUncorrectedIFGCsv(const std::string& dir)
     for (size_t row = 0; row < maxLen; row++) {
         ofs << row;
         for (size_t i = 0; i < nFiles; i++) {
-            const auto& raw = appState->rawDataCache[i];
+            const auto& raw = appState->active->rawDataCache[i];
             if (row < raw.referenceDetector.size())
                 ofs << "," << raw.referenceDetector[row];
             else
@@ -326,11 +326,11 @@ void ExportPanel::writeUncorrectedIFGCsv(const std::string& dir)
 
 void ExportPanel::writeAvgSpectrumCsv(const std::string& dir)
 {
-    const auto& avg = appState->averageSpectrum;
+    const auto& avg = appState->active->averageSpectrum;
     if (!avg.averageAvailable || avg.cachedAverageX.empty() || avg.cachedAverageY.empty())
         return;
 
-    std::string dsName = sanitizeFilename(appState->currentDatasetName);
+    std::string dsName = sanitizeFilename(appState->active->currentDatasetName);
     std::string path = dir + "/" + dsName + "_average_spectrum.csv";
     std::ofstream ofs(path);
     if (!ofs.is_open()) return;
@@ -349,11 +349,11 @@ void ExportPanel::writeAvgSpectrumCsv(const std::string& dir)
 
 void ExportPanel::writeSnrSpectrumCsv(const std::string& dir)
 {
-    const auto& snr = appState->snrSpectrum;
+    const auto& snr = appState->active->snrSpectrum;
     if (!snr.snrAvailable || snr.cachedSnrX.empty() || snr.cachedSnrY.empty())
         return;
 
-    std::string dsName = sanitizeFilename(appState->currentDatasetName);
+    std::string dsName = sanitizeFilename(appState->active->currentDatasetName);
     std::string path = dir + "/" + dsName + "_snr_spectrum.csv";
     std::ofstream ofs(path);
     if (!ofs.is_open()) return;
@@ -375,10 +375,10 @@ void ExportPanel::writeSpectraCsv(const std::string& dir)
     // Build list of checked files
     std::vector<std::string> checkedFull;
     std::vector<std::string> checkedShort;
-    for (size_t i = 0; i < appState->sortedFiles.size() && i < appState->filesSelectedForAveraging.size(); i++) {
-        if (appState->filesSelectedForAveraging[i]) {
-            checkedFull.push_back(appState->sortedFiles[i]);
-            std::string fn = appState->sortedFiles[i];
+    for (size_t i = 0; i < appState->active->sortedFiles.size() && i < appState->active->filesSelectedForAveraging.size(); i++) {
+        if (appState->active->filesSelectedForAveraging[i]) {
+            checkedFull.push_back(appState->active->sortedFiles[i]);
+            std::string fn = appState->active->sortedFiles[i];
             size_t ls = fn.find_last_of("/\\");
             if (ls != std::string::npos) fn = fn.substr(ls + 1);
             checkedShort.push_back(fn);
@@ -391,15 +391,15 @@ void ExportPanel::writeSpectraCsv(const std::string& dir)
     std::vector<bool> fileOk(nFiles, false);
     for (size_t i = 0; i < nFiles; i++) {
         const std::string& fid = checkedShort[i];
-        if (appState->spectrum.cachedFrequencies.find(fid) == appState->spectrum.cachedFrequencies.end() ||
-            appState->spectrum.cachedSpectra.find(fid) == appState->spectrum.cachedSpectra.end()) {
-            if (!appState->spectrum.computeAndCacheSpectrum(checkedFull[i], fid)) {
+        if (appState->active->spectrum.cachedFrequencies.find(fid) == appState->active->spectrum.cachedFrequencies.end() ||
+            appState->active->spectrum.cachedSpectra.find(fid) == appState->active->spectrum.cachedSpectra.end()) {
+            if (!appState->active->spectrum.computeAndCacheSpectrum(checkedFull[i], fid)) {
                 std::cerr << "Warning: Could not compute spectrum for " << checkedFull[i] << std::endl;
                 continue;
             }
         }
-        if (appState->spectrum.cachedFrequencies.count(fid) &&
-            appState->spectrum.cachedSpectra.count(fid))
+        if (appState->active->spectrum.cachedFrequencies.count(fid) &&
+            appState->active->spectrum.cachedSpectra.count(fid))
             fileOk[i] = true;
     }
 
@@ -410,14 +410,14 @@ void ExportPanel::writeSpectraCsv(const std::string& dir)
     }
     if (masterIdx < 0) return;
 
-    std::string dsName = sanitizeFilename(appState->currentDatasetName);
+    std::string dsName = sanitizeFilename(appState->active->currentDatasetName);
     std::string path = dir + "/" + dsName + "_spectra.csv";
     std::ofstream ofs(path);
     if (!ofs.is_open()) return;
 
     const char* xLabel = "Wavenumber [cm-1]";
-    if (appState->spectrum.xUnitSelector == 1) xLabel = "Wavelength [um]";
-    else if (appState->spectrum.xUnitSelector == 2) xLabel = "Frequency [THz]";
+    if (appState->active->spectrum.xUnitSelector == 1) xLabel = "Wavelength [um]";
+    else if (appState->active->spectrum.xUnitSelector == 2) xLabel = "Frequency [THz]";
 
     ofs << xLabel;
     for (size_t i = 0; i < nFiles; i++) {
@@ -428,15 +428,15 @@ void ExportPanel::writeSpectraCsv(const std::string& dir)
     }
     ofs << "\n";
 
-    const auto& masterFreq = appState->spectrum.cachedFrequencies.at(checkedShort[masterIdx]);
+    const auto& masterFreq = appState->active->spectrum.cachedFrequencies.at(checkedShort[masterIdx]);
     size_t nRows = masterFreq.size();
     for (size_t r = 0; r < nRows; r++) {
         ofs << masterFreq[r];
         for (size_t i = 0; i < nFiles; i++) {
             if (!fileOk[i]) { ofs << ","; continue; }
             const auto& fid = checkedShort[i];
-            const auto& freq = appState->spectrum.cachedFrequencies.at(fid);
-            const auto& spec = appState->spectrum.cachedSpectra.at(fid);
+            const auto& freq = appState->active->spectrum.cachedFrequencies.at(fid);
+            const auto& spec = appState->active->spectrum.cachedSpectra.at(fid);
             if (freq.empty() || spec.empty()) {
                 ofs << ",";
                 continue;
@@ -472,12 +472,12 @@ void ExportPanel::writeSpectraCsv(const std::string& dir)
 
 void ExportPanel::writeAllan3DCsv(const std::string& dir)
 {
-    const auto& al = appState->allanVariance;
+    const auto& al = appState->active->allanVariance;
     if (!al.allanAvailable || al.cachedSurfaceWavelengths.empty() ||
         al.cachedSurfaceTaus.empty() || al.cachedSurfaceAllanVar.empty())
         return;
 
-    std::string dsName = sanitizeFilename(appState->currentDatasetName);
+    std::string dsName = sanitizeFilename(appState->active->currentDatasetName);
     std::string path = dir + "/" + dsName + "_allan_3d.csv";
     std::ofstream ofs(path);
     if (!ofs.is_open()) return;
@@ -509,7 +509,7 @@ void ExportPanel::writeAllan3DCsv(const std::string& dir)
 
 void ExportPanel::writeAllanSliceCsv(const std::string& dir)
 {
-    const auto& al = appState->allanVariance;
+    const auto& al = appState->active->allanVariance;
     if (!al.allanAvailable || al.cachedSurfaceWavelengths.empty() ||
         al.cachedSurfaceTaus.empty() || al.cachedSurfaceAllanVar.empty())
         return;
@@ -527,7 +527,7 @@ void ExportPanel::writeAllanSliceCsv(const std::string& dir)
     char wlStr[64];
     std::snprintf(wlStr, sizeof(wlStr), "%.4f_%s", wlDisplay, wlUnit);
 
-    std::string dsName = sanitizeFilename(appState->currentDatasetName);
+    std::string dsName = sanitizeFilename(appState->active->currentDatasetName);
     std::string path = dir + "/" + dsName + "_allan_slice_" + wlStr + ".csv";
     std::ofstream ofs(path);
     if (!ofs.is_open()) return;
@@ -544,7 +544,7 @@ void ExportPanel::writeAllanSliceCsv(const std::string& dir)
 
 void ExportPanel::writeT100TransCsv(const std::string& dir)
 {
-    const auto& t100 = appState->t100;
+    const auto& t100 = appState->active->t100;
     if (!t100.transmittanceAvailable || t100.lastKnownSelection.empty())
         return;
     const std::string& fileId = t100.lastKnownSelection[0];
@@ -562,7 +562,7 @@ void ExportPanel::writeT100TransCsv(const std::string& dir)
     size_t dot = srcName.rfind('.');
     if (dot != std::string::npos) srcName = srcName.substr(0, dot);
 
-    std::string dsName = sanitizeFilename(appState->currentDatasetName);
+    std::string dsName = sanitizeFilename(appState->active->currentDatasetName);
     std::string path = dir + "/" + dsName + "_t100_transmission_" + srcName + ".csv";
     std::ofstream ofs(path);
     if (!ofs.is_open()) return;
@@ -580,14 +580,14 @@ void ExportPanel::writeT100TransCsv(const std::string& dir)
 
 void ExportPanel::writeT100AllTransCsv(const std::string& dir)
 {
-    const auto& t100 = appState->t100;
+    const auto& t100 = appState->active->t100;
     if (!t100.transmittanceAvailable || !t100.referenceAvailable)
         return;
 
     std::vector<std::string> checkedFiles;
-    for (size_t i = 0; i < appState->sortedFiles.size() && i < appState->filesSelectedForAveraging.size(); i++) {
-        if (appState->filesSelectedForAveraging[i])
-            checkedFiles.push_back(appState->sortedFiles[i]);
+    for (size_t i = 0; i < appState->active->sortedFiles.size() && i < appState->active->filesSelectedForAveraging.size(); i++) {
+        if (appState->active->filesSelectedForAveraging[i])
+            checkedFiles.push_back(appState->active->sortedFiles[i]);
     }
     if (checkedFiles.empty()) return;
 
@@ -596,37 +596,37 @@ void ExportPanel::writeT100AllTransCsv(const std::string& dir)
     bool anyValid = false;
 
     for (size_t i = 0; i < checkedFiles.size(); i++) {
-        auto raw = workspaceRead(appState->workspace, checkedFiles[i]);
+        auto raw = workspaceRead(appState->active->workspace, checkedFiles[i]);
         SpectralToolbox::ProcessedSpectrum ps;
-        if (appState->datasetInfo.hasPrecomputedSpectra) {
+        if (appState->active->datasetInfo.hasPrecomputedSpectra) {
             ps.spectrumX = raw.referenceDetector;
             for (double& f : ps.spectrumX)
                 f = SpectralToolbox::convertXValue(f,
                     SpectralToolbox::SpectrumXUnit::CmInv,
                     static_cast<SpectralToolbox::SpectrumXUnit>(t100.xUnitSelector));
             ps.spectrumY = std::move(raw.primaryDetector);
-        } else if (appState->datasetInfo.axisIsCorrected) {
+        } else if (appState->active->datasetInfo.axisIsCorrected) {
             for (auto& v : raw.opdAxis) v *= 1e6;
             ps = SpectralToolbox::processSpectrumFromCorrectedAxis(
                 raw.primaryDetector, raw.opdAxis,
-                appState->spectrum.Kpadding,
+                appState->active->spectrum.Kpadding,
                 static_cast<SpectralToolbox::SpectrumXUnit>(t100.xUnitSelector),
-                static_cast<ApodizationWindow>(appState->spectrum.apodizationSelector),
-                appState->spectrum.apodizationParams);
+                static_cast<ApodizationWindow>(appState->active->spectrum.apodizationSelector),
+                appState->active->spectrum.apodizationParams);
         } else {
             ps = SpectralToolbox::processSpectrum(
                 raw.primaryDetector, raw.referenceDetector,
-                appState->spectrum.refLaserTextbox,
-                appState->spectrum.Kpadding,
+                appState->active->spectrum.refLaserTextbox,
+                appState->active->spectrum.Kpadding,
                 static_cast<SpectralToolbox::SpectrumXUnit>(t100.xUnitSelector),
-                static_cast<ApodizationWindow>(appState->spectrum.apodizationSelector),
-                appState->spectrum.apodizationParams,
-                static_cast<SpectralToolbox::XCorrectionMethod>(appState->xCorrectionMethod),
-                appState->peakProminenceThreshold);
+                static_cast<ApodizationWindow>(appState->active->spectrum.apodizationSelector),
+                appState->active->spectrum.apodizationParams,
+                static_cast<SpectralToolbox::XCorrectionMethod>(appState->active->xCorrectionMethod),
+                appState->active->peakProminenceThreshold);
         }
         if (ps.spectrumX.empty() || ps.spectrumY.empty()) continue;
         std::vector<double> tx, ty;
-        if (appState->t100.computeTransmittanceFromVectors(
+        if (appState->active->t100.computeTransmittanceFromVectors(
                 ps.spectrumX, ps.spectrumY, t100.xUnitSelector, tx, ty)) {
             allTransX[i] = std::move(tx);
             allTransY[i] = std::move(ty);
@@ -635,7 +635,7 @@ void ExportPanel::writeT100AllTransCsv(const std::string& dir)
     }
     if (!anyValid) return;
 
-    std::string dsName = sanitizeFilename(appState->currentDatasetName);
+    std::string dsName = sanitizeFilename(appState->active->currentDatasetName);
     std::string path = dir + "/" + dsName + "_t100_all_transmissions.csv";
     std::ofstream ofs(path);
     if (!ofs.is_open()) return;
@@ -678,11 +678,11 @@ void ExportPanel::writeT100AllTransCsv(const std::string& dir)
 
 void ExportPanel::writeT100StdDevCsv(const std::string& dir)
 {
-    const auto& t100 = appState->t100;
+    const auto& t100 = appState->active->t100;
     if (!t100.stddevAvailable || t100.cachedStdX.empty() || t100.cachedStdY.empty())
         return;
 
-    std::string dsName = sanitizeFilename(appState->currentDatasetName);
+    std::string dsName = sanitizeFilename(appState->active->currentDatasetName);
     std::string path = dir + "/" + dsName + "_t100_stddev.csv";
     std::ofstream ofs(path);
     if (!ofs.is_open()) return;
@@ -699,7 +699,7 @@ void ExportPanel::writeT100StdDevCsv(const std::string& dir)
 }
 void ExportPanel::renderPanel() {
         ImGui::Begin("Export");
-        if (appState->dataLoaded) {
+        if (appState->active->dataLoaded) {
             render();
         } else {
             ImGui::Text("No data loaded.");
@@ -710,19 +710,6 @@ void ExportPanel::renderPanel() {
 
 // ── Park/resume mirror support (M2.1) ───────────────────────────────────────
 
-void ExportPanel::parkInto(ExportPanel& dst) {
-    dst.appState = appState;
-    dst.artifactLabels = std::move(artifactLabels);
-    dst.artifactChecked = std::move(artifactChecked);
-    dst.exportPending = exportPending;
-    dst.exportJustCompleted = exportJustCompleted;
-    dst.exportDir = exportDir;
-}
 
-void ExportPanel::resumeFrom(ExportPanel& src) {
-    artifactLabels = std::move(src.artifactLabels);
-    artifactChecked = std::move(src.artifactChecked);
-    exportPending = src.exportPending;
-    exportJustCompleted = src.exportJustCompleted;
-    exportDir = src.exportDir;
-}
+
+

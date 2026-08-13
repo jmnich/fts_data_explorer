@@ -78,11 +78,14 @@ static void renderUnsavedPromptModal() {
     if (ImGui::BeginPopupModal("Unsaved Changes##confirm", nullptr,
                                ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
         // NoTitleBar: the title moves into the body so removing the header
-        // loses no information.
+        // loses no information. The workspace change list only renders when a
+        // workspace is active — the prompt can also be raised for unsaved
+        // EXPERIMENTS alone (replace-project flow, Phase 4).
         ImGui::Text("Unsaved Changes");
         ImGui::Spacing();
         ImGui::TextWrapped("Save changes to \"%s\" before continuing?",
-                           appState.currentDatasetName.c_str());
+                           appState.active ? appState.active->currentDatasetName.c_str()
+                                           : "(no workspace)");
         ImGui::Spacing();
         ImGui::Separator();
         ImGui::Spacing();
@@ -92,9 +95,10 @@ static void renderUnsavedPromptModal() {
         // shown verbatim. Names match the stale-drop modal (shared constants).
         // Bullet + TextWrapped: BulletText never wraps, so long entries (e.g.
         // the view-settings line at scaled UI sizes) clip at the pinned width.
+        if (appState.active) {
         const std::string spectrumPrefix = "Spectrum: ";
         int spectrumCount = 0;
-        for (const auto& entry : appState.workspace.changeLog)
+        for (const auto& entry : appState.active->workspace.changeLog)
             if (entry.rfind(spectrumPrefix, 0) == 0) ++spectrumCount;
         bool shown = false;
         if (spectrumCount > 0) {
@@ -103,7 +107,7 @@ static void renderUnsavedPromptModal() {
                                spectrumCount == 1 ? "" : "s");
             shown = true;
         }
-        for (const auto& entry : appState.workspace.changeLog) {
+        for (const auto& entry : appState.active->workspace.changeLog) {
             if (entry.rfind(spectrumPrefix, 0) == 0) continue;
             ImGui::Bullet();
             ImGui::TextWrapped("%s", entry.c_str());
@@ -112,6 +116,7 @@ static void renderUnsavedPromptModal() {
         if (!shown) {
             ImGui::Bullet();
             ImGui::TextWrapped("Workspace contains unsaved changes.");
+        }
         }
         ImGui::Spacing();
         ImGui::Separator();
@@ -232,7 +237,7 @@ static void renderStaleDropPromptModal() {
         ImGui::Spacing();
         // Bullet + TextWrapped (BulletText never wraps): keeps the list look
         // and wraps long lines at the pinned width instead of clipping.
-        for (const auto& cat : appState.workspace.staleCategories()) {
+        for (const auto& cat : appState.active->workspace.staleCategories()) {
             ImGui::Bullet();
             ImGui::TextWrapped("%s", cat.c_str());
         }
@@ -310,10 +315,9 @@ static void renderExitDirtyModal() {
             for (int idx : appState.exitDirtyTabs) {
                 if (idx == appState.activeSessionIdx &&
                     appState.activeTabKind == ActiveTabKind::Workspace) {
-                    appState.workspace.dirty = false;
-                    appState.workspace.changeLog.clear();
+                    appState.active->workspace.dirty = false;
+                    appState.active->workspace.changeLog.clear();
                 } else if (idx >= 0 && idx < static_cast<int>(appState.sessions.size())) {
-                    appState.sessions[idx]->workspaceDirty = false;
                     appState.sessions[idx]->workspace.dirty = false;
                     appState.sessions[idx]->workspace.changeLog.clear();
                 }
@@ -851,52 +855,52 @@ static void rebuildDefaultLayout(ImGuiID dockspace_id, float topOffset) {
 }
 static void renderSpectrumViewPanel() {
         ImGui::Begin("Spectrum View");
-        if (appState.dataLoaded && !appState.loadedData.empty()) {
+        if (appState.active->dataLoaded && !appState.active->loadedData.empty()) {
             // Pre-load precomputed spectra into spectrum cache (always refresh)
-            if (appState.datasetInfo.hasPrecomputedSpectra) {
-                auto targetUnit = static_cast<SpectralToolbox::SpectrumXUnit>(appState.spectrum.xUnitSelector);
-                for (size_t i = 0; i < appState.loadedData.size(); i++) {
-                    const std::string& fid = appState.selectedFilenames[i];
-                    if (appState.spectrum.cachedFrequencies.find(fid) == appState.spectrum.cachedFrequencies.end()) {
+            if (appState.active->datasetInfo.hasPrecomputedSpectra) {
+                auto targetUnit = static_cast<SpectralToolbox::SpectrumXUnit>(appState.active->spectrum.xUnitSelector);
+                for (size_t i = 0; i < appState.active->loadedData.size(); i++) {
+                    const std::string& fid = appState.active->selectedFilenames[i];
+                    if (appState.active->spectrum.cachedFrequencies.find(fid) == appState.active->spectrum.cachedFrequencies.end()) {
                         // File stores wavenumber in cm-1; convert to target unit
-                        std::vector<double> freqs = appState.rawDataCache[i].referenceDetector;
+                        std::vector<double> freqs = appState.active->rawDataCache[i].referenceDetector;
                         for (double& f : freqs)
                             f = SpectralToolbox::convertXValue(f,
                                 SpectralToolbox::SpectrumXUnit::CmInv, targetUnit);
-                        appState.spectrum.cachedFrequencies[fid] = std::move(freqs);
-                        appState.spectrum.cachedSpectra[fid] = appState.rawDataCache[i].primaryDetector;
-                        appState.spectrum.lastPrimaryDetectors[fid] = appState.rawDataCache[i].primaryDetector;
+                        appState.active->spectrum.cachedFrequencies[fid] = std::move(freqs);
+                        appState.active->spectrum.cachedSpectra[fid] = appState.active->rawDataCache[i].primaryDetector;
+                        appState.active->spectrum.lastPrimaryDetectors[fid] = appState.active->rawDataCache[i].primaryDetector;
                         double activeParam = 0.0;
-                        if (appState.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Gauss))
-                            activeParam = static_cast<double>(appState.spectrum.apodizationParams.gaussSigma);
-                        else if (appState.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Rectangular))
-                            activeParam = static_cast<double>(appState.spectrum.apodizationParams.rectWidth);
-                        else if (appState.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::NortonBeer))
-                            activeParam = static_cast<double>(appState.spectrum.apodizationParams.nortonBeerFwhm);
-                        else if (appState.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::DolphChebyshev))
-                            activeParam = static_cast<double>(appState.spectrum.apodizationParams.dolphChebyshevAt);
-                        else if (appState.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Hamming))
-                            activeParam = static_cast<double>(appState.spectrum.apodizationParams.hammingAlpha);
-                        else if (appState.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Kaiser))
-                            activeParam = static_cast<double>(appState.spectrum.apodizationParams.kaiserBeta);
-                        appState.spectrum.lastSpectrumParams[fid] = {
-                            static_cast<double>(appState.spectrum.Kpadding),
-                            static_cast<double>(appState.spectrum.refLaserTextbox),
-                            static_cast<double>(appState.spectrum.apodizationSelector),
+                        if (appState.active->spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Gauss))
+                            activeParam = static_cast<double>(appState.active->spectrum.apodizationParams.gaussSigma);
+                        else if (appState.active->spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Rectangular))
+                            activeParam = static_cast<double>(appState.active->spectrum.apodizationParams.rectWidth);
+                        else if (appState.active->spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::NortonBeer))
+                            activeParam = static_cast<double>(appState.active->spectrum.apodizationParams.nortonBeerFwhm);
+                        else if (appState.active->spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::DolphChebyshev))
+                            activeParam = static_cast<double>(appState.active->spectrum.apodizationParams.dolphChebyshevAt);
+                        else if (appState.active->spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Hamming))
+                            activeParam = static_cast<double>(appState.active->spectrum.apodizationParams.hammingAlpha);
+                        else if (appState.active->spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Kaiser))
+                            activeParam = static_cast<double>(appState.active->spectrum.apodizationParams.kaiserBeta);
+                        appState.active->spectrum.lastSpectrumParams[fid] = {
+                            static_cast<double>(appState.active->spectrum.Kpadding),
+                            static_cast<double>(appState.active->spectrum.refLaserTextbox),
+                            static_cast<double>(appState.active->spectrum.apodizationSelector),
                             activeParam,
-                            appState.spectrum.apodizationParams.rectAsymMode ? 1.0 : 0.0,
-                            static_cast<double>(appState.xCorrectionMethod),
-                            static_cast<double>(appState.peakProminenceThreshold),
+                            appState.active->spectrum.apodizationParams.rectAsymMode ? 1.0 : 0.0,
+                            static_cast<double>(appState.active->xCorrectionMethod),
+                            static_cast<double>(appState.active->peakProminenceThreshold),
                             0.0
                         };
                     }
                 }
             }
             std::vector<std::pair<std::string, std::vector<double>>> primaryDetectors;
-            for (size_t i = 0; i < appState.loadedData.size(); i++) {
-                primaryDetectors.emplace_back(appState.selectedFilenames[i], appState.loadedData[i].primaryDetector);
+            for (size_t i = 0; i < appState.active->loadedData.size(); i++) {
+                primaryDetectors.emplace_back(appState.active->selectedFilenames[i], appState.active->loadedData[i].primaryDetector);
             }
-            appState.spectrum.renderSpectrumContents(primaryDetectors, appState.rawDataCache);
+            appState.active->spectrum.renderSpectrumContents(primaryDetectors, appState.active->rawDataCache);
         } else {
             ImGui::Text("No data loaded.");
         }
@@ -905,26 +909,26 @@ static void renderSpectrumViewPanel() {
 
 static void renderAverageViewPanel() {
         ImGui::Begin("Average View");
-        appState.averageSpectrum.renderAverageContents(appState.spectrum.showTrackingCursor);
+        appState.active->averageSpectrum.renderAverageContents(appState.active->spectrum.showTrackingCursor);
         ImGui::End();
 }
 
 static void renderSnrViewPanel() {
         ImGui::Begin("SNR View");
-        appState.snrSpectrum.renderSnrContents(appState.spectrum.showTrackingCursor);
+        appState.active->snrSpectrum.renderSnrContents(appState.active->spectrum.showTrackingCursor);
         ImGui::End();
 }
 
 static void renderAllanViewPanel() {
         ImGui::Begin("Allan View");
-        appState.allanVariance.renderAllanContents(appState.spectrum.showTrackingCursor);
+        appState.active->allanVariance.renderAllanContents(appState.active->spectrum.showTrackingCursor);
         ImGui::End();
 }
 
 static void renderT100ViewPanel() {
         ImGui::Begin("100% T View");
-        if (appState.dataLoaded && !appState.selectedFilenames.empty()) {
-            appState.t100.renderT100Contents(appState.spectrum.showTrackingCursor);
+        if (appState.active->dataLoaded && !appState.active->selectedFilenames.empty()) {
+            appState.active->t100.renderT100Contents(appState.active->spectrum.showTrackingCursor);
         } else {
             ImGui::Text("No data loaded.");
         }
@@ -1048,35 +1052,37 @@ void AppLoop::pollAsyncComputations() {
         // Workspace-tab polls run only while a workspace tab is active — the
         // flat fields then hold THAT tab's data (M2.3). Session/environment
         // tabs poll via SessionBase::tickAsync() instead.
-        if (appState.activeTabKind != ActiveTabKind::Workspace) return;
+        // The active pointer is null while no workspace tab exists (launch
+        // welcome / go-home) — the kind defaults to Workspace, so check both.
+        if (appState.activeTabKind != ActiveTabKind::Workspace || !appState.active) return;
         // Poll pending async spectrum computations
-        if (!appState.spectrum.pendingSpectra_.empty()) {
+        if (!appState.active->spectrum.pendingSpectra_.empty()) {
             appState.needsRedraw = true;
-            appState.spectrum.pollPendingSpectra();
+            appState.active->spectrum.pollPendingSpectra();
         }
 
         // Tick average spectrum calculation (parallel batch-submit + poll)
-        if (appState.averageSpectrum.calcInProgress) {
+        if (appState.active->averageSpectrum.calcInProgress) {
             appState.needsRedraw = true;
-            appState.averageSpectrum.tickCalculation();
+            appState.active->averageSpectrum.tickCalculation();
         }
 
         // Tick SNR spectrum calculation (parallel batch-submit + poll)
-        if (appState.snrSpectrum.calcInProgress) {
+        if (appState.active->snrSpectrum.calcInProgress) {
             appState.needsRedraw = true;
-            appState.snrSpectrum.tickCalculation();
+            appState.active->snrSpectrum.tickCalculation();
         }
 
         // Tick Allan variance calculation (parallel batch-submit + poll)
-        if (appState.allanVariance.calcInProgress) {
+        if (appState.active->allanVariance.calcInProgress) {
             appState.needsRedraw = true;
-            appState.allanVariance.tickCalculation();
+            appState.active->allanVariance.tickCalculation();
         }
 
         // Tick T100 standard deviation calculation (parallel batch-submit + poll)
-        if (appState.t100.calcStdInProgress) {
+        if (appState.active->t100.calcStdInProgress) {
             appState.needsRedraw = true;
-            if (appState.t100.tickStdCalculation()) {
+            if (appState.active->t100.tickStdCalculation()) {
                 appState.needsRedraw = true;
             }
         }
@@ -1124,21 +1130,23 @@ void AppLoop::scheduleRedraws() {
 
 void AppLoop::handleInput() {
     ImGuiIO& io = ImGui::GetIO();
-        appState.multiSelectMode = ImGui::GetIO().KeyCtrl;
-        appState.shiftSelectMode = ImGui::GetIO().KeyShift;
 
         // Per-workspace input (M2.3): shortcuts, navigation and file loading
-        // operate on the ACTIVE workspace tab's flat fields. With a
-        // non-workspace tab focused, the per-workspace edge flags are cleared
-        // so no stale key edge fires after the next swap.
+        // operate on the ACTIVE workspace tab's fields. With a non-workspace
+        // tab focused (or none at all — launch welcome / go-home), the
+        // per-workspace edge flags are cleared so no stale key edge fires
+        // after the next swap.
         const bool wsActive = (appState.activeTabKind == ActiveTabKind::Workspace &&
-                               appState.activeSessionIdx >= 0);
+                               appState.activeSessionIdx >= 0 && appState.active);
         if (!wsActive) {
             appState.yKeyPressedLastFrame = false;
             appState.aKeyPressedLastFrame = false;
             appState.dKeyPressedLastFrame = false;
             appState.qKeyPressedLastFrame = false;
             appState.sKeyPressedLastFrame = false;
+        } else {
+        appState.active->multiSelectMode = ImGui::GetIO().KeyCtrl;
+        appState.active->shiftSelectMode = ImGui::GetIO().KeyShift;
         }
 
         // Handle keyboard shortcuts - only trigger once per key press
@@ -1151,38 +1159,38 @@ void AppLoop::handleInput() {
             
             // 'Ctrl+Y' - Toggle auto-fit Y-axis (only on initial press)
             if (yKeyPressed && !appState.yKeyPressedLastFrame) {
-                appState.autoFitYAxis = !appState.autoFitYAxis;
-                if (appState.autoFitYAxis && appState.dataLoaded) {
-                    if (!appState.loadedData[0].referenceDetector.empty()) {
-                        auto ref_min_max = std::minmax_element(appState.loadedData[0].referenceDetector.begin(), appState.loadedData[0].referenceDetector.end());
-                        appState.ref_y_min = *ref_min_max.first;
-                        appState.ref_y_max = *ref_min_max.second;
+                appState.active->autoFitYAxis = !appState.active->autoFitYAxis;
+                if (appState.active->autoFitYAxis && appState.active->dataLoaded) {
+                    if (!appState.active->loadedData[0].referenceDetector.empty()) {
+                        auto ref_min_max = std::minmax_element(appState.active->loadedData[0].referenceDetector.begin(), appState.active->loadedData[0].referenceDetector.end());
+                        appState.active->ref_y_min = *ref_min_max.first;
+                        appState.active->ref_y_max = *ref_min_max.second;
                     }
-                    auto prim_min_max = std::minmax_element(appState.loadedData[0].primaryDetector.begin(), appState.loadedData[0].primaryDetector.end());
-                    appState.prim_y_min = *prim_min_max.first;
-                    appState.prim_y_max = *prim_min_max.second;
+                    auto prim_min_max = std::minmax_element(appState.active->loadedData[0].primaryDetector.begin(), appState.active->loadedData[0].primaryDetector.end());
+                    appState.active->prim_y_min = *prim_min_max.first;
+                    appState.active->prim_y_max = *prim_min_max.second;
                 }
             }
             
             // 'Ctrl+A' - Toggle max at zero (only on initial press)
             if (aKeyPressed && !appState.aKeyPressedLastFrame) {
-                appState.maxAtZero = !appState.maxAtZero;
-                appState.shouldAutoscale = true;
+                appState.active->maxAtZero = !appState.active->maxAtZero;
+                appState.active->shouldAutoscale = true;
             }
             
             // 'Ctrl+D' - Toggle downsampling (only on initial press)
             if (dKeyPressed && !appState.dKeyPressedLastFrame) {
-                appState.enableDownsampling = !appState.enableDownsampling;
-                appState.hilbertXCache.clear();
-                if (appState.dataLoaded) {
+                appState.active->enableDownsampling = !appState.active->enableDownsampling;
+                appState.active->hilbertXCache.clear();
+                if (appState.active->dataLoaded) {
                     // Reload all selected files with new downsampling setting while preserving selection
                     std::vector<InterferogramData> reloadedData;
-                    for (const auto& filePath : appState.selectedFiles) {
+                    for (const auto& filePath : appState.active->selectedFiles) {
                         try {
                             InterferogramData data = loadInterferogram(appState, filePath);
                             
                             // Apply downsampling if enabled and dataset is large
-                            if (appState.enableDownsampling && data.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
+                            if (appState.active->enableDownsampling && data.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
                                 size_t localDownsampleFactor = data.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
                                 
                                 // Downsample both reference and primary detectors
@@ -1202,35 +1210,35 @@ void AppLoop::handleInput() {
                     }
                     
                     if (!reloadedData.empty()) {
-                        appState.loadedData = reloadedData;
+                        appState.active->loadedData = reloadedData;
                         // Also update raw data cache - need to reload raw data
                         // IMPORTANT: We need to reload the ORIGINAL raw data, not the processed data
-                        appState.rawDataCache.clear();
+                        appState.active->rawDataCache.clear();
                         size_t reloadedIdx = 0;
-                        for (const auto& file : appState.selectedFiles) {
+                        for (const auto& file : appState.active->selectedFiles) {
                             try {
                                 InterferogramData rawData = loadInterferogram(appState, file);
-                                appState.rawDataCache.push_back(rawData);
+                                appState.active->rawDataCache.push_back(rawData);
                             } catch (const std::exception& e) {
                                 std::cerr << "Error reloading raw data for spectrum: " << e.what() << std::endl;
                                 if (reloadedIdx < reloadedData.size())
-                                    appState.rawDataCache.push_back(reloadedData[reloadedIdx]);
+                                    appState.active->rawDataCache.push_back(reloadedData[reloadedIdx]);
                             }
                             reloadedIdx++;
                         }
                         // Force X-axis to show all data when downsampling is toggled (same behavior as menu)
-                        appState.zoomRange = {0, 0};
-                        appState.shouldAutoscale = true;
-                        appState.forceXAutofit = true; // Set global flag to force X-axis autofit
-                        std::cout << "Reloaded " << appState.loadedData.size() << " datasets with " 
-                                  << (appState.enableDownsampling ? "enabled" : "disabled") << " downsampling" << std::endl;
+                        appState.active->zoomRange = {0, 0};
+                        appState.active->shouldAutoscale = true;
+                        appState.active->forceXAutofit = true; // Set global flag to force X-axis autofit
+                        std::cout << "Reloaded " << appState.active->loadedData.size() << " datasets with " 
+                                  << (appState.active->enableDownsampling ? "enabled" : "disabled") << " downsampling" << std::endl;
                     }
                 }
             }
             
             // 'Ctrl+Q' - Toggle tracking cursor (only on initial press)
             if (qKeyPressed && !appState.qKeyPressedLastFrame) {
-                appState.spectrum.showTrackingCursor = !appState.spectrum.showTrackingCursor;
+                appState.active->spectrum.showTrackingCursor = !appState.active->spectrum.showTrackingCursor;
                 appState.needsRedraw = true;
             }
 
@@ -1289,9 +1297,11 @@ void AppLoop::handleInput() {
         // Track window state changes
         handleWindowEvents(window_, config_);
         
-        // Update sorted files list for keyboard navigation
-        appState.sortedFiles = appState.csvFiles;
-        std::sort(appState.sortedFiles.begin(), appState.sortedFiles.end(), [](const std::string& a, const std::string& b) {
+        // Update sorted files list for keyboard navigation (active workspace
+        // tab only — no tab exists at launch / go-home).
+        if (wsActive) {
+        appState.active->sortedFiles = appState.active->csvFiles;
+        std::sort(appState.active->sortedFiles.begin(), appState.active->sortedFiles.end(), [](const std::string& a, const std::string& b) {
             std::string nameA = a;
             std::string nameB = b;
             size_t last_slash_a = nameA.find_last_of("/\\");
@@ -1300,18 +1310,19 @@ void AppLoop::handleInput() {
             if (last_slash_b != std::string::npos) nameB = nameB.substr(last_slash_b + 1);
             return naturalSortCompare(nameA, nameB);
         });
+        }
         
         // Ensure averaging checkboxes match the sorted files size
         if (wsActive) {
-        if (appState.filesSelectedForAveraging.size() != appState.sortedFiles.size()) {
-            appState.filesSelectedForAveraging.clear();
-            appState.filesSelectedForAveraging.resize(appState.sortedFiles.size(), true);
+        if (appState.active->filesSelectedForAveraging.size() != appState.active->sortedFiles.size()) {
+            appState.active->filesSelectedForAveraging.clear();
+            appState.active->filesSelectedForAveraging.resize(appState.active->sortedFiles.size(), true);
         }
 
 // Handle keyboard navigation for file selection
-        handleKeyboardNavigation(appState.csvFiles, appState.currentSortedFileIndex, appState.filesChanged, appState.keyboardNavigation, 
-                                appState.shiftSelectMode, appState.selectedFiles, appState.selectedFilenames, appState.loadedData, appState.rawDataCache, appState.dataLoaded, 
-                                appState.sortedFiles, appState.enableDownsampling, appState.maxPointsBeforeDownsampling, appState.MAX_SELECTABLE_FILES);
+        handleKeyboardNavigation(appState.active->csvFiles, appState.active->currentSortedFileIndex, appState.active->filesChanged, appState.active->keyboardNavigation, 
+                                appState.active->shiftSelectMode, appState.active->selectedFiles, appState.active->selectedFilenames, appState.active->loadedData, appState.active->rawDataCache, appState.active->dataLoaded, 
+                                appState.active->sortedFiles, appState.active->enableDownsampling, appState.maxPointsBeforeDownsampling, appState.MAX_SELECTABLE_FILES);
         
 
         
@@ -1321,22 +1332,22 @@ void AppLoop::handleInput() {
         // (OpenPopup is deferred to the Files panel, after NewFrame)
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) &&
             ImGui::IsKeyPressed(ImGuiKey_Delete) &&
-            !appState.sortedFiles.empty()) {
+            !appState.active->sortedFiles.empty()) {
 #if FTS_BUILD_HDF5
             if (appState.hasWorkspace()) {
-                appState.pendingWorkspaceDeletionPath =
-                    memberPathOf(appState.workspace, appState.sortedFiles[appState.currentSortedFileIndex]);
-                if (!appState.pendingWorkspaceDeletionPath.empty()) {
-                    appState.showWorkspaceDeleteConfirmPopup = true;
+                appState.active->pendingWorkspaceDeletionPath =
+                    memberPathOf(appState.active->workspace, appState.active->sortedFiles[appState.active->currentSortedFileIndex]);
+                if (!appState.active->pendingWorkspaceDeletionPath.empty()) {
+                    appState.active->showWorkspaceDeleteConfirmPopup = true;
                     appState.needsRedraw = true;
                 }
             } else
 #endif
-            if (appState.skipDeleteConfirm) {
-                performFileDeletion(appState, appState.currentSortedFileIndex);
+            if (appState.active->skipDeleteConfirm) {
+                performFileDeletion(appState, appState.active->currentSortedFileIndex);
             } else {
-                appState.deleteConfirmIndex = appState.currentSortedFileIndex;
-                appState.showDeleteConfirmPopup = true;
+                appState.active->deleteConfirmIndex = appState.active->currentSortedFileIndex;
+                appState.active->showDeleteConfirmPopup = true;
                 appState.needsRedraw = true;
             }
         }
@@ -1345,56 +1356,56 @@ void AppLoop::handleInput() {
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) &&
             !ImGui::GetIO().WantCaptureKeyboard &&
             ImGui::IsKeyPressed(ImGuiKey_Space) &&
-            appState.dataLoaded) {
-            for (const auto& selFile : appState.selectedFiles) {
-                auto it = std::find(appState.sortedFiles.begin(), appState.sortedFiles.end(), selFile);
-                if (it != appState.sortedFiles.end()) {
-                    size_t idx = std::distance(appState.sortedFiles.begin(), it);
-                    if (idx < appState.filesSelectedForAveraging.size())
-                        appState.filesSelectedForAveraging[idx] = !appState.filesSelectedForAveraging[idx];
+            appState.active->dataLoaded) {
+            for (const auto& selFile : appState.active->selectedFiles) {
+                auto it = std::find(appState.active->sortedFiles.begin(), appState.active->sortedFiles.end(), selFile);
+                if (it != appState.active->sortedFiles.end()) {
+                    size_t idx = std::distance(appState.active->sortedFiles.begin(), it);
+                    if (idx < appState.active->filesSelectedForAveraging.size())
+                        appState.active->filesSelectedForAveraging[idx] = !appState.active->filesSelectedForAveraging[idx];
                 }
             }
             appState.needsRedraw = true;
         }
 
         // 'Left/Right Arrow' - Pan left by 10% of current visible range
-        if (glfwGetKey(window_, GLFW_KEY_LEFT) == GLFW_PRESS && !appState.leftArrowPressedLastFrame) {
+        if (glfwGetKey(window_, GLFW_KEY_LEFT) == GLFW_PRESS && !appState.active->leftArrowPressedLastFrame) {
 
-            appState.leftArrowPressedLastFrame = true;
-            appState.leftArrowHandleFlag = true;
+            appState.active->leftArrowPressedLastFrame = true;
+            appState.active->leftArrowHandleFlag = true;
         }
         else if (glfwGetKey(window_, GLFW_KEY_LEFT) == GLFW_RELEASE) {
-            appState.leftArrowPressedLastFrame = false;
-            appState.leftArrowHandleFlag = false;
+            appState.active->leftArrowPressedLastFrame = false;
+            appState.active->leftArrowHandleFlag = false;
         }
 
-        if (glfwGetKey(window_, GLFW_KEY_RIGHT) == GLFW_PRESS && !appState.rightArrowPressedLastFrame) {
+        if (glfwGetKey(window_, GLFW_KEY_RIGHT) == GLFW_PRESS && !appState.active->rightArrowPressedLastFrame) {
 
-            appState.rightArrowPressedLastFrame = true;
-            appState.rightArrowHandleFlag = true;
+            appState.active->rightArrowPressedLastFrame = true;
+            appState.active->rightArrowHandleFlag = true;
         }
         else if (glfwGetKey(window_, GLFW_KEY_RIGHT) == GLFW_RELEASE) {
-            appState.rightArrowPressedLastFrame = false;
-            appState.rightArrowHandleFlag = false;
+            appState.active->rightArrowPressedLastFrame = false;
+            appState.active->rightArrowHandleFlag = false;
         }
 
         // Load file if navigation changed
-        if (appState.filesChanged && !appState.csvFiles.empty() && appState.dataSourceReady()) {
+        if (appState.active->filesChanged && !appState.active->csvFiles.empty() && appState.dataSourceReady()) {
             try {
                 // Load the currently selected file
-                InterferogramData data = loadInterferogram(appState, appState.sortedFiles[appState.currentSortedFileIndex]);
+                InterferogramData data = loadInterferogram(appState, appState.active->sortedFiles[appState.active->currentSortedFileIndex]);
                 
 
                 
                 // Store raw data in cache before any processing for spectrum computation
-                appState.rawDataCache.clear();
-                appState.rawDataCache.push_back(data);
+                appState.active->rawDataCache.clear();
+                appState.active->rawDataCache.push_back(data);
                 
                 // Create a copy for processing (downsampling, etc.)
                 InterferogramData processedData = data;
                 
                 // Apply downsampling if enabled and dataset is large
-                if (appState.enableDownsampling && processedData.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
+                if (appState.active->enableDownsampling && processedData.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
                     size_t localDownsampleFactor = processedData.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
                     
                     // Downsample both reference and primary detectors
@@ -1410,68 +1421,68 @@ void AppLoop::handleInput() {
                 }
                 
                 // For single selection (no Ctrl), replace current selection
-                appState.loadedData.clear();
+                appState.active->loadedData.clear();
                 // DON'T clear raw data cache - we need it for spectrum calculation!
-                // appState.rawDataCache.clear(); // Clear raw data cache too
-                appState.selectedFiles.clear();
-                appState.selectedFilenames.clear();
+                // appState.active->rawDataCache.clear(); // Clear raw data cache too
+                appState.active->selectedFiles.clear();
+                appState.active->selectedFilenames.clear();
                 
                 // Always load the processed data
-                appState.loadedData.push_back(processedData);
+                appState.active->loadedData.push_back(processedData);
                 // Raw data is already in cache from line 718, no need to add again
-                // appState.rawDataCache.push_back(data); // Store raw data for spectrum computation
+                // appState.active->rawDataCache.push_back(data); // Store raw data for spectrum computation
 
-                appState.selectedFiles.push_back(appState.sortedFiles[appState.currentSortedFileIndex]);
+                appState.active->selectedFiles.push_back(appState.active->sortedFiles[appState.active->currentSortedFileIndex]);
                 
                 // Extract filename for legend
-                std::string filename = appState.sortedFiles[appState.currentSortedFileIndex];
+                std::string filename = appState.active->sortedFiles[appState.active->currentSortedFileIndex];
                 size_t last_slash = filename.find_last_of("/\\");
                 if (last_slash != std::string::npos) {
                     filename = filename.substr(last_slash + 1);
                 }
-                appState.selectedFilenames.push_back(filename);
+                appState.active->selectedFilenames.push_back(filename);
                 
                 // Update current dataset name (extract from current directory path)
-                std::string dirPath = appState.currentDirectory;
+                std::string dirPath = appState.active->currentDirectory;
                 size_t dir_last_slash = dirPath.find_last_of("/\\");
                 if (dir_last_slash != std::string::npos) {
-                    appState.currentDatasetName = dirPath.substr(dir_last_slash + 1);
+                    appState.active->currentDatasetName = dirPath.substr(dir_last_slash + 1);
                     // If this is "raw_data", get the parent directory name
-                    if (appState.currentDatasetName == "raw_data" && dir_last_slash > 0) {
+                    if (appState.active->currentDatasetName == "raw_data" && dir_last_slash > 0) {
                         size_t parent_slash = dirPath.substr(0, dir_last_slash).find_last_of("/\\");
                         if (parent_slash != std::string::npos) {
-                            appState.currentDatasetName = dirPath.substr(parent_slash + 1, dir_last_slash - parent_slash - 1);
+                            appState.active->currentDatasetName = dirPath.substr(parent_slash + 1, dir_last_slash - parent_slash - 1);
                         }
                     }
                 }
                 
-                appState.dataLoaded = true;
+                appState.active->dataLoaded = true;
                 appState.needsRedraw = true;
                 
                 // Handle autoscale behavior based on AGENTS.md requirements:
                 // "when the application loads a file for display for the first time after launch or work directory switch, axes zoom to fit all data."
-                if (appState.isFirstDataLoad) {
-                    appState.zoomRange = {0, 0};
-                    appState.shouldAutoscale = true; // Trigger autoscale
+                if (appState.active->isFirstDataLoad) {
+                    appState.active->zoomRange = {0, 0};
+                    appState.active->shouldAutoscale = true; // Trigger autoscale
                     
                     // Recalculate Y-axis limits from the actual data for autoscale
                     if (!data.referenceDetector.empty()) {
                         auto ref_min_max = std::minmax_element(data.referenceDetector.begin(), data.referenceDetector.end());
-                        appState.ref_y_min = *ref_min_max.first;
-                        appState.ref_y_max = *ref_min_max.second;
+                        appState.active->ref_y_min = *ref_min_max.first;
+                        appState.active->ref_y_max = *ref_min_max.second;
                     }
                     auto prim_min_max = std::minmax_element(data.primaryDetector.begin(), data.primaryDetector.end());
-                    appState.prim_y_min = *prim_min_max.first;
-                    appState.prim_y_max = *prim_min_max.second;
+                    appState.active->prim_y_min = *prim_min_max.first;
+                    appState.active->prim_y_max = *prim_min_max.second;
                     
                     // Reset first load flag after handling
-                    appState.isFirstDataLoad = false;
+                    appState.active->isFirstDataLoad = false;
                 }
-                appState.filesChanged = false;
+                appState.active->filesChanged = false;
                 
                 // Add parent directory to recent datasets from the loaded file path
-                if (!appState.selectedFiles.empty()) {
-                    std::string datasetPath = appState.selectedFiles[0];
+                if (!appState.active->selectedFiles.empty()) {
+                    std::string datasetPath = appState.active->selectedFiles[0];
                     size_t last_slash = datasetPath.find_last_of("/\\");
                     if (last_slash != std::string::npos) {
                         std::string parentDir = datasetPath.substr(0, last_slash);
@@ -1486,8 +1497,8 @@ void AppLoop::handleInput() {
                 
             } catch (const std::exception& e) {
                 std::cerr << "Error loading file: " << e.what() << std::endl;
-                appState.dataLoaded = false;
-                appState.filesChanged = false;
+                appState.active->dataLoaded = false;
+                appState.active->filesChanged = false;
             }
         }
         }   // end wsActive gate
@@ -1552,24 +1563,25 @@ void AppLoop::renderUI() {
         // first rendered frame (see the post-render block), so the first-load
         // autoscale of the zoom ranges can never false-dirty a fresh open.
         // Latching (no baseline update on diff) matches the coarse-dirty model.
-        if (appState.hasWorkspace() && !appState.workspace.dirty &&
-            !appState.viewStateBaselinePending) {
-            if (viewStateJson(appState) != appState.viewStateBaseline) {
-                appState.workspace.dirty = true;
+        if (appState.hasWorkspace() && !appState.active->workspace.dirty &&
+            !appState.active->viewStateBaselinePending) {
+            if (viewStateJson(appState) != appState.active->viewStateBaseline) {
+                appState.active->workspace.dirty = true;
                 // One entry per dirty period: the latch only fires on the
                 // clean->dirty transition.
-                logWorkspaceChange(appState.workspace,
+                logWorkspaceChange(appState.active->workspace,
                                    "View settings (zooms, ranges, panel options)");
             }
         }
 #endif
 
         // Conditionally disable anti-aliasing for large datasets (>50k points).
-        // Guarded: after a tab switch the flat loadedData is parked (moved
-        // out) while dataLoaded may still be latched true — never index [0]
-        // without the empty check.
-        if (appState.dataLoaded && !appState.loadedData.empty() &&
-            appState.loadedData[0].dataSize() > 50000) {
+        // Guarded: the active pointer is null while no workspace tab exists
+        // (launch welcome / go-home), and after a tab switch loadedData may be
+        // empty while dataLoaded is still latched — never index [0] without
+        // the empty check.
+        if (appState.active && appState.active->dataLoaded && !appState.active->loadedData.empty() &&
+            appState.active->loadedData[0].dataSize() > 50000) {
             ImGui::GetStyle().AntiAliasedLines = false;
         }
         
@@ -1769,7 +1781,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
         // tab is focused (M2.3): the flat fields hold the active workspace's
         // data; the Session tab renders its own windows instead.
         if ((!appState.showWelcomeScreen || appState.welcomeScreenInitialized) &&
-            appState.activeTabKind == ActiveTabKind::Workspace) {
+            appState.activeTabKind == ActiveTabKind::Workspace && appState.active) {
         // Files panel (left)
         renderFilesPanel();
         
@@ -1777,7 +1789,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
         renderInterferogramPanel();
 
 // Spectrum panel (bottom)
-        appState.spectrum.renderPanel(appState);
+        appState.active->spectrum.renderPanel(appState);
         
         // Average config panel
         renderAveragePanel();
@@ -1795,7 +1807,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
         renderInterferogramConfigPanel();
 
         // Export panel (docked)
-        appState.exportPanel.renderPanel();
+        appState.active->exportPanel.renderPanel();
 
         // Metadata panel (right)
         renderMetadataPanel();
@@ -1856,7 +1868,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), "FPS: %.1f", appState.fps); // White text for high contrast
             ImGui::End();
         }
-        if (appState.exportPanel.exportPending) {
+        if (appState.active && appState.active->exportPanel.exportPending) {
             fprintf(stderr, "DEBUG: Export progress overlay rendering\n");
             ImDrawList* dl = ImGui::GetForegroundDrawList();
             ImVec2 size = ImGui::GetIO().DisplaySize;
@@ -1899,16 +1911,16 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
         // autoscale has written the final zoom ranges. Latch compares from the
         // next frame.
 #if FTS_BUILD_HDF5
-        if (appState.hasWorkspace() && appState.viewStateBaselinePending) {
-            appState.viewStateBaseline = viewStateJson(appState);
-            appState.viewStateBaselinePending = false;
+        if (appState.hasWorkspace() && appState.active->viewStateBaselinePending) {
+            appState.active->viewStateBaseline = viewStateJson(appState);
+            appState.active->viewStateBaselinePending = false;
             // Pristine open: the first frame's auto-computes (spectrum mirror
             // in wsMirrorSpectrum) are re-baselined along with the view state
             // — opening a file is not "unsaved changes" by itself.
-            if (appState.workspaceDirtyRebaselinePending) {
-                appState.workspaceDirtyRebaselinePending = false;
-                appState.workspace.dirty = false;
-                appState.workspace.changeLog.clear();
+            if (appState.active->workspaceDirtyRebaselinePending) {
+                appState.active->workspaceDirtyRebaselinePending = false;
+                appState.active->workspace.dirty = false;
+                appState.active->workspace.changeLog.clear();
             }
         }
 #endif
@@ -1930,8 +1942,9 @@ void AppLoop::present() {
         glfwSwapBuffers(window_);
 
         // Execute deferred export after the frame is visible on screen
-        if (appState.exportPanel.exportPending) {
-            appState.exportPanel.executePendingExport();
+        // (exportPanel lives in the active session — null while no tab exists).
+        if (appState.active && appState.active->exportPanel.exportPending) {
+            appState.active->exportPanel.executePendingExport();
             appState.needsRedraw = true;
         }
         
@@ -1941,5 +1954,5 @@ void AppLoop::present() {
         }
         
         // Reset keyboard navigation flag after rendering
-        appState.keyboardNavigation = false;
+        if (appState.active) appState.active->keyboardNavigation = false;
 }

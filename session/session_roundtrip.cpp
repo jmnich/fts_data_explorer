@@ -74,7 +74,9 @@ Workspace makeFixtureWorkspace(const std::string& tag) {
     return ws;
 }
 
-void populateAppState(AppState& s, const std::string& tag, const std::string& h5Path) {
+// Populate a SESSION's canonical fields (M4.5: sessions hold all per-workspace
+// state; AppState has no flat fields). Mirrors the app's open flow output.
+void populateSession(WorkspaceSession& s, const std::string& tag, const std::string& h5Path) {
     s.workspace = makeFixtureWorkspace(tag);
     s.workspacePath = h5Path;
     s.datasetInfo = workspaceDatasetInfo(s.workspace);
@@ -507,196 +509,148 @@ void checkMirrored(const L& a, const R& b) {
     CHECK(a.pendingWorkspaceDeletionPath == b.pendingWorkspaceDeletionPath);
 }
 
-// Session-latch vs flat dirty: the mirror latch must track workspace.dirty.
-void checkLatch(const WorkspaceSession& sess, const AppState& s) {
-    CHECK(sess.workspaceDirty == s.workspace.dirty);
-}
-
 // ── tests ───────────────────────────────────────────────────────────────────
 
-// Back-pointer regression (crash fix): the flat panels must keep pointing at
-// &appState after a resume — a blank session's panels carry nullptr and must
-// never overwrite the wiring.
-// Mirrors the app's startup wiring (ui/window.cpp / headless.cpp): the flat
-// panels point at &appState once, at startup — never re-wired on tab switch.
-void wirePanels(AppState& s) {
-    s.spectrum.appState = &s;
-    s.averageSpectrum.appState = &s;
-    s.snrSpectrum.appState = &s;
-    s.allanVariance.appState = &s;
-    s.t100.appState = &s;
-    s.exportPanel.appState = &s;
+// Back-pointer contract (M4.5): every session's panels point at &appState —
+// wired once at session creation (wireSessionPanels), never re-wired on tab
+// switch (the AppState address is stable).
+void checkBackpointers(const WorkspaceSession& ws, const AppState& s) {
+    CHECK(ws.spectrum.appState == &s);
+    CHECK(ws.averageSpectrum.appState == &s);
+    CHECK(ws.snrSpectrum.appState == &s);
+    CHECK(ws.allanVariance.appState == &s);
+    CHECK(ws.t100.appState == &s);
+    CHECK(ws.exportPanel.appState == &s);
 }
 
-void checkBackpointers(const AppState& s) {
-    CHECK(s.spectrum.appState == &s);
-    CHECK(s.averageSpectrum.appState == &s);
-    CHECK(s.snrSpectrum.appState == &s);
-    CHECK(s.allanVariance.appState == &s);
-    CHECK(s.t100.appState == &s);
-    CHECK(s.exportPanel.appState == &s);
+// Fixture: push a populated, wired session and return it.
+WorkspaceSession* makeSession(AppState& s, const std::string& tag,
+                              const std::string& path) {
+    auto sess = std::make_unique<WorkspaceSession>();
+    sess->key = path;
+    sess->path = path;
+    populateSession(*sess, tag, path);
+    wireSessionPanels(s, *sess);
+    s.sessions.push_back(std::move(sess));
+    return s.sessions.back().get();
 }
+
+// Fixture: make sessions[idx] the active workspace tab (the app's swap
+// machinery does the same via executePendingSwap).
+void activateSession(AppState& s, int idx) {
+    s.active = s.sessions[idx].get();
+    s.activeTabKind = ActiveTabKind::Workspace;
+    s.activeSessionIdx = idx;
+    s.lastActiveSessionIdx = idx;
+}
+
+
+
+
+
+
+
+// ── M2.2 lifecycle ─────────────────────────────────────────────────────────
 
 void test1_singleRoundtrip() {
-    std::printf("test1: single park/resume round-trip...\n");
+    std::printf("test1: canonical session state (active pointer, no copies)...\n");
     AppState s;
-    AppState reference;   // never parked; the expected state
-    populateAppState(s, "A", "/tmp/fts_session_a.h5");
-    populateAppState(reference, "A", "/tmp/fts_session_a.h5");
-    wirePanels(s);
-    wirePanels(reference);
-
-    WorkspaceSession sess;
-    sess.key = "/tmp/fts_session_a.h5";
-    sess.path = "/tmp/fts_session_a.h5";
-
-    sess.park(s);
-    checkMirrored(reference, sess);
-    checkLatch(sess, reference);       // park direction
-    sess.resume(s);
-    checkMirrored(s, reference);          // resume direction
-    checkBackpointers(s);                 // wiring survived the round-trip
-
-    // A second park/resume cycle must be stable (moved-from flat fields are
-    // fully replaced each time).
-    sess.park(s);
-    checkMirrored(reference, sess);
-    checkLatch(sess, reference);
-    sess.resume(s);
-    checkMirrored(s, reference);
-    checkBackpointers(s);
+    WorkspaceSession reference;
+    populateSession(reference, "A", "/tmp/fts_session_a.h5");
+    auto* sess = makeSession(s, "A", "/tmp/fts_session_a.h5");
+    checkMirrored(*sess, reference);          // populated at creation
+    checkBackpointers(*sess, s);              // wired at creation
+    activateSession(s, 0);
+    CHECK(s.active == sess);
+    checkMirrored(*s.active, reference);      // activation moved nothing
+    checkBackpointers(*sess, s);
+    // A second activation cycle is stable (nothing to move).
+    activateSession(s, 0);
+    checkMirrored(*s.active, reference);
 }
 
 void test2_twoSessionsABBA() {
-    std::printf("test2: two-session A->B->A round-trip...\n");
+    std::printf("test2: two-session A->B->A switching...\n");
     AppState s;
-    AppState refA;
-    AppState refB;
-    populateAppState(refA, "A", "/tmp/fts_session_a.h5");
-    populateAppState(refB, "B", "/tmp/fts_session_b.h5");
-    populateAppState(s, "A", "/tmp/fts_session_a.h5");
-    wirePanels(refA);
-    wirePanels(refB);
-    wirePanels(s);
-
-    WorkspaceSession sessA;
-    sessA.key = "/tmp/fts_session_a.h5";
-    sessA.path = "/tmp/fts_session_a.h5";
-    WorkspaceSession sessB;
-    sessB.key = "/tmp/fts_session_b.h5";
-    sessB.path = "/tmp/fts_session_b.h5";
-
-    // Contract: park is a TRANSFER — a session is blank after resume until it
-    // is parked again (the app's executePendingSwap always parks the active
-    // tab before resuming the target, so this invariant holds in practice).
-    sessA.park(s);                              // sessA = A (s is blank after)
-    checkMirrored(refA, sessA);                 // park A
-
-    populateAppState(s, "B", "/tmp/fts_session_b.h5");
-    sessB.park(s);                              // sessB = B
-    checkMirrored(refB, sessB);                 // park B — both parked
-
-    sessA.resume(s);                            // A -> active (sessA blank after)
-    checkMirrored(s, refA);
-
-    sessA.park(s);                              // park A back (switch away)
-    sessB.resume(s);                            // B -> active
-    checkMirrored(s, refB);
-
-    sessB.park(s);                              // park B back (switch away)
-    sessA.resume(s);                            // A -> active again
-    checkMirrored(s, refA);
-
-    // Park overwrite contract: parking the flat state (A) into sessB makes
-    // sessB a full copy of A — parked sessions are always replaced wholesale.
-    sessB.park(s);
-    checkMirrored(refA, sessB);
+    WorkspaceSession refA, refB;
+    populateSession(refA, "A", "/tmp/fts_session_a.h5");
+    populateSession(refB, "B", "/tmp/fts_session_b.h5");
+    makeSession(s, "A", "/tmp/fts_session_a.h5");
+    makeSession(s, "B", "/tmp/fts_session_b.h5");
+    activateSession(s, 0);
+    checkMirrored(*s.active, refA);
+    swapInSession(s, 1);                      // click B (queued)
+    executePendingSwap(s);
+    CHECK(s.active == s.sessions[1].get());
+    checkMirrored(*s.active, refB);
+    CHECK(s.sessions[0]->currentDatasetName == "A");   // A retained
+    swapInSession(s, 0);
+    executePendingSwap(s);
+    checkMirrored(*s.active, refA);
+    CHECK(s.sessions[1]->currentDatasetName == "B");   // B retained
 }
 
 void test3_queuedSwapOrder() {
     std::printf("test3: queued swap executes only at frame top...\n");
     AppState s;
-    AppState refA;
-    AppState refB;
-    populateAppState(refA, "A", "/tmp/fts_session_a.h5");
-    populateAppState(refB, "B", "/tmp/fts_session_b.h5");
-    populateAppState(s, "A", "/tmp/fts_session_a.h5");
-    wirePanels(refA);
-    wirePanels(refB);
-    wirePanels(s);
-
-    auto sessA = std::make_unique<WorkspaceSession>();
-    sessA->key = "/tmp/fts_session_a.h5";
-    sessA->path = "/tmp/fts_session_a.h5";
-    sessA->park(s);                          // sessA = A's state
-    populateAppState(s, "B", "/tmp/fts_session_b.h5");
-    auto sessB = std::make_unique<WorkspaceSession>();
-    sessB->key = "/tmp/fts_session_b.h5";
-    sessB->path = "/tmp/fts_session_b.h5";
-    sessB->park(s);                          // sessB = B's state
-    sessA->resume(s);                        // A becomes the active tab
-    s.sessions.push_back(std::move(sessA));
-    s.sessions.push_back(std::move(sessB));
-    s.activeTabKind = ActiveTabKind::Workspace;
-    s.activeSessionIdx = 0;
+    WorkspaceSession refA, refB;
+    populateSession(refA, "A", "/tmp/fts_session_a.h5");
+    populateSession(refB, "B", "/tmp/fts_session_b.h5");
+    makeSession(s, "A", "/tmp/fts_session_a.h5");
+    makeSession(s, "B", "/tmp/fts_session_b.h5");
+    activateSession(s, 0);
 
     swapInSession(s, 1);                     // click B — must only queue
     CHECK(s.pendingSwapIdx == 1);
     CHECK(s.pendingSwapToSession == false);
-    CHECK(s.activeSessionIdx == 0);          // flat fields untouched
-    CHECK(s.currentDatasetName == "A");
+    CHECK(s.activeSessionIdx == 0);          // nothing changed mid-frame
+    CHECK(s.active == s.sessions[0].get());
+    CHECK(s.active->currentDatasetName == "A");
 
     executePendingSwap(s);                   // frame top
     CHECK(s.activeSessionIdx == 1);
     CHECK(s.activeTabKind == ActiveTabKind::Workspace);
     CHECK(s.lastActiveSessionIdx == 1);
     CHECK(s.pendingSwapIdx == -1);
-    CHECK(s.currentDatasetName == "B");
-    checkMirrored(s, refB);
+    CHECK(s.active->currentDatasetName == "B");
+    checkMirrored(*s.active, refB);
 
-    // Session-tab focus: park the active workspace, kind -> Session.
+    // Session-tab focus: the workspace leaves the active pointer (data stays
+    // in its session).
     focusSessionTab(s);
     executePendingSwap(s);
     CHECK(s.activeTabKind == ActiveTabKind::Session);
     CHECK(s.activeSessionIdx == -1);
-    CHECK(s.sessions[0]->currentDatasetName == "A");   // parked, data retained
+    CHECK(s.active == nullptr);
+    CHECK(s.sessions[0]->currentDatasetName == "A");   // retained
 
     // Back to the workspace tab.
     swapInSession(s, 0);
     executePendingSwap(s);
     CHECK(s.activeSessionIdx == 0);
-    CHECK(s.currentDatasetName == "A");
-    checkMirrored(s, refA);
+    CHECK(s.active->currentDatasetName == "A");
+    checkMirrored(*s.active, refA);
 }
 
-// ── M2.2 lifecycle ─────────────────────────────────────────────────────────
+
+
+
+
+// M2.3: an in-flight computation's futures travel with the session on
+// park/resume and complete on the shared pool while parked.
+
+
+// Crash regression (welcome-open SIGSEGV): opening a NEW workspace tab
+// resumes a never-parked (blank) session; its panels carry nullptr
+// back-pointers, which must never overwrite the flat panels' wiring.
+
 
 void test4_closeFlow() {
     std::printf("test4: closeTab / removeTab / queued close-after-swap...\n");
     AppState s;
-    AppState refA;
-    AppState refB;
-    populateAppState(refA, "A", "/tmp/fts_session_a.h5");
-    populateAppState(refB, "B", "/tmp/fts_session_b.h5");
-    populateAppState(s, "A", "/tmp/fts_session_a.h5");
-    wirePanels(refA);
-    wirePanels(refB);
-    wirePanels(s);
-
-    auto sessA = std::make_unique<WorkspaceSession>();
-    sessA->key = "/tmp/fts_session_a.h5";
-    sessA->path = "/tmp/fts_session_a.h5";
-    sessA->park(s);
-    populateAppState(s, "B", "/tmp/fts_session_b.h5");
-    auto sessB = std::make_unique<WorkspaceSession>();
-    sessB->key = "/tmp/fts_session_b.h5";
-    sessB->path = "/tmp/fts_session_b.h5";
-    sessB->park(s);
-    sessA->resume(s);
-    s.sessions.push_back(std::move(sessA));
-    s.sessions.push_back(std::move(sessB));
-    s.activeTabKind = ActiveTabKind::Workspace;
-    s.activeSessionIdx = 0;
+    makeSession(s, "A", "/tmp/fts_session_a.h5");
+    makeSession(s, "B", "/tmp/fts_session_b.h5");
+    activateSession(s, 0);
 
     // A is active + clean: the removal is QUEUED (pendingRemoveIdx) — never
     // mid-frame — and runs at frame top.
@@ -704,7 +658,7 @@ void test4_closeFlow() {
     CHECK(s.pendingRemoveIdx == 0);
     CHECK(s.sessions.size() == 2);                   // still there this frame
     CHECK(s.activeSessionIdx == 0);                  // still active
-    CHECK(s.currentDatasetName == "A");              // flat fields intact
+    CHECK(s.active->currentDatasetName == "A");
     if (s.pendingRemoveIdx >= 0) {                   // frame-top executor
         const int idx = s.pendingRemoveIdx;
         s.pendingRemoveIdx = -1;
@@ -713,6 +667,7 @@ void test4_closeFlow() {
     CHECK(s.sessions.size() == 1);
     CHECK(s.activeSessionIdx == -1);
     CHECK(s.activeTabKind == ActiveTabKind::Session);
+    CHECK(s.active == nullptr);
     CHECK(s.sessions[0]->key == "/tmp/fts_session_b.h5");   // B shifted to 0
 
     // B is parked + clean: removed directly (no queue needed — parked).
@@ -720,31 +675,18 @@ void test4_closeFlow() {
     CHECK(s.sessions.empty());
 
     // Dirty ACTIVE tab close: prompt (pendingTabCloseIdx), then discard.
-    // Setup: sessC parked (filler), sessA parked, then the flat fields are
-    // (re)loaded with A — the active tab's data always lives in flat fields.
-    populateAppState(s, "A", "/tmp/fts_session_a.h5");
-    auto sessC = std::make_unique<WorkspaceSession>();
-    sessC->key = "/tmp/fts_session_a.h5";
-    sessC->path = "/tmp/fts_session_a.h5";
-    sessC->park(s);
-    populateAppState(s, "A", "/tmp/fts_session_a.h5");
-    sessA = std::make_unique<WorkspaceSession>();
-    sessA->key = "/tmp/fts_session_a.h5";
-    sessA->path = "/tmp/fts_session_a.h5";
-    sessA->park(s);
-    populateAppState(s, "A", "/tmp/fts_session_a.h5");
-    s.sessions.push_back(std::move(sessC));
-    s.sessions.push_back(std::move(sessA));
-    s.activeTabKind = ActiveTabKind::Workspace;
-    s.activeSessionIdx = 1;
-    s.workspace.dirty = true;                       // dirty latch
+    // Setup: sessC filler (parked), sessA active + dirty.
+    makeSession(s, "A", "/tmp/fts_session_a.h5");        // C (filler, index 0)
+    auto* a = makeSession(s, "A", "/tmp/fts_session_a.h5");
+    activateSession(s, 1);
+    a->workspace.dirty = true;                           // dirty latch (canonical)
     closeTab(s, 1);
     CHECK(s.pendingTabCloseIdx == 1);
     CHECK(s.showUnsavedPrompt == true);
-    // The dirty ACTIVE tab is NOT parked before the modal: the modal's change
-    // list and Save must see the real flat fields.
-    CHECK(s.workspace.measurementComment == "roundtrip A");
-    CHECK(s.workspace.changeLog.size() == 0);       // clean before the latch test
+    // The dirty ACTIVE tab stays active before the modal: the modal's change
+    // list and Save must see the real session fields.
+    CHECK(s.active->workspace.measurementComment == "roundtrip A");
+    CHECK(s.active->workspace.changeLog.size() == 0);
     // Modal "Don't Save" resolution: queues the removal (frame top).
     s.pendingTabCloseIdx = -1;
     s.showUnsavedPrompt = false;
@@ -757,31 +699,17 @@ void test4_closeFlow() {
     CHECK(s.sessions.size() == 1);
     CHECK(s.activeSessionIdx == -1);
     CHECK(s.activeTabKind == ActiveTabKind::Session);
-    CHECK(s.sessions[0]->currentDatasetName == "A");   // the parked session survived
+    CHECK(s.sessions[0]->currentDatasetName == "A");   // the filler survived
 
     // Dirty PARKED tab close: queued swap first, modal after the frame-top
     // executor runs.
     s.sessions.clear();
     s.activeSessionIdx = -1;
-    populateAppState(s, "A", "/tmp/fts_session_a.h5");
-    sessA = std::make_unique<WorkspaceSession>();
-    sessA->key = "/tmp/fts_session_a.h5";
-    sessA->path = "/tmp/fts_session_a.h5";
-    sessA->park(s);                                  // A parked, clean
-    populateAppState(s, "B", "/tmp/fts_session_b.h5");
-    sessB = std::make_unique<WorkspaceSession>();
-    sessB->key = "/tmp/fts_session_b.h5";
-    sessB->path = "/tmp/fts_session_b.h5";
-    sessB->park(s);                                  // B parked, clean
-    sessA->resume(s);                                // A active
-    sessA->workspaceDirty = true;                    // A becomes dirty while parked... 
-    // (dirty latch travels with the parked session; mark B dirty instead)
-    sessA->workspaceDirty = false;
-    sessB->workspaceDirty = true;
-    s.sessions.push_back(std::move(sessA));
-    s.sessions.push_back(std::move(sessB));
-    s.activeTabKind = ActiveTabKind::Workspace;
-    s.activeSessionIdx = 0;
+    s.active = nullptr;
+    makeSession(s, "A", "/tmp/fts_session_a.h5");
+    auto* b = makeSession(s, "B", "/tmp/fts_session_b.h5");
+    b->workspace.dirty = true;                           // B dirty (parked)
+    activateSession(s, 0);
 
     closeTab(s, 1);                                  // close dirty PARKED B
     CHECK(s.pendingCloseAfterSwap == 1);
@@ -797,7 +725,7 @@ void test4_closeFlow() {
     CHECK(s.activeSessionIdx == 1);
     CHECK(s.pendingTabCloseIdx == 1);
     CHECK(s.showUnsavedPrompt == true);
-    CHECK(s.currentDatasetName == "B");
+    CHECK(s.active->currentDatasetName == "B");
     // Modal "Don't Save": queues the removal (frame top).
     s.pendingTabCloseIdx = -1;
     s.showUnsavedPrompt = false;
@@ -821,7 +749,7 @@ void test5_labels() {
     fs.key = "/data/sample_2024.h5";
     CHECK(fs.label() == "sample_2024");
     CHECK(fs.title() == "sample_2024");              // clean: no star
-    fs.workspaceDirty = true;
+    fs.workspace.dirty = true;                       // canonical dirty flag
     CHECK(fs.title() == "sample_2024 *");
 
     WorkspaceSession embedded;
@@ -829,14 +757,15 @@ void test5_labels() {
     CHECK(embedded.label() == "source_0001");
 }
 
-// M2.3: an in-flight computation's futures travel with the session on
-// park/resume and complete on the shared pool while parked.
+// M2.3/M4.5: futures live in the session's panel state; switching tabs never
+// moves them — an in-flight computation completes on the shared pool while
+// the tab is inactive and its result is polled on re-activation.
 void test6_futureMigration() {
-    std::printf("test6: pending futures migrate with the session...\n");
+    std::printf("test6: pending futures stay with the session across switches...\n");
     AppState s;
-    AppState ref;
-    populateAppState(ref, "A", "/tmp/fts_session_a.h5");
-    populateAppState(s, "A", "/tmp/fts_session_a.h5");
+    auto* sessA = makeSession(s, "A", "/tmp/fts_session_a.h5");
+    auto* sessB = makeSession(s, "B", "/tmp/fts_session_b.h5");
+    activateSession(s, 0);
 
     auto fut = s.computationPool->enqueue(
         []() -> SpectralToolbox::ProcessedSpectrum {
@@ -845,70 +774,62 @@ void test6_futureMigration() {
             ps.spectrumY = {0.5, 0.25};
             return ps;
         });
-    s.averageSpectrum.pendingFutures_.push_back(std::move(fut));
+    sessA->averageSpectrum.pendingFutures_.push_back(std::move(fut));
+    CHECK(sessA->averageSpectrum.pendingFutures_.size() == 1);
 
-    WorkspaceSession sess;
-    sess.key = "/tmp/fts_session_a.h5";
-    sess.path = "/tmp/fts_session_a.h5";
-    sess.park(s);
-    CHECK(s.averageSpectrum.pendingFutures_.empty());      // moved into the session
-    CHECK(sess.averageSpectrum.pendingFutures_.size() == 1);
+    // Switch away mid-compute: the future stays put (nothing to migrate).
+    swapInSession(s, 1);
+    executePendingSwap(s);
+    CHECK(s.active == sessB);
+    CHECK(sessA->averageSpectrum.pendingFutures_.size() == 1);
+    CHECK(sessA->averageSpectrum.pendingFutures_.front().valid());
 
-    sess.resume(s);
-    CHECK(s.averageSpectrum.pendingFutures_.size() == 1);  // moved back
-    auto& f = s.averageSpectrum.pendingFutures_.front();
+    // Back: poll the completed future (the app polls only the active tab).
+    swapInSession(s, 0);
+    executePendingSwap(s);
+    auto& f = sessA->averageSpectrum.pendingFutures_.front();
     if (f.wait_for(std::chrono::seconds(5)) != std::future_status::ready)
-        CHECK(false && "future did not complete while parked");
+        CHECK(false && "future did not complete while inactive");
     auto result = f.get();
     checkVecEq(result.spectrumX, {100.0, 200.0}, "future X");
     checkVecEq(result.spectrumY, {0.5, 0.25}, "future Y");
-    s.averageSpectrum.pendingFutures_.clear();
+    sessA->averageSpectrum.pendingFutures_.clear();
 }
 
-// Crash regression (welcome-open SIGSEGV): opening a NEW workspace tab
-// resumes a never-parked (blank) session; its panels carry nullptr
-// back-pointers, which must never overwrite the flat panels' wiring.
+// M4.5: activation of a never-populated (blank) session leaves its panels
+// wired and its fields at ctor defaults — panels render "no data", never a
+// null back-pointer (the crash class the old park/resume could not clobber
+// is gone by construction: wiring happens once at session creation).
 void test7_blankSessionResume() {
-    std::printf("test7: blank-session resume keeps panel wiring...\n");
-    AppState s;
-    AppState ref;
-    populateAppState(ref, "A", "/tmp/fts_session_a.h5");
-    wirePanels(ref);
-    populateAppState(s, "A", "/tmp/fts_session_a.h5");
-    wirePanels(s);
-
-    // Scenario 1 — FIRST open (the reported crash): launch-fresh AppState, one
-    // blank tab, nothing to park. The blank resume must not clobber wiring.
+    std::printf("test7: blank-session activation keeps panel wiring...\n");
+    // Scenario 1 — FIRST open (the old crash): launch-fresh AppState, one
+    // blank tab, nothing to park.
     {
         AppState s2;
-        wirePanels(s2);              // startup wiring (ui/window.cpp)
         s2.sessions.push_back(std::make_unique<WorkspaceSession>());
+        wireSessionPanels(s2, *s2.sessions[0]);
         swapInSession(s2, 0);
-        executePendingSwap(s2);            // frame top: resume blank
+        executePendingSwap(s2);            // frame top: activate blank
         CHECK(s2.activeSessionIdx == 0);
-        checkBackpointers(s2);             // THE regression: wiring survived
+        CHECK(s2.active == s2.sessions[0].get());
+        checkBackpointers(*s2.sessions[0], s2);   // wiring survived
     }
 
-    // Scenario 2 — a workspace tab is ACTIVE (its data in the flat fields);
-    // the user opens a new workspace (blank tab). Frame top parks A, resumes
-    // the blank.
-    auto sessA = std::make_unique<WorkspaceSession>();
-    sessA->key = "/tmp/fts_session_a.h5";
-    sessA->path = "/tmp/fts_session_a.h5";
-    s.sessions.push_back(std::move(sessA));   // A's data still in flat fields
-    s.activeTabKind = ActiveTabKind::Workspace;
-    s.activeSessionIdx = 0;
-
+    // Scenario 2 — a workspace tab is ACTIVE; the user opens a new workspace
+    // (blank tab). Frame top repoints the active pointer to the blank.
+    AppState s;
+    auto* a = makeSession(s, "A", "/tmp/fts_session_a.h5");
+    activateSession(s, 0);
     s.sessions.push_back(std::make_unique<WorkspaceSession>());
+    wireSessionPanels(s, *s.sessions[1]);
     swapInSession(s, 1);
-    executePendingSwap(s);                 // frame top: park A, resume blank
+    executePendingSwap(s);                 // frame top: activate blank
     CHECK(s.activeSessionIdx == 1);
-    checkBackpointers(s);                  // wiring survived
-    CHECK(s.sessions[0]->currentDatasetName == "A");   // A parked intact
-    // The blank flat state is ctor-default — panels render "no data", never
-    // dereferencing a null back-pointer.
-    CHECK(s.spectrum.xUnitSelector == 0);
-    CHECK(s.averageSpectrum.averageAvailable == false);
+    checkBackpointers(*s.sessions[1], s);
+    CHECK(a->currentDatasetName == "A");            // A intact, inactive
+    // The blank session's fields are ctor-default.
+    CHECK(s.active->spectrum.xUnitSelector == 0);
+    CHECK(s.active->averageSpectrum.averageAvailable == false);
 }
 
 // M3.1: spectral pool — parity (precomputed cm-1 session == cachedSpectra),
@@ -1015,19 +936,18 @@ void test8_pool() {
         checkVecEq(matrix[1], want, "matrix row 1");
     }
 
-    // Active-tab (flat-fields) read: resume the session — the ownership rule
-    // switches to the flat fields; the pool must return identical data.
+    // Active-tab read: the pool reads the session's fields whether the tab
+    // is active or not (canonical model — no ownership branch). Activate the
+    // tab and verify the result is identical.
     {
         s.poolCache.clear();
-        s.activeTabKind = ActiveTabKind::Workspace;  // frame-top swap effect
-        s.activeSessionIdx = 0;
-        s.sessions[0]->resume(s);
-        CHECK(s.spectrum.cachedSpectra.count("specA") == 1);
+        activateSession(s, 0);
+        CHECK(s.active->spectrum.cachedSpectra.count("specA") == 1);
         SpectralToolbox::ProcessedSpectrum pp = poolSpectrum(s, refA, 0);
         checkVecEq(pp.spectrumX, xCm, "pool X active");
         checkVecEq(pp.spectrumY, yA, "pool Y active");
-        s.sessions[0]->park(s);                      // back to parked
-        s.activeTabKind = ActiveTabKind::Session;
+        focusSessionTab(s);                          // back to parked
+        executePendingSwap(s);
     }
 
     // poolEvictKey removes the workspace's entries.
@@ -1100,46 +1020,35 @@ void test9_env() {
 // the active workspace tab first. Before the fix the direct activation left
 // workspace data in the flat fields with an empty mirror; the next queued
 // swap resumed that empty mirror over the live fields — wiping the tab.
+// Bugfix regression (2026-08-13, preserved under M4.5): switching to an
+// environment tab must never touch the workspace tabs' data. Under the
+// canonical model this holds by construction — sessions own their data and
+// env activation only nulls AppState::active — but the alternation sequence
+// that used to wipe tabs is still exercised end-to-end.
 void test9b_envActivationParksWorkspace() {
-    std::printf("test9b: env activation parks the active workspace tab (no wipe)...\n");
+    std::printf("test9b: env activation leaves workspace sessions intact (no wipe)...\n");
     AppState s;
+    auto* a = makeSession(s, "A", "/tmp/ws_a.h5");
+    auto* b = makeSession(s, "B", "/tmp/ws_b.h5");
+    activateSession(s, 0);
+    CHECK(a->currentDatasetName == "A");
+    CHECK(a->csvFiles.size() == 1);
 
-    // Workspace A active (data in flat fields), workspace B parked.
-    populateAppState(s, "A", "/tmp/ws_a.h5");
-    auto sessA = std::make_unique<WorkspaceSession>();
-    sessA->key = "/tmp/ws_a.h5";
-    sessA->path = "/tmp/ws_a.h5";
-    sessA->park(s);                                  // A parked (mirror holds A)
-    populateAppState(s, "B", "/tmp/ws_b.h5");
-    auto sessB = std::make_unique<WorkspaceSession>();
-    sessB->key = "/tmp/ws_b.h5";
-    sessB->path = "/tmp/ws_b.h5";
-    sessB->park(s);                                  // B parked
-    sessA->resume(s);                                // A active (flat fields = A)
-    s.sessions.push_back(std::move(sessA));
-    s.sessions.push_back(std::move(sessB));
-    s.activeTabKind = ActiveTabKind::Workspace;
-    s.activeSessionIdx = 0;
-    // Invariant: ACTIVE tab's data lives in the flat fields; the mirror is
-    // only populated while PARKED (resume MOVES the data back).
-    CHECK(s.currentDatasetName == "A");
-    CHECK(s.csvFiles.size() == 1);
-
-    // Click the env tab: queued; frame top parks A (data back in mirror[0]).
+    // Click the env tab: queued; frame top nulls the active pointer.
     createEnvironment(s, EnvType::Absorbance);
     executePendingSwap(s);
     CHECK(s.activeTabKind == ActiveTabKind::Environment);
     CHECK(s.activeEnvIdx == 0);
-    CHECK(s.sessions[0]->currentDatasetName == "A"); // A parked, data retained
-    CHECK(s.csvFiles.empty());                       // flat fields parked away
+    CHECK(s.active == nullptr);
+    CHECK(a->currentDatasetName == "A");             // A retained in its session
 
-    // Click workspace B: frame top resumes B; A's mirror must be untouched.
+    // Click workspace B: frame top repoints; A's session untouched.
     swapInSession(s, 1);
     executePendingSwap(s);
     CHECK(s.activeTabKind == ActiveTabKind::Workspace);
     CHECK(s.activeSessionIdx == 1);
-    CHECK(s.currentDatasetName == "B");
-    CHECK(s.sessions[0]->currentDatasetName == "A"); // THE regression: no wipe
+    CHECK(b->currentDatasetName == "B");
+    CHECK(a->currentDatasetName == "A");             // THE regression: no wipe
 
     // Env tab again, then back to A — A's data must survive the round trip.
     activateEnvironment(s, 0);
@@ -1147,9 +1056,9 @@ void test9b_envActivationParksWorkspace() {
     swapInSession(s, 0);
     executePendingSwap(s);
     CHECK(s.activeSessionIdx == 0);
-    CHECK(s.currentDatasetName == "A");
-    CHECK(!s.csvFiles.empty());
-    CHECK(s.sessions[1]->currentDatasetName == "B"); // B parked intact
+    CHECK(a->currentDatasetName == "A");
+    CHECK(!a->csvFiles.empty());
+    CHECK(b->currentDatasetName == "B");             // B intact
 
     // Alternate env <-> workspace several times: no tab may blank.
     for (int i = 0; i < 3; ++i) {
@@ -1159,15 +1068,16 @@ void test9b_envActivationParksWorkspace() {
         executePendingSwap(s);
         swapInSession(s, 1);
         executePendingSwap(s);
-        CHECK(s.currentDatasetName == "B");
-        CHECK(s.sessions[0]->currentDatasetName == "A");
+        CHECK(b->currentDatasetName == "B");
+        CHECK(a->currentDatasetName == "A");
     }
     // End on A: both tabs' data intact after the alternation.
     swapInSession(s, 0);
     executePendingSwap(s);
-    CHECK(s.currentDatasetName == "A");
-    CHECK(s.sessions[1]->currentDatasetName == "B");
+    CHECK(a->currentDatasetName == "A");
+    CHECK(b->currentDatasetName == "B");
 }
+
 
 // M3.3: T%/A parity vs the t100 panel (same-workspace ref+sample), clamp
 // cases, and the yMode toggle. Runs on the GLOBAL appState: the env
@@ -1190,36 +1100,29 @@ void test10_t100Parity() {
     // lives in the flat fields — t100 reads the flat fields (panel
     // back-pointer) and the pool's active branch reads the same fields, so
     // both see identical spectra (the parity contract).
-    auto sess = std::make_unique<WorkspaceSession>();
-    sess->key = "/tmp/parity.h5";
-    sess->path = "/tmp/parity.h5";
-    sess->workspace = makeFixtureWorkspace("parity");
-    sess->workspacePath = sess->path;
-    s.sessions.push_back(std::move(sess));
-    wirePanels(s);
-    s.activeTabKind = ActiveTabKind::Workspace;
-    s.activeSessionIdx = 0;
-    s.datasetInfo = workspaceDatasetInfo(s.workspace);
-    s.spectrum.xUnitSelector = 0;
-    s.spectrum.refLaserTextbox = 1.55f;
-    s.spectrum.Kpadding = 2;
+    auto* sess = makeSession(s, "parity", "/tmp/parity.h5");
+    activateSession(s, 0);
+    s.active->datasetInfo = workspaceDatasetInfo(s.active->workspace);
+    s.active->spectrum.xUnitSelector = 0;
+    s.active->spectrum.refLaserTextbox = 1.55f;
+    s.active->spectrum.Kpadding = 2;
     const std::vector<double> refX = {1000.0, 1250.0, 1500.0, 1750.0, 2000.0};
     const std::vector<double> refY = {1.0, 1.0, 1.0, 1.0, 1.0};       // unit ref
     const std::vector<double> smpX = {1000.0, 1500.0, 2000.0};
     const std::vector<double> smpY = {0.8, 0.8, 0.8};                  // ratio 0.8
-    s.spectrum.cachedFrequencies["specRef"] = refX;
-    s.spectrum.cachedSpectra["specRef"] = refY;
-    s.spectrum.cachedFrequencies["specSmp"] = smpX;
-    s.spectrum.cachedSpectra["specSmp"] = smpY;
+    s.active->spectrum.cachedFrequencies["specRef"] = refX;
+    s.active->spectrum.cachedSpectra["specRef"] = refY;
+    s.active->spectrum.cachedFrequencies["specSmp"] = smpX;
+    s.active->spectrum.cachedSpectra["specSmp"] = smpY;
 
     // t100 panel: reference = specRef, sample = specSmp.
-    s.t100.xUnitSelector = 0;
-    s.t100.refX = refX;
-    s.t100.refY = refY;
-    s.t100.refXUnit = 0;
-    s.t100.referenceAvailable = true;
-    CHECK(s.t100.computeTransmittanceForFile("specSmp") == true);
-    const std::vector<double> t100Y = s.t100.cachedTransY["specSmp"];
+    s.active->t100.xUnitSelector = 0;
+    s.active->t100.refX = refX;
+    s.active->t100.refY = refY;
+    s.active->t100.refXUnit = 0;
+    s.active->t100.referenceAvailable = true;
+    CHECK(s.active->t100.computeTransmittanceForFile("specSmp") == true);
+    const std::vector<double> t100Y = s.active->t100.cachedTransY["specSmp"];
     CHECK(t100Y.size() == refX.size());              // overlap = full ref grid
     for (double v : t100Y) CHECK(std::fabs(v - 80.0) < 1e-12);   // 0.8*100
 
@@ -1272,7 +1175,7 @@ void test10_t100Parity() {
     // recompute.
     std::vector<double> refY0 = refY;
     refY0[2] = 0.0;                                  // division-by-zero trap
-    s.spectrum.cachedSpectra["specRef"] = refY0;
+    s.active->spectrum.cachedSpectra["specRef"] = refY0;
     poolEvictKey(s, "/tmp/parity.h5");
     env->startCompute(s);
     while (env->batchActive_ && std::chrono::steady_clock::now() < deadline) {
@@ -1291,7 +1194,7 @@ void test10_t100Parity() {
 
     // Tiny ratio clamp: sample ≈ 0 → ratio ≤ 1e-15 → 0.
     std::vector<double> smpY0 = {0.0, 0.0, 0.0};
-    s.spectrum.cachedSpectra["specSmp"] = smpY0;
+    s.active->spectrum.cachedSpectra["specSmp"] = smpY0;
     poolEvictKey(s, "/tmp/parity.h5");               // raw-data change → evict
     env->startCompute(s);
     while (env->batchActive_ && std::chrono::steady_clock::now() < deadline) {
@@ -1439,32 +1342,29 @@ void test12_experimentPersistence() {
     s.pendingEnvIdx = -1;
 
     // Workspace with a panel-cache spectrum pair (test10 pattern).
-    auto sess = std::make_unique<WorkspaceSession>();
-    sess->key = "/tmp/parity.h5";
-    sess->path = "/tmp/parity.h5";
-    sess->workspace = makeFixtureWorkspace("exp");
-    sess->workspacePath = sess->path;
-    s.sessions.push_back(std::move(sess));
-    wirePanels(s);
-    s.activeTabKind = ActiveTabKind::Workspace;
-    s.activeSessionIdx = 0;
-    s.datasetInfo = workspaceDatasetInfo(s.workspace);
-    s.spectrum.xUnitSelector = 0;
-    s.spectrum.refLaserTextbox = 1.55f;
-    s.spectrum.Kpadding = 2;
+    auto* sess = makeSession(s, "exp", "/tmp/parity.h5");
+    activateSession(s, 0);
+    s.active->datasetInfo = workspaceDatasetInfo(s.active->workspace);
+    s.active->xCorrectionMethod = 0;               // default fingerprint params
+    s.active->peakProminenceThreshold = 0.02f;     // (populateSession's 2/0.25 are
+                                                   //  harness-wide defaults, not used here)
+    s.active->spectrum.xUnitSelector = 0;
+    s.active->spectrum.refLaserTextbox = 1.55f;
+    s.active->spectrum.Kpadding = 2;
     const std::vector<double> refX = {1000.0, 1250.0, 1500.0, 1750.0, 2000.0};
     const std::vector<double> refY = {1.0, 1.0, 1.0, 1.0, 1.0};
     const std::vector<double> smpX = {1000.0, 1500.0, 2000.0};
     const std::vector<double> smpY = {0.8, 0.8, 0.8};
-    s.spectrum.cachedFrequencies["specRef"] = refX;
-    s.spectrum.cachedSpectra["specRef"] = refY;
-    s.spectrum.cachedFrequencies["specSmp"] = smpX;
-    s.spectrum.cachedSpectra["specSmp"] = smpY;
+    s.active->spectrum.cachedFrequencies["specRef"] = refX;
+    s.active->spectrum.cachedSpectra["specRef"] = refY;
+    s.active->spectrum.cachedFrequencies["specSmp"] = smpX;
+    s.active->spectrum.cachedSpectra["specSmp"] = smpY;
 
     // Absorbance instance: rename (dirty) + compute through the pool.
+    s.pendingEnvIdx = -1;   // the test drives compute directly; the queued env activation is not wanted
+    activateSession(s, 0);
     EnvironmentSession* env = createEnvironment(s, EnvType::Absorbance);
-    s.activeTabKind = ActiveTabKind::Workspace;
-    s.activeSessionIdx = 0;
+    s.pendingEnvIdx = -1;   // cancel the queued activation (compute is driven directly)
     env->refKey = "/tmp/parity.h5";
     env->refMember = "specRef";
     env->samples = {{"/tmp/parity.h5", "specSmp"}};
@@ -1518,7 +1418,6 @@ void test12_experimentPersistence() {
     // dirty=false; stale because /tmp/parity.h5 does not exist on disk
     // (stored K=2 vs unreachable default).
     AppState s2;
-    wirePanels(s2);
     CHECK(crossLoadExperiments(s2, crossPath, err));
     CHECK(s2.environments.size() == 1);
     EnvironmentSession* e2 = s2.environments[0].get();
@@ -1556,7 +1455,6 @@ void test12_experimentPersistence() {
 
     // Comparator: config round-trip, no results group.
     AppState s3;
-    wirePanels(s3);
     EnvironmentSession* cmp = createEnvironment(s3, EnvType::Comparator);
     cmp->artifactSelector = 3;                  // 100% T
     cmp->comparatorKeys = {"/tmp/parity.h5", "/tmp/other.h5"};
@@ -1572,7 +1470,6 @@ void test12_experimentPersistence() {
     CHECK(crossExperimentList(crossPath, entries2, err));
     CHECK(entries2.size() == 2);
     AppState s4;
-    wirePanels(s4);
     CHECK(crossLoadExperiments(s4, crossPath, err));
     CHECK(s4.environments.size() == 2);   // absorbance + comparator
     EnvironmentSession* c2 = nullptr;
@@ -1633,31 +1530,28 @@ void test13_stalenessPersisted() {
     s.pendingSwapIdx = -1;
     s.pendingSwapToSession = false;
     s.pendingEnvIdx = -1;
-    auto sess = std::make_unique<WorkspaceSession>();
-    sess->key = srcPath;
-    sess->path = srcPath;
-    sess->workspace = ws;
-    sess->workspacePath = srcPath;
-    s.sessions.push_back(std::move(sess));
-    wirePanels(s);
-    s.activeTabKind = ActiveTabKind::Workspace;
-    s.activeSessionIdx = 0;
-    s.datasetInfo = workspaceDatasetInfo(s.workspace);
-    s.spectrum.xUnitSelector = 0;
-    s.spectrum.refLaserTextbox = 1.55f;
-    s.spectrum.Kpadding = 2;
+    auto* sess = makeSession(s, "stale", srcPath);
+    sess->workspace = ws;                 // fixture override
+    activateSession(s, 0);
+    s.active->datasetInfo = workspaceDatasetInfo(s.active->workspace);
+    s.active->xCorrectionMethod = 0;               // default fingerprint params
+    s.active->peakProminenceThreshold = 0.02f;     // (match the persisted view state)
+    s.active->spectrum.xUnitSelector = 0;
+    s.active->spectrum.refLaserTextbox = 1.55f;
+    s.active->spectrum.Kpadding = 2;
     const std::vector<double> refX = {1000.0, 1250.0, 1500.0, 1750.0, 2000.0};
     const std::vector<double> refY = {1.0, 1.0, 1.0, 1.0, 1.0};
     const std::vector<double> smpX = {1000.0, 1500.0, 2000.0};
     const std::vector<double> smpY = {0.8, 0.8, 0.8};
-    s.spectrum.cachedFrequencies["specRef"] = refX;
-    s.spectrum.cachedSpectra["specRef"] = refY;
-    s.spectrum.cachedFrequencies["specSmp"] = smpX;
-    s.spectrum.cachedSpectra["specSmp"] = smpY;
+    s.active->spectrum.cachedFrequencies["specRef"] = refX;
+    s.active->spectrum.cachedSpectra["specRef"] = refY;
+    s.active->spectrum.cachedFrequencies["specSmp"] = smpX;
+    s.active->spectrum.cachedSpectra["specSmp"] = smpY;
 
+    s.pendingEnvIdx = -1;   // the test drives compute directly; the queued env activation is not wanted
+    activateSession(s, 0);
     EnvironmentSession* env = createEnvironment(s, EnvType::Absorbance);
-    s.activeTabKind = ActiveTabKind::Workspace;
-    s.activeSessionIdx = 0;
+    s.pendingEnvIdx = -1;   // cancel the queued activation (compute is driven directly)
     env->refKey = srcPath;
     env->refMember = "specRef";
     env->samples = {{srcPath, "specSmp"}};
@@ -1680,7 +1574,6 @@ void test13_stalenessPersisted() {
     // Reload with the source NOT open: current fingerprint comes from the
     // persisted workspace.json (K=4) → differs from the stored K=2 → stale.
     AppState s2;
-    wirePanels(s2);
     CHECK(crossLoadExperiments(s2, crossPath, err));
     CHECK(s2.environments.size() == 1);
     CHECK(s2.environments[0]->stale == true);

@@ -164,7 +164,7 @@ bool Spectrum::isSpectrumDirty(const std::string& fileId, const std::vector<doub
 
     // Precomputed spectra: data IS the final spectrum, no FFT needed.
     // Only recompute when the file changed (handled above by missing cache).
-    if (appState && appState->datasetInfo.hasPrecomputedSpectra) return false;
+    if (appState && appState->active->datasetInfo.hasPrecomputedSpectra) return false;
 
     // Check if processing parameters changed (K, xUnit, refLaser, apodization)
     const auto paramsIt = lastSpectrumParams.find(fileId);
@@ -191,8 +191,8 @@ bool Spectrum::isSpectrumDirty(const std::string& fileId, const std::vector<doub
         lp[2] != static_cast<double>(apodizationSelector)    ||
         lp[3] != activeParam                                  ||
         lp[4] != (apodizationParams.rectAsymMode ? 1.0 : 0.0) ||
-        lp[5] != static_cast<double>(appState->xCorrectionMethod) ||
-        lp[6] != static_cast<double>(appState->peakProminenceThreshold)) {
+        lp[5] != static_cast<double>(appState->active->xCorrectionMethod) ||
+        lp[6] != static_cast<double>(appState->active->peakProminenceThreshold)) {
         return true;
     }
 
@@ -251,8 +251,8 @@ void Spectrum::pollPendingSpectra() {
                                                    static_cast<double>(apodizationSelector),
                                                    activeParam,
                                                    apodizationParams.rectAsymMode ? 1.0 : 0.0,
-                                                   static_cast<double>(appState->xCorrectionMethod),
-                                                   static_cast<double>(appState->peakProminenceThreshold),
+                                                   static_cast<double>(appState->active->xCorrectionMethod),
+                                                   static_cast<double>(appState->active->peakProminenceThreshold),
                                                    0.0 };
             } catch (const std::exception& e) {
                 fprintf(stderr, "WARNING: Spectrum computation failed for %s: %s\n",
@@ -268,18 +268,18 @@ void Spectrum::pollPendingSpectra() {
 bool Spectrum::computeAndCacheSpectrum(const std::string& filePath, const std::string& fileId) {
     if (!appState) return false;
     try {
-        auto raw = workspaceRead(appState->workspace, filePath);
+        auto raw = workspaceRead(appState->active->workspace, filePath);
 
         auto targetUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
 
-        if (appState->datasetInfo.hasPrecomputedSpectra) {
+        if (appState->active->datasetInfo.hasPrecomputedSpectra) {
             std::vector<double> freqs = raw.referenceDetector;
             for (double& f : freqs)
                 f = SpectralToolbox::convertXValue(f, SpectralToolbox::SpectrumXUnit::CmInv, targetUnit);
             cachedFrequencies[fileId] = std::move(freqs);
             cachedSpectra[fileId] = std::move(raw.primaryDetector);
             lastPrimaryDetectors[fileId] = raw.primaryDetector;
-        } else if (appState->datasetInfo.axisIsCorrected) {
+        } else if (appState->active->datasetInfo.axisIsCorrected) {
             for (auto& v : raw.opdAxis) v *= 1e6;
             auto ps = SpectralToolbox::processSpectrumFromCorrectedAxis(
                 raw.primaryDetector, raw.opdAxis,
@@ -298,8 +298,8 @@ bool Spectrum::computeAndCacheSpectrum(const std::string& filePath, const std::s
                 targetUnit,
                 static_cast<ApodizationWindow>(apodizationSelector),
                 apodizationParams,
-                static_cast<SpectralToolbox::XCorrectionMethod>(appState->xCorrectionMethod),
-                appState->peakProminenceThreshold);
+                static_cast<SpectralToolbox::XCorrectionMethod>(appState->active->xCorrectionMethod),
+                appState->active->peakProminenceThreshold);
             cachedFrequencies[fileId] = std::move(ps.spectrumX);
             cachedSpectra[fileId] = std::move(ps.spectrumY);
             lastPrimaryDetectors[fileId] = raw.primaryDetector;
@@ -330,8 +330,8 @@ bool Spectrum::computeAndCacheSpectrum(const std::string& filePath, const std::s
             static_cast<double>(apodizationSelector),
             activeParam,
             apodizationParams.rectAsymMode ? 1.0 : 0.0,
-            static_cast<double>(appState->xCorrectionMethod),
-            static_cast<double>(appState->peakProminenceThreshold),
+            static_cast<double>(appState->active->xCorrectionMethod),
+            static_cast<double>(appState->active->peakProminenceThreshold),
             0.0
         };
 
@@ -408,8 +408,8 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                 // "Show timestamps": precomputed-spectrum originals only; derived
                 // spectra (spec_*) never get a timestamp (plan §4, site 3).
                 if (appState && appState->hasWorkspace() && appState->showTimestamps &&
-                    isOriginalSpectraMember(appState->workspace, fileData.first)) {
-                    std::string ts = memberTimestampHMS(appState->workspace, fileData.first);
+                    isOriginalSpectraMember(appState->active->workspace, fileData.first)) {
+                    std::string ts = memberTimestampHMS(appState->active->workspace, fileData.first);
                     if (!ts.empty()) legendLabel += " [" + ts + "]";
                 }
 #endif
@@ -760,7 +760,7 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
 #if FTS_BUILD_HDF5
                     if (appState && appState->hasWorkspace()) {
                         try {
-                            rawData = workspaceRead(appState->workspace, fileId);
+                            rawData = workspaceRead(appState->active->workspace, fileId);
                         } catch (...) { /* keep the primary-only fallback */ }
                     }
 #endif
@@ -772,7 +772,7 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                     if (rawData.primaryDetector.empty()) {
                         continue;
                     }
-                    if (!(appState && appState->datasetInfo.axisIsCorrected) && rawData.referenceDetector.empty()) {
+                    if (!(appState && appState->active->datasetInfo.axisIsCorrected) && rawData.referenceDetector.empty()) {
                         continue;
                     }
 
@@ -788,7 +788,7 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                                        !cachedFrequencies[fileId].empty();
 
                     if (!hasAnyCache) {
-                        if (appState && appState->datasetInfo.hasPrecomputedSpectra) {
+                        if (appState && appState->active->datasetInfo.hasPrecomputedSpectra) {
                             // Precomputed spectra: copy raw data directly, no FFT
                             cachedSpectra[fileId]     = rawData.primaryDetector;
                             // File stores wavenumber in cm-1; convert to target unit
@@ -810,7 +810,7 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                         } else {
                         // No cached data at all → compute synchronously to avoid one-frame gap
                         SpectralToolbox::ProcessedSpectrum ps;
-                        if (appState && appState->datasetInfo.axisIsCorrected) {
+                        if (appState && appState->active->datasetInfo.axisIsCorrected) {
                             std::vector<double> opdUm(rawData.opdAxis.size());
                             for (size_t j = 0; j < rawData.opdAxis.size(); j++)
                                 opdUm[j] = rawData.opdAxis[j] * 1e6;
@@ -825,8 +825,8 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                                 Kpadding, static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector),
                                 static_cast<ApodizationWindow>(apodizationSelector),
                                 apodizationParams,
-                                static_cast<SpectralToolbox::XCorrectionMethod>(appState->xCorrectionMethod),
-                                appState->peakProminenceThreshold);
+                                static_cast<SpectralToolbox::XCorrectionMethod>(appState->active->xCorrectionMethod),
+                                appState->active->peakProminenceThreshold);
                         }
 
                         cachedSpectra[fileId]     = std::move(ps.spectrumY);
@@ -856,14 +856,14 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                                                          static_cast<double>(apodizationSelector),
                                                          activeParam,
                                                          apodizationParams.rectAsymMode ? 1.0 : 0.0,
-                                                         static_cast<double>(appState->xCorrectionMethod),
-                                                         static_cast<double>(appState->peakProminenceThreshold),
+                                                         static_cast<double>(appState->active->xCorrectionMethod),
+                                                         static_cast<double>(appState->active->peakProminenceThreshold),
                                                          0.0 };
                         }
                     } else {
                         // Stale cached data exists → submit async, old spectrum stays visible
                         if (appState && appState->computationPool) {
-                            bool axisCorr = appState->datasetInfo.axisIsCorrected;
+                            bool axisCorr = appState->active->datasetInfo.axisIsCorrected;
                             std::vector<double> opd;
                             if (axisCorr) {
                                 opd = rawData.opdAxis;
@@ -879,8 +879,8 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                                  xUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector),
                                  apodWin = static_cast<ApodizationWindow>(apodizationSelector),
                                  apodParams = apodizationParams,
-                                 xMethod = static_cast<SpectralToolbox::XCorrectionMethod>(appState->xCorrectionMethod),
-                                 promThresh = appState->peakProminenceThreshold]() {
+                                 xMethod = static_cast<SpectralToolbox::XCorrectionMethod>(appState->active->xCorrectionMethod),
+                                 promThresh = appState->active->peakProminenceThreshold]() {
                                     thread_local bool fftwInited = false;
                                     if (!fftwInited) {
                                         fftw_plan_with_nthreads(1);
@@ -1225,18 +1225,18 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
 void Spectrum::renderPanel(AppState& s) {
 
         ImGui::Begin("Spectrum");
-        if (s.dataLoaded) {
+        if (s.active->dataLoaded) {
             // Spectrum panel controls
             ImGui::Separator();
 
 
             // Lambda helper: invalidate spectrum caches when a control editing is finished
             auto invalidateSpectrumCaches = [&]() {
-                s.spectrum.cachedSpectra.clear();
-                s.spectrum.cachedFrequencies.clear();
-                s.spectrum.lastPrimaryDetectors.clear();
-                s.spectrum.lastSpectrumParams.clear();
-                s.spectrum.pendingSpectra_.clear();
+                s.active->spectrum.cachedSpectra.clear();
+                s.active->spectrum.cachedFrequencies.clear();
+                s.active->spectrum.lastPrimaryDetectors.clear();
+                s.active->spectrum.lastSpectrumParams.clear();
+                s.active->spectrum.pendingSpectra_.clear();
                 s.needsRedraw = true;
             };
 
@@ -1247,29 +1247,29 @@ void Spectrum::renderPanel(AppState& s) {
             float remWidth = ImGui::GetContentRegionAvail().x;
             ImGui::SetNextItemWidth(remWidth);
             ImGui::InputText("##DetectorSensitivity",
-                s.spectrum.detectorSensitivityText,
-                sizeof(s.spectrum.detectorSensitivityText));
+                s.active->spectrum.detectorSensitivityText,
+                sizeof(s.active->spectrum.detectorSensitivityText));
             if (ImGui::IsItemDeactivatedAfterEdit()) {
-                std::string sensText(s.spectrum.detectorSensitivityText);
+                std::string sensText(s.active->spectrum.detectorSensitivityText);
                 sensText.erase(0, sensText.find_first_not_of(" \t\n\r"));
                 sensText.erase(sensText.find_last_not_of(" \t\n\r") + 1);
 
                 if (sensText == "NA" || sensText == "na" || sensText == "n/a" || sensText == "none") {
-                    s.spectrum.detectorSensitivity = 0.0f;
-                    snprintf(s.spectrum.detectorSensitivityText,
-                             sizeof(s.spectrum.detectorSensitivityText), "NA");
+                    s.active->spectrum.detectorSensitivity = 0.0f;
+                    snprintf(s.active->spectrum.detectorSensitivityText,
+                             sizeof(s.active->spectrum.detectorSensitivityText), "NA");
                     invalidateSpectrumCaches();
                 } else {
                     char* end = nullptr;
                     float val = std::strtof(sensText.c_str(), &end);
                     if (end != sensText.c_str() && *end == '\0') {
-                        s.spectrum.detectorSensitivity = val;
+                        s.active->spectrum.detectorSensitivity = val;
                         if (val == 0.0f)
-                            snprintf(s.spectrum.detectorSensitivityText,
-                                     sizeof(s.spectrum.detectorSensitivityText), "NA");
+                            snprintf(s.active->spectrum.detectorSensitivityText,
+                                     sizeof(s.active->spectrum.detectorSensitivityText), "NA");
                         else
-                            snprintf(s.spectrum.detectorSensitivityText,
-                                     sizeof(s.spectrum.detectorSensitivityText), "%.4f", val);
+                            snprintf(s.active->spectrum.detectorSensitivityText,
+                                     sizeof(s.active->spectrum.detectorSensitivityText), "%.4f", val);
                         invalidateSpectrumCaches();
                     }
                 }
@@ -1282,25 +1282,25 @@ void Spectrum::renderPanel(AppState& s) {
             // Reference laser textbox
             ImGui::Text("Ref laser [\xC2\xB5""m]:");
             ImGui::SameLine();
-            if (s.datasetInfo.axisIsCorrected) ImGui::BeginDisabled();
+            if (s.active->datasetInfo.axisIsCorrected) ImGui::BeginDisabled();
 
             float remainingWidth = ImGui::GetContentRegionAvail().x;
             ImGui::SetNextItemWidth(remainingWidth);
-            ImGui::InputFloat("##RefLaserTextbox", &(s.spectrum.refLaserTextbox), 0.001, 0.01);
-            if (ImGui::IsItemDeactivatedAfterEdit() && !s.datasetInfo.axisIsCorrected) {
+            ImGui::InputFloat("##RefLaserTextbox", &(s.active->spectrum.refLaserTextbox), 0.001, 0.01);
+            if (ImGui::IsItemDeactivatedAfterEdit() && !s.active->datasetInfo.axisIsCorrected) {
                 invalidateSpectrumCaches();
             }
-            if (s.datasetInfo.axisIsCorrected) ImGui::EndDisabled();
+            if (s.active->datasetInfo.axisIsCorrected) ImGui::EndDisabled();
 
             // Zero-pad factor K
             ImGui::Text("Zero-pad K:");
             ImGui::SameLine();
-            if (s.datasetInfo.hasPrecomputedSpectra) ImGui::BeginDisabled();
+            if (s.active->datasetInfo.hasPrecomputedSpectra) ImGui::BeginDisabled();
 
             remainingWidth = ImGui::GetContentRegionAvail().x;
             ImGui::SetNextItemWidth(remainingWidth);
-            if (ImGui::InputInt("##Kpadding", &s.spectrum.Kpadding, 1, 1)) {
-                s.spectrum.Kpadding = std::clamp(s.spectrum.Kpadding, 0, 16);
+            if (ImGui::InputInt("##Kpadding", &s.active->spectrum.Kpadding, 1, 1)) {
+                s.active->spectrum.Kpadding = std::clamp(s.active->spectrum.Kpadding, 0, 16);
                 invalidateSpectrumCaches();
             }
             if (ImGui::IsItemHovered()) {
@@ -1311,25 +1311,25 @@ void Spectrum::renderPanel(AppState& s) {
             ImGui::Text("Apodization");
             ImGui::SameLine();
             const auto& windowNames = Apodization::getWindowNames();
-            if (ImGui::Combo("##ApodizationSelector", &s.spectrum.apodizationSelector,
+            if (ImGui::Combo("##ApodizationSelector", &s.active->spectrum.apodizationSelector,
                              windowNames.data(), static_cast<int>(windowNames.size()))) {
                 invalidateSpectrumCaches();
             }
 
             // Conditional parametric controls based on selected window
-            if (s.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Gauss)) {
-                if (ImGui::SliderFloat("Sigma##GaussSigma", &s.spectrum.apodizationParams.gaussSigma,
+            if (s.active->spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Gauss)) {
+                if (ImGui::SliderFloat("Sigma##GaussSigma", &s.active->spectrum.apodizationParams.gaussSigma,
                                        1.0f, 3.0f, "%.1f")) {
                     invalidateSpectrumCaches();
                 }
                 if (ImGui::IsItemHovered()) {
                     ImGui::SetTooltip("Gauss sigma fraction (1.0-3.0).\n1.0 = narrow, 3.0 = wide.");
                 }
-            } else if (s.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Rectangular)) {
+            } else if (s.active->spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Rectangular)) {
                 ImGui::Text("Mode");
                 ImGui::SameLine();
-                const bool rectSym  = !s.spectrum.apodizationParams.rectAsymMode;
-                const bool rectAsym =  s.spectrum.apodizationParams.rectAsymMode;
+                const bool rectSym  = !s.active->spectrum.apodizationParams.rectAsymMode;
+                const bool rectAsym =  s.active->spectrum.apodizationParams.rectAsymMode;
                 const ImVec4 rectBtnClr[2] = {
                     ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
                     ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
@@ -1338,7 +1338,7 @@ void Spectrum::renderPanel(AppState& s) {
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  rectSym ? rectBtnClr[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   rectBtnClr[1]);
                 if (ImGui::Button("Sym##RectMode")) {
-                    s.spectrum.apodizationParams.rectAsymMode = false;
+                    s.active->spectrum.apodizationParams.rectAsymMode = false;
                     invalidateSpectrumCaches();
                 }
                 ImGui::PopStyleColor(3);
@@ -1347,49 +1347,49 @@ void Spectrum::renderPanel(AppState& s) {
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  rectAsym ? rectBtnClr[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   rectBtnClr[1]);
                 if (ImGui::Button("Asym##RectMode")) {
-                    s.spectrum.apodizationParams.rectAsymMode = true;
+                    s.active->spectrum.apodizationParams.rectAsymMode = true;
                     invalidateSpectrumCaches();
                 }
                 ImGui::PopStyleColor(3);
                 if (ImGui::IsItemHovered()) {
                     ImGui::SetTooltip("Sym: uses the longer side's distance on both sides (shorter side saturates).\nAsym: each side extends proportionally to its own distance from peak.");
                 }
-                if (ImGui::SliderFloat("Width##RectWidth", &s.spectrum.apodizationParams.rectWidth,
+                if (ImGui::SliderFloat("Width##RectWidth", &s.active->spectrum.apodizationParams.rectWidth,
                                        0.05f, 1.0f, "%.2f")) {
                     invalidateSpectrumCaches();
                 }
                 if (ImGui::IsItemHovered()) {
                     ImGui::SetTooltip("Rectangular window width fraction (0.05-1.0).\n1.0 = full signal, 0.05 = 5% of signal.");
                 }
-            } else if (s.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::NortonBeer)) {
-                if (ImGui::SliderFloat("FWHM##NortonBeerFwhm", &s.spectrum.apodizationParams.nortonBeerFwhm,
+            } else if (s.active->spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::NortonBeer)) {
+                if (ImGui::SliderFloat("FWHM##NortonBeerFwhm", &s.active->spectrum.apodizationParams.nortonBeerFwhm,
                                        1.0f, 2.0f, "%.1f")) {
                     invalidateSpectrumCaches();
                 }
                 if (ImGui::IsItemHovered()) {
                     ImGui::SetTooltip("Norton-Beer FWHM parameter (1.0-2.0 step 0.1).\nControls the relative full-width at half maximum.");
                 }
-            } else if (s.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::DolphChebyshev)) {
-                float at = s.spectrum.apodizationParams.dolphChebyshevAt;
+            } else if (s.active->spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::DolphChebyshev)) {
+                float at = s.active->spectrum.apodizationParams.dolphChebyshevAt;
                 ImGui::SliderFloat("Attenuation##DolphChebyshevAt", &at,
                                    50.0f, 160.0f, "%.0f dB");
                 at = std::round(at / 10.0f) * 10.0f;
-                if (at != s.spectrum.apodizationParams.dolphChebyshevAt) {
-                    s.spectrum.apodizationParams.dolphChebyshevAt = at;
+                if (at != s.active->spectrum.apodizationParams.dolphChebyshevAt) {
+                    s.active->spectrum.apodizationParams.dolphChebyshevAt = at;
                     invalidateSpectrumCaches();
                 }
                 if (ImGui::IsItemHovered()) {
                     ImGui::SetTooltip("Dolph-Chebyshev attenuation (50-160 dB, step 10).\nHigher values produce lower sidelobes.");
                 }
-            } else if (s.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Hamming)) {
-                if (ImGui::SliderFloat("Alpha##HammingAlpha", &s.spectrum.apodizationParams.hammingAlpha, 0.36f, 1.0f, "%.2f")) {
+            } else if (s.active->spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Hamming)) {
+                if (ImGui::SliderFloat("Alpha##HammingAlpha", &s.active->spectrum.apodizationParams.hammingAlpha, 0.36f, 1.0f, "%.2f")) {
                     invalidateSpectrumCaches();
                 }
                 if (ImGui::IsItemHovered()) {
                     ImGui::SetTooltip("Generalized Hamming alpha (0.36-1.0).\n0.54 = standard Hamming, 1.0 = rectangular.");
                 }
-            } else if (s.spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Kaiser)) {
-                if (ImGui::SliderFloat("Beta##KaiserBeta", &s.spectrum.apodizationParams.kaiserBeta, 0.5f, 12.0f, "%.1f")) {
+            } else if (s.active->spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Kaiser)) {
+                if (ImGui::SliderFloat("Beta##KaiserBeta", &s.active->spectrum.apodizationParams.kaiserBeta, 0.5f, 12.0f, "%.1f")) {
                     invalidateSpectrumCaches();
                 }
                 if (ImGui::IsItemHovered()) {
@@ -1397,7 +1397,7 @@ void Spectrum::renderPanel(AppState& s) {
                 }
             }
 
-            if (s.datasetInfo.hasPrecomputedSpectra) ImGui::EndDisabled();
+            if (s.active->datasetInfo.hasPrecomputedSpectra) ImGui::EndDisabled();
 
             ImGui::Separator();
 
@@ -1412,14 +1412,14 @@ void Spectrum::renderPanel(AppState& s) {
                 // Tracking cursor toggle
                 ImGui::Text("Cursor");
                 ImGui::SameLine();
-                const bool cursorOn = s.spectrum.showTrackingCursor;
+                const bool cursorOn = s.active->spectrum.showTrackingCursor;
 
                 ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[cursorOn ? 1 : 0]);
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cursorOn ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
                 if (ImGui::Button("On##CursorOn")) {
                     if (!cursorOn) {
-                        s.spectrum.showTrackingCursor = true;
+                        s.active->spectrum.showTrackingCursor = true;
                         s.needsRedraw = true;
                     }
                 }
@@ -1431,7 +1431,7 @@ void Spectrum::renderPanel(AppState& s) {
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
                 if (ImGui::Button("Off##CursorOff")) {
                     if (cursorOn) {
-                        s.spectrum.showTrackingCursor = false;
+                        s.active->spectrum.showTrackingCursor = false;
                         s.needsRedraw = true;
                     }
                 }
@@ -1441,15 +1441,15 @@ void Spectrum::renderPanel(AppState& s) {
                 ImGui::Text("Y scale");
                 ImGui::SameLine();
 
-                const bool linSelected = (s.spectrum.yScaleSelector == 0);
-                const bool logSelected = (s.spectrum.yScaleSelector == 1);
+                const bool linSelected = (s.active->spectrum.yScaleSelector == 0);
+                const bool logSelected = (s.active->spectrum.yScaleSelector == 1);
 
                 ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[linSelected ? 1 : 0]);
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  linSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
                 if (ImGui::Button("lin##YScaleLin")) {
                     if (!linSelected) {
-                        s.spectrum.yScaleSelector = 0;
+                        s.active->spectrum.yScaleSelector = 0;
                         s.needsRedraw = true;
                     }
                 }
@@ -1462,7 +1462,7 @@ void Spectrum::renderPanel(AppState& s) {
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
                 if (ImGui::Button("log##YScaleLog")) {
                     if (!logSelected) {
-                        s.spectrum.yScaleSelector = 1;
+                        s.active->spectrum.yScaleSelector = 1;
                         s.needsRedraw = true;
                     }
                 }
@@ -1470,13 +1470,13 @@ void Spectrum::renderPanel(AppState& s) {
 
                 ImGui::SameLine();
 
-                const bool dbSelected = (s.spectrum.yScaleSelector == 2);
+                const bool dbSelected = (s.active->spectrum.yScaleSelector == 2);
                 ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[dbSelected ? 1 : 0]);
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  dbSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
                 if (ImGui::Button("dB##YScaleDb")) {
                     if (!dbSelected) {
-                        s.spectrum.yScaleSelector = 2;
+                        s.active->spectrum.yScaleSelector = 2;
                         s.needsRedraw = true;
                     }
                 }
@@ -1486,16 +1486,16 @@ void Spectrum::renderPanel(AppState& s) {
                 ImGui::Text("X unit");
                 ImGui::SameLine();
 
-                const bool cmSelected  = (s.spectrum.xUnitSelector == 0);
-                const bool umSelected  = (s.spectrum.xUnitSelector == 1);
-                const bool thzSelected = (s.spectrum.xUnitSelector == 2);
+                const bool cmSelected  = (s.active->spectrum.xUnitSelector == 0);
+                const bool umSelected  = (s.active->spectrum.xUnitSelector == 1);
+                const bool thzSelected = (s.active->spectrum.xUnitSelector == 2);
 
                 ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[cmSelected ? 1 : 0]);
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cmSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
                 if (ImGui::Button("cm-1##XUnitCm")) {
                     if (!cmSelected) {
-                        s.spectrum.xUnitSelector = 0;
+                        s.active->spectrum.xUnitSelector = 0;
                         s.needsRedraw = true;
                     }
                 }
@@ -1508,7 +1508,7 @@ void Spectrum::renderPanel(AppState& s) {
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
                 if (ImGui::Button("\xC2\xB5""m##XUnitUm")) {
                     if (!umSelected) {
-                        s.spectrum.xUnitSelector = 1;
+                        s.active->spectrum.xUnitSelector = 1;
                         s.needsRedraw = true;
                     }
                 }
@@ -1521,7 +1521,7 @@ void Spectrum::renderPanel(AppState& s) {
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
                 if (ImGui::Button("THz##XUnitTHz")) {
                     if (!thzSelected) {
-                        s.spectrum.xUnitSelector = 2;
+                        s.active->spectrum.xUnitSelector = 2;
                         s.needsRedraw = true;
                     }
                 }
@@ -1531,16 +1531,16 @@ void Spectrum::renderPanel(AppState& s) {
                 ImGui::Text("Y Axis");
                 ImGui::SameLine();
 
-                const bool allSelected   = (s.spectrum.yAxisMode == 0);
-                const bool tightSelected = (s.spectrum.yAxisMode == 1);
-                const bool forceSelected = (s.spectrum.yAxisMode == 2);
+                const bool allSelected   = (s.active->spectrum.yAxisMode == 0);
+                const bool tightSelected = (s.active->spectrum.yAxisMode == 1);
+                const bool forceSelected = (s.active->spectrum.yAxisMode == 2);
 
                 ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[allSelected ? 1 : 0]);
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
                 if (ImGui::Button("all##YAxisAll")) {
                     if (!allSelected) {
-                        s.spectrum.yAxisMode = 0;
+                        s.active->spectrum.yAxisMode = 0;
                         s.needsRedraw = true;
                     }
                 }
@@ -1553,7 +1553,7 @@ void Spectrum::renderPanel(AppState& s) {
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
                 if (ImGui::Button("tight##YAxisTight")) {
                     if (!tightSelected) {
-                        s.spectrum.yAxisMode = 1;
+                        s.active->spectrum.yAxisMode = 1;
                         s.needsRedraw = true;
                     }
                 }
@@ -1566,7 +1566,7 @@ void Spectrum::renderPanel(AppState& s) {
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
                 if (ImGui::Button("force##YAxisForce")) {
                     if (!forceSelected) {
-                        s.spectrum.yAxisMode = 2;
+                        s.active->spectrum.yAxisMode = 2;
                         s.needsRedraw = true;
                     }
                 }
@@ -1590,79 +1590,6 @@ void Spectrum::renderPanel(AppState& s) {
 // Heavy members (caches, futures) are moved; scalars copied. Keep both
 // directions in sync when adding per-workspace fields.
 
-void Spectrum::parkInto(Spectrum& dst) {
-    dst.appState = appState;
-    dst.cachedSpectra = std::move(cachedSpectra);
-    dst.cachedFrequencies = std::move(cachedFrequencies);
-    dst.lastPrimaryDetectors = std::move(lastPrimaryDetectors);
-    dst.spectrumDirty = spectrumDirty;
-    dst.isSelectingXRange = isSelectingXRange;
-    dst.selectionStartX = selectionStartX;
-    dst.selectionEndX = selectionEndX;
-    dst.shouldAutoscale = shouldAutoscale;
-    dst.firstLoadCompleted = firstLoadCompleted;
-    dst.manualXMin = manualXMin; dst.manualXMax = manualXMax;
-    dst.manualYMin = manualYMin; dst.manualYMax = manualYMax;
-    dst.savedYMin = savedYMin; dst.savedYMax = savedYMax;
-    dst.showTrackingCursor = showTrackingCursor;
-    dst.leftArrowPressedLastFrame = leftArrowPressedLastFrame;
-    dst.rightArrowPressedLastFrame = rightArrowPressedLastFrame;
-    dst.leftArrowHandleFlag = leftArrowHandleFlag;
-    dst.rightArrowHandleFlag = rightArrowHandleFlag;
-    dst.xUnitSelector = xUnitSelector;
-    dst.prevXUnitSelector = prevXUnitSelector;
-    dst.yScaleSelector = yScaleSelector;
-    dst.prevYScaleSelector = prevYScaleSelector;
-    dst.refLaserTextbox = refLaserTextbox;
-    dst.detectorSensitivity = detectorSensitivity;
-    std::memcpy(dst.detectorSensitivityText, detectorSensitivityText, sizeof(detectorSensitivityText));
-    dst.Kpadding = Kpadding;
-    dst.apodizationSelector = apodizationSelector;
-    dst.apodizationParams = apodizationParams;
-    dst.yAxisMode = yAxisMode;
-    dst.prevYAxisMode = prevYAxisMode;
-    dst.forcedYMin = forcedYMin; dst.forcedYMax = forcedYMax;
-    dst.pendingNextXMin = pendingNextXMin; dst.pendingNextXMax = pendingNextXMax;
-    dst.xUnitSwitchedThisFrame = xUnitSwitchedThisFrame;
-    dst.convertedXMin = convertedXMin; dst.convertedXMax = convertedXMax;
-    dst.lastSpectrumParams = std::move(lastSpectrumParams);
-    dst.pendingSpectra_ = std::move(pendingSpectra_);
-}
 
-void Spectrum::resumeFrom(Spectrum& src) {
-    cachedSpectra = std::move(src.cachedSpectra);
-    cachedFrequencies = std::move(src.cachedFrequencies);
-    lastPrimaryDetectors = std::move(src.lastPrimaryDetectors);
-    spectrumDirty = src.spectrumDirty;
-    isSelectingXRange = src.isSelectingXRange;
-    selectionStartX = src.selectionStartX;
-    selectionEndX = src.selectionEndX;
-    shouldAutoscale = src.shouldAutoscale;
-    firstLoadCompleted = src.firstLoadCompleted;
-    manualXMin = src.manualXMin; manualXMax = src.manualXMax;
-    manualYMin = src.manualYMin; manualYMax = src.manualYMax;
-    savedYMin = src.savedYMin; savedYMax = src.savedYMax;
-    showTrackingCursor = src.showTrackingCursor;
-    leftArrowPressedLastFrame = src.leftArrowPressedLastFrame;
-    rightArrowPressedLastFrame = src.rightArrowPressedLastFrame;
-    leftArrowHandleFlag = src.leftArrowHandleFlag;
-    rightArrowHandleFlag = src.rightArrowHandleFlag;
-    xUnitSelector = src.xUnitSelector;
-    prevXUnitSelector = src.prevXUnitSelector;
-    yScaleSelector = src.yScaleSelector;
-    prevYScaleSelector = src.prevYScaleSelector;
-    refLaserTextbox = src.refLaserTextbox;
-    detectorSensitivity = src.detectorSensitivity;
-    std::memcpy(detectorSensitivityText, src.detectorSensitivityText, sizeof(detectorSensitivityText));
-    Kpadding = src.Kpadding;
-    apodizationSelector = src.apodizationSelector;
-    apodizationParams = src.apodizationParams;
-    yAxisMode = src.yAxisMode;
-    prevYAxisMode = src.prevYAxisMode;
-    forcedYMin = src.forcedYMin; forcedYMax = src.forcedYMax;
-    pendingNextXMin = src.pendingNextXMin; pendingNextXMax = src.pendingNextXMax;
-    xUnitSwitchedThisFrame = src.xUnitSwitchedThisFrame;
-    convertedXMin = src.convertedXMin; convertedXMax = src.convertedXMax;
-    lastSpectrumParams = std::move(src.lastSpectrumParams);
-    pendingSpectra_ = std::move(src.pendingSpectra_);
-}
+
+

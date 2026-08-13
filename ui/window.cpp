@@ -338,22 +338,12 @@ void setupApplication(AppConfig& config, const std::string& configFilePath,
     // Apply the scaling (font only initially to avoid UI issues)
     io.FontGlobalScale = dpi_scale * appState.uiScale;
 
-    // Main application state
-    // Use config settings if available, otherwise use empty path
-    if (!config.lastWorkingDirectory.empty() && std::filesystem::exists(config.lastWorkingDirectory)) {
-        appState.currentDirectory = config.lastWorkingDirectory;
-    } else {
-        appState.currentDirectory = "";
-    }
-
-    // View-state (panels, plotDefaults, selection) lives in workspace.json now
-    // (Phase 3); the AppConfig fields above are session defaults only.
-    appState.autoFitYAxis = config.autoFitYAxis; // Load from config
-    appState.enableDownsampling = config.enableDownsampling; // Load from config
+    // Session defaults from config (M4.5: no session exists at startup — the
+    // defaults are applied to each NEW workspace tab at creation instead,
+    // see applySessionDefaults in workspace_session.cpp).
     appState.showFPS = config.showFPS; // Load from config
     appState.showTimestamps = config.showTimestamps; // Load from config
     appState.gridAlpha = config.gridAlpha; // Load from config
-    appState.showPeakIndicators = config.showPeakIndicators;
     appState.currentAccentColor = config.accentColor; // Load accent color from config
 
     // Load docking layout flag from config (persisted so DockBuilder runs only once)
@@ -364,12 +354,4 @@ void setupApplication(AppConfig& config, const std::string& configFilePath,
     if (!std::filesystem::exists(io.IniFilename)) {
         appState.defaultLayoutApplied = false;
     }
-
-    // Set the appState pointer in the panel objects for raw data access.
-    appState.spectrum.appState = &appState;
-    appState.averageSpectrum.appState = &appState;
-    appState.snrSpectrum.appState = &appState;
-    appState.allanVariance.appState = &appState;
-    appState.t100.appState = &appState;
-    appState.exportPanel.appState = &appState;
 }

@@ -45,19 +45,19 @@ static void workspaceEraseMember(Workspace& ws, const std::string& path) {
 }
 
 static void removeFileFromEngine(AppState& s, const std::string& id) {
-    s.csvFiles.erase(std::remove(s.csvFiles.begin(), s.csvFiles.end(), id), s.csvFiles.end());
-    auto sortedIt = std::find(s.sortedFiles.begin(), s.sortedFiles.end(), id);
-    size_t sortedIdx = (sortedIt != s.sortedFiles.end())
-        ? static_cast<size_t>(std::distance(s.sortedFiles.begin(), sortedIt)) : s.sortedFiles.size();
-    if (sortedIt != s.sortedFiles.end()) s.sortedFiles.erase(sortedIt);
-    if (sortedIdx < s.filesSelectedForAveraging.size())
-        s.filesSelectedForAveraging.erase(s.filesSelectedForAveraging.begin() + sortedIdx);
-    for (size_t i = 0; i < s.selectedFiles.size();) {
-        if (s.selectedFiles[i] == id) {
-            s.selectedFiles.erase(s.selectedFiles.begin() + i);
-            if (i < s.selectedFilenames.size()) s.selectedFilenames.erase(s.selectedFilenames.begin() + i);
-            if (i < s.loadedData.size()) s.loadedData.erase(s.loadedData.begin() + i);
-            if (i < s.rawDataCache.size()) s.rawDataCache.erase(s.rawDataCache.begin() + i);
+    s.active->csvFiles.erase(std::remove(s.active->csvFiles.begin(), s.active->csvFiles.end(), id), s.active->csvFiles.end());
+    auto sortedIt = std::find(s.active->sortedFiles.begin(), s.active->sortedFiles.end(), id);
+    size_t sortedIdx = (sortedIt != s.active->sortedFiles.end())
+        ? static_cast<size_t>(std::distance(s.active->sortedFiles.begin(), sortedIt)) : s.active->sortedFiles.size();
+    if (sortedIt != s.active->sortedFiles.end()) s.active->sortedFiles.erase(sortedIt);
+    if (sortedIdx < s.active->filesSelectedForAveraging.size())
+        s.active->filesSelectedForAveraging.erase(s.active->filesSelectedForAveraging.begin() + sortedIdx);
+    for (size_t i = 0; i < s.active->selectedFiles.size();) {
+        if (s.active->selectedFiles[i] == id) {
+            s.active->selectedFiles.erase(s.active->selectedFiles.begin() + i);
+            if (i < s.active->selectedFilenames.size()) s.active->selectedFilenames.erase(s.active->selectedFilenames.begin() + i);
+            if (i < s.active->loadedData.size()) s.active->loadedData.erase(s.active->loadedData.begin() + i);
+            if (i < s.active->rawDataCache.size()) s.active->rawDataCache.erase(s.active->rawDataCache.begin() + i);
         } else {
             ++i;
         }
@@ -66,30 +66,30 @@ static void removeFileFromEngine(AppState& s, const std::string& id) {
     // shrunk lists (mirrors the legacy performFileDeletion clamp): a stale
     // index would OOB-index sortedFiles, and dataLoaded=true with an empty
     // loadedData would OOB-index loadedData[0] in the frame loop.
-    if (s.currentSortedFileIndex >= s.sortedFiles.size())
-        s.currentSortedFileIndex = s.sortedFiles.empty() ? 0 : s.sortedFiles.size() - 1;
-    s.dataLoaded = !s.loadedData.empty();
-    s.spectrum.cachedSpectra.erase(id);
-    s.spectrum.cachedFrequencies.erase(id);
-    s.spectrum.lastPrimaryDetectors.erase(id);
-    s.spectrum.lastSpectrumParams.erase(id);
-    s.hilbertXCache.erase(id);
-    s.peakPositionsCache.erase(id);
-    s.t100.cachedTransX.erase(id);
-    s.t100.cachedTransY.erase(id);
+    if (s.active->currentSortedFileIndex >= s.active->sortedFiles.size())
+        s.active->currentSortedFileIndex = s.active->sortedFiles.empty() ? 0 : s.active->sortedFiles.size() - 1;
+    s.active->dataLoaded = !s.active->loadedData.empty();
+    s.active->spectrum.cachedSpectra.erase(id);
+    s.active->spectrum.cachedFrequencies.erase(id);
+    s.active->spectrum.lastPrimaryDetectors.erase(id);
+    s.active->spectrum.lastSpectrumParams.erase(id);
+    s.active->hilbertXCache.erase(id);
+    s.active->peakPositionsCache.erase(id);
+    s.active->t100.cachedTransX.erase(id);
+    s.active->t100.cachedTransY.erase(id);
 }
 
 void performWorkspaceMemberDeletion(AppState& s, const std::string& absPath) {
     const std::string id = absPath.substr(absPath.find_last_of('/') + 1);
-    const bool isOriginal = workspaceMemberIsOriginal(s.workspace, absPath);
+    const bool isOriginal = workspaceMemberIsOriginal(s.active->workspace, absPath);
 
     // 1. Remove the member from its group.
-    workspaceEraseMember(s.workspace, absPath);
+    workspaceEraseMember(s.active->workspace, absPath);
     if (isOriginal)
-        s.workspace.deletedOriginalPaths.push_back(absPath);
+        s.active->workspace.deletedOriginalPaths.push_back(absPath);
 
     // 2. Cascade: downstream derivatives (and their dependents) go stale.
-    markDependentsStale(s.workspace, absPath);
+    markDependentsStale(s.active->workspace, absPath);
 
     // 3. Clear engine state referencing the removed member.
     removeFileFromEngine(s, id);
@@ -97,14 +97,14 @@ void performWorkspaceMemberDeletion(AppState& s, const std::string& absPath) {
     // 4. Original removed from the active group → re-derive datasetInfo +
     //    csvFiles (active-group priority may shift) and clear panel caches.
     if (isOriginal) {
-        s.datasetInfo = workspaceDatasetInfo(s.workspace);
-        s.csvFiles = workspaceFileList(s.workspace);
+        s.active->datasetInfo = workspaceDatasetInfo(s.active->workspace);
+        s.active->csvFiles = workspaceFileList(s.active->workspace);
         clearPanelCaches(s);
-        s.filesChanged = true;
+        s.active->filesChanged = true;
     }
 
-    s.workspace.dirty = true;
-    logWorkspaceChange(s.workspace, "Deleted: " + absPath);
+    s.active->workspace.dirty = true;
+    logWorkspaceChange(s.active->workspace, "Deleted: " + absPath);
     s.needsRedraw = true;
 }
 
@@ -114,16 +114,16 @@ static void stripWorkspaceDerivatives(AppState& s) {
             [](const auto& m) { return m.kind == MemberKind::Derivative; }),
             members.end());
     };
-    clearDerivs(s.workspace.uncorrectedIfg.members);
-    clearDerivs(s.workspace.correctedIfg.members);
-    clearDerivs(s.workspace.spectra.members);
-    s.workspace.averageSpectra.members.clear();
-    s.workspace.snrSpectra.members.clear();
-    s.workspace.allanWerle.members.clear();
-    s.workspace.t100.members.clear();
+    clearDerivs(s.active->workspace.uncorrectedIfg.members);
+    clearDerivs(s.active->workspace.correctedIfg.members);
+    clearDerivs(s.active->workspace.spectra.members);
+    s.active->workspace.averageSpectra.members.clear();
+    s.active->workspace.snrSpectra.members.clear();
+    s.active->workspace.allanWerle.members.clear();
+    s.active->workspace.t100.members.clear();
     clearPanelDerivedResults(s);
-    s.workspace.dirty = true;
-    logWorkspaceChange(s.workspace, "Removed all derivative results");
+    s.active->workspace.dirty = true;
+    logWorkspaceChange(s.active->workspace, "Removed all derivative results");
     s.needsRedraw = true;
 }
 
@@ -135,15 +135,15 @@ void performFileDeletion(AppState& appState, size_t index) {
     // workspace-aware deletion (cascade + engine cleanup). Callers already
     // route around this, but the function must be safe on its own.
     if (appState.hasWorkspace()) {
-        if (index < appState.sortedFiles.size()) {
-            std::string path = memberPathOf(appState.workspace, appState.sortedFiles[index]);
+        if (index < appState.active->sortedFiles.size()) {
+            std::string path = memberPathOf(appState.active->workspace, appState.active->sortedFiles[index]);
             if (!path.empty())
                 performWorkspaceMemberDeletion(appState, path);
         }
         return;
     }
 #endif
-    const auto& file = appState.sortedFiles[index];
+    const auto& file = appState.active->sortedFiles[index];
 
     std::error_code ec;
     bool removed = std::filesystem::remove(file, ec);
@@ -155,40 +155,40 @@ void performFileDeletion(AppState& appState, size_t index) {
     std::cout << "Deleted file: " << file << std::endl;
 
     // Remove from csvFiles
-    auto csvIt = std::find(appState.csvFiles.begin(), appState.csvFiles.end(), file);
-    if (csvIt != appState.csvFiles.end())
-        appState.csvFiles.erase(csvIt);
+    auto csvIt = std::find(appState.active->csvFiles.begin(), appState.active->csvFiles.end(), file);
+    if (csvIt != appState.active->csvFiles.end())
+        appState.active->csvFiles.erase(csvIt);
 
     // Remove from sortedFiles at index
-    appState.sortedFiles.erase(appState.sortedFiles.begin() + index);
+    appState.active->sortedFiles.erase(appState.active->sortedFiles.begin() + index);
 
     // Remove from filesSelectedForAveraging
-    if (index < appState.filesSelectedForAveraging.size())
-        appState.filesSelectedForAveraging.erase(appState.filesSelectedForAveraging.begin() + index);
+    if (index < appState.active->filesSelectedForAveraging.size())
+        appState.active->filesSelectedForAveraging.erase(appState.active->filesSelectedForAveraging.begin() + index);
 
     // If the file was in selectedFiles, remove it there too
-    auto selIt = std::find(appState.selectedFiles.begin(), appState.selectedFiles.end(), file);
-    if (selIt != appState.selectedFiles.end()) {
-        size_t selIdx = std::distance(appState.selectedFiles.begin(), selIt);
-        appState.selectedFiles.erase(appState.selectedFiles.begin() + selIdx);
-        appState.selectedFilenames.erase(appState.selectedFilenames.begin() + selIdx);
-        appState.loadedData.erase(appState.loadedData.begin() + selIdx);
-        appState.rawDataCache.erase(appState.rawDataCache.begin() + selIdx);
+    auto selIt = std::find(appState.active->selectedFiles.begin(), appState.active->selectedFiles.end(), file);
+    if (selIt != appState.active->selectedFiles.end()) {
+        size_t selIdx = std::distance(appState.active->selectedFiles.begin(), selIt);
+        appState.active->selectedFiles.erase(appState.active->selectedFiles.begin() + selIdx);
+        appState.active->selectedFilenames.erase(appState.active->selectedFilenames.begin() + selIdx);
+        appState.active->loadedData.erase(appState.active->loadedData.begin() + selIdx);
+        appState.active->rawDataCache.erase(appState.active->rawDataCache.begin() + selIdx);
     }
 
     // Adjust currentSortedFileIndex: jump to previous file when deleting current
-    if (index < appState.currentSortedFileIndex) {
-        appState.currentSortedFileIndex--;
-    } else if (index == appState.currentSortedFileIndex) {
-        if (appState.currentSortedFileIndex > 0)
-            appState.currentSortedFileIndex--;
-        appState.filesChanged = true; // trigger reload from new position
+    if (index < appState.active->currentSortedFileIndex) {
+        appState.active->currentSortedFileIndex--;
+    } else if (index == appState.active->currentSortedFileIndex) {
+        if (appState.active->currentSortedFileIndex > 0)
+            appState.active->currentSortedFileIndex--;
+        appState.active->filesChanged = true; // trigger reload from new position
     }
-    if (appState.currentSortedFileIndex >= appState.sortedFiles.size())
-        appState.currentSortedFileIndex = appState.sortedFiles.empty() ? 0 : appState.sortedFiles.size() - 1;
+    if (appState.active->currentSortedFileIndex >= appState.active->sortedFiles.size())
+        appState.active->currentSortedFileIndex = appState.active->sortedFiles.empty() ? 0 : appState.active->sortedFiles.size() - 1;
 
-    if (appState.loadedData.empty())
-        appState.dataLoaded = false;
+    if (appState.active->loadedData.empty())
+        appState.active->dataLoaded = false;
 
     appState.needsRedraw = true;
 }
@@ -197,36 +197,36 @@ void renderFilesPanel() {
 
         ImGui::Begin("Files");
         // Open delete confirmation popup if pending (called within frame context)
-        if (appState.showDeleteConfirmPopup) {
+        if (appState.active->showDeleteConfirmPopup) {
             ImGui::OpenPopup("Delete File##confirm");
         }
         ImGui::PushTextWrapPos(); // Enable text wrapping
-        ImGui::Text("Current Dataset: %s", appState.currentDatasetName.c_str());
+        ImGui::Text("Current Dataset: %s", appState.active->currentDatasetName.c_str());
         ImGui::Separator();
         ImGui::Text("Select:");
         ImGui::SameLine();
         if (ImGui::Button("All##FilesAll")) {
-            for (size_t i = 0; i < appState.filesSelectedForAveraging.size(); i++)
-                appState.filesSelectedForAveraging[i] = true;
+            for (size_t i = 0; i < appState.active->filesSelectedForAveraging.size(); i++)
+                appState.active->filesSelectedForAveraging[i] = true;
             appState.needsRedraw = true;
         }
         ImGui::SameLine();
         if (ImGui::Button("None##FilesNone")) {
-            for (size_t i = 0; i < appState.filesSelectedForAveraging.size(); i++)
-                appState.filesSelectedForAveraging[i] = false;
+            for (size_t i = 0; i < appState.active->filesSelectedForAveraging.size(); i++)
+                appState.active->filesSelectedForAveraging[i] = false;
             appState.needsRedraw = true;
         }
         ImGui::SameLine();
         if (ImGui::Button("10")) {
-            for (size_t i = 0; i < appState.filesSelectedForAveraging.size(); i++)
-                appState.filesSelectedForAveraging[i] = (i < 10);
+            for (size_t i = 0; i < appState.active->filesSelectedForAveraging.size(); i++)
+                appState.active->filesSelectedForAveraging[i] = (i < 10);
             appState.needsRedraw = true;
         }
         ImGui::SameLine();
         if (ImGui::Button("50%")) {
-            size_t half = appState.filesSelectedForAveraging.size() / 2;
-            for (size_t i = 0; i < appState.filesSelectedForAveraging.size(); i++)
-                appState.filesSelectedForAveraging[i] = (i < half);
+            size_t half = appState.active->filesSelectedForAveraging.size() / 2;
+            for (size_t i = 0; i < appState.active->filesSelectedForAveraging.size(); i++)
+                appState.active->filesSelectedForAveraging[i] = (i < half);
             appState.needsRedraw = true;
             }
 
@@ -244,10 +244,10 @@ void renderFilesPanel() {
                           ImGuiWindowFlags_AlwaysVerticalScrollbar);
 
         // Use the pre-sorted files list
-        size_t currentSortedIndex = appState.currentSortedFileIndex;
+        size_t currentSortedIndex = appState.active->currentSortedFileIndex;
 
         // Only calculate scroll position when using keyboard navigation
-        if (appState.keyboardNavigation) {
+        if (appState.active->keyboardNavigation) {
             if (currentSortedIndex > 0 && ImGui::GetScrollY() + ImGui::GetWindowHeight() < (currentSortedIndex + 1) * ImGui::GetTextLineHeightWithSpacing()) {
                 ImGui::SetScrollY((currentSortedIndex + 1) * ImGui::GetTextLineHeightWithSpacing() - ImGui::GetWindowHeight());
             } else if (currentSortedIndex == 0) {
@@ -255,8 +255,8 @@ void renderFilesPanel() {
             }
         }
         
-        for (size_t i = 0; i < appState.sortedFiles.size(); ) {
-            const auto& file = appState.sortedFiles[i];
+        for (size_t i = 0; i < appState.active->sortedFiles.size(); ) {
+            const auto& file = appState.active->sortedFiles[i];
             // Extract just the filename without path
             std::string filename = file;
             size_t last_slash = filename.find_last_of("/\\");
@@ -274,9 +274,9 @@ void renderFilesPanel() {
             if (appState.hasWorkspace()) {
                 std::string delBtnId = "×##del" + std::to_string(i);
                 if (ImGui::Button(delBtnId.c_str(), ImVec2(btnH, btnH))) {
-                    appState.pendingWorkspaceDeletionPath = memberPathOf(appState.workspace, file);
-                    if (!appState.pendingWorkspaceDeletionPath.empty()) {
-                        appState.showWorkspaceDeleteConfirmPopup = true;
+                    appState.active->pendingWorkspaceDeletionPath = memberPathOf(appState.active->workspace, file);
+                    if (!appState.active->pendingWorkspaceDeletionPath.empty()) {
+                        appState.active->showWorkspaceDeleteConfirmPopup = true;
                         appState.needsRedraw = true;
                     }
                 }
@@ -286,12 +286,12 @@ void renderFilesPanel() {
             {
                 std::string delBtnId = "×##del" + std::to_string(i);
                 if (ImGui::Button(delBtnId.c_str(), ImVec2(btnH, btnH))) {
-                    if (appState.skipDeleteConfirm) {
+                    if (appState.active->skipDeleteConfirm) {
                         performFileDeletion(appState, i);
                         continue;
                     } else {
-                        appState.deleteConfirmIndex = i;
-                        appState.showDeleteConfirmPopup = true;
+                        appState.active->deleteConfirmIndex = i;
+                        appState.active->showDeleteConfirmPopup = true;
                     }
                 }
                 ImGui::SameLine();
@@ -301,12 +301,12 @@ void renderFilesPanel() {
             
             // Enhanced highlighting for the currently selected file
             int stylesPushed = 1; // Default: push 1 style
-            bool isFileSelected = (std::find(appState.selectedFiles.begin(), appState.selectedFiles.end(), file) != appState.selectedFiles.end());
+            bool isFileSelected = (std::find(appState.active->selectedFiles.begin(), appState.active->selectedFiles.end(), file) != appState.active->selectedFiles.end());
             
             if (isFileSelected) {
                 // Find the index of this file in the selectedFiles vector to determine its color
-                auto it = std::find(appState.selectedFiles.begin(), appState.selectedFiles.end(), file);
-                size_t fileIndex = std::distance(appState.selectedFiles.begin(), it);
+                auto it = std::find(appState.active->selectedFiles.begin(), appState.active->selectedFiles.end(), file);
+                size_t fileIndex = std::distance(appState.active->selectedFiles.begin(), it);
                 
                 // Get the color matching the plot curve color
                 ImVec4 buttonColor;
@@ -348,26 +348,26 @@ void renderFilesPanel() {
             std::string rowLabel = filename;
 #if FTS_BUILD_HDF5
             if (appState.hasWorkspace() && appState.showTimestamps) {
-                std::string ts = memberTimestampHMS(appState.workspace, file);
+                std::string ts = memberTimestampHMS(appState.active->workspace, file);
                 if (!ts.empty()) rowLabel += " [" + ts + "]";
             }
 #endif
             if (ImGui::Button(rowLabel.c_str(), ImVec2(btnWidth, 0))) {
                 // Handle multi-select with Ctrl key
-                if (appState.multiSelectMode) {
+                if (appState.active->multiSelectMode) {
                     // Toggle selection for this file
-                    std::string fullPath = appState.sortedFiles[i];
-                    auto it = std::find(appState.selectedFiles.begin(), appState.selectedFiles.end(), fullPath);
-                    if (it != appState.selectedFiles.end()) {
+                    std::string fullPath = appState.active->sortedFiles[i];
+                    auto it = std::find(appState.active->selectedFiles.begin(), appState.active->selectedFiles.end(), fullPath);
+                    if (it != appState.active->selectedFiles.end()) {
                         // File already selected, remove it
-                        size_t index = std::distance(appState.selectedFiles.begin(), it);
-                        appState.selectedFiles.erase(appState.selectedFiles.begin() + index);
-                        appState.selectedFilenames.erase(appState.selectedFilenames.begin() + index);
-                        appState.loadedData.erase(appState.loadedData.begin() + index);
-                        appState.rawDataCache.erase(appState.rawDataCache.begin() + index); // Also remove from raw data cache
+                        size_t index = std::distance(appState.active->selectedFiles.begin(), it);
+                        appState.active->selectedFiles.erase(appState.active->selectedFiles.begin() + index);
+                        appState.active->selectedFilenames.erase(appState.active->selectedFilenames.begin() + index);
+                        appState.active->loadedData.erase(appState.active->loadedData.begin() + index);
+                        appState.active->rawDataCache.erase(appState.active->rawDataCache.begin() + index); // Also remove from raw data cache
                     } else {
                         // Check if we would exceed the limit
-                        if (appState.selectedFiles.size() < appState.MAX_SELECTABLE_FILES) {
+                        if (appState.active->selectedFiles.size() < appState.MAX_SELECTABLE_FILES) {
                             try {
                                 InterferogramData data = loadInterferogram(appState, fullPath);
         
@@ -376,7 +376,7 @@ void renderFilesPanel() {
                                 InterferogramData rawData = data;
                                 
                                 // Apply downsampling to multi-selected files too
-                                if (appState.enableDownsampling && data.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
+                                if (appState.active->enableDownsampling && data.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
                                     size_t localDownsampleFactor = data.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
                                     
                                     // Downsample both reference and primary detectors
@@ -389,13 +389,13 @@ void renderFilesPanel() {
                                     data.primaryDetector = downsampledPrim;
                                 }
                                 
-                                appState.loadedData.push_back(data);
-                                appState.rawDataCache.push_back(rawData); // Store raw data for spectrum computation
-                                appState.selectedFiles.push_back(fullPath);
+                                appState.active->loadedData.push_back(data);
+                                appState.active->rawDataCache.push_back(rawData); // Store raw data for spectrum computation
+                                appState.active->selectedFiles.push_back(fullPath);
                                 std::string idName = fullPath;
                                 size_t idSlash = idName.find_last_of("/\\");
                                 if (idSlash != std::string::npos) idName = idName.substr(idSlash + 1);
-                                appState.selectedFilenames.push_back(idName);
+                                appState.active->selectedFilenames.push_back(idName);
                             } catch (const std::exception& e) {
                                 std::cerr << "Error loading file: " << e.what() << std::endl;
                             }
@@ -404,16 +404,16 @@ void renderFilesPanel() {
                             appState.needsRedraw = true;
                         }
                     }
-                } else if (appState.shiftSelectMode) {
+                } else if (appState.active->shiftSelectMode) {
                     // Handle Shift+Click for range selection
-                    size_t startIndex = std::min(appState.lastSelectedIndex, i);
-                    size_t endIndex = std::max(appState.lastSelectedIndex, i);
+                    size_t startIndex = std::min(appState.active->lastSelectedIndex, i);
+                    size_t endIndex = std::max(appState.active->lastSelectedIndex, i);
                     
                     // Clear current selection
-                    appState.selectedFiles.clear();
-                    appState.selectedFilenames.clear();
-                    appState.loadedData.clear();
-                    appState.rawDataCache.clear(); // Clear raw data cache too
+                    appState.active->selectedFiles.clear();
+                    appState.active->selectedFilenames.clear();
+                    appState.active->loadedData.clear();
+                    appState.active->rawDataCache.clear(); // Clear raw data cache too
                     
                     // Add all files in the range, respecting the 5-file limit
                     size_t filesToAdd = 0;
@@ -421,14 +421,14 @@ void renderFilesPanel() {
                         if (filesToAdd >= appState.MAX_SELECTABLE_FILES) break;
                         
                         try {
-                            std::string fullPath = appState.sortedFiles[j];
+                            std::string fullPath = appState.active->sortedFiles[j];
                             InterferogramData data = loadInterferogram(appState, fullPath);
                             
                             // Store raw data in cache before downsampling
                             InterferogramData rawData = data;
                             
                             // Apply downsampling
-                            if (appState.enableDownsampling && data.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
+                            if (appState.active->enableDownsampling && data.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
                                 size_t localDownsampleFactor = data.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
                                 std::vector<double> downsampledRef, downsampledPrim;
                                 for (size_t k = 0; k < data.referenceDetector.size(); k += localDownsampleFactor) {
@@ -439,17 +439,17 @@ void renderFilesPanel() {
                                 data.primaryDetector = downsampledPrim;
                             }
                             
-                            appState.loadedData.push_back(data);
-                            appState.rawDataCache.push_back(rawData); // Store raw data for spectrum computation
-                            appState.selectedFiles.push_back(fullPath);
+                            appState.active->loadedData.push_back(data);
+                            appState.active->rawDataCache.push_back(rawData); // Store raw data for spectrum computation
+                            appState.active->selectedFiles.push_back(fullPath);
                             
                             // Extract filename for legend
-                            std::string filename = appState.sortedFiles[j];
+                            std::string filename = appState.active->sortedFiles[j];
                             size_t last_slash = filename.find_last_of("/\\");
                             if (last_slash != std::string::npos) {
                                 filename = filename.substr(last_slash + 1);
                             }
-                            appState.selectedFilenames.push_back(filename);
+                            appState.active->selectedFilenames.push_back(filename);
                             filesToAdd++;
                         } catch (const std::exception& e) {
                             std::cerr << "Error loading file: " << e.what() << std::endl;
@@ -457,14 +457,14 @@ void renderFilesPanel() {
                     }
                     
                     // Update last selected index
-                    appState.lastSelectedIndex = i;
-                    appState.dataLoaded = !appState.selectedFiles.empty();
+                    appState.active->lastSelectedIndex = i;
+                    appState.active->dataLoaded = !appState.active->selectedFiles.empty();
                 } else {
                     // Single selection - replace current selection
-                    appState.currentSortedFileIndex = i;
-                    appState.filesChanged = true;
+                    appState.active->currentSortedFileIndex = i;
+                    appState.active->filesChanged = true;
                     // Update last selected index for future Shift+Click
-                    appState.lastSelectedIndex = i;
+                    appState.active->lastSelectedIndex = i;
                 }
             }
             
@@ -476,8 +476,8 @@ void renderFilesPanel() {
             
             // Averaging checkbox (right-aligned)
             ImGui::SameLine();
-            if (i < appState.filesSelectedForAveraging.size()) {
-                bool chk = appState.filesSelectedForAveraging[i];
+            if (i < appState.active->filesSelectedForAveraging.size()) {
+                bool chk = appState.active->filesSelectedForAveraging[i];
                 bool wasUnchecked = !chk;
                 if (wasUnchecked) {
                     ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.3f, 0.3f, 0.3f, 0.8f));
@@ -485,7 +485,7 @@ void renderFilesPanel() {
                 }
                 ImGui::PushID(static_cast<int>(i + 100000));
                 if (ImGui::Checkbox("##AvgSel", &chk)) {
-                    appState.filesSelectedForAveraging[i] = chk;
+                    appState.active->filesSelectedForAveraging[i] = chk;
                     appState.needsRedraw = true;
                 }
                 ImGui::PopID();
@@ -495,7 +495,7 @@ void renderFilesPanel() {
             }
 
             // Auto-scroll to keep selected item visible only when selection changes via keyboard
-            if (i == appState.currentSortedFileIndex && appState.keyboardNavigation) {
+            if (i == appState.active->currentSortedFileIndex && appState.active->keyboardNavigation) {
                 ImGui::SetScrollHereY(0.5f); // Scroll to center the selected item
             }
 
@@ -529,11 +529,11 @@ void renderFilesPanel() {
                         }
                     }
                 };
-                listGroup("spectra", appState.workspace.spectra.members);
-                listGroup("average_spectra", appState.workspace.averageSpectra.members);
-                listGroup("snr_spectra", appState.workspace.snrSpectra.members);
-                listGroup("allan_werle", appState.workspace.allanWerle.members);
-                listGroup("t100", appState.workspace.t100.members);
+                listGroup("spectra", appState.active->workspace.spectra.members);
+                listGroup("average_spectra", appState.active->workspace.averageSpectra.members);
+                listGroup("snr_spectra", appState.active->workspace.snrSpectra.members);
+                listGroup("allan_werle", appState.active->workspace.allanWerle.members);
+                listGroup("t100", appState.active->workspace.t100.members);
                 if (!any) ImGui::TextDisabled("(none)");
             }
         }
@@ -542,17 +542,17 @@ void renderFilesPanel() {
         {
             static int delFocus = 0;
             static bool prevWPopupOpen = false;
-            if (!appState.showWorkspaceDeleteConfirmPopup) {
+            if (!appState.active->showWorkspaceDeleteConfirmPopup) {
                 prevWPopupOpen = false;
             }
-            if (appState.showWorkspaceDeleteConfirmPopup) {
+            if (appState.active->showWorkspaceDeleteConfirmPopup) {
                 ImGui::OpenPopup("Delete Member##confirm");
             }
             beginModal(480.0f, modalAccent());
             if (ImGui::BeginPopupModal("Delete Member##confirm", NULL,
                                        ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
-                const std::string& delPath = appState.pendingWorkspaceDeletionPath;
-                size_t dependentCount = appState.workspace.dependentsOf(delPath).size();
+                const std::string& delPath = appState.active->pendingWorkspaceDeletionPath;
+                size_t dependentCount = appState.active->workspace.dependentsOf(delPath).size();
                 ImGui::Text("Delete member?");   // body restates the title (NoTitleBar)
                 ImGui::Spacing();
                 ImGui::TextWrapped("%s", delPath.c_str());
@@ -565,14 +565,14 @@ void renderFilesPanel() {
                 int pressed = modalButtonRow({"Cancel", "Delete"},
                                              delFocus, prevWPopupOpen, modalAccent());
                 if (pressed == 0 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-                    appState.showWorkspaceDeleteConfirmPopup = false;
-                    appState.pendingWorkspaceDeletionPath.clear();
+                    appState.active->showWorkspaceDeleteConfirmPopup = false;
+                    appState.active->pendingWorkspaceDeletionPath.clear();
                     ImGui::CloseCurrentPopup();
                 } else if (pressed == 1) {
-                    if (!appState.pendingWorkspaceDeletionPath.empty())
-                        performWorkspaceMemberDeletion(appState, appState.pendingWorkspaceDeletionPath);
-                    appState.showWorkspaceDeleteConfirmPopup = false;
-                    appState.pendingWorkspaceDeletionPath.clear();
+                    if (!appState.active->pendingWorkspaceDeletionPath.empty())
+                        performWorkspaceMemberDeletion(appState, appState.active->pendingWorkspaceDeletionPath);
+                    appState.active->showWorkspaceDeleteConfirmPopup = false;
+                    appState.active->pendingWorkspaceDeletionPath.clear();
                     ImGui::CloseCurrentPopup();
                 }
                 drawModalAccentFrame(modalAccent());
@@ -614,15 +614,15 @@ void renderFilesPanel() {
         {
             static int focusIdx = 0;
             static bool prevPopupOpen = false;
-            if (!appState.showDeleteConfirmPopup)
+            if (!appState.active->showDeleteConfirmPopup)
                 prevPopupOpen = false;
 
             beginModal(480.0f, modalAccent());
             if (ImGui::BeginPopupModal("Delete File##confirm", NULL,
                                        ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
-                size_t idx = appState.deleteConfirmIndex;
-                std::string fname = idx < appState.sortedFiles.size()
-                    ? appState.sortedFiles[idx].substr(appState.sortedFiles[idx].find_last_of("/\\") + 1)
+                size_t idx = appState.active->deleteConfirmIndex;
+                std::string fname = idx < appState.active->sortedFiles.size()
+                    ? appState.active->sortedFiles[idx].substr(appState.active->sortedFiles[idx].find_last_of("/\\") + 1)
                     : "";
 
                 ImGui::Text("Are you sure you want to delete?");   // body restates the title (NoTitleBar)
@@ -636,18 +636,18 @@ void renderFilesPanel() {
                     {"Cancel", "Yes", "Yes, don't ask again"},
                     focusIdx, prevPopupOpen, modalAccent());
                 if (pressed == 0 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-                    appState.showDeleteConfirmPopup = false;
+                    appState.active->showDeleteConfirmPopup = false;
                     ImGui::CloseCurrentPopup();
                 } else if (pressed == 1) {
-                    if (idx < appState.sortedFiles.size())
+                    if (idx < appState.active->sortedFiles.size())
                         performFileDeletion(appState, idx);
-                    appState.showDeleteConfirmPopup = false;
+                    appState.active->showDeleteConfirmPopup = false;
                     ImGui::CloseCurrentPopup();
                 } else if (pressed == 2) {
-                    appState.skipDeleteConfirm = true;
-                    if (idx < appState.sortedFiles.size())
+                    appState.active->skipDeleteConfirm = true;
+                    if (idx < appState.active->sortedFiles.size())
                         performFileDeletion(appState, idx);
-                    appState.showDeleteConfirmPopup = false;
+                    appState.active->showDeleteConfirmPopup = false;
                     ImGui::CloseCurrentPopup();
                 }
 
@@ -665,5 +665,5 @@ void renderFilesPanel() {
 
 // Single read path for all engine loads: the workspace.
 InterferogramData loadInterferogram(AppState& s, const std::string& id) {
-    return workspaceRead(s.workspace, id);
+    return workspaceRead(s.active->workspace, id);
 }

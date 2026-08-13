@@ -116,12 +116,7 @@ struct SessionTabState {
 
 // Application state structure
 struct AppState {
-    // Data adapter state
-    DatasetInfo datasetInfo;
 #if FTS_BUILD_HDF5
-    Workspace workspace;      // in-memory HDF5 workspace
-    std::string workspacePath; // empty = no workspace open
-
     // Pending workspace-discarding action stashed while the unsaved-changes
     // modal runs; dispatched by dispatchPendingAction on resolution.
     PendingWorkspaceAction pendingWorkspaceAction = PendingWorkspaceAction::None;
@@ -132,22 +127,6 @@ struct AppState {
     // pendingSaveAsPath empty = plain Save, non-empty = Save As target.
     std::string pendingSaveAsPath;
     bool showStaleDropPrompt = false;
-
-    // Phase 3: view-state dirty latch + editable metadata buffers.
-    // Baseline is captured at the end of the FIRST rendered frame after open
-    // (not at open time): first-load autoscale finalizes the per-panel zoom
-    // ranges mid-frame, so capturing earlier would false-dirty every fresh open.
-    nlohmann::json viewStateBaseline;
-    bool viewStateBaselinePending = true;
-    // Pristine-open dirty re-baseline: set by openWorkspace, consumed at the
-    // end of the first rendered frame. First-load auto-computes (the spectrum
-    // mirror in wsMirrorSpectrum) must not make a fresh open "dirty" — the
-    // auto-generated members become the baseline, exactly like the view state.
-    bool workspaceDirtyRebaselinePending = false;
-    // ponytail: fixed-cap free-text comment; acceptable for a comment field,
-    // bump the array size if a real need appears.
-    char metadataCommentBuffer[4096];
-    char metadataTagsBuffer[128];
 #endif
     bool showAdapterErrorPopup = false;
     std::string adapterErrorMsg;
@@ -160,39 +139,16 @@ struct AppState {
     std::string currentAccentColor;
     bool accentColorChanged;
     
-    // Main application state
-    std::string currentDirectory;
-    std::vector<std::string> csvFiles;
-    std::vector<InterferogramData> loadedData;
-    std::vector<InterferogramData> rawDataCache; // Cache for raw, unprocessed data for spectrum computation
-    std::vector<std::string> selectedFiles;
-    std::vector<std::string> selectedFilenames;
-    bool dataLoaded;
-    std::string currentDatasetName;
-    size_t currentSortedFileIndex;
-    bool filesChanged;
-    bool keyboardNavigation;
-    bool multiSelectMode;
-    bool shiftSelectMode;
-    const size_t MAX_SELECTABLE_FILES;
-    size_t lastSelectedIndex;
-    bool maxAtZero;
-    
-    // Keyboard shortcut state tracking
+    // Keyboard shortcut state tracking (frame-edge latches; shared across
+    // tabs — the arrow/nav keys are gated per active workspace tab).
     bool yKeyPressedLastFrame;
     bool aKeyPressedLastFrame;
     bool dKeyPressedLastFrame;
     bool qKeyPressedLastFrame;
     bool sKeyPressedLastFrame;
-    
-    // Performance optimization
-    bool enableDownsampling;
+    // App-wide limits (identical across sessions, not per-workspace).
+    const size_t MAX_SELECTABLE_FILES;
     const size_t maxPointsBeforeDownsampling;
-    
-    // Zoom state
-    std::pair<size_t, size_t> zoomRange;
-    bool shouldAutoscale;
-    bool forceXAutofit;
     
     // FPS counter state
     bool showFPS;
@@ -217,42 +173,6 @@ struct AppState {
     // successful workspace save; renderSaveToast draws while now < deadline.
     double saveToastUntil = 0.0;
     
-    // X-range selection state
-    bool isSelectingXRange;
-    bool applyXRangeSelection;
-    double selectionStartX;
-    double selectionEndX;
-    bool isMouseOverPlot;
-    
-    // Y-axis limits for plots
-    float ref_y_min;
-    float ref_y_max;
-    float prim_y_min;
-    float prim_y_max;
-    bool autoFitYAxis;
-    
-    // Last x axis limits
-    double last_x_min;
-    double last_x_max;
-
-    // Last y axis limits (saved from previous frame visible range)
-    float last_ref_y_min;
-    float last_ref_y_max;
-    float last_prim_y_min;
-    float last_prim_y_max;
-    
-    // Arrow key handling
-    bool leftArrowPressedLastFrame;
-    bool rightArrowPressedLastFrame;
-    bool leftArrowHandleFlag;
-    bool rightArrowHandleFlag;
-    
-    // First data load tracking
-    bool isFirstDataLoad;
-    
-    // Sorted files list for display
-    std::vector<std::string> sortedFiles;
-    
     // Welcome screen state
     bool showWelcomeScreen;
     bool welcomeScreenInitialized;
@@ -263,38 +183,16 @@ struct AppState {
     // Set by Settings > Restore layout menu item; consumed inside DockSpace window
     bool restoreLayoutRequested = false;
     
-    // Spectrum window state
-    Spectrum spectrum;
-    
-    // Average spectrum state
-    AverageSpectrum averageSpectrum;
-
-    // SNR spectrum state
-    SnrSpectrum snrSpectrum;
-
-    // Allan variance state
-    AllanVariance allanVariance;
-
-    // T100 spectrum state
-    T100Spectrum t100;
-
-    // Export panel state
-    ExportPanel exportPanel;
-
-    // Per-file checkbox state for file selection (shared by Average and SNR panels).
-    // Indexed identically to sortedFiles.
-    // Default: all true (checked) after loading a dataset.
-    std::vector<bool> filesSelectedForAveraging;
-    
-    // OPD X-axis state
-    int xAxisBase = 0;  // 0 = sample, 1 = OPD
-    std::map<std::string, std::vector<double>> hilbertXCache;
-    float hilbertCacheLaserWavelength = 0.0f;
-
-    // ── Multi-workspace tabs (Phase-2 M2.1) ────────────────────────────────
-    // sessions order is fixed at creation (UI reorder remaps only the strip
-    // order); cross-references use WorkspaceSession::key, never raw indices.
+    // ── Multi-workspace tabs (Phase-2 M2.1; Phase-5 M4.5 live-object model) ──
+    // THE SESSIONS ARE CANONICAL (data_structures_audit.md §3.1b): every
+    // per-workspace field lives in WorkspaceSession; AppState holds NO flat
+    // per-workspace fields. `active` points at the session whose tab is
+    // focused (null unless a workspace tab is active) — tab switch is a
+    // pointer assignment, never a copy. sessions order is fixed at creation
+    // (UI reorder remaps only the strip order); cross-references use
+    // WorkspaceSession::key, never raw indices.
     std::vector<std::unique_ptr<WorkspaceSession>> sessions;
+    WorkspaceSession* active = nullptr;     // == sessions[activeSessionIdx] when a workspace tab is active, else nullptr
     int activeSessionIdx = -1;          // valid when activeTabKind == Workspace
     int activeEnvIdx = -1;              // Phase 3: environment instances
     int lastActiveSessionIdx = -1;      // most-recent workspace tab (Ctrl+H target)
@@ -303,17 +201,14 @@ struct AppState {
     bool sessionTabPresent = false;     // set by ensureSessionTab; never unset
     // Queued tab switch (Amendment 4): swapInSession/focusSessionTab/
     // activateEnvironment only stash these; executePendingSwap runs at the
-    // top of the next frame (never mid-frame — the park/resume must not
-    // interleave with panel renders or polls).
+    // top of the next frame (never mid-frame — the active pointer must not
+    // change while panels render or polls walk the fields).
     int pendingSwapIdx = -1;
     bool pendingSwapToSession = false;
     // Queued ENVIRONMENT activation (Phase 3, bugfix 2026-08-13): env tabs
-    // are live objects, but switching to one must still PARK the active
-    // workspace tab first — otherwise the flat fields keep a workspace's
-    // data while its mirror is empty, and the next swap resumes an empty
-    // mirror over the live fields (wipe). Same last-wins semantics as the
-    // workspace/Session queues; valid only while activeTabKind is not yet
-    // switched. -1 = none queued.
+    // are live objects; switching to one just nulls `active` (the workspace
+    // data stays in its session — nothing to park under the live-object
+    // model). Same last-wins semantics as the workspace/Session queues.
     int pendingEnvIdx = -1;
 
     // ── Phase-3 environment instances (M3.2) ───────────────────────────────
@@ -341,7 +236,7 @@ struct AppState {
     int pendingRemoveIdx = -1;
     // Open requested on a NEW workspace tab: the blank session is queued for
     // swap; the load runs at frame top AFTER the swap so the previous tab's
-    // flat fields are already parked when openWorkspace overwrites them.
+    // fields are out of `active` when openWorkspace overwrites them.
     // pendingOpenSourceId non-empty = embedded source (pendingOpenPath = the
     // .cross.h5 path); empty = filesystem workspace.
     std::string pendingOpenPath;
@@ -365,65 +260,35 @@ struct AppState {
     bool pendingGoHome = false;
     bool exitTargetIsGoHome = false;
 
-    // Peak-finding X correction state
-    int    xCorrectionMethod = 0;           // 0=Hilbert, 1=PeakFinding
-    float  peakProminenceThreshold = 0.02f; // fraction of max peak height
-    bool   showPeakIndicators = false;      // circular markers on ref interferogram
-    std::map<std::string, std::vector<size_t>> peakPositionsCache;
-    
-    // Constructor to initialize constants
-    AppState();
-    
-    // Clear average spectrum data (call when dataset changes)
-    void clearAverageSpectrum();
-
-    // Clear SNR spectrum data (call when dataset changes)
-    void clearSnrSpectrum();
-
-    // Clear Allan variance data (call when dataset changes)
-    void clearAllanVariance();
-
-    // Clear T100 spectrum data (call when dataset changes)
-    void clearT100Spectrum();
-
-    // Delete confirmation state (session-only, not persisted)
-    bool showDeleteConfirmPopup = false;
-    size_t deleteConfirmIndex = 0;
-    bool skipDeleteConfirm = false; // "Don't ask again" flag — survives dataset changes, not config
+    // Phase 5: dataset conversion screen (foreign formats -> .h5)
+    ConversionScreenState conversionScreen;
 
     // Phase 4: experiment delete confirmation (dirty or persisted experiments
     // confirm before removal; transient empty instances remove directly).
     bool showEnvDeleteConfirm = false;
     int pendingEnvDeleteIdx = -1;
 
-    // Workspace member deletion confirmation (decision 1: originals always confirm).
-    bool showWorkspaceDeleteConfirmPopup = false;
-    std::string pendingWorkspaceDeletionPath;
-
-    // Phase 5: dataset conversion screen (foreign formats -> .h5)
-    ConversionScreenState conversionScreen;
-
     // Thread pool for parallel computation
     std::unique_ptr<ThreadPool> computationPool;
     int configuredWorkerCount = -1;   // -1 = AUTO
 
+    // Constructor to initialize constants
+    AppState();
+
+    // Clear panel caches (call when dataset changes) — act on the ACTIVE
+    // workspace session's panels (callers gate on hasWorkspace()).
+    void clearAverageSpectrum();
+    void clearSnrSpectrum();
+    void clearAllanVariance();
+    void clearT100Spectrum();
+
     void reconfigurePool(int count);
 
-#if FTS_BUILD_HDF5
-    bool hasWorkspace() const {
-        if (!workspacePath.empty()) return true;
-        // Embedded-source tabs keep an empty filesystem path — the workspace
-        // lives in the .cross.h5 (its save target is derived from the session
-        // key). Without this, embedded tabs would never be savable.
-        return activeTabKind == ActiveTabKind::Workspace && activeSessionIdx >= 0 &&
-               activeSessionIdx < static_cast<int>(sessions.size()) &&
-               sessions[activeSessionIdx]->key.find('#') != std::string::npos;
+    // Per-workspace state lives in sessions[] (canonical — M4.5). Helpers:
+    bool hasWorkspace() const { return active != nullptr; }
+    bool workspaceDirty() const {
+        return active != nullptr && active->workspace.dirty;
     }
-    bool workspaceDirty() const { return workspace.dirty; }
-#else
-    bool hasWorkspace() const { return false; }
-    bool workspaceDirty() const { return false; }
-#endif
     bool dataSourceReady() const { return hasWorkspace(); }
 };
 

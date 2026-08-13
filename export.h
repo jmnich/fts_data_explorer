@@ -46,8 +46,6 @@ public:
     // Park/resume mirror support (M2.1): heavy members (caches, futures) are
     // moved, scalars copied. Every per-workspace field must appear in BOTH
     // directions.
-    void parkInto(ExportPanel& dst);
-    void resumeFrom(ExportPanel& src);
 
 private:
     void writeCorrectedIFGCsv(const std::string& dir);

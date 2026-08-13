@@ -1,8 +1,7 @@
 #include "app_state.h"
 
-#include <type_traits>
-
-// Constructor implementation
+// Constructor implementation (globals only — per-workspace state lives in
+// WorkspaceSession, M4.5 canonical model).
 AppState::AppState()
     : MAX_SELECTABLE_FILES(5),
       maxPointsBeforeDownsampling(50000),
@@ -11,57 +10,20 @@ AppState::AppState()
       uiSizeChanged(false),
       currentAccentColor("default"),
       accentColorChanged(false),
-      currentDirectory(""),
-      dataLoaded(false),
-      currentDatasetName("No dataset selected"),
-      currentSortedFileIndex(0),
-      filesChanged(false),
-      keyboardNavigation(false),
-      multiSelectMode(false),
-      shiftSelectMode(false),
-      lastSelectedIndex(0),
-      maxAtZero(false),
       yKeyPressedLastFrame(false),
       aKeyPressedLastFrame(false),
       dKeyPressedLastFrame(false),
       qKeyPressedLastFrame(false),
       sKeyPressedLastFrame(false),
-      enableDownsampling(true),
-      zoomRange({0, 0}),
-      shouldAutoscale(false),
-      forceXAutofit(false),
       showFPS(false),
       gridAlpha(1.0f),
       fps(0.0f),
       frameCount(0),
       lastTime(0.0f),
       needsRedraw(true),
-      isSelectingXRange(false),
-      applyXRangeSelection(false),
-      selectionStartX(0.0),
-      selectionEndX(0.0),
-      isMouseOverPlot(false),
-      ref_y_min(0.0f),
-      ref_y_max(1.0f),
-      prim_y_min(0.0f),
-      prim_y_max(1.0f),
-      autoFitYAxis(true),
-      last_x_min(0),
-      last_x_max(0),
-      last_ref_y_min(0.0f),
-      last_ref_y_max(0.0f),
-      last_prim_y_min(0.0f),
-      last_prim_y_max(0.0f),
-      leftArrowPressedLastFrame(false),
-      rightArrowPressedLastFrame(false),
-      leftArrowHandleFlag(false),
-      rightArrowHandleFlag(false),
-      isFirstDataLoad(true),
       showWelcomeScreen(true),
       welcomeScreenInitialized(false),
       defaultLayoutApplied(false),
-      spectrum(),
-      xAxisBase(0),
       computationPool(std::make_unique<ThreadPool>(
           std::thread::hardware_concurrency())),
       configuredWorkerCount(-1)
@@ -78,11 +40,7 @@ void resetActiveWorkspaceTab(AppState& s) {
                      ? s.activeSessionIdx
                      : s.lastActiveSessionIdx;
     if (target < 0 || target >= static_cast<int>(s.sessions.size())) return;
-    if (target == s.activeSessionIdx) {
-        clearWorkspacePanels(s);
-    } else {
-        clearSessionPanels(*s.sessions[target]);
-    }
+    clearSessionPanels(*s.sessions[target]);
     s.needsRedraw = true;
 }
 
@@ -151,10 +109,8 @@ void finalizeGoHome(AppState& s) {
     s.exitDirtyTabs.clear();
     s.exitDirtyEnvs.clear();
     s.exitDirtyLabels.clear();
-    // removeTab leaves the active tab's data in the flat fields (the normal
-    // active-close path tolerates that until the next swap) — clear them so
-    // the launch welcome renders against a pristine state.
-    clearWorkspacePanels(s);
+    // Sessions are canonical: after the last removeTab the active pointer is
+    // already null — the launch welcome renders against a pristine state.
     s.lastActiveSessionIdx = -1;
     s.showWelcomeScreen = true;
     s.welcomeScreenInitialized = false;
@@ -162,15 +118,11 @@ void finalizeGoHome(AppState& s) {
 }
 #endif
 
-// The single workspace-reset path.
+// The single workspace-reset path (session-canonical, M4.5).
 // Order matters: futures first (abandoned → workers finish into moved-from
 // futures), then caches, then selection, then panel states. Baselines are
 // re-captured on the next frame by the callers that need them.
-// Template over the flat-fields holder: AppState (active tab) and
-// WorkspaceSession mirrors expose the same members under the same names, so
-// the reset is field-identical for both.
-template <typename S>
-static void clearWorkspacePanelsImpl(S& s) {
+void clearSessionPanels(WorkspaceSession& s) {
     s.spectrum.pendingSpectra_.clear();
     s.spectrum.cachedSpectra.clear();
     s.spectrum.cachedFrequencies.clear();
@@ -188,37 +140,31 @@ static void clearWorkspacePanelsImpl(S& s) {
     s.snrSpectrum.reset();
     s.allanVariance.reset();
     s.t100.reset();
-    if constexpr (std::is_same_v<S, AppState>) s.needsRedraw = true;
 }
 
 void clearWorkspacePanels(AppState& s) {
-    clearWorkspacePanelsImpl(s);
+    if (!s.active) return;
+    clearSessionPanels(*s.active);
     // Pool entries of the active session are stale by definition (its panels
     // and caches just got cleared) — evict so poolSpectrum recomputes
     // (audit §5.3 Amendment 4).
-    if (s.activeTabKind == ActiveTabKind::Workspace && s.activeSessionIdx >= 0 &&
-        s.activeSessionIdx < static_cast<int>(s.sessions.size()))
-        poolEvictKey(s, s.sessions[s.activeSessionIdx]->key);
-}
-
-void clearSessionPanels(WorkspaceSession& sess) {
-    clearWorkspacePanelsImpl(sess);
+    poolEvictKey(s, s.active->key);
 }
 
 void AppState::clearAverageSpectrum() {
-    averageSpectrum.reset();
+    if (active) active->averageSpectrum.reset();
 }
 
 void AppState::clearSnrSpectrum() {
-    snrSpectrum.reset();
+    if (active) active->snrSpectrum.reset();
 }
 
 void AppState::clearAllanVariance() {
-    allanVariance.reset();
+    if (active) active->allanVariance.reset();
 }
 
 void AppState::clearT100Spectrum() {
-    t100.reset();
+    if (active) active->t100.reset();
 }
 
 void AppState::reconfigurePool(int count) {

@@ -25,9 +25,10 @@ void renderMainMenuBar(AppConfig& config, const std::string& configFilePath,
                     }
 #if FTS_BUILD_HDF5
                     if (ImGui::MenuItem("Open Workspace (.h5)...")) {
-                        std::string defaultFolder = appState.currentDirectory;
+                        std::string defaultFolder = appState.active
+                            ? appState.active->currentDirectory : std::string();
                         if (appState.hasWorkspace())
-                            defaultFolder = std::filesystem::path(appState.workspacePath).parent_path().string();
+                            defaultFolder = std::filesystem::path(appState.active->workspacePath).parent_path().string();
                         if (!std::filesystem::is_directory(defaultFolder))
                             defaultFolder = std::filesystem::is_directory(config.lastWorkingDirectory)
                                 ? config.lastWorkingDirectory : "";

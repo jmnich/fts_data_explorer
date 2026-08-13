@@ -116,8 +116,6 @@ public:
     // Park/resume mirror support (M2.1): heavy members (caches, futures) are
     // moved, scalars copied. Every per-workspace field must appear in BOTH
     // directions (incl. the private calc state).
-    void parkInto(T100Spectrum& dst);
-    void resumeFrom(T100Spectrum& src);
 
 private:
 

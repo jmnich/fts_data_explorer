@@ -1,7 +1,8 @@
-// WorkspaceSession: park/resume folding between AppState flat fields and a
-// parked session (M2.1). Heavy containers are MOVED — the flat fields ARE the
-// active tab's storage, so switches are O(1) per container and parked
-// sessions retain their data (never duplicated).
+// WorkspaceSession: the CANONICAL storage of every per-workspace field
+// (data_structures_audit.md §3.1b — Phase-5 M4.5 live-object model). AppState
+// holds no flat per-workspace fields; AppState::active points at the focused
+// session. Tab switch is a pointer assignment — never a copy, no park/resume,
+// no field checklist (the drift class is gone by construction).
 #include "workspace_session.h"
 
 #include <filesystem>
@@ -16,154 +17,26 @@ WorkspaceSession::WorkspaceSession() {
     metadataTagsBuffer[0] = '\0';
 }
 
-// flat fields → this. Order: read the dirty latch before moving the workspace;
-// then move heavy containers, copy scalars, snapshot atomics, move futures.
-void WorkspaceSession::park(AppState& s) {
-    workspaceDirty = s.workspace.dirty;
-    workspace = std::move(s.workspace);
-    workspacePath = std::move(s.workspacePath);
-    datasetInfo = s.datasetInfo;
-    viewStateBaseline = std::move(s.viewStateBaseline);
-    viewStateBaselinePending = s.viewStateBaselinePending;
-    workspaceDirtyRebaselinePending = s.workspaceDirtyRebaselinePending;
-    std::memcpy(metadataCommentBuffer, s.metadataCommentBuffer, sizeof(metadataCommentBuffer));
-    std::memcpy(metadataTagsBuffer, s.metadataTagsBuffer, sizeof(metadataTagsBuffer));
-
-    currentDirectory = std::move(s.currentDirectory);
-    csvFiles = std::move(s.csvFiles);
-    loadedData = std::move(s.loadedData);
-    rawDataCache = std::move(s.rawDataCache);
-    selectedFiles = std::move(s.selectedFiles);
-    selectedFilenames = std::move(s.selectedFilenames);
-    dataLoaded = s.dataLoaded;
-    currentDatasetName = std::move(s.currentDatasetName);
-    currentSortedFileIndex = s.currentSortedFileIndex;
-    filesChanged = s.filesChanged;
-    keyboardNavigation = s.keyboardNavigation;
-    multiSelectMode = s.multiSelectMode;
-    shiftSelectMode = s.shiftSelectMode;
-    lastSelectedIndex = s.lastSelectedIndex;
-    maxAtZero = s.maxAtZero;
-    sortedFiles = std::move(s.sortedFiles);
-    filesSelectedForAveraging = std::move(s.filesSelectedForAveraging);
-
-    zoomRange = s.zoomRange;
-    shouldAutoscale = s.shouldAutoscale;
-    forceXAutofit = s.forceXAutofit;
-    isSelectingXRange = s.isSelectingXRange;
-    applyXRangeSelection = s.applyXRangeSelection;
-    selectionStartX = s.selectionStartX;
-    selectionEndX = s.selectionEndX;
-    isMouseOverPlot = s.isMouseOverPlot;
-    ref_y_min = s.ref_y_min; ref_y_max = s.ref_y_max;
-    prim_y_min = s.prim_y_min; prim_y_max = s.prim_y_max;
-    autoFitYAxis = s.autoFitYAxis;
-    last_x_min = s.last_x_min; last_x_max = s.last_x_max;
-    last_ref_y_min = s.last_ref_y_min; last_ref_y_max = s.last_ref_y_max;
-    last_prim_y_min = s.last_prim_y_min; last_prim_y_max = s.last_prim_y_max;
-    leftArrowPressedLastFrame = s.leftArrowPressedLastFrame;
-    rightArrowPressedLastFrame = s.rightArrowPressedLastFrame;
-    leftArrowHandleFlag = s.leftArrowHandleFlag;
-    rightArrowHandleFlag = s.rightArrowHandleFlag;
-    isFirstDataLoad = s.isFirstDataLoad;
-    enableDownsampling = s.enableDownsampling;
-
-    xAxisBase = s.xAxisBase;
-    hilbertXCache = std::move(s.hilbertXCache);
-    hilbertCacheLaserWavelength = s.hilbertCacheLaserWavelength;
-    xCorrectionMethod = s.xCorrectionMethod;
-    peakProminenceThreshold = s.peakProminenceThreshold;
-    showPeakIndicators = s.showPeakIndicators;
-    peakPositionsCache = std::move(s.peakPositionsCache);
-
-    s.spectrum.parkInto(spectrum);
-    s.averageSpectrum.parkInto(averageSpectrum);
-    s.snrSpectrum.parkInto(snrSpectrum);
-    s.allanVariance.parkInto(allanVariance);
-    s.t100.parkInto(t100);
-    s.exportPanel.parkInto(exportPanel);
-
-    showDeleteConfirmPopup = s.showDeleteConfirmPopup;
-    deleteConfirmIndex = s.deleteConfirmIndex;
-    skipDeleteConfirm = s.skipDeleteConfirm;
-    showWorkspaceDeleteConfirmPopup = s.showWorkspaceDeleteConfirmPopup;
-    pendingWorkspaceDeletionPath = std::move(s.pendingWorkspaceDeletionPath);
-
+// Panels read the session's fields through AppState::active; the AppState
+// address is stable, so wiring runs once at session creation (never re-wired
+// on tab switch — mirrors the old flat-panels invariant).
+void wireSessionPanels(AppState& s, WorkspaceSession& ws) {
+    ws.spectrum.appState = &s;
+    ws.averageSpectrum.appState = &s;
+    ws.snrSpectrum.appState = &s;
+    ws.allanVariance.appState = &s;
+    ws.t100.appState = &s;
+    ws.exportPanel.appState = &s;
 }
 
-// this → flat fields. Mirrors park() exactly, direction reversed.
-void WorkspaceSession::resume(AppState& s) {
-    s.workspace = std::move(workspace);
-    s.workspace.dirty = workspaceDirty;
-    s.workspacePath = std::move(workspacePath);
-    s.datasetInfo = datasetInfo;
-    s.viewStateBaseline = std::move(viewStateBaseline);
-    s.viewStateBaselinePending = viewStateBaselinePending;
-    s.workspaceDirtyRebaselinePending = workspaceDirtyRebaselinePending;
-    std::memcpy(s.metadataCommentBuffer, metadataCommentBuffer, sizeof(metadataCommentBuffer));
-    std::memcpy(s.metadataTagsBuffer, metadataTagsBuffer, sizeof(metadataTagsBuffer));
-
-    s.currentDirectory = std::move(currentDirectory);
-    s.csvFiles = std::move(csvFiles);
-    s.loadedData = std::move(loadedData);
-    s.rawDataCache = std::move(rawDataCache);
-    s.selectedFiles = std::move(selectedFiles);
-    s.selectedFilenames = std::move(selectedFilenames);
-    s.dataLoaded = dataLoaded;
-    s.currentDatasetName = std::move(currentDatasetName);
-    s.currentSortedFileIndex = currentSortedFileIndex;
-    s.filesChanged = filesChanged;
-    s.keyboardNavigation = keyboardNavigation;
-    s.multiSelectMode = multiSelectMode;
-    s.shiftSelectMode = shiftSelectMode;
-    s.lastSelectedIndex = lastSelectedIndex;
-    s.maxAtZero = maxAtZero;
-    s.sortedFiles = std::move(sortedFiles);
-    s.filesSelectedForAveraging = std::move(filesSelectedForAveraging);
-
-    s.zoomRange = zoomRange;
-    s.shouldAutoscale = shouldAutoscale;
-    s.forceXAutofit = forceXAutofit;
-    s.isSelectingXRange = isSelectingXRange;
-    s.applyXRangeSelection = applyXRangeSelection;
-    s.selectionStartX = selectionStartX;
-    s.selectionEndX = selectionEndX;
-    s.isMouseOverPlot = isMouseOverPlot;
-    s.ref_y_min = ref_y_min; s.ref_y_max = ref_y_max;
-    s.prim_y_min = prim_y_min; s.prim_y_max = prim_y_max;
-    s.autoFitYAxis = autoFitYAxis;
-    s.last_x_min = last_x_min; s.last_x_max = last_x_max;
-    s.last_ref_y_min = last_ref_y_min; s.last_ref_y_max = last_ref_y_max;
-    s.last_prim_y_min = last_prim_y_min; s.last_prim_y_max = last_prim_y_max;
-    s.leftArrowPressedLastFrame = leftArrowPressedLastFrame;
-    s.rightArrowPressedLastFrame = rightArrowPressedLastFrame;
-    s.leftArrowHandleFlag = leftArrowHandleFlag;
-    s.rightArrowHandleFlag = rightArrowHandleFlag;
-    s.isFirstDataLoad = isFirstDataLoad;
-    s.enableDownsampling = enableDownsampling;
-
-    s.xAxisBase = xAxisBase;
-    s.hilbertXCache = std::move(hilbertXCache);
-    s.hilbertCacheLaserWavelength = hilbertCacheLaserWavelength;
-    s.xCorrectionMethod = xCorrectionMethod;
-    s.peakProminenceThreshold = peakProminenceThreshold;
-    s.showPeakIndicators = showPeakIndicators;
-    s.peakPositionsCache = std::move(peakPositionsCache);
-
-    s.spectrum.resumeFrom(spectrum);
-    s.averageSpectrum.resumeFrom(averageSpectrum);
-    s.snrSpectrum.resumeFrom(snrSpectrum);
-    s.allanVariance.resumeFrom(allanVariance);
-    s.t100.resumeFrom(t100);
-    s.exportPanel.resumeFrom(exportPanel);
-
-    s.showDeleteConfirmPopup = showDeleteConfirmPopup;
-    s.deleteConfirmIndex = deleteConfirmIndex;
-    s.skipDeleteConfirm = skipDeleteConfirm;
-    s.showWorkspaceDeleteConfirmPopup = showWorkspaceDeleteConfirmPopup;
-    s.pendingWorkspaceDeletionPath = std::move(pendingWorkspaceDeletionPath);
-
-    s.needsRedraw = true;
+void applySessionDefaults(AppState& s, WorkspaceSession& ws) {
+    if (!s.configPtr) return;
+    ws.enableDownsampling = s.configPtr->enableDownsampling;
+    ws.autoFitYAxis = s.configPtr->autoFitYAxis;
+    ws.showPeakIndicators = s.configPtr->showPeakIndicators;
+    const std::string& wd = s.configPtr->lastWorkingDirectory;
+    if (!wd.empty() && std::filesystem::is_directory(wd))
+        ws.currentDirectory = wd;
 }
 
 void WorkspaceSession::closeRequest() {
@@ -171,12 +44,10 @@ void WorkspaceSession::closeRequest() {
 }
 
 const std::string& WorkspaceSession::title() const {
-    // Computed per call (cheap): label + dirty star. The strip bypasses this
-    // for the ACTIVE tab — its dirty state lives in the flat fields, not the
-    // mirror latch.
+    // Computed per call (cheap): label + dirty star.
     static const std::string star = " *";
     static thread_local std::string cached;
-    cached = label() + (workspaceDirty ? star : std::string());
+    cached = label() + (workspace.dirty ? star : std::string());
     return cached;
 }
 
@@ -192,12 +63,10 @@ std::string WorkspaceSession::label() const {
     return out;
 }
 
-
-
-// ── Tab-switch queue (Amendment 4) ──────────────────────────────────────────
-// swapInSession only queues; executePendingSwap runs the park/resume at the
-// top of the next frame — never mid-frame, never while a poll is walking a
-// future vector.
+// ── Tab-switch queue (Amendment 4 / M4.5) ───────────────────────────────────
+// swapInSession only queues; executePendingSwap repoints AppState::active at
+// the top of the next frame — never mid-frame, never while a poll is walking
+// a future vector. Sessions are canonical: nothing moves on switch.
 
 void swapInSession(AppState& s, int idx) {
     s.pendingSwapIdx = idx;
@@ -220,25 +89,21 @@ void executePendingSwap(AppState& s) {
     // saves only when it actually has tabs — behind the launch welcome there
     // is none, and its layout must not clobber a real type's snapshot.
     const ActiveTabKind outKind = s.activeTabKind;
-    const bool outHasTabs =
-        (outKind == ActiveTabKind::Workspace && s.activeSessionIdx >= 0) ||
+    const bool outHasTabs = s.active != nullptr ||
         (outKind == ActiveTabKind::Environment && s.activeEnvIdx >= 0) ||
         (outKind == ActiveTabKind::Session && s.sessionTabPresent);
-    // Park the currently active workspace tab first (if any).
-    if (s.activeTabKind == ActiveTabKind::Workspace && s.activeSessionIdx >= 0 &&
-        s.activeSessionIdx < static_cast<int>(s.sessions.size())) {
-        s.sessions[s.activeSessionIdx]->park(s);
-    }
+    // Sessions are canonical: no park step — the workspace data never leaves
+    // its session; the active pointer is simply repointed.
     ActiveTabKind inKind = outKind;
     if (s.pendingEnvIdx >= 0) {
-        // Environment activation (bugfix 2026-08-13): the park above ran, so
-        // the workspace data is back in its mirror before we leave the
-        // workspace kind — the flat-fields invariant holds (data lives in
-        // the flat fields ⟺ a workspace tab is active).
+        // Environment activation (bugfix 2026-08-13, now by construction):
+        // leaving the workspace kind only nulls `active` — the workspace tab's
+        // data stays in its session, so the old wipe class cannot recur.
         const int idx = s.pendingEnvIdx;
         s.pendingEnvIdx = -1;
         s.pendingSwapIdx = -1;
         s.pendingSwapToSession = false;
+        s.active = nullptr;
         if (idx >= 0 && idx < static_cast<int>(s.environments.size())) {
             s.activeTabKind = ActiveTabKind::Environment;
             s.activeEnvIdx = idx;
@@ -248,6 +113,7 @@ void executePendingSwap(AppState& s) {
             inKind = ActiveTabKind::Session;
         }
     } else if (s.pendingSwapToSession) {
+        s.active = nullptr;
         s.activeTabKind = ActiveTabKind::Session;
         s.activeSessionIdx = -1;
         inKind = ActiveTabKind::Session;
@@ -258,7 +124,7 @@ void executePendingSwap(AppState& s) {
             s.pendingSwapToSession = false;
             return;
         }
-        s.sessions[idx]->resume(s);
+        s.active = s.sessions[idx].get();
         s.activeTabKind = ActiveTabKind::Workspace;
         s.activeSessionIdx = idx;
         s.lastActiveSessionIdx = idx;
@@ -295,6 +161,8 @@ void openEmbeddedInNewTab(AppState& s, const std::string& crossPath,
     }
     auto sess = std::make_unique<WorkspaceSession>();
     sess->key = key;
+    wireSessionPanels(s, *sess);
+    applySessionDefaults(s, *sess);
     s.sessions.push_back(std::move(sess));
     swapInSession(s, static_cast<int>(s.sessions.size()) - 1);
     s.pendingOpenPath = crossPath;
@@ -303,9 +171,9 @@ void openEmbeddedInNewTab(AppState& s, const std::string& crossPath,
 }
 
 // ── Close flow (M2.2) ───────────────────────────────────────────────────────
-// The unsaved modal runs against the ACTIVE tab's flat fields, so a dirty
-// PARKED tab must be swapped in before its modal shows. The modal dispatch is
-// in AppLoop (renderUnsavedPromptModal); closeTab only arranges state.
+// The unsaved modal reads the ACTIVE session's fields, so a dirty PARKED tab
+// must be swapped in before its modal shows. The modal dispatch is in AppLoop
+// (renderUnsavedPromptModal); closeTab only arranges state.
 
 // Remove a parked session. Indexes shift; cross-references never store raw
 // indices (they resolve via stable keys), so a simple index fix-up suffices.
@@ -313,6 +181,7 @@ void openEmbeddedInNewTab(AppState& s, const std::string& crossPath,
 void removeTab(AppState& s, int idx) {
     if (idx < 0 || idx >= static_cast<int>(s.sessions.size())) return;
     poolEvictKey(s, s.sessions[idx]->key);
+    if (s.active == s.sessions[idx].get()) s.active = nullptr;
     s.sessions.erase(s.sessions.begin() + idx);
     if (s.activeSessionIdx > idx) s.activeSessionIdx--;
     else if (s.activeSessionIdx == idx) {
@@ -336,11 +205,10 @@ void closeTab(AppState& s, int idx) {
     if (idx < 0 || idx >= static_cast<int>(s.sessions.size())) return;
     const bool isActive = (idx == s.activeSessionIdx &&
                            s.activeTabKind == ActiveTabKind::Workspace);
-    // The ACTIVE tab's dirty flag lives in the flat fields (the mirror latch
-    // is only fresh while parked). Never park before the modal: it reads and
-    // saves from the flat fields.
-    const bool dirty = isActive ? s.workspaceDirty() : s.sessions[idx]->isDirty();
-    if (dirty) {
+    // Sessions are canonical: the dirty flag always lives in the session.
+    // (The modal itself reads the ACTIVE session's change list, so a parked
+    // dirty tab is still swapped in before its modal shows.)
+    if (s.sessions[idx]->isDirty()) {
         if (isActive) {
             s.pendingTabCloseIdx = idx;
             s.showUnsavedPrompt = true;
@@ -360,6 +228,6 @@ void closeTab(AppState& s, int idx) {
         s.pendingRemoveIdx = idx;
         s.needsRedraw = true;
     } else {
-        removeTab(s, idx);   // parked: already out of the flat fields
+        removeTab(s, idx);   // parked: remove directly
     }
 }

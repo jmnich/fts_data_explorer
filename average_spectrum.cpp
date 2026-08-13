@@ -288,7 +288,7 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
                                                  : "Frequency (THz)";
         const char* yLabel = "";
         if (yScaleSelector == 2)
-            yLabel = (appState->spectrum.detectorSensitivity > 0.0f) ? "dBm" : "dB";
+            yLabel = (appState->active->spectrum.detectorSensitivity > 0.0f) ? "dBm" : "dB";
         ImPlot::SetupAxes(xLabel, yLabel, x_flags, y_flags);
 
         if (yScaleSelector == 1)
@@ -296,10 +296,10 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
 
         // Helper: V→W conversion only. When sensitivity == 0, caller normalizes.
         auto toDisplay = [&](double raw) -> double {
-            if (appState->spectrum.detectorSensitivity > 0.0f) {
+            if (appState->active->spectrum.detectorSensitivity > 0.0f) {
                 if (yScaleSelector == 2)
-                    return 10.0 * std::log10(std::max(raw / appState->spectrum.detectorSensitivity, 1e-300));
-                return raw / (appState->spectrum.detectorSensitivity * 1000.0);
+                    return 10.0 * std::log10(std::max(raw / appState->active->spectrum.detectorSensitivity, 1e-300));
+                return raw / (appState->active->spectrum.detectorSensitivity * 1000.0);
             }
             return raw;
         };
@@ -319,7 +319,7 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
             double xMax = std::max(cachedAverageX.front(), cachedAverageX.back());
 
             double yMin, yMax;
-            if (appState->spectrum.detectorSensitivity > 0.0f) {
+            if (appState->active->spectrum.detectorSensitivity > 0.0f) {
                 yMin = std::numeric_limits<double>::max();
                 yMax = std::numeric_limits<double>::lowest();
                 for (double v : cachedAverageY) {
@@ -381,7 +381,7 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
             double yMin = savedYMin;
             double yMax = savedYMax;
             if (yMin >= yMax) {
-                if (appState->spectrum.detectorSensitivity > 0.0f) {
+                if (appState->active->spectrum.detectorSensitivity > 0.0f) {
                     yMin = std::numeric_limits<double>::max();
                     yMax = std::numeric_limits<double>::lowest();
                     for (double v : cachedAverageY) {
@@ -435,7 +435,7 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
         {
             const double* plotData = cachedAverageY.data();
             std::vector<double> displayBuf;
-            if (appState->spectrum.detectorSensitivity > 0.0f) {
+            if (appState->active->spectrum.detectorSensitivity > 0.0f) {
                 displayBuf.resize(cachedAverageY.size());
                 for (size_t i = 0; i < cachedAverageY.size(); ++i)
                     displayBuf[i] = toDisplay(cachedAverageY[i]);
@@ -513,7 +513,7 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
                     }
                 }
                 signalY = specs[idx];
-                if (appState->spectrum.detectorSensitivity > 0.0f) {
+                if (appState->active->spectrum.detectorSensitivity > 0.0f) {
                     signalY = toDisplay(signalY);
                 } else {
                     double maxVal = *std::max_element(specs.begin(), specs.end());
@@ -542,7 +542,7 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
                           SpectralToolbox::convertXValue(mousePos.x, unit, ST::THz);
             const char* yUnit = "";
             if (yScaleSelector == 2)
-                yUnit = (appState->spectrum.detectorSensitivity > 0.0f) ? " dBm" : " dB";
+                yUnit = (appState->active->spectrum.detectorSensitivity > 0.0f) ? " dBm" : " dB";
             char txt[512];
             std::snprintf(txt, sizeof(txt), "Average\n%.2f cm-1\n%.4f um\n%.4f THz\nY: %.4e%s",
                           cm1, um, thz, signalY, yUnit);
@@ -596,27 +596,27 @@ bool AverageSpectrum::tickCalculation() {
         calcFirstFile = true;
         calcValidFiles = 0;
 
-        double refLaser = appState->spectrum.refLaserTextbox;
-        int K = appState->spectrum.Kpadding;
+        double refLaser = appState->active->spectrum.refLaserTextbox;
+        int K = appState->active->spectrum.Kpadding;
         auto xUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
-        int apodSelector = appState->spectrum.apodizationSelector;
-        auto apodParams = appState->spectrum.apodizationParams;
+        int apodSelector = appState->active->spectrum.apodizationSelector;
+        auto apodParams = appState->active->spectrum.apodizationParams;
 
-        for (size_t i = 0; i < appState->sortedFiles.size(); ++i) {
-            if (i >= appState->filesSelectedForAveraging.size() ||
-                !appState->filesSelectedForAveraging[i]) continue;
+        for (size_t i = 0; i < appState->active->sortedFiles.size(); ++i) {
+            if (i >= appState->active->filesSelectedForAveraging.size() ||
+                !appState->active->filesSelectedForAveraging[i]) continue;
 
-            std::string filePath = appState->sortedFiles[i];
-            bool axisCorr = appState->datasetInfo.axisIsCorrected;
-            bool hasPrecomp = appState->datasetInfo.hasPrecomputedSpectra;
+            std::string filePath = appState->active->sortedFiles[i];
+            bool axisCorr = appState->active->datasetInfo.axisIsCorrected;
+            bool hasPrecomp = appState->active->datasetInfo.hasPrecomputedSpectra;
             // Read the raw data on the main thread and capture it by value:
             // the workspace is mutated/replaced by the main thread (open,
             // close, member delete, Ctrl+H), so workers must never read it.
-            InterferogramData raw = workspaceRead(appState->workspace, filePath);
+            InterferogramData raw = workspaceRead(appState->active->workspace, filePath);
             auto fut = appState->computationPool->enqueue([raw = std::move(raw), refLaser, K, xUnit,
                                                                apodSelector, apodParams, this, axisCorr, hasPrecomp,
-                                                               xMethod = static_cast<SpectralToolbox::XCorrectionMethod>(appState->xCorrectionMethod),
-                                                               promThresh = appState->peakProminenceThreshold]() mutable {
+                                                               xMethod = static_cast<SpectralToolbox::XCorrectionMethod>(appState->active->xCorrectionMethod),
+                                                               promThresh = appState->active->peakProminenceThreshold]() mutable {
                 if (hasPrecomp) {
                     SpectralToolbox::ProcessedSpectrum ps;
                     ps.spectrumX = raw.referenceDetector;
@@ -701,7 +701,7 @@ bool AverageSpectrum::tickCalculation() {
 #if FTS_BUILD_HDF5
             if (appState && appState->hasWorkspace() && averageAvailable) {
                 auto inputs = checkedInputPaths(*appState);
-                wsUpsertAverage(appState->workspace, inputs, averageCount,
+                wsUpsertAverage(appState->active->workspace, inputs, averageCount,
                                 cachedAverageX, cachedAverageY,
                                 makeAverageConfig(*appState, inputs, averageCount));
             }
@@ -719,19 +719,19 @@ bool AverageSpectrum::tickCalculation() {
 }
 void renderAveragePanel() {
         ImGui::Begin("Average");
-        if (appState.dataLoaded) {
+        if (appState.active->dataLoaded) {
             // Button / progress bar (mutually exclusive)
-            if (!appState.averageSpectrum.calcInProgress) {
+            if (!appState.active->averageSpectrum.calcInProgress) {
                 if (ImGui::Button("Calculate average")) {
-                    appState.averageSpectrum.startCalculation();
+                    appState.active->averageSpectrum.startCalculation();
                     appState.needsRedraw = true;
                 }
             } else {
                 ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.6f, 0.5f, 0.1f, 1.0f));
                 char pctBuf[48];
-                float pct = appState.averageSpectrum.progressTotal > 0
-                    ? (float)appState.averageSpectrum.progressCurrent /
-                      (float)appState.averageSpectrum.progressTotal
+                float pct = appState.active->averageSpectrum.progressTotal > 0
+                    ? (float)appState.active->averageSpectrum.progressCurrent /
+                      (float)appState.active->averageSpectrum.progressTotal
                     : 0.0f;
                 std::snprintf(pctBuf, sizeof(pctBuf), "Calculating average (%.0f%%)", pct * 100.0f);
                 ImGui::ProgressBar(pct,
@@ -749,14 +749,14 @@ void renderAveragePanel() {
             // ---- Cursor toggle (SYNCHRONIZED with Spectrum) ----
             ImGui::Text("Cursor");
             ImGui::SameLine();
-            const bool cursorOn = appState.spectrum.showTrackingCursor;
+            const bool cursorOn = appState.active->spectrum.showTrackingCursor;
 
             ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[cursorOn ? 1 : 0]);
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cursorOn ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
             if (ImGui::Button("On##AvgCursorOn")) {
                 if (!cursorOn) {
-                    appState.spectrum.showTrackingCursor = true;
+                    appState.active->spectrum.showTrackingCursor = true;
                     appState.needsRedraw = true;
                 }
             }
@@ -768,7 +768,7 @@ void renderAveragePanel() {
             ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
             if (ImGui::Button("Off##AvgCursorOff")) {
                 if (cursorOn) {
-                    appState.spectrum.showTrackingCursor = false;
+                    appState.active->spectrum.showTrackingCursor = false;
                     appState.needsRedraw = true;
                 }
             }
@@ -777,111 +777,111 @@ void renderAveragePanel() {
             // ---- Y scale selector (INDEPENDENT) ----
             ImGui::Text("Y scale");
             ImGui::SameLine();
-            const bool linSel = (appState.averageSpectrum.yScaleSelector == 0);
-            const bool logSel = (appState.averageSpectrum.yScaleSelector == 1);
-            const bool dbSel  = (appState.averageSpectrum.yScaleSelector == 2);
+            const bool linSel = (appState.active->averageSpectrum.yScaleSelector == 0);
+            const bool logSel = (appState.active->averageSpectrum.yScaleSelector == 1);
+            const bool dbSel  = (appState.active->averageSpectrum.yScaleSelector == 2);
 
             ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[linSel ? 1 : 0]);
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  linSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("lin##AvgYScaleLin")) { appState.averageSpectrum.yScaleSelector = 0; appState.needsRedraw = true; }
+            if (ImGui::Button("lin##AvgYScaleLin")) { appState.active->averageSpectrum.yScaleSelector = 0; appState.needsRedraw = true; }
             ImGui::PopStyleColor(3);
             ImGui::SameLine();
 
             ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[logSel ? 1 : 0]);
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  logSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("log##AvgYScaleLog")) { appState.averageSpectrum.yScaleSelector = 1; appState.needsRedraw = true; }
+            if (ImGui::Button("log##AvgYScaleLog")) { appState.active->averageSpectrum.yScaleSelector = 1; appState.needsRedraw = true; }
             ImGui::PopStyleColor(3);
             ImGui::SameLine();
 
             ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[dbSel ? 1 : 0]);
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  dbSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("dB##AvgYScaleDb")) { appState.averageSpectrum.yScaleSelector = 2; appState.needsRedraw = true; }
+            if (ImGui::Button("dB##AvgYScaleDb")) { appState.active->averageSpectrum.yScaleSelector = 2; appState.needsRedraw = true; }
             ImGui::PopStyleColor(3);
 
             // ---- X unit selector (INDEPENDENT) ----
             ImGui::Text("X unit");
             ImGui::SameLine();
-            const bool cmSel  = (appState.averageSpectrum.xUnitSelector == 0);
-            const bool umSel  = (appState.averageSpectrum.xUnitSelector == 1);
-            const bool thzSel = (appState.averageSpectrum.xUnitSelector == 2);
+            const bool cmSel  = (appState.active->averageSpectrum.xUnitSelector == 0);
+            const bool umSel  = (appState.active->averageSpectrum.xUnitSelector == 1);
+            const bool thzSel = (appState.active->averageSpectrum.xUnitSelector == 2);
 
             ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[cmSel ? 1 : 0]);
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cmSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("cm-1##AvgXUnitCm")) { appState.averageSpectrum.xUnitSelector = 0; appState.needsRedraw = true; }
+            if (ImGui::Button("cm-1##AvgXUnitCm")) { appState.active->averageSpectrum.xUnitSelector = 0; appState.needsRedraw = true; }
             ImGui::PopStyleColor(3);
             ImGui::SameLine();
 
             ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[umSel ? 1 : 0]);
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  umSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("\xC2\xB5""m##AvgXUnitUm")) { appState.averageSpectrum.xUnitSelector = 1; appState.needsRedraw = true; }
+            if (ImGui::Button("\xC2\xB5""m##AvgXUnitUm")) { appState.active->averageSpectrum.xUnitSelector = 1; appState.needsRedraw = true; }
             ImGui::PopStyleColor(3);
             ImGui::SameLine();
 
             ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[thzSel ? 1 : 0]);
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  thzSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("THz##AvgXUnitTHz")) { appState.averageSpectrum.xUnitSelector = 2; appState.needsRedraw = true; }
+            if (ImGui::Button("THz##AvgXUnitTHz")) { appState.active->averageSpectrum.xUnitSelector = 2; appState.needsRedraw = true; }
             ImGui::PopStyleColor(3);
 
                 // Match X to Spectrum View
                 if (ImGui::Button("Match X to Spectrum View##AvgMatchX")) {
-                    int newXUnit = appState.spectrum.xUnitSelector;
-                    int oldUnit = appState.averageSpectrum.prevXUnitSelector;
-                    double specMin = appState.spectrum.manualXMin;
-                    double specMax = appState.spectrum.manualXMax;
+                    int newXUnit = appState.active->spectrum.xUnitSelector;
+                    int oldUnit = appState.active->averageSpectrum.prevXUnitSelector;
+                    double specMin = appState.active->spectrum.manualXMin;
+                    double specMax = appState.active->spectrum.manualXMax;
 
                     if (specMin < specMax) {
-                        appState.averageSpectrum.manualXMin = specMin;
-                        appState.averageSpectrum.manualXMax = specMax;
-                        appState.averageSpectrum.pendingNextXMin = specMin;
-                        appState.averageSpectrum.pendingNextXMax = specMax;
-                        appState.averageSpectrum.shouldAutoscale = false;
+                        appState.active->averageSpectrum.manualXMin = specMin;
+                        appState.active->averageSpectrum.manualXMax = specMax;
+                        appState.active->averageSpectrum.pendingNextXMin = specMin;
+                        appState.active->averageSpectrum.pendingNextXMax = specMax;
+                        appState.active->averageSpectrum.shouldAutoscale = false;
                     } else {
-                        appState.averageSpectrum.shouldAutoscale = true;
+                        appState.active->averageSpectrum.shouldAutoscale = true;
                     }
 
-                    if (appState.averageSpectrum.averageAvailable && !appState.averageSpectrum.cachedAverageX.empty()) {
+                    if (appState.active->averageSpectrum.averageAvailable && !appState.active->averageSpectrum.cachedAverageX.empty()) {
                         auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(oldUnit);
                         auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(newXUnit);
-                        for (double& x : appState.averageSpectrum.cachedAverageX)
+                        for (double& x : appState.active->averageSpectrum.cachedAverageX)
                             x = SpectralToolbox::convertXValue(x, oldU, newU);
                     }
 
-                    appState.averageSpectrum.xUnitSelector = newXUnit;
-                    appState.averageSpectrum.prevXUnitSelector = newXUnit;
+                    appState.active->averageSpectrum.xUnitSelector = newXUnit;
+                    appState.active->averageSpectrum.prevXUnitSelector = newXUnit;
                     appState.needsRedraw = true;
                 }
 
             // ---- Y Axis mode selector (INDEPENDENT) ----
             ImGui::Text("Y Axis");
             ImGui::SameLine();
-            const bool allSel   = (appState.averageSpectrum.yAxisMode == 0);
-            const bool tightSel = (appState.averageSpectrum.yAxisMode == 1);
-            const bool forceSel = (appState.averageSpectrum.yAxisMode == 2);
+            const bool allSel   = (appState.active->averageSpectrum.yAxisMode == 0);
+            const bool tightSel = (appState.active->averageSpectrum.yAxisMode == 1);
+            const bool forceSel = (appState.active->averageSpectrum.yAxisMode == 2);
 
             ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[allSel ? 1 : 0]);
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("all##AvgYAxisAll")) { appState.averageSpectrum.yAxisMode = 0; appState.needsRedraw = true; }
+            if (ImGui::Button("all##AvgYAxisAll")) { appState.active->averageSpectrum.yAxisMode = 0; appState.needsRedraw = true; }
             ImGui::PopStyleColor(3);
             ImGui::SameLine();
 
             ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[tightSel ? 1 : 0]);
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  tightSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("tight##AvgYAxisTight")) { appState.averageSpectrum.yAxisMode = 1; appState.needsRedraw = true; }
+            if (ImGui::Button("tight##AvgYAxisTight")) { appState.active->averageSpectrum.yAxisMode = 1; appState.needsRedraw = true; }
             ImGui::PopStyleColor(3);
             ImGui::SameLine();
 
             ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[forceSel ? 1 : 0]);
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  forceSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("force##AvgYAxisForce")) { appState.averageSpectrum.yAxisMode = 2; appState.needsRedraw = true; }
+            if (ImGui::Button("force##AvgYAxisForce")) { appState.active->averageSpectrum.yAxisMode = 2; appState.needsRedraw = true; }
             ImGui::PopStyleColor(3);
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("all: auto-fit Y to all data\n"
@@ -889,19 +889,19 @@ void renderAveragePanel() {
                                   "force: lock Y to the given min/max");
             }
 
-            if (appState.averageSpectrum.yAxisMode == 2) {
+            if (appState.active->averageSpectrum.yAxisMode == 2) {
                 ImGui::Text("min:");
                 ImGui::SameLine();
                 ImGui::SetNextItemWidth(80.0f);
-                if (ImGui::InputDouble("##AvgForcedYMin", &appState.averageSpectrum.forcedYMin, 0.0, 0.0, "%.6g"))
+                if (ImGui::InputDouble("##AvgForcedYMin", &appState.active->averageSpectrum.forcedYMin, 0.0, 0.0, "%.6g"))
                     appState.needsRedraw = true;
                 ImGui::SameLine();
                 ImGui::Text("max:");
                 ImGui::SameLine();
                 ImGui::SetNextItemWidth(80.0f);
-                if (ImGui::InputDouble("##AvgForcedYMax", &appState.averageSpectrum.forcedYMax, 0.0, 0.0, "%.6g"))
+                if (ImGui::InputDouble("##AvgForcedYMax", &appState.active->averageSpectrum.forcedYMax, 0.0, 0.0, "%.6g"))
                     appState.needsRedraw = true;
-                if (appState.averageSpectrum.forcedYMin >= appState.averageSpectrum.forcedYMax) {
+                if (appState.active->averageSpectrum.forcedYMin >= appState.active->averageSpectrum.forcedYMax) {
                     ImGui::SameLine();
                     ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "(min<max!)");
                 }
@@ -919,83 +919,6 @@ void renderAveragePanel() {
 // counter is snapshotted (load/store — it is bumped on the main thread only,
 // so the snapshot cannot clobber worker progress).
 
-void AverageSpectrum::parkInto(AverageSpectrum& dst) {
-    dst.appState = appState;
-    dst.cachedAverageY = std::move(cachedAverageY);
-    dst.cachedAverageX = std::move(cachedAverageX);
-    dst.averageCount = averageCount;
-    dst.averageAvailable = averageAvailable;
-    dst.calcInProgress = calcInProgress;
-    dst.progressTotal = progressTotal;
-    dst.progressCurrent = progressCurrent;
-    dst.isSelectingXRange = isSelectingXRange;
-    dst.selectionStartX = selectionStartX;
-    dst.selectionEndX = selectionEndX;
-    dst.shouldAutoscale = shouldAutoscale;
-    dst.firstLoadCompleted = firstLoadCompleted;
-    dst.manualXMin = manualXMin; dst.manualXMax = manualXMax;
-    dst.manualYMin = manualYMin; dst.manualYMax = manualYMax;
-    dst.savedYMin = savedYMin; dst.savedYMax = savedYMax;
-    dst.leftArrowPressedLastFrame = leftArrowPressedLastFrame;
-    dst.rightArrowPressedLastFrame = rightArrowPressedLastFrame;
-    dst.leftArrowHandleFlag = leftArrowHandleFlag;
-    dst.rightArrowHandleFlag = rightArrowHandleFlag;
-    dst.xUnitSelector = xUnitSelector;
-    dst.prevXUnitSelector = prevXUnitSelector;
-    dst.yScaleSelector = yScaleSelector;
-    dst.prevYScaleSelector = prevYScaleSelector;
-    dst.yAxisMode = yAxisMode;
-    dst.prevYAxisMode = prevYAxisMode;
-    dst.forcedYMin = forcedYMin; dst.forcedYMax = forcedYMax;
-    dst.pendingNextXMin = pendingNextXMin; dst.pendingNextXMax = pendingNextXMax;
-    dst.xUnitSwitchedThisFrame = xUnitSwitchedThisFrame;
-    dst.convertedXMin = convertedXMin; dst.convertedXMax = convertedXMax;
-    dst.calcCommonX = std::move(calcCommonX);
-    dst.calcNumBins = calcNumBins;
-    dst.calcValidFiles = calcValidFiles;
-    dst.calcFirstFile = calcFirstFile;
-    dst.pendingFutures_ = std::move(pendingFutures_);
-    dst.completedCount_.store(completedCount_.load());
-    dst.totalSubmitted_ = totalSubmitted_;
-    dst.batchActive_ = batchActive_;
-}
 
-void AverageSpectrum::resumeFrom(AverageSpectrum& src) {
-    cachedAverageY = std::move(src.cachedAverageY);
-    cachedAverageX = std::move(src.cachedAverageX);
-    averageCount = src.averageCount;
-    averageAvailable = src.averageAvailable;
-    calcInProgress = src.calcInProgress;
-    progressTotal = src.progressTotal;
-    progressCurrent = src.progressCurrent;
-    isSelectingXRange = src.isSelectingXRange;
-    selectionStartX = src.selectionStartX;
-    selectionEndX = src.selectionEndX;
-    shouldAutoscale = src.shouldAutoscale;
-    firstLoadCompleted = src.firstLoadCompleted;
-    manualXMin = src.manualXMin; manualXMax = src.manualXMax;
-    manualYMin = src.manualYMin; manualYMax = src.manualYMax;
-    savedYMin = src.savedYMin; savedYMax = src.savedYMax;
-    leftArrowPressedLastFrame = src.leftArrowPressedLastFrame;
-    rightArrowPressedLastFrame = src.rightArrowPressedLastFrame;
-    leftArrowHandleFlag = src.leftArrowHandleFlag;
-    rightArrowHandleFlag = src.rightArrowHandleFlag;
-    xUnitSelector = src.xUnitSelector;
-    prevXUnitSelector = src.prevXUnitSelector;
-    yScaleSelector = src.yScaleSelector;
-    prevYScaleSelector = src.prevYScaleSelector;
-    yAxisMode = src.yAxisMode;
-    prevYAxisMode = src.prevYAxisMode;
-    forcedYMin = src.forcedYMin; forcedYMax = src.forcedYMax;
-    pendingNextXMin = src.pendingNextXMin; pendingNextXMax = src.pendingNextXMax;
-    xUnitSwitchedThisFrame = src.xUnitSwitchedThisFrame;
-    convertedXMin = src.convertedXMin; convertedXMax = src.convertedXMax;
-    calcCommonX = std::move(src.calcCommonX);
-    calcNumBins = src.calcNumBins;
-    calcValidFiles = src.calcValidFiles;
-    calcFirstFile = src.calcFirstFile;
-    pendingFutures_ = std::move(src.pendingFutures_);
-    completedCount_.store(src.completedCount_.load());
-    totalSubmitted_ = src.totalSubmitted_;
-    batchActive_ = src.batchActive_;
-}
+
+

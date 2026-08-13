@@ -73,12 +73,12 @@ void renderMetadataPanel() {
 
         ImGui::Begin("Metadata");
         ImGui::PushTextWrapPos(); // Enable text wrapping
-        if (appState.dataLoaded) {
-            ImGui::Text("File: %s", appState.csvFiles.empty() ? "None" : appState.csvFiles[0].c_str());
-            ImGui::Text("Samples: %zu", appState.loadedData.empty() ? 0 : appState.loadedData[0].dataSize());
-            const char* dataTypeName = appState.datasetInfo.hasPrecomputedSpectra
+        if (appState.active->dataLoaded) {
+            ImGui::Text("File: %s", appState.active->csvFiles.empty() ? "None" : appState.active->csvFiles[0].c_str());
+            ImGui::Text("Samples: %zu", appState.active->loadedData.empty() ? 0 : appState.active->loadedData[0].dataSize());
+            const char* dataTypeName = appState.active->datasetInfo.hasPrecomputedSpectra
                 ? "Precomputed spectra"
-                : (appState.datasetInfo.axisIsCorrected ? "Corrected single IFG"
+                : (appState.active->datasetInfo.axisIsCorrected ? "Corrected single IFG"
                                                         : "Uncorrected dual IFG");
             ImGui::Text("Data type: %s", dataTypeName);
             
@@ -98,40 +98,40 @@ void renderMetadataPanel() {
                 float minCommentH = 3.0f * ImGui::GetTextLineHeightWithSpacing();
                 if (commentHeight < minCommentH) commentHeight = minCommentH;
                 if (ImGui::InputTextMultiline("##metadataComment",
-                        appState.metadataCommentBuffer,
-                        sizeof(appState.metadataCommentBuffer),
+                        appState.active->metadataCommentBuffer,
+                        sizeof(appState.active->metadataCommentBuffer),
                         ImVec2(-FLT_MIN, commentHeight))) {
-                    appState.workspace.measurementComment = appState.metadataCommentBuffer;
-                    appState.workspace.dirty = true;
-                    logWorkspaceChange(appState.workspace, "Edited comment");
+                    appState.active->workspace.measurementComment = appState.active->metadataCommentBuffer;
+                    appState.active->workspace.dirty = true;
+                    logWorkspaceChange(appState.active->workspace, "Edited comment");
                     appState.needsRedraw = true;
                 }
                 ImGui::Text("Tags:");
-                if (ImGui::InputText("##metadataTags", appState.metadataTagsBuffer,
-                                     sizeof(appState.metadataTagsBuffer))) {
-                    appState.workspace.tags = appState.metadataTagsBuffer;
-                    appState.workspace.dirty = true;
-                    logWorkspaceChange(appState.workspace, "Edited tags");
+                if (ImGui::InputText("##metadataTags", appState.active->metadataTagsBuffer,
+                                     sizeof(appState.active->metadataTagsBuffer))) {
+                    appState.active->workspace.tags = appState.active->metadataTagsBuffer;
+                    appState.active->workspace.dirty = true;
+                    logWorkspaceChange(appState.active->workspace, "Edited tags");
                     appState.needsRedraw = true;
                 }
 
-                if (!appState.workspace.created.empty())
-                    ImGui::TextWrapped("@created: %s", appState.workspace.created.c_str());
-                if (!appState.workspace.format.empty())
-                    ImGui::TextWrapped("@format: %s", appState.workspace.format.c_str());
-                if (!appState.workspace.measurementConfig.empty()) {
+                if (!appState.active->workspace.created.empty())
+                    ImGui::TextWrapped("@created: %s", appState.active->workspace.created.c_str());
+                if (!appState.active->workspace.format.empty())
+                    ImGui::TextWrapped("@format: %s", appState.active->workspace.format.c_str());
+                if (!appState.active->workspace.measurementConfig.empty()) {
                     if (ImGui::TreeNode("Measurement Config")) {
-                        renderMeasurementConfig(appState.workspace.measurementConfig);
+                        renderMeasurementConfig(appState.active->workspace.measurementConfig);
                         ImGui::TreePop();
                     }
                 }
             } else
 #endif
-            if (appState.datasetInfo.hasMetadataFile) {
+            if (appState.active->datasetInfo.hasMetadataFile) {
                 ImGui::Separator();
                 ImGui::Text("Comments:");
                 
-                std::string commentsPath = appState.currentDirectory;
+                std::string commentsPath = appState.active->currentDirectory;
                 size_t last_slash = commentsPath.find_last_of("/\\");
                 if (last_slash != std::string::npos) {
                     commentsPath = commentsPath.substr(0, last_slash); // Go up to parent directory
@@ -150,8 +150,8 @@ void renderMetadataPanel() {
                 }
             } else {
                 ImGui::Separator();
-                if (!appState.loadedData.empty() && !appState.loadedData[0].metadata.empty()) {
-                    ImGui::TextWrapped("%s", appState.loadedData[0].metadata.c_str());
+                if (!appState.active->loadedData.empty() && !appState.active->loadedData[0].metadata.empty()) {
+                    ImGui::TextWrapped("%s", appState.active->loadedData[0].metadata.c_str());
                 } else {
                     ImGui::Text("-no data-");
                 }

@@ -79,3 +79,6 @@ version.h
 temporary/
 playground/outputs/
 playground/validate_outputs/
+
+# Per-tab-type dock-layout snapshots (M4.4) — runtime artifacts
+imgui.ini.layout.*
