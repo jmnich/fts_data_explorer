@@ -87,7 +87,7 @@ void resetActiveWorkspaceTab(AppState& s) {
 }
 
 #if FTS_BUILD_HDF5
-void collectDirtyTabs(const AppState& s, std::vector<int>& tabs,
+void collectDirtyTabs(AppState& s, std::vector<int>& tabs,
                       std::vector<std::string>& labels) {
     if (s.activeTabKind == ActiveTabKind::Workspace &&
         s.activeSessionIdx >= 0 && s.workspaceDirty()) {
@@ -99,6 +99,14 @@ void collectDirtyTabs(const AppState& s, std::vector<int>& tabs,
         if (s.sessions[i]->isDirty()) {
             tabs.push_back(i);
             labels.push_back(s.sessions[i]->title());
+        }
+    }
+    // Phase 4: dirty experiments (live objects) ride the same modal.
+    s.exitDirtyEnvs.clear();
+    for (int i = 0; i < static_cast<int>(s.environments.size()); ++i) {
+        if (s.environments[i]->isDirty()) {
+            s.exitDirtyEnvs.push_back(i);
+            labels.push_back(s.environments[i]->tabLabel());
         }
     }
 }
@@ -116,7 +124,7 @@ void requestGoHome(AppState& s) {
     std::vector<int> dirtyTabs;
     std::vector<std::string> dirtyLabels;
     collectDirtyTabs(s, dirtyTabs, dirtyLabels);
-    if (!dirtyTabs.empty()) {
+    if (!dirtyTabs.empty() || !s.exitDirtyEnvs.empty()) {
         s.exitDirtyTabs = std::move(dirtyTabs);
         s.exitDirtyLabels = std::move(dirtyLabels);
         s.exitTargetIsGoHome = true;
@@ -136,12 +144,12 @@ void finalizeGoHome(AppState& s) {
     // have to process.
     for (int i = static_cast<int>(s.sessions.size()) - 1; i >= 0; --i)
         removeTab(s, i);
-    // Environment instances reference the closed workspaces (Phase 3) —
-    // close them too; nothing to save (results are RAM-only in Phase 3).
-    s.environments.clear();
-    s.activeEnvIdx = -1;
-    s.pendingEnvIdx = -1;          // stale queued activation must not fire
+    // Environment instances reference the closed workspaces — close them too
+    // (Phase 3); nothing to save here — dirty experiments routed through the
+    // shared exit modal before this ran.
+    clearEnvironments(s);
     s.exitDirtyTabs.clear();
+    s.exitDirtyEnvs.clear();
     s.exitDirtyLabels.clear();
     // removeTab leaves the active tab's data in the flat fields (the normal
     // active-close path tolerates that until the next swap) — clear them so

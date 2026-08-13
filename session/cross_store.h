@@ -54,3 +54,40 @@ Workspace crossLoadSource(const std::string& crossPath, const std::string& sourc
 // view-state persistence). Refreshes @summary + the manifest in the same save.
 void crossSaveSource(const std::string& crossPath, const std::string& sourceId,
                      const Workspace& ws, std::string& err);
+
+// ── Phase 4: experiments (schema v2 layout, data_structures_audit.md §2.1) ──
+//
+//   experiments/<id>/config.json      full EnvironmentSession state
+//   experiments/<id>/fingerprint.json { workspaceKey: ParamFingerprint } per
+//                                      referenced source at compute time
+//   experiments/<id>/results/         x_common, ref_y, ratio_<k>_y (fp64
+//                                      datasets, Absorbance only)
+//   experiments/<id>/stats.json       light per-curve stats
+//
+// File-level primitives below have NO EnvironmentSession/AppState linkage —
+// shared by the fts_cross_roundtrip CLI and the AppState-level wrappers
+// (defined in environment_session.cpp, which can construct instances).
+// `results` keys are dataset names ("x_common", "ref_y", "ratio_0_y", ...).
+bool crossExperimentWrite(const std::string& path, const std::string& expId,
+                          const nlohmann::json& config,
+                          const nlohmann::json& fingerprints,
+                          const std::map<std::string, std::vector<double>>& results,
+                          const nlohmann::json& stats, std::string& err);
+bool crossExperimentRemove(const std::string& path, const std::string& expId,
+                           std::string& err);
+// Manifest entries {"id","name","type","createdIso"} for all experiments.
+bool crossExperimentList(const std::string& path,
+                         std::vector<nlohmann::json>& entries, std::string& err);
+bool crossExperimentRead(const std::string& path, const std::string& expId,
+                         nlohmann::json& config, nlohmann::json& fingerprints,
+                         std::map<std::string, std::vector<double>>& results,
+                         nlohmann::json& stats, std::string& err);
+
+// AppState-level wrappers (defined in environment_session.cpp — see above).
+// crossSaveExperiments saves every dirty instance (exit Save All). Loading
+// restores instances into AppState::environments (dedupe by id, results
+// loaded directly — no recompute) and computes the staleness flags.
+bool crossSaveExperiment(AppState& s, EnvironmentSession& env,
+                         const std::string& path, std::string& err);
+bool crossSaveExperiments(AppState& s, const std::string& path, std::string& err);
+bool crossLoadExperiments(AppState& s, const std::string& path, std::string& err);

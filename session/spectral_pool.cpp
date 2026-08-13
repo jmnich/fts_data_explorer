@@ -200,6 +200,63 @@ ParamFingerprint poolCurrentFingerprint(AppState& s, const std::string& workspac
     return fingerprintOf(r);
 }
 
+ParamFingerprint fingerprintFromWorkspace(const Workspace& ws) {
+    ParamFingerprint fp;
+    Spectrum sp;
+    int xMethod = 0;
+    float prominence = 0.02f;
+    if (!persistedSpectrumParams(ws, sp, xMethod, prominence)) return fp;
+    fp.K = sp.Kpadding;
+    fp.refLaser = sp.refLaserTextbox;
+    fp.apodSelector = sp.apodizationSelector;
+    fp.apodParams = sp.apodizationParams;
+    fp.xMethod = xMethod;
+    fp.prominence = prominence;
+    DatasetInfo info = workspaceDatasetInfo(ws);
+    fp.axisIsCorrected = info.axisIsCorrected;
+    fp.hasPrecomputed = info.hasPrecomputedSpectra;
+    return fp;
+}
+
+nlohmann::json fingerprintToJson(const ParamFingerprint& fp) {
+    nlohmann::json j;
+    j["K"] = fp.K;
+    j["refLaser"] = fp.refLaser;
+    j["apodSelector"] = fp.apodSelector;
+    j["gaussSigma"] = fp.apodParams.gaussSigma;
+    j["rectWidth"] = fp.apodParams.rectWidth;
+    j["nortonBeerFwhm"] = fp.apodParams.nortonBeerFwhm;
+    j["dolphChebyshevAt"] = fp.apodParams.dolphChebyshevAt;
+    j["hammingAlpha"] = fp.apodParams.hammingAlpha;
+    j["kaiserBeta"] = fp.apodParams.kaiserBeta;
+    j["rectAsymMode"] = fp.apodParams.rectAsymMode;
+    j["xMethod"] = fp.xMethod;
+    j["prominence"] = fp.prominence;
+    j["axisIsCorrected"] = fp.axisIsCorrected;
+    j["hasPrecomputed"] = fp.hasPrecomputed;
+    return j;
+}
+
+ParamFingerprint fingerprintFromJson(const nlohmann::json& j) {
+    ParamFingerprint fp;
+    if (!j.is_object()) return fp;
+    fp.K = j.value("K", fp.K);
+    fp.refLaser = j.value("refLaser", fp.refLaser);
+    fp.apodSelector = j.value("apodSelector", fp.apodSelector);
+    fp.apodParams.gaussSigma = j.value("gaussSigma", fp.apodParams.gaussSigma);
+    fp.apodParams.rectWidth = j.value("rectWidth", fp.apodParams.rectWidth);
+    fp.apodParams.nortonBeerFwhm = j.value("nortonBeerFwhm", fp.apodParams.nortonBeerFwhm);
+    fp.apodParams.dolphChebyshevAt = j.value("dolphChebyshevAt", fp.apodParams.dolphChebyshevAt);
+    fp.apodParams.hammingAlpha = j.value("hammingAlpha", fp.apodParams.hammingAlpha);
+    fp.apodParams.kaiserBeta = j.value("kaiserBeta", fp.apodParams.kaiserBeta);
+    fp.apodParams.rectAsymMode = j.value("rectAsymMode", fp.apodParams.rectAsymMode);
+    fp.xMethod = j.value("xMethod", fp.xMethod);
+    fp.prominence = j.value("prominence", fp.prominence);
+    fp.axisIsCorrected = j.value("axisIsCorrected", fp.axisIsCorrected);
+    fp.hasPrecomputed = j.value("hasPrecomputed", fp.hasPrecomputed);
+    return fp;
+}
+
 SpectralToolbox::ProcessedSpectrum poolSpectrum(AppState& s, const SpectralRef& ref, int xUnit) {
     SpectralToolbox::ProcessedSpectrum cm1;
     if (poolTryCache(s, ref, cm1))

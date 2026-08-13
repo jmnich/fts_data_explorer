@@ -328,7 +328,7 @@ void renderCreateMultiWorkspaceButton() {
                 const std::string srcPath = appState.sessions[src]->path;
                 std::string err;
                 if (crossCreateFromDataset(appState, path, srcPath, err)) {
-                    crossLoad(appState, path, err);
+                    crossOpenProject(appState, path, err);
                     rememberMultiWorkspace(appState, path);
                     appState.needsRedraw = true;
                 } else {
@@ -482,7 +482,7 @@ void SessionTab::renderActiveEnvironmentsPanel() {
 
         const float availW = ImGui::GetContentRegionAvail().x - 10.0f;
         const std::vector<std::string> titleLines =
-            wrapToLines(env->title(), availW, 2);
+            wrapToLines(env->tabLabel(), availW, 2);
         const std::string meta =
             std::to_string(env->samples.size()) + " sample" +
             (env->samples.size() == 1 ? "" : "s") + " · " + envTypeName(env->type);

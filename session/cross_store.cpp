@@ -41,6 +41,19 @@ std::string sourcePrefix(const std::string& id) {
     return "sources/" + id;
 }
 
+std::string experimentPrefix(const std::string& id) {
+    return "experiments/" + id;
+}
+
+// Collect the link names of `group` (dataset enumeration for results/).
+struct LinkNames {
+    std::vector<std::string> names;
+    static herr_t visit(hid_t, const char* name, const H5L_info_t*, void* op) {
+        static_cast<LinkNames*>(op)->names.push_back(name);
+        return 0;
+    }
+};
+
 nlohmann::json readManifest(hid_t file) {
     if (!H5Lexists(file, "archive.json", H5P_DEFAULT))
         throw H5Error("cross: missing archive.json (not a .cross.h5)");
@@ -98,6 +111,21 @@ bool atomicMutate(const std::string& path,
         std::filesystem::remove(tmp);
         err = e.what();
         return false;
+    }
+    // HDF5 1.14.3 quirk: after a mutating close, a SUBSEQUENT open of the same
+    // file (without an intervening open/close) can read stale vlen blob-ids
+    // from the metadata cache — the file on disk is fine, but the next open
+    // misreads it ("global heap object size does not match"). One RDONLY
+    // open+close finalizes the pending metadata-cache state before the rename
+    // (empirically verified: without it, two mutations in a row corrupt the
+    // second one's manifest read; with it, all mutation sequences pass).
+    {
+        H5FileGuard heal(H5Fopen(tmp.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT));
+        if (heal.id < 0) {
+            std::filesystem::remove(tmp);
+            err = "cross: post-mutate reopen failed";
+            return false;
+        }
     }
     std::filesystem::rename(tmp, path, ec);
     if (ec) {
@@ -275,4 +303,130 @@ void crossSaveSource(const std::string& crossPath, const std::string& sourceId,
         writeManifest(file.id, manifest);
     }, err);
     if (!ok) throw H5Error(err);
+}
+
+// ── Phase 4: experiments ────────────────────────────────────────────────────
+
+bool crossExperimentWrite(const std::string& path, const std::string& expId,
+                          const nlohmann::json& config,
+                          const nlohmann::json& fingerprints,
+                          const std::map<std::string, std::vector<double>>& results,
+                          const nlohmann::json& stats, std::string& err) {
+    const std::string prefix = experimentPrefix(expId);
+    return atomicMutate(path, [&](const std::string& tmp) {
+        H5FileGuard file(H5Fopen(tmp.c_str(), H5F_ACC_RDWR, H5P_DEFAULT));
+        if (file.id < 0) throw H5Error("crossExperimentWrite: cannot open temp");
+        // Parent-aware existence: H5Lexists on a slash path with a missing
+        // parent errors out (hdf5 quirk fixed in Phase 2).
+        const bool haveParent = H5Lexists(file.id, "experiments", H5P_DEFAULT) > 0;
+        if (haveParent && H5Lexists(file.id, prefix.c_str(), H5P_DEFAULT) > 0)
+            H5Ldelete(file.id, prefix.c_str(), H5P_DEFAULT);
+        if (!haveParent &&
+            H5Gcreate2(file.id, "experiments", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT) < 0)
+            throw H5Error("crossExperimentWrite: cannot create experiments/");
+        H5GroupGuard g(H5Gcreate2(file.id, prefix.c_str(), H5P_DEFAULT,
+                                  H5P_DEFAULT, H5P_DEFAULT));
+        if (g.id < 0) throw H5Error("crossExperimentWrite: cannot create group '" + expId + "'");
+        h5WriteVlenString(g.id, "config.json", config.dump());
+        h5WriteVlenString(g.id, "fingerprint.json", fingerprints.dump());
+        if (!results.empty()) {
+            H5GroupGuard rg(H5Gcreate2(g.id, "results", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT));
+            if (rg.id < 0) throw H5Error("crossExperimentWrite: cannot create results/");
+            for (const auto& [name, vec] : results)
+                h5WriteFp64Vector(rg.id, name.c_str(), vec);
+        }
+        h5WriteVlenString(g.id, "stats.json", stats.dump());
+        // Manifest entry (append or replace in the same save).
+        nlohmann::json manifest = readManifest(file.id);
+        if (manifest.find("experiments") == manifest.end())
+            manifest["experiments"] = nlohmann::json::array();
+        nlohmann::json entry = {
+            {"id", expId},
+            {"name", config.value("name", expId)},
+            {"type", config.value("type", "absorbance")},
+            {"createdIso", h5UtcNowIso()},
+        };
+        auto& exps = manifest["experiments"];
+        bool found = false;
+        for (auto& e : exps)
+            if (e.value("id", "") == expId) { e = entry; found = true; break; }
+        if (!found) exps.push_back(entry);
+        writeManifest(file.id, manifest);
+    }, err);
+}
+
+bool crossExperimentRemove(const std::string& path, const std::string& expId,
+                           std::string& err) {
+    return atomicMutate(path, [&](const std::string& tmp) {
+        H5FileGuard file(H5Fopen(tmp.c_str(), H5F_ACC_RDWR, H5P_DEFAULT));
+        if (file.id < 0) throw H5Error("crossExperimentRemove: cannot open temp");
+        const std::string prefix = experimentPrefix(expId);
+        if (H5Lexists(file.id, "experiments", H5P_DEFAULT) > 0 &&
+            H5Lexists(file.id, prefix.c_str(), H5P_DEFAULT) > 0)
+            H5Ldelete(file.id, prefix.c_str(), H5P_DEFAULT);
+        nlohmann::json manifest = readManifest(file.id);
+        if (manifest.find("experiments") != manifest.end()) {
+            auto& exps = manifest["experiments"];
+            exps.erase(std::remove_if(exps.begin(), exps.end(),
+                                      [&](const nlohmann::json& e) {
+                                          return e.value("id", "") == expId;
+                                      }),
+                       exps.end());
+        }
+        writeManifest(file.id, manifest);
+    }, err);
+}
+
+bool crossExperimentList(const std::string& path,
+                         std::vector<nlohmann::json>& entries, std::string& err) {
+    try {
+        H5FileGuard file(H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT));
+        if (file.id < 0) throw H5Error("crossExperimentList: cannot open '" + path + "'");
+        const nlohmann::json manifest = readManifest(file.id);
+        entries.clear();
+        for (const auto& e : manifest.value("experiments", nlohmann::json::array()))
+            entries.push_back(e);
+        return true;
+    } catch (const std::exception& e) {
+        err = e.what();
+        return false;
+    }
+}
+
+bool crossExperimentRead(const std::string& path, const std::string& expId,
+                         nlohmann::json& config, nlohmann::json& fingerprints,
+                         std::map<std::string, std::vector<double>>& results,
+                         nlohmann::json& stats, std::string& err) {
+    try {
+        H5FileGuard file(H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT));
+        if (file.id < 0) throw H5Error("crossExperimentRead: cannot open '" + path + "'");
+        const std::string prefix = experimentPrefix(expId);
+        H5GroupGuard g(H5Gopen2(file.id, prefix.c_str(), H5P_DEFAULT));
+        if (g.id < 0) throw H5Error("crossExperimentRead: experiment group '" + expId + "' missing");
+        config = nlohmann::json::parse(h5ReadVlenString(g.id, "config.json"), nullptr, false);
+        if (config.is_discarded()) config = nlohmann::json::object();
+        fingerprints = nlohmann::json::parse(h5ReadVlenString(g.id, "fingerprint.json"),
+                                             nullptr, false);
+        if (fingerprints.is_discarded()) fingerprints = nlohmann::json::object();
+        stats = nlohmann::json::parse(h5ReadVlenString(g.id, "stats.json"), nullptr, false);
+        if (stats.is_discarded()) stats = nlohmann::json::object();
+        results.clear();
+        if (H5Lexists(g.id, "results", H5P_DEFAULT) > 0) {   // parent-aware (no error spam)
+            H5GroupGuard rg(H5Gopen2(g.id, "results", H5P_DEFAULT));
+            if (rg.id >= 0) {
+                LinkNames links;
+                hsize_t idx = 0;
+                H5Literate(rg.id, H5_INDEX_NAME, H5_ITER_INC, &idx, LinkNames::visit, &links);
+                for (const auto& name : links.names) {
+                    std::vector<double> vec;
+                    h5ReadFp64Vector(rg.id, name.c_str(), vec);
+                    results[name] = std::move(vec);
+                }
+            }
+        }
+        return true;
+    } catch (const std::exception& e) {
+        err = e.what();
+        return false;
+    }
 }

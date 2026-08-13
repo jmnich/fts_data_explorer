@@ -9,6 +9,7 @@
 #include "hdf/workspace.h"
 
 struct AppState;
+struct Spectrum;
 
 // Map Workspace availability flags 1:1 onto DatasetInfo so the engine's
 // feature gating (axisIsCorrected, hasPrecomputedSpectra, ...) works unchanged.
@@ -113,5 +114,13 @@ void captureViewState(AppState& s);
 // seedPanelsFromWorkspace in openWorkspace so restored spectrum params match the
 // saved member configs (no spurious staleness).
 void applyViewState(AppState& s);
+
+// Spectrum-panel params persisted in a workspace's view state
+// (workspace.json §8.1: spectrumView + plotDefaults, xMethod/prominence live
+// at AppState level). Pure read; used by the spectral pool to fingerprint
+// NOT-OPEN sources (Phase 4 staleness). Returns false when the workspace has
+// no app view-state subtree (out left at defaults).
+bool persistedSpectrumParams(const Workspace& ws, Spectrum& out,
+                             int& xMethod, float& prominence);
 
 #endif // FTS_BUILD_HDF5

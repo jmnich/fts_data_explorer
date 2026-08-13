@@ -5,11 +5,14 @@
 #include <utility>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 #include "apodization.h"
 #include "interferogram_data.h"
 #include "spectral_toolbox.h"
 
 struct AppState;
+struct Workspace;
 
 // STABLE identity (Amendment 4): workspace path, or "cross.h5#sourceId" for
 // embedded sources. Resolved to a live session index at each use — never
@@ -98,6 +101,16 @@ bool poolTryCache(AppState& s, const SpectralRef& ref,
 // when no compute happened, e.g. a cache-hit enqueue). Default fingerprint
 // when the workspace is not open.
 ParamFingerprint poolCurrentFingerprint(AppState& s, const std::string& workspaceKey);
+
+// Fingerprint derived from a PERSISTED workspace (workspace.json §8.1 view
+// state + workspaceDatasetInfo) — used by the Phase-4 staleness check for
+// referenced sources that are not open in a tab (their live params only exist
+// on disk). Returns default fingerprint when the workspace has no view state.
+ParamFingerprint fingerprintFromWorkspace(const Workspace& ws);
+
+// JSON (de)serialization for experiment fingerprint.json (Phase 4).
+nlohmann::json fingerprintToJson(const ParamFingerprint& fp);
+ParamFingerprint fingerprintFromJson(const nlohmann::json& j);
 
 // Aligned common-X matrix over many refs: gridX = first ref's spectrumX (in
 // the requested unit); every other spectrum resampled via resampleToGrid

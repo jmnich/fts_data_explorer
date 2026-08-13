@@ -15,6 +15,7 @@
 #include "apodization.h"
 #include "app_dirs.h"
 #include "file_browser.h"
+#include "session/cross_store.h"
 #include <imgui.h>
 #include "imgui_internal.h" // DockBuilder API
 #include "imgui_impl_glfw.h"
@@ -120,6 +121,17 @@ static void renderUnsavedPromptModal() {
         // (pendingTabCloseIdx); the change list above comes from the same flat
         // fields, so text and data always agree.
         const bool closingTab = appState.pendingTabCloseIdx >= 0;
+        // Phase 4: unsaved experiments ride the replace-project prompt.
+        if (!closingTab) {
+            int dirtyEnvCount = 0;
+            for (const auto& env : appState.environments)
+                if (env->dirty) ++dirtyEnvCount;
+            if (dirtyEnvCount > 0) {
+                ImGui::Bullet();
+                ImGui::TextWrapped("%d unsaved experiment%s", dirtyEnvCount,
+                                   dirtyEnvCount == 1 ? "" : "s");
+            }
+        }
         int pressed = modalButtonRow({"Save", "Don't Save", "Cancel"},
                                      focus, wasOpen, modalAccent());
         if (pressed == 0) {
@@ -139,6 +151,18 @@ static void renderUnsavedPromptModal() {
                         appState.showUnsavedPrompt = false;
                         appState.needsRedraw = true;
                     } else {
+                        // Phase 4: the replace-project prompt also saves
+                        // unsaved experiments (they live in the .cross.h5).
+                        if (appState.pendingWorkspaceAction ==
+                            PendingWorkspaceAction::OpenMultiWorkspace) {
+                            std::string err;
+                            if (!crossSaveExperiments(
+                                    appState, appState.sessionTab.multiWorkspacePath, err)) {
+                                appState.adapterErrorMsg =
+                                    std::string("Experiment save failed:\n") + err;
+                                appState.showAdapterErrorPopup = true;
+                            }
+                        }
                         dispatchPendingAction(appState);
                     }
                     ImGui::CloseCurrentPopup();
@@ -294,7 +318,13 @@ static void renderExitDirtyModal() {
                     appState.sessions[idx]->workspace.changeLog.clear();
                 }
             }
+            // Phase 4: drop unsaved experiments with the same "Discard All".
+            for (int idx : appState.exitDirtyEnvs) {
+                if (idx >= 0 && idx < static_cast<int>(appState.environments.size()))
+                    appState.environments[idx]->dirty = false;
+            }
             appState.exitDirtyTabs.clear();
+            appState.exitDirtyEnvs.clear();
             appState.exitDirtyLabels.clear();
             appState.showExitDirtyModal = false;
             if (appState.exitTargetIsGoHome) {
@@ -306,10 +336,76 @@ static void renderExitDirtyModal() {
             ImGui::CloseCurrentPopup();
         } else if (pressed == 2 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
             appState.exitDirtyTabs.clear();
+            appState.exitDirtyEnvs.clear();
             appState.exitDirtyLabels.clear();
             appState.showExitDirtyModal = false;
             appState.exitDeferredClose = false;   // Cancel drops a deferred close
             appState.exitTargetIsGoHome = false;
+            ImGui::CloseCurrentPopup();
+        }
+        drawModalAccentFrame(modalAccent());
+        ImGui::EndPopup();
+        wasOpen = true;
+    } else {
+        wasOpen = false;
+    }
+    endModal();
+}
+
+// Phase-4 experiment delete confirmation: dirty or persisted experiments
+// confirm before removal (transient empty instances remove directly). On
+// Delete: remove the experiment group from the .cross.h5 (if persisted) and
+// drop the instance.
+static void renderEnvDeleteConfirmModal() {
+    static int focus = 0;
+    static bool wasOpen = false;
+    if (!appState.showEnvDeleteConfirm) {
+        wasOpen = false;
+        return;
+    }
+    const int idx = appState.pendingEnvDeleteIdx;
+    const bool valid = idx >= 0 && idx < static_cast<int>(appState.environments.size());
+    ImGui::OpenPopup("Delete Experiment##confirm");
+    beginModal(480.0f, modalAccent());
+    if (ImGui::BeginPopupModal("Delete Experiment##confirm", nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
+        ImGui::Text("Delete Experiment");
+        ImGui::Spacing();
+        if (valid) {
+            auto* env = appState.environments[idx].get();
+            ImGui::TextWrapped("Delete \"%s\"?", env->instanceName.c_str());
+            if (env->dirty && !env->id.empty())
+                ImGui::TextWrapped("Unsaved changes will be lost and the saved experiment "
+                                   "removed from the project.");
+            else if (env->dirty)
+                ImGui::TextWrapped("This experiment has unsaved changes.");
+            else
+                ImGui::TextWrapped("The saved experiment will be removed from the project.");
+        }
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+        int pressed = modalButtonRow({"Delete", "Cancel"}, focus, wasOpen, modalAccent());
+        if (pressed == 0) {
+            if (valid) {
+                auto* env = appState.environments[idx].get();
+                if (!env->id.empty() && appState.sessionTab.multiWorkspaceOpen) {
+                    std::string err;
+                    if (!crossExperimentRemove(appState.sessionTab.multiWorkspacePath,
+                                               env->id, err)) {
+                        appState.adapterErrorMsg = "Delete failed:\n" + err;
+                        appState.showAdapterErrorPopup = true;
+                    }
+                }
+                removeEnvironment(appState, idx);
+            }
+            appState.showEnvDeleteConfirm = false;
+            appState.pendingEnvDeleteIdx = -1;
+            appState.needsRedraw = true;
+            ImGui::CloseCurrentPopup();
+        } else if (pressed == 1 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            appState.showEnvDeleteConfirm = false;
+            appState.pendingEnvDeleteIdx = -1;
             ImGui::CloseCurrentPopup();
         }
         drawModalAccentFrame(modalAccent());
@@ -331,9 +427,46 @@ static void advanceExitSaveAll() {
     if (!appState.exitSaveAllRunning) return;
     if (appState.showUnsavedPrompt || appState.showStaleDropPrompt) return;
     if (appState.pendingSwapIdx >= 0) return;   // swap queued, not yet executed
-    if (appState.exitDirtyTabs.empty()) {
+    if (appState.exitSaveAllCursor == appState.exitDirtyTabs.size()) {
+        // Workspace saves done (or none were dirty) — Phase 4: dirty
+        // experiments are live objects, no swap needed; save them all in one
+        // pass (best-effort, mirrors the workspace saves).
+        appState.exitSaveAllCursor++;   // run once
+        const std::string& crossPath = appState.sessionTab.multiWorkspacePath;
+        if (!crossPath.empty()) {
+            for (int idx : appState.exitDirtyEnvs) {
+                if (idx < 0 || idx >= static_cast<int>(appState.environments.size()))
+                    continue;
+                auto& env = appState.environments[idx];
+                if (!env->dirty) continue;
+                std::string err;
+                if (!crossSaveExperiment(appState, *env, crossPath, err)) {
+                    appState.adapterErrorMsg = std::string("Experiment save failed:\n") + err;
+                    appState.showAdapterErrorPopup = true;
+                    appState.exitSaveAllRunning = false;
+                    appState.exitDirtyTabs.clear();
+                    appState.exitDirtyEnvs.clear();
+                    appState.exitDirtyLabels.clear();
+                    appState.exitTargetIsGoHome = false;
+                    return;
+                }
+                env->dirty = false;
+            }
+        }
+        for (int idx : appState.exitDirtyEnvs) {
+            if (idx >= 0 && idx < static_cast<int>(appState.environments.size()))
+                appState.environments[idx]->dirty = false;
+        }
         appState.exitSaveAllRunning = false;
-        appState.exitTargetIsGoHome = false;
+        appState.exitDirtyTabs.clear();
+        appState.exitDirtyEnvs.clear();
+        appState.exitDirtyLabels.clear();
+        if (appState.exitTargetIsGoHome) {
+            appState.exitTargetIsGoHome = false;
+            appState.pendingGoHome = true;
+        } else {
+            glfwSetWindowShouldClose(glfwGetCurrentContext(), GLFW_TRUE);
+        }
         return;
     }
     if (appState.activeSessionIdx != appState.exitDirtyTabs[appState.exitSaveAllCursor]) {
@@ -347,21 +480,15 @@ static void advanceExitSaveAll() {
         appState.showAdapterErrorPopup = true;
         appState.exitSaveAllRunning = false;
         appState.exitDirtyTabs.clear();
+        appState.exitDirtyEnvs.clear();
         appState.exitDirtyLabels.clear();
         appState.exitTargetIsGoHome = false;
         return;
     }
     appState.exitSaveAllCursor++;
     if (appState.exitSaveAllCursor >= appState.exitDirtyTabs.size()) {
-        appState.exitSaveAllRunning = false;
-        appState.exitDirtyTabs.clear();
-        appState.exitDirtyLabels.clear();
-        if (appState.exitTargetIsGoHome) {
-            appState.exitTargetIsGoHome = false;
-            appState.pendingGoHome = true;
-        } else {
-            glfwSetWindowShouldClose(glfwGetCurrentContext(), GLFW_TRUE);
-        }
+        // Workspace saves done — the experiment phase runs next frame.
+        appState.needsRedraw = true;
     } else {
         swapInSession(appState, appState.exitDirtyTabs[appState.exitSaveAllCursor]);
     }
@@ -523,7 +650,8 @@ static float renderTabStrip() {
             auto* env = appState.environments[i].get();
             const bool isActive = (appState.activeTabKind == ActiveTabKind::Environment &&
                                    appState.activeEnvIdx == i);
-            const std::string label = env->title() + "##env" + std::to_string(i);
+            const std::string label =
+                env->tabLabel() + "##env" + std::to_string(i);
             bool open = true;
             const bool shown = ImGui::BeginTabItem(label.c_str(), &open,
                 isActive ? ImGuiTabItemFlags_SetSelected : 0);
@@ -882,7 +1010,7 @@ void AppLoop::pollEvents() {
             std::vector<int> dirtyTabs;
             std::vector<std::string> dirtyLabels;
             collectDirtyTabs(appState, dirtyTabs, dirtyLabels);
-            if (!dirtyTabs.empty()) {
+            if (!dirtyTabs.empty() || !appState.exitDirtyEnvs.empty()) {
                 glfwSetWindowShouldClose(window_, GLFW_FALSE);   // defer
                 appState.showExitDirtyModal = true;
                 appState.exitDirtyTabs = std::move(dirtyTabs);
@@ -1500,6 +1628,7 @@ void AppLoop::renderUI() {
         renderUnsavedPromptModal();
         renderStaleDropPromptModal();
         renderExitDirtyModal();
+        renderEnvDeleteConfirmModal();
 #endif
         
         // Only render main docking interface if welcome screen is not active

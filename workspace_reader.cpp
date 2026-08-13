@@ -422,6 +422,29 @@ void applyPanelViewState(AppState& s, const nlohmann::json& vs) {
 
 // ---- Phase 3: view-state persistence (workspace.json §8) ----
 
+bool persistedSpectrumParams(const Workspace& ws, Spectrum& out,
+                             int& xMethod, float& prominence) {
+    const nlohmann::json& j = ws.workspaceJson;
+    auto apps = j.find("applications");
+    if (apps == j.end() || !apps->is_object()) return false;
+    auto vsIt = apps->find(kAppName);
+    if (vsIt == apps->end() || !vsIt->is_object()) return false;
+    const nlohmann::json& vs = *vsIt;
+    out.xUnitSelector = viewInt(vs, "spectrumView", "xUnit", out.xUnitSelector);
+    out.refLaserTextbox = viewDouble(vs, "spectrumView", "refLaserUm",
+                                     out.refLaserTextbox);
+    out.Kpadding = viewInt(vs, "spectrumView", "zeroPadK", out.Kpadding);
+    auto sv = vs.find("spectrumView");
+    if (sv != vs.end() && sv->is_object()) {
+        auto a = sv->find("apodization");
+        if (a != sv->end()) applyApodizationFromJson(*a, out);
+    }
+    xMethod = viewInt(vs, "plotDefaults", "xCorrectionMethod", xMethod);
+    prominence = static_cast<float>(
+        viewDouble(vs, "plotDefaults", "peakProminence", prominence));
+    return true;
+}
+
 nlohmann::json viewStateJson(const AppState& s) {
     nlohmann::json j;
     j["plotDefaults"] = {

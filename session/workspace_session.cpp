@@ -8,6 +8,7 @@
 #include <cstring>
 
 #include "app_state.h"
+#include "ui/layout_persistence.h"
 #include "spectral_pool.h"
 
 WorkspaceSession::WorkspaceSession() {
@@ -215,11 +216,20 @@ void focusSessionTab(AppState& s) {
 void executePendingSwap(AppState& s) {
     if (!s.pendingSwapToSession && s.pendingSwapIdx < 0 && s.pendingEnvIdx < 0)
         return;
+    // Phase 4 (M4.4): per-tab-type dock layouts. The OUTGOING type's layout
+    // saves only when it actually has tabs — behind the launch welcome there
+    // is none, and its layout must not clobber a real type's snapshot.
+    const ActiveTabKind outKind = s.activeTabKind;
+    const bool outHasTabs =
+        (outKind == ActiveTabKind::Workspace && s.activeSessionIdx >= 0) ||
+        (outKind == ActiveTabKind::Environment && s.activeEnvIdx >= 0) ||
+        (outKind == ActiveTabKind::Session && s.sessionTabPresent);
     // Park the currently active workspace tab first (if any).
     if (s.activeTabKind == ActiveTabKind::Workspace && s.activeSessionIdx >= 0 &&
         s.activeSessionIdx < static_cast<int>(s.sessions.size())) {
         s.sessions[s.activeSessionIdx]->park(s);
     }
+    ActiveTabKind inKind = outKind;
     if (s.pendingEnvIdx >= 0) {
         // Environment activation (bugfix 2026-08-13): the park above ran, so
         // the workspace data is back in its mirror before we leave the
@@ -232,15 +242,15 @@ void executePendingSwap(AppState& s) {
         if (idx >= 0 && idx < static_cast<int>(s.environments.size())) {
             s.activeTabKind = ActiveTabKind::Environment;
             s.activeEnvIdx = idx;
+            inKind = ActiveTabKind::Environment;
         } else {
             s.activeEnvIdx = -1;
+            inKind = ActiveTabKind::Session;
         }
-        s.needsRedraw = true;
-        return;
-    }
-    if (s.pendingSwapToSession) {
+    } else if (s.pendingSwapToSession) {
         s.activeTabKind = ActiveTabKind::Session;
         s.activeSessionIdx = -1;
+        inKind = ActiveTabKind::Session;
     } else {
         const int idx = s.pendingSwapIdx;
         if (idx < 0 || idx >= static_cast<int>(s.sessions.size())) {
@@ -252,9 +262,14 @@ void executePendingSwap(AppState& s) {
         s.activeTabKind = ActiveTabKind::Workspace;
         s.activeSessionIdx = idx;
         s.lastActiveSessionIdx = idx;
+        inKind = ActiveTabKind::Workspace;
     }
     s.pendingSwapIdx = -1;
     s.pendingSwapToSession = false;
+    // Phase 4 (M4.4): layout snapshot per tab type — save the outgoing type
+    // (if it had tabs), restore the incoming type's snapshot (if any).
+    if (outHasTabs && inKind != outKind) saveTabLayout(tabTypeName(static_cast<int>(outKind)));
+    if (inKind != outKind) restoreTabLayout(tabTypeName(static_cast<int>(inKind)));
     s.needsRedraw = true;
 }
 

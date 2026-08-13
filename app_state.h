@@ -84,8 +84,9 @@ void requestGoHome(AppState& s);
 // clear the flat fields, re-show the welcome screen.
 void finalizeGoHome(AppState& s);
 // Shared dirty-tab scan (Exit intercept + go-home): active tab first, then
-// parked tabs in sessions order.
-void collectDirtyTabs(const AppState& s, std::vector<int>& tabs,
+// parked tabs in sessions order, then dirty experiments (Phase 4 —
+// appState.exitDirtyEnvs filled; non-const because of that side output).
+void collectDirtyTabs(AppState& s, std::vector<int>& tabs,
                       std::vector<std::string>& labels);
 #endif
 
@@ -349,6 +350,9 @@ struct AppState {
     bool showExitDirtyModal = false;
     std::vector<int> exitDirtyTabs;         // dirty tab indices (active first)
     std::vector<std::string> exitDirtyLabels;
+    // Phase 4: dirty EXPERIMENTS ride the same modal (live objects — separate
+    // index list, saved via crossSaveExperiment, no swap needed).
+    std::vector<int> exitDirtyEnvs;
     bool exitSaveAllRunning = false;
     size_t exitSaveAllCursor = 0;
     // Close requested while a dirty-flow modal/state was pending: the close
@@ -386,6 +390,11 @@ struct AppState {
     bool showDeleteConfirmPopup = false;
     size_t deleteConfirmIndex = 0;
     bool skipDeleteConfirm = false; // "Don't ask again" flag — survives dataset changes, not config
+
+    // Phase 4: experiment delete confirmation (dirty or persisted experiments
+    // confirm before removal; transient empty instances remove directly).
+    bool showEnvDeleteConfirm = false;
+    int pendingEnvDeleteIdx = -1;
 
     // Workspace member deletion confirmation (decision 1: originals always confirm).
     bool showWorkspaceDeleteConfirmPopup = false;

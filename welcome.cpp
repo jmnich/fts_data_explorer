@@ -465,7 +465,7 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
             ensureSessionTab(appState);
             std::string err;
             if (crossCreate(path, err)) {
-                if (crossLoad(appState, path, err)) {
+                if (crossOpenProject(appState, path, err)) {
                     focusSessionTab(appState);
                     config.lastMultiWorkspacePath = path;
                     config.addRecentMultiWorkspace(path);

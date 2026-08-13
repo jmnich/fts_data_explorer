@@ -15,6 +15,7 @@
 #include "config.h"
 #include "cross_store.h"
 #include "file_browser.h"
+#include "hdf/h5_store.h"
 #include "theme.h"
 #include "workspace_reader.h"
 #include "workspace_session.h"
@@ -256,7 +257,80 @@ const char* artifactLabel(ComparatorArtifact a) {
 }
 
 EnvironmentSession::EnvironmentSession(EnvType t, const std::string& name)
-    : type(t), instanceName(name), titleCache_(name) {}
+    : type(t), instanceName(name), titleCache_(name) {
+    std::snprintf(nameBuf, sizeof(nameBuf), "%s", name.c_str());
+}
+
+std::string EnvironmentSession::tabLabel() const {
+    std::string label = titleCache_;
+    if (dirty) label += " *";
+    if (stale) label += " \xE2\x9A\xA0";   // ⚠ (UTF-8)
+    return label;
+}
+
+void EnvironmentSession::rename(const std::string& name) {
+    if (name.empty() || name == instanceName) return;
+    instanceName = name;
+    titleCache_ = name;
+    dirty = true;
+    appState.needsRedraw = true;
+}
+
+void EnvironmentSession::save(AppState& s) {
+    if (!s.sessionTab.multiWorkspaceOpen || s.sessionTab.multiWorkspacePath.empty())
+        return;
+    std::string err;
+    if (!crossSaveExperiment(s, *this, s.sessionTab.multiWorkspacePath, err)) {
+        s.adapterErrorMsg = "Experiment save failed:\n" + err;
+        s.showAdapterErrorPopup = true;
+        return;
+    }
+    dirty = false;
+    s.needsRedraw = true;
+}
+
+namespace {
+// Current FFT-param fingerprint for a referenced source. Open tab → the
+// (parked or active) session's spectrum state — the pool's source of truth.
+// Not-open embedded source → the params persisted in its workspace.json
+// (loaded via the sourceCache, which crossLoad already populates). Not-open
+// filesystem source → the params persisted in the .h5 itself. Unreachable →
+// default fingerprint (compare then reports stale only if the stored
+// fingerprint is non-default).
+ParamFingerprint currentFingerprintForKey(AppState& s, const std::string& key) {
+    for (const auto& sess : s.sessions)
+        if (sess->key == key) return poolCurrentFingerprint(s, key);
+    const size_t hash = key.find('#');
+    if (hash != std::string::npos) {
+        const std::string crossPath = key.substr(0, hash);
+        const std::string sourceId = key.substr(hash + 1);
+        auto it = s.sessionTab.sourceCache.find(sourceId);
+        if (it == s.sessionTab.sourceCache.end()) {
+            std::string err;
+            Workspace ws = crossLoadSource(crossPath, sourceId, err);
+            if (!err.empty()) return {};
+            it = s.sessionTab.sourceCache.emplace(sourceId, std::move(ws)).first;
+        }
+        return fingerprintFromWorkspace(it->second);
+    }
+    try {
+        return fingerprintFromWorkspace(H5Store::load(key));
+    } catch (const std::exception&) {
+        return {};
+    }
+}
+}  // namespace
+
+void EnvironmentSession::updateStaleness(AppState& s) {
+    stale = false;
+    for (const auto& [key, stored] : storedFingerprints) {
+        if (!(stored == currentFingerprintForKey(s, key))) {
+            stale = true;
+            break;
+        }
+    }
+    s.needsRedraw = true;
+}
 
 // ── registry ────────────────────────────────────────────────────────────────
 
@@ -309,10 +383,31 @@ void removeEnvironment(AppState& s, int idx) {
 void EnvironmentSession::closeRequest() {
     for (size_t i = 0; i < appState.environments.size(); ++i) {
         if (appState.environments[i].get() == this) {
-            removeEnvironment(appState, static_cast<int>(i));
+            const int idx = static_cast<int>(i);
+            // Phase 4: dirty or persisted experiments confirm; transient
+            // empty instances remove directly (Phase-3 behavior).
+            if (dirty || !id.empty()) {
+                appState.pendingEnvDeleteIdx = idx;
+                appState.showEnvDeleteConfirm = true;
+                appState.needsRedraw = true;
+                return;
+            }
+            removeEnvironment(appState, idx);
             return;
         }
     }
+}
+
+// Close ALL environment instances (project switch / go-home). RAM-only
+// instances reference the closing project's sources; persisted experiments
+// reload with the new project via crossLoadExperiments.
+void clearEnvironments(AppState& s) {
+    s.environments.clear();
+    s.activeEnvIdx = -1;
+    s.pendingEnvIdx = -1;   // stale queued activation must not fire
+    if (s.activeTabKind == ActiveTabKind::Environment)
+        s.activeTabKind = ActiveTabKind::Session;
+    s.needsRedraw = true;
 }
 
 // ── async compute ───────────────────────────────────────────────────────────
@@ -459,6 +554,14 @@ void EnvironmentSession::finalizeCompute() {
     applyYMode();
     shouldAutoscale = true;
     computed = true;
+    // Record the fingerprints actually used (dedupe by workspace key) — the
+    // staleness badge compares against these. A fresh compute is by definition
+    // current: stale clears.
+    storedFingerprints.clear();
+    for (size_t i = 0; i < pendingRefs_.size(); ++i)
+        storedFingerprints[pendingRefs_[i].workspaceKey] = pendingFps_[i];
+    stale = false;
+    dirty = true;
 }
 
 void EnvironmentSession::applyYMode() {
@@ -472,6 +575,7 @@ void EnvironmentSession::applyYMode() {
         }
         curveY[key] = std::move(y);
     }
+    dirty = true;
     appState.needsRedraw = true;
 }
 
@@ -487,6 +591,7 @@ void EnvironmentSession::convertXInPlace() {
         manualXMax = SpectralToolbox::convertXValue(manualXMax, oldU, newU);
         if (manualXMin > manualXMax) std::swap(manualXMin, manualXMax);
     }
+    dirty = true;
 }
 
 // ── render ──────────────────────────────────────────────────────────────────
@@ -497,7 +602,8 @@ void EnvironmentSession::render() {
 }
 
 // Config panel: pickers (absorbance) / artifact + dataset selectors
-// (comparator), plot config, comment, export. Docked in the main dock space.
+// (comparator), plot config, inline name edit, comment, save, export. Docked
+// in the main dock space.
 void EnvironmentSession::renderConfigWindow() {
     ImGui::SetNextWindowDockID(mainDockSpaceId(), ImGuiCond_FirstUseEver);
     if (ImGui::Begin(instanceName.c_str())) {
@@ -507,6 +613,20 @@ void EnvironmentSession::renderConfigWindow() {
             appState.needsRedraw = true;
         }
         forceDockSelection();
+        // Inline rename (Phase 4): applies on Enter / focus loss only — a
+        // mid-frame window-title change would churn the dock identity. The
+        // buffer resyncs from instanceName while not being edited.
+        ImGui::TextUnformatted("Name");
+        ImGui::SameLine(120.0f);
+        ImGui::SetNextItemWidth(200.0f);
+        const bool nameEdited =
+            ImGui::InputText("##envName", nameBuf, sizeof(nameBuf),
+                             ImGuiInputTextFlags_EnterReturnsTrue |
+                             ImGuiInputTextFlags_AutoSelectAll);
+        if (!ImGui::IsItemActive() && nameBuf != instanceName)
+            std::snprintf(nameBuf, sizeof(nameBuf), "%s", instanceName.c_str());
+        if (nameEdited && nameBuf != instanceName) rename(nameBuf);
+        ImGui::Separator();
         if (type == EnvType::Absorbance) renderAbsorbanceConfig();
         else renderComparatorConfig();
     }
@@ -570,6 +690,7 @@ void EnvironmentSession::renderAbsorbanceConfig() {
         if (ImGui::BeginCombo(comboLabel, current.c_str())) {
             for (const auto& [key, label] : datasets) {
                 if (ImGui::Selectable(label.c_str(), key == keyOut)) {
+                    if (key != keyOut) dirty = true;
                     keyOut = key;
                     memberOut.clear();
                     // Picker contract: cross sources auto-open (in-memory load).
@@ -594,8 +715,10 @@ void EnvironmentSession::renderAbsorbanceConfig() {
             if (m.first == memberOut) current = memberLabel(m);
         if (ImGui::BeginCombo(comboLabel, current.c_str())) {
             for (const auto& m : members) {
-                if (ImGui::Selectable(memberLabel(m).c_str(), m.first == memberOut))
+                if (ImGui::Selectable(memberLabel(m).c_str(), m.first == memberOut)) {
+                    if (m.first != memberOut) dirty = true;
                     memberOut = m.first;
+                }
             }
             ImGui::EndCombo();
         }
@@ -631,6 +754,7 @@ void EnvironmentSession::renderAbsorbanceConfig() {
     if (removeIdx >= 0) {
         samples.erase(samples.begin() + removeIdx);
         computed = false;
+        dirty = true;
         appState.needsRedraw = true;
     }
 
@@ -643,6 +767,7 @@ void EnvironmentSession::renderAbsorbanceConfig() {
         !newSampleMember.empty()) {
         samples.emplace_back(newSampleKey, newSampleMember);
         computed = false;
+        dirty = true;
         appState.needsRedraw = true;
     }
 
@@ -686,11 +811,23 @@ void EnvironmentSession::renderAbsorbanceConfig() {
 
     ImGui::Separator();
     renderCommentEditor();
+    // Phase 4: persist as a named experiment in the open .cross.h5.
+    if (appState.sessionTab.multiWorkspaceOpen) {
+        if (ImGui::Button("Save Experiment")) save(appState);
+        if (dirty) {
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "Unsaved changes");
+        } else if (!id.empty()) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("Saved");
+        }
+    } else {
+        ImGui::TextDisabled("Open a multi-workspace file to save experiments.");
+    }
     if (computed) {
         if (ImGui::Button("Export CSV...")) exportCsv();
         ImGui::SameLine();
     }
-    ImGui::TextDisabled("Results not persisted (experiments come in Phase 4).");
 }
 
 // Comment editor (multi-line), placed above the plot in both env types.
@@ -700,6 +837,7 @@ void EnvironmentSession::renderCommentEditor() {
     if (ImGui::InputTextMultiline("##envComment", commentBuf, sizeof(commentBuf),
                                   ImVec2(-FLT_MIN, 3.0f * ImGui::GetTextLineHeightWithSpacing()))) {
         comment = commentBuf;
+        dirty = true;
         appState.needsRedraw = true;
     }
     ImGui::Separator();
@@ -719,6 +857,7 @@ void EnvironmentSession::renderComparatorConfig() {
                 if (artifactSelector != a) {
                     artifactSelector = a;
                     shouldAutoscale = true;
+                    dirty = true;
                     appState.needsRedraw = true;
                 }
             }
@@ -736,9 +875,19 @@ void EnvironmentSession::renderComparatorConfig() {
     ImGui::Separator();
     renderCommentEditor();
 
+    if (appState.sessionTab.multiWorkspaceOpen) {
+        if (ImGui::Button("Save Experiment")) save(appState);
+        if (dirty) {
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "Unsaved changes");
+        } else if (!id.empty()) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("Saved");
+        }
+    } else {
+        ImGui::TextDisabled("Open a multi-workspace file to save experiments.");
+    }
     if (ImGui::Button("Export CSV...")) exportCsv();
-    ImGui::SameLine();
-    ImGui::TextDisabled("Results not persisted (experiments come in Phase 4).");
 }
 
 // Comparator: checkbox list of available datasets (open tabs ∪ embedded cross
@@ -775,6 +924,7 @@ void EnvironmentSession::renderDatasetSelector() {
                     if (sessionOpen(o.key)) comparatorKeys.push_back(o.key);
             }
             comparatorKeysExplicit = true;
+            dirty = true;
             if (checked) {
                 if (!hasKey(src.key)) comparatorKeys.push_back(src.key);
             } else {
@@ -804,6 +954,7 @@ void EnvironmentSession::renderDatasetSelector() {
                     const bool sel = m.id == current;
                     if (ImGui::Selectable(m.id.c_str(), sel)) {
                         memberPicks[src.key] = m.id;
+                        dirty = true;
                         appState.needsRedraw = true;
                     }
                 }
@@ -853,7 +1004,7 @@ void EnvironmentSession::renderYAxisControls() {
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, yAxisMode == m ? colActive : colInactive);
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, colActive);
         if (ImGui::Button(names[m])) {
-            if (yAxisMode != m) { yAxisMode = m; appState.needsRedraw = true; }
+            if (yAxisMode != m) { yAxisMode = m; dirty = true; appState.needsRedraw = true; }
         }
         ImGui::PopStyleColor(3);
         if (m < 2) ImGui::SameLine();
@@ -865,14 +1016,18 @@ void EnvironmentSession::renderYAxisControls() {
         ImGui::Text("min:");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(80.0f);
-        if (ImGui::InputDouble("##EnvForcedYMin", &forcedYMin, 0.0, 0.0, "%.6g"))
+        if (ImGui::InputDouble("##EnvForcedYMin", &forcedYMin, 0.0, 0.0, "%.6g")) {
+            dirty = true;
             appState.needsRedraw = true;
+        }
         ImGui::SameLine();
         ImGui::Text("max:");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(80.0f);
-        if (ImGui::InputDouble("##EnvForcedYMax", &forcedYMax, 0.0, 0.0, "%.6g"))
+        if (ImGui::InputDouble("##EnvForcedYMax", &forcedYMax, 0.0, 0.0, "%.6g")) {
+            dirty = true;
             appState.needsRedraw = true;
+        }
         if (forcedYMin >= forcedYMax) {
             ImGui::SameLine();
             ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "(min<max!)");
@@ -1150,4 +1305,208 @@ void EnvironmentSession::exportCsv() {
     ofs.close();
     appState.saveToastUntil = glfwGetTime() + 1.5;
     appState.needsRedraw = true;
+}
+
+// ── Phase 4: experiment persistence (cross_store.h wrappers) ────────────────
+// Defined HERE (not cross_store.cpp): serialization needs the live
+// EnvironmentSession object, and cross_store.cpp must stay linkable without
+// environment_session.cpp for the fts_cross_roundtrip CLI.
+
+// Full instance state minus transient plot flags (audit §3.3 → config.json).
+static nlohmann::json envConfigJson(const EnvironmentSession& env) {
+    nlohmann::json j;
+    j["type"] = envTypeName(env.type);
+    j["name"] = env.instanceName;
+    j["comment"] = env.comment;
+    j["xUnit"] = env.xUnitSelector;
+    j["yMode"] = env.yMode;
+    j["yAxisMode"] = env.yAxisMode;
+    j["forcedYMin"] = env.forcedYMin;
+    j["forcedYMax"] = env.forcedYMax;
+    j["computed"] = env.computed;
+    if (env.type == EnvType::Absorbance) {
+        j["refKey"] = env.refKey;
+        j["refMember"] = env.refMember;
+        j["samples"] = nlohmann::json::array();
+        for (const auto& smp : env.samples)
+            j["samples"].push_back({smp.first, smp.second});
+    } else {
+        j["artifactSelector"] = env.artifactSelector;
+        j["comparatorKeys"] = env.comparatorKeys;
+        j["comparatorKeysExplicit"] = env.comparatorKeysExplicit;
+        j["memberPicks"] = env.memberPicks;
+    }
+    return j;
+}
+
+static void envApplyConfig(EnvironmentSession& env, const nlohmann::json& j) {
+    env.comment = j.value("comment", "");
+    std::snprintf(env.commentBuf, sizeof(env.commentBuf), "%s", env.comment.c_str());
+    std::snprintf(env.nameBuf, sizeof(env.nameBuf), "%s", env.instanceName.c_str());
+    env.xUnitSelector = j.value("xUnit", 0);
+    env.prevXUnitSelector = env.xUnitSelector;
+    env.yMode = j.value("yMode", 0);
+    env.yAxisMode = j.value("yAxisMode", 0);
+    env.prevYAxisMode = env.yAxisMode;
+    env.forcedYMin = j.value("forcedYMin", 0.0);
+    env.forcedYMax = j.value("forcedYMax", 1.0);
+    env.computed = j.value("computed", false);
+    if (env.type == EnvType::Absorbance) {
+        env.refKey = j.value("refKey", "");
+        env.refMember = j.value("refMember", "");
+        env.samples.clear();
+        for (const auto& s : j.value("samples", nlohmann::json::array()))
+            if (s.is_array() && s.size() == 2 && s[0].is_string() && s[1].is_string())
+                env.samples.emplace_back(s[0].get<std::string>(), s[1].get<std::string>());
+    } else {
+        env.artifactSelector = j.value("artifactSelector", 0);
+        env.comparatorKeys = j.value("comparatorKeys", std::vector<std::string>{});
+        env.comparatorKeysExplicit = j.value("comparatorKeysExplicit", false);
+        auto mp = j.find("memberPicks");
+        if (mp != j.end() && mp->is_object())
+            for (auto it = mp->begin(); it != mp->end(); ++it)
+                if (it.value().is_string()) env.memberPicks[it.key()] = it.value().get<std::string>();
+    }
+}
+
+// Light per-curve stats (audit §2.1 stats.json) — no consumer yet beyond the
+// schema contract; ponytail: expand when a consumer appears.
+static nlohmann::json envStatsJson(const EnvironmentSession& env) {
+    nlohmann::json stats = nlohmann::json::array();
+    if (env.type != EnvType::Absorbance) return stats;
+    for (const auto& [key, y] : env.curveY) {
+        nlohmann::json s;
+        s["label"] = key.first + "/" + key.second;
+        if (!y.empty()) {
+            auto [mn, mx] = std::minmax_element(y.begin(), y.end());
+            double sum = 0.0;
+            for (double v : y) sum += v;
+            double mean = sum / static_cast<double>(y.size());
+            double sq = 0.0;
+            for (double v : y) sq += (v - mean) * (v - mean);
+            s["min"] = *mn;
+            s["max"] = *mx;
+            s["mean"] = mean;
+            s["std"] = std::sqrt(sq / static_cast<double>(y.size()));
+        }
+        stats.push_back(std::move(s));
+    }
+    return stats;
+}
+
+bool crossSaveExperiment(AppState& s, EnvironmentSession& env,
+                         const std::string& path, std::string& err) {
+    if (env.id.empty()) {
+        std::vector<nlohmann::json> entries;
+        std::vector<std::string> ids;
+        if (crossExperimentList(path, entries, err)) {
+            for (const auto& e : entries) ids.push_back(e.value("id", ""));
+            for (const auto& other : s.environments)
+                if (!other->id.empty()) ids.push_back(other->id);
+        }
+        env.id = makeUniqueId("exp", ids);
+    }
+    nlohmann::json fps;
+    for (const auto& [key, fp] : env.storedFingerprints)
+        fps[key] = fingerprintToJson(fp);
+    std::map<std::string, std::vector<double>> results;
+    if (env.type == EnvType::Absorbance && env.computed) {
+        results["x_common"] = env.gridX;
+        results["ref_y"] = env.refY;
+        size_t k = 0;
+        for (const auto& smp : env.samples) {
+            auto it = env.ratioY.find(std::make_pair(smp.first, smp.second));
+            if (it != env.ratioY.end())
+                results["ratio_" + std::to_string(k) + "_y"] = it->second;
+            ++k;
+        }
+    }
+    return crossExperimentWrite(path, env.id, envConfigJson(env), fps,
+                                results, envStatsJson(env), err);
+}
+
+bool crossSaveExperiments(AppState& s, const std::string& path, std::string& err) {
+    for (auto& env : s.environments) {
+        if (!env->dirty) continue;
+        if (!crossSaveExperiment(s, *env, path, err)) return false;
+        env->dirty = false;
+    }
+    return true;
+}
+
+bool crossLoadExperiments(AppState& s, const std::string& path, std::string& err) {    try {
+        std::vector<nlohmann::json> entries;
+        if (!crossExperimentList(path, entries, err)) return false;
+        int restoredAbsorbance = 0, restoredComparator = 0;
+        for (const auto& e : entries) {
+            const std::string id = e.value("id", "");
+            if (id.empty()) continue;
+            bool have = false;
+            for (const auto& env : s.environments)
+                if (env->id == id) { have = true; break; }
+            if (have) continue;   // idempotent across repeated crossLoad calls
+            nlohmann::json config, fps, stats;
+            std::map<std::string, std::vector<double>> results;
+            if (!crossExperimentRead(path, id, config, fps, results, stats, err))
+                return false;
+            const EnvType t = (config.value("type", "") == "Comparator")
+                                  ? EnvType::Comparator
+                                  : EnvType::Absorbance;
+            const std::string name = config.value("name", e.value("name", "Experiment"));
+            auto env = std::make_unique<EnvironmentSession>(t, name);
+            env->id = id;
+            envApplyConfig(*env, config);
+            for (auto it = fps.begin(); it != fps.end(); ++it)
+                if (it.value().is_object())
+                    env->storedFingerprints[it.key()] = fingerprintFromJson(it.value());
+            // Results loaded directly — same code path as computing (curveY
+            // derived via applyYMode), so no secondary math exists in the
+            // loader: what was plotted is what is stored (bitwise).
+            if (t == EnvType::Absorbance && env->computed) {
+                auto x = results.find("x_common");
+                auto r = results.find("ref_y");
+                if (x != results.end() && r != results.end()) {
+                    env->gridX = x->second;
+                    env->refY = r->second;
+                    size_t k = 0;
+                    bool anyRatio = false;
+                    for (const auto& smp : env->samples) {
+                        auto it = results.find("ratio_" + std::to_string(k) + "_y");
+                        if (it != results.end()) {
+                            env->ratioY[std::make_pair(smp.first, smp.second)] = it->second;
+                            anyRatio = true;
+                        }
+                        ++k;
+                    }
+                    if (anyRatio && !env->gridX.empty()) {
+                        env->applyYMode();   // sets dirty — reset below
+                        env->shouldAutoscale = true;
+                    } else {
+                        env->computed = false;
+                    }
+                } else {
+                    env->computed = false;
+                }
+            }
+            env->dirty = false;
+            env->updateStaleness(s);
+            if (t == EnvType::Absorbance) ++restoredAbsorbance;
+            else ++restoredComparator;
+            s.environments.push_back(std::move(env));
+        }
+        // Auto-name counters must not collide with restored names.
+        s.envAbsorbanceCounter = std::max(s.envAbsorbanceCounter, restoredAbsorbance);
+        s.envComparatorCounter = std::max(s.envComparatorCounter, restoredComparator);
+        if (!entries.empty()) s.needsRedraw = true;
+        return true;
+    } catch (const std::exception& e) {
+        err = e.what();
+        return false;
+    }
+}
+
+bool crossOpenProject(AppState& s, const std::string& path, std::string& err) {
+    if (!crossLoad(s, path, err)) return false;
+    clearEnvironments(s);
+    return crossLoadExperiments(s, path, err);
 }

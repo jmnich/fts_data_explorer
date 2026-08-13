@@ -74,7 +74,7 @@ void openWorkspaceInNewTab(AppState& s, const std::string& path) {
             requestWorkspaceDiscard(s, PendingWorkspaceAction::OpenMultiWorkspace, path);
         } else {
             std::string err;
-            if (crossLoad(s, path, err)) {
+            if (crossOpenProject(s, path, err)) {
                 focusSessionTab(s);
                 rememberMultiWorkspace(s, path);
                 // Leave the launch welcome (the Session tab takes over) — the
@@ -376,8 +376,13 @@ void requestWorkspaceDiscard(AppState& s, PendingWorkspaceAction action, const s
         }
         return;
     }
-    // OpenMultiWorkspace / Exit: prompt only when the active workspace is dirty.
-    if (!s.hasWorkspace() || !s.workspace.dirty) {
+    // OpenMultiWorkspace / Exit: prompt when the active workspace is dirty OR
+    // any experiment has unsaved changes (Phase 4 — the project switch drops
+    // environments; dirty ones must confirm first).
+    bool envDirty = false;
+    for (const auto& env : s.environments)
+        if (env->dirty) { envDirty = true; break; }
+    if ((!s.hasWorkspace() || !s.workspace.dirty) && !envDirty) {
         dispatchPendingAction(s);
         return;
     }
@@ -407,7 +412,7 @@ void dispatchPendingAction(AppState& s) {
             break;
         case PendingWorkspaceAction::OpenMultiWorkspace: {
             std::string err;
-            if (crossLoad(s, path, err)) {
+            if (crossOpenProject(s, path, err)) {
                 focusSessionTab(s);
                 rememberMultiWorkspace(s, path);
                 s.showWelcomeScreen = false;

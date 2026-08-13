@@ -279,6 +279,7 @@ add_executable(fts_data_explorer
     ui/window.cpp
     ui/app_loop.cpp
     ui/menu_bar.cpp
+    ui/layout_persistence.cpp
     panels/files_panel.cpp
     panels/interferogram_view.cpp
     panels/metadata_panel.cpp
@@ -381,6 +382,7 @@ add_executable(fts_session_roundtrip
     session/spectral_pool.cpp
     session/environment_session.cpp
     session/cross_store.cpp
+    ui/layout_persistence.cpp
     spectrum.cpp
     average_spectrum.cpp
     snr_spectrum.cpp

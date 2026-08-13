@@ -17,6 +17,7 @@
 #include "workspace_session.h"
 #include "environment_session.h"
 #include "spectral_pool.h"
+#include "cross_store.h"
 #include "hdf/h5_store.h"
 #include "workspace_reader.h"
 
@@ -1417,6 +1418,283 @@ void test11_comparator() {
     CHECK(curves[0].y[0] == 5.0 && curves[0].y[3] == 8.0);               // col1
 }
 
+// M4.1: experiment persistence round-trip — save an Absorbance experiment
+// (config + results + fingerprints) into a .cross.h5, reload into a fresh
+// AppState, verify bitwise-exact results (no recompute) + staleness flags;
+// then a Comparator config round-trip.
+void test12_experimentPersistence() {
+    std::printf("test12: experiment persistence round-trip...\n");
+    const std::string crossPath = "/tmp/fts_exp_roundtrip.cross.h5";
+    std::remove(crossPath.c_str());
+
+    AppState& s = ::appState;
+    s.sessions.clear();
+    s.environments.clear();
+    s.poolCache.clear();
+    s.activeTabKind = ActiveTabKind::Session;
+    s.activeSessionIdx = -1;
+    s.activeEnvIdx = -1;
+    s.pendingSwapIdx = -1;
+    s.pendingSwapToSession = false;
+    s.pendingEnvIdx = -1;
+
+    // Workspace with a panel-cache spectrum pair (test10 pattern).
+    auto sess = std::make_unique<WorkspaceSession>();
+    sess->key = "/tmp/parity.h5";
+    sess->path = "/tmp/parity.h5";
+    sess->workspace = makeFixtureWorkspace("exp");
+    sess->workspacePath = sess->path;
+    s.sessions.push_back(std::move(sess));
+    wirePanels(s);
+    s.activeTabKind = ActiveTabKind::Workspace;
+    s.activeSessionIdx = 0;
+    s.datasetInfo = workspaceDatasetInfo(s.workspace);
+    s.spectrum.xUnitSelector = 0;
+    s.spectrum.refLaserTextbox = 1.55f;
+    s.spectrum.Kpadding = 2;
+    const std::vector<double> refX = {1000.0, 1250.0, 1500.0, 1750.0, 2000.0};
+    const std::vector<double> refY = {1.0, 1.0, 1.0, 1.0, 1.0};
+    const std::vector<double> smpX = {1000.0, 1500.0, 2000.0};
+    const std::vector<double> smpY = {0.8, 0.8, 0.8};
+    s.spectrum.cachedFrequencies["specRef"] = refX;
+    s.spectrum.cachedSpectra["specRef"] = refY;
+    s.spectrum.cachedFrequencies["specSmp"] = smpX;
+    s.spectrum.cachedSpectra["specSmp"] = smpY;
+
+    // Absorbance instance: rename (dirty) + compute through the pool.
+    EnvironmentSession* env = createEnvironment(s, EnvType::Absorbance);
+    s.activeTabKind = ActiveTabKind::Workspace;
+    s.activeSessionIdx = 0;
+    env->refKey = "/tmp/parity.h5";
+    env->refMember = "specRef";
+    env->samples = {{"/tmp/parity.h5", "specSmp"}};
+    env->xUnitSelector = 0;
+    env->comment = "my experiment";
+    env->rename("Absorbance Roundtrip");
+    CHECK(env->dirty == true);
+    env->startCompute(s);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (env->batchActive_ && std::chrono::steady_clock::now() < deadline) {
+        env->tickAsync();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(env->batchActive_ == false);
+    CHECK(env->computed == true);
+    const auto rkey = std::make_pair(std::string("/tmp/parity.h5"), std::string("specSmp"));
+    CHECK(env->storedFingerprints.count("/tmp/parity.h5") == 1);
+    CHECK(env->storedFingerprints["/tmp/parity.h5"].K == 2);
+    CHECK(std::fabs(env->storedFingerprints["/tmp/parity.h5"].refLaser - 1.55f) < 1e-6);
+
+    // Save into a fresh .cross.h5 (assigns the id; second save idempotent).
+    std::string err;
+    CHECK(crossCreate(crossPath, err));
+    CHECK(crossSaveExperiment(s, *env, crossPath, err));
+    CHECK(!env->id.empty());
+    const std::string expId = env->id;
+    CHECK(crossSaveExperiment(s, *env, crossPath, err));
+    CHECK(env->id == expId);
+    std::vector<nlohmann::json> entries;
+    CHECK(crossExperimentList(crossPath, entries, err));
+    CHECK(entries.size() == 1);
+    CHECK(entries[0]["id"] == expId);
+    CHECK(entries[0]["type"] == "Absorbance");
+
+    // Structure check (h5py-equivalent): config/fingerprint/results content.
+    nlohmann::json config, fps, stats;
+    std::map<std::string, std::vector<double>> results;
+    CHECK(crossExperimentRead(crossPath, expId, config, fps, results, stats, err));
+    CHECK(config["name"] == "Absorbance Roundtrip");
+    CHECK(config["comment"] == "my experiment");
+    CHECK(config["computed"] == true);
+    CHECK(results.count("x_common") == 1);
+    checkVecEq(results["x_common"], refX, "persisted x_common");
+    checkVecEq(results["ref_y"], refY, "persisted ref_y");
+    CHECK(results.count("ratio_0_y") == 1);
+    checkVecEq(results["ratio_0_y"], env->ratioY[rkey], "persisted ratio");
+    CHECK(fps["/tmp/parity.h5"]["K"] == 2);
+    CHECK(stats.is_array());
+
+    // Reload into a fresh state with no source open → restored results,
+    // dirty=false; stale because /tmp/parity.h5 does not exist on disk
+    // (stored K=2 vs unreachable default).
+    AppState s2;
+    wirePanels(s2);
+    CHECK(crossLoadExperiments(s2, crossPath, err));
+    CHECK(s2.environments.size() == 1);
+    EnvironmentSession* e2 = s2.environments[0].get();
+    CHECK(e2->id == expId);
+    CHECK(e2->type == EnvType::Absorbance);
+    CHECK(e2->instanceName == "Absorbance Roundtrip");
+    CHECK(e2->comment == "my experiment");
+    CHECK(e2->dirty == false);
+    CHECK(e2->computed == true);
+    checkVecEq(e2->gridX, env->gridX, "restored gridX");
+    checkVecEq(e2->refY, env->refY, "restored refY");
+    CHECK(e2->ratioY.count(rkey) == 1);
+    checkVecEq(e2->ratioY[rkey], env->ratioY[rkey], "restored ratio");
+    checkVecEq(e2->curveY[rkey], env->curveY[rkey], "restored curveY (applyYMode)");
+    CHECK(e2->storedFingerprints.count("/tmp/parity.h5") == 1);
+    CHECK(e2->stale == true);
+
+    // Source OPEN with matching params → not stale; a param edit → stale.
+    auto sess2 = std::make_unique<WorkspaceSession>();
+    sess2->key = "/tmp/parity.h5";
+    sess2->path = "/tmp/parity.h5";
+    sess2->workspace = makeFixtureWorkspace("exp");
+    sess2->workspacePath = sess2->path;
+    sess2->spectrum.refLaserTextbox = 1.55f;
+    sess2->spectrum.Kpadding = 2;
+    s2.sessions.push_back(std::move(sess2));
+    e2->updateStaleness(s2);
+    CHECK(e2->stale == false);
+    s2.sessions[0]->spectrum.Kpadding = 4;
+    e2->updateStaleness(s2);
+    CHECK(e2->stale == true);
+    s2.sessions[0]->spectrum.Kpadding = 2;
+    e2->updateStaleness(s2);
+    CHECK(e2->stale == false);
+
+    // Comparator: config round-trip, no results group.
+    AppState s3;
+    wirePanels(s3);
+    EnvironmentSession* cmp = createEnvironment(s3, EnvType::Comparator);
+    cmp->artifactSelector = 3;                  // 100% T
+    cmp->comparatorKeys = {"/tmp/parity.h5", "/tmp/other.h5"};
+    cmp->comparatorKeysExplicit = true;
+    cmp->memberPicks["/tmp/parity.h5"] = "specRef";
+    cmp->xUnitSelector = 1;
+    cmp->yAxisMode = 2;
+    cmp->forcedYMin = -1.0;
+    cmp->forcedYMax = 5.0;
+    cmp->comment = "comparator experiment";
+    CHECK(crossSaveExperiment(s3, *cmp, crossPath, err));
+    std::vector<nlohmann::json> entries2;
+    CHECK(crossExperimentList(crossPath, entries2, err));
+    CHECK(entries2.size() == 2);
+    AppState s4;
+    wirePanels(s4);
+    CHECK(crossLoadExperiments(s4, crossPath, err));
+    CHECK(s4.environments.size() == 2);   // absorbance + comparator
+    EnvironmentSession* c2 = nullptr;
+    for (auto& e : s4.environments)
+        if (e->type == EnvType::Comparator) c2 = e.get();
+    CHECK(c2 != nullptr);
+    CHECK(c2->type == EnvType::Comparator);
+    CHECK(c2->artifactSelector == 3);
+    CHECK(c2->comparatorKeys.size() == 2);
+    CHECK(c2->comparatorKeys[0] == "/tmp/parity.h5");
+    CHECK(c2->comparatorKeysExplicit == true);
+    CHECK(c2->memberPicks.count("/tmp/parity.h5") == 1);
+    CHECK(c2->memberPicks["/tmp/parity.h5"] == "specRef");
+    CHECK(c2->xUnitSelector == 1);
+    CHECK(c2->yAxisMode == 2);
+    CHECK(c2->forcedYMin == -1.0 && c2->forcedYMax == 5.0);
+    CHECK(c2->comment == "comparator experiment");
+    CHECK(c2->computed == false);
+    CHECK(c2->dirty == false);
+
+    // Dedupe: repeated loads add nothing.
+    CHECK(crossLoadExperiments(s4, crossPath, err));
+    CHECK(s4.environments.size() == 2);
+
+    std::remove(crossPath.c_str());
+}
+
+// M4.3: staleness vs PERSISTED source params (source not open in a tab).
+// Compute + save the experiment with K=2; change the source's K and persist
+// it; reload → the fingerprint derives from the source's workspace.json → ⚠
+// stale. Restoring the params clears the badge.
+void test13_stalenessPersisted() {
+    std::printf("test13: staleness vs persisted source params...\n");
+    const std::string srcPath = "/tmp/fts_exp_src.h5";
+    const std::string crossPath = "/tmp/fts_exp_stale.cross.h5";
+    std::remove(srcPath.c_str());
+    std::remove(crossPath.c_str());
+    std::string err;
+
+    // Source workspace with the spectrum params persisted in the view state
+    // (matching the session state the pool uses: K=2, refLaser 1.55,
+    // rectangular apodization, defaults elsewhere).
+    Workspace ws = makeFixtureWorkspace("stale");
+    ws.workspaceJson["applications"]["FTS Data Explorer"]["spectrumView"] = {
+        {"zeroPadK", 2}, {"refLaserUm", 1.55},
+        {"apodization", {{"window", "rectangular"}}}};
+    ws.workspaceJson["applications"]["FTS Data Explorer"]["plotDefaults"] = {
+        {"xCorrectionMethod", 0}, {"peakProminence", 0.02}};
+    H5Store::save(srcPath, ws);
+
+    AppState& s = ::appState;
+    s.sessions.clear();
+    s.environments.clear();
+    s.poolCache.clear();
+    s.activeTabKind = ActiveTabKind::Session;
+    s.activeSessionIdx = -1;
+    s.activeEnvIdx = -1;
+    s.pendingSwapIdx = -1;
+    s.pendingSwapToSession = false;
+    s.pendingEnvIdx = -1;
+    auto sess = std::make_unique<WorkspaceSession>();
+    sess->key = srcPath;
+    sess->path = srcPath;
+    sess->workspace = ws;
+    sess->workspacePath = srcPath;
+    s.sessions.push_back(std::move(sess));
+    wirePanels(s);
+    s.activeTabKind = ActiveTabKind::Workspace;
+    s.activeSessionIdx = 0;
+    s.datasetInfo = workspaceDatasetInfo(s.workspace);
+    s.spectrum.xUnitSelector = 0;
+    s.spectrum.refLaserTextbox = 1.55f;
+    s.spectrum.Kpadding = 2;
+    const std::vector<double> refX = {1000.0, 1250.0, 1500.0, 1750.0, 2000.0};
+    const std::vector<double> refY = {1.0, 1.0, 1.0, 1.0, 1.0};
+    const std::vector<double> smpX = {1000.0, 1500.0, 2000.0};
+    const std::vector<double> smpY = {0.8, 0.8, 0.8};
+    s.spectrum.cachedFrequencies["specRef"] = refX;
+    s.spectrum.cachedSpectra["specRef"] = refY;
+    s.spectrum.cachedFrequencies["specSmp"] = smpX;
+    s.spectrum.cachedSpectra["specSmp"] = smpY;
+
+    EnvironmentSession* env = createEnvironment(s, EnvType::Absorbance);
+    s.activeTabKind = ActiveTabKind::Workspace;
+    s.activeSessionIdx = 0;
+    env->refKey = srcPath;
+    env->refMember = "specRef";
+    env->samples = {{srcPath, "specSmp"}};
+    env->xUnitSelector = 0;
+    env->startCompute(s);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (env->batchActive_ && std::chrono::steady_clock::now() < deadline) {
+        env->tickAsync();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(env->computed == true);
+    CHECK(crossCreate(crossPath, err));
+    CHECK(crossSaveExperiment(s, *env, crossPath, err));
+
+    // Change the source's K and persist it (the M4.3 flow: change a source's
+    // K → save source → reopen project).
+    ws.workspaceJson["applications"]["FTS Data Explorer"]["spectrumView"]["zeroPadK"] = 4;
+    H5Store::save(srcPath, ws);
+
+    // Reload with the source NOT open: current fingerprint comes from the
+    // persisted workspace.json (K=4) → differs from the stored K=2 → stale.
+    AppState s2;
+    wirePanels(s2);
+    CHECK(crossLoadExperiments(s2, crossPath, err));
+    CHECK(s2.environments.size() == 1);
+    CHECK(s2.environments[0]->stale == true);
+
+    // Restore the source params → the badge clears.
+    ws.workspaceJson["applications"]["FTS Data Explorer"]["spectrumView"]["zeroPadK"] = 2;
+    H5Store::save(srcPath, ws);
+    s2.environments[0]->updateStaleness(s2);
+    CHECK(s2.environments[0]->stale == false);
+
+    std::remove(srcPath.c_str());
+    std::remove(crossPath.c_str());
+}
+
 }  // namespace
 
 int main() {
@@ -1432,6 +1710,8 @@ int main() {
     test9b_envActivationParksWorkspace();
     test10_t100Parity();
     test11_comparator();
+    test12_experimentPersistence();
+    test13_stalenessPersisted();
     std::printf("fts_session_roundtrip: all %d checks passed\n", g_checks);
     return 0;
 }
