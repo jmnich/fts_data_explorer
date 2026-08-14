@@ -1,8 +1,8 @@
 // Phase-3 M3.2/M3.3/M3.4 — instantiable experiment tabs (Absorbance /
 // Comparator). LIVE objects: state is the instance itself, never folded.
-// Compute runs poolComputeRaw on the shared pool (workers capture by value,
-// never touch AppState — average_spectrum.cpp:616 pattern); results apply on
-// the main thread in tickAsync. T%/A math locked by audit §5.2.
+// Absorbance computes synchronously from already-computed artifacts (Average/
+// Raw spectra) — no FFT pool; T%/A math locked by audit §5.2. Comparator
+// gathers its overlay curves from the same artifact model each frame.
 #include "environment_session.h"
 
 #include <algorithm>
@@ -41,14 +41,19 @@ ImGuiID mainDockSpaceId() {
 }
 
 // Background-tab render fallback: force this window's dock tab to the front.
+// Only fires when the node's current tab is a NON-experiment window — never
+// overrides the user's tab choice among stacked experiment panels (Plot
+// Ranging / Export share a node when stacked, and the unconditional force made
+// the tab selector unclickable).
 void forceDockSelection() {
     ImGuiWindow* w = ImGui::GetCurrentWindow();
-    if (w->DockNode && w->DockNode->SelectedTabId != w->TabId) {
-        w->DockNode->SelectedTabId = w->TabId;
-        if (w->DockNode->TabBar)
-            w->DockNode->TabBar->NextSelectedTabId = w->TabId;
-        appState.needsRedraw = true;
-    }
+    if (!(w->DockNode && w->DockNode->SelectedTabId != w->TabId)) return;
+    if (ImGuiWindow* sel = ImGui::FindWindowByID(w->DockNode->SelectedTabId))
+        if (isExperimentPanelName(sel->Name)) return;
+    w->DockNode->SelectedTabId = w->TabId;
+    if (w->DockNode->TabBar)
+        w->DockNode->TabBar->NextSelectedTabId = w->TabId;
+    appState.needsRedraw = true;
 }
 
 const char* xUnitLabel(int unit) {
@@ -57,44 +62,10 @@ const char* xUnitLabel(int unit) {
                                  : "Frequency (THz)";
 }
 
-// Session tab label for a stable key, or the key itself when closed.
-std::string sessionLabelForKey(const std::string& key) {
-    for (const auto& sess : appState.sessions) {
-        if (sess->key == key) return sess->label();
-    }
-    return key;
-}
-
 bool sessionOpen(const std::string& key) {
     for (const auto& sess : appState.sessions)
         if (sess->key == key) return true;
     return false;
-}
-
-// Members of a session's workspace, spectra group first, IFG members marked
-// "(compute)". Pairs: (memberId, isInterferogram). Ownership rule (HL §3.1):
-// the ACTIVE tab's workspace lives in the flat fields, parked tabs in the
-// mirror — resolve the same way the pool does.
-std::vector<std::pair<std::string, bool>> sessionMembers(const std::string& key) {
-    std::vector<std::pair<std::string, bool>> out;
-    for (const auto& sess : appState.sessions) {
-        if (sess->key != key) continue;
-        // Sessions are canonical (M4.5): always read the session's own fields.
-        const Workspace& ws = sess->workspace;
-        for (const auto& m : ws.spectra.members)
-            out.emplace_back(m.id, false);
-        for (const auto& m : ws.uncorrectedIfg.members)
-            out.emplace_back(m.id, true);
-        for (const auto& m : ws.correctedIfg.members)
-            out.emplace_back(m.id, true);
-        break;
-    }
-    return out;
-}
-
-// Display label for a member id ("<id>" or "<id> (compute)").
-std::string memberLabel(const std::pair<std::string, bool>& m) {
-    return m.second ? m.first + " (compute)" : m.first;
 }
 
 // ── Comparator artifact model (persisted workspace members) ─────────────────
@@ -166,21 +137,25 @@ void downsampleCurve(const std::vector<double>& x, const std::vector<double>& y,
 }
 
 // matplotlib "tab20" qualitative colormap (20 colors, matplotlib standard;
-// RGB values from the matplotlib source). Registered once into ImPlot, then
-// pushed for comparator overlay plots (cyclic: curve 21 wraps to color 0).
+// RGB values from the matplotlib source). Cyclic: index 20 wraps to color 0.
+// Shared by the plot colormap, the per-curve line colors, and the Settings
+// curve list's left accent line (so the two always match).
+ImVec4 tab20Color(size_t i) {
+    static const unsigned char rgb[20][3] = {
+        { 31, 119, 180}, {255, 127,  14}, { 44, 160,  44}, {214,  39,  40},
+        {148, 103, 189}, {140,  86,  75}, {227, 119, 194}, {127, 127, 127},
+        {188, 189,  34}, { 23, 190, 207}, {174, 199, 232}, {255, 187, 120},
+        {152, 223, 138}, {255, 152, 150}, {197, 176, 213}, {196, 156, 148},
+        {247, 182, 210}, {199, 199, 199}, {219, 219, 141}, {158, 218, 229},
+    };
+    const auto& c = rgb[i % 20];
+    return ImVec4(c[0] / 255.0f, c[1] / 255.0f, c[2] / 255.0f, 1.0f);
+}
+
 ImPlotColormap tab20Colormap() {
     static ImPlotColormap cmap = [] {
-        static const unsigned char rgb[20][3] = {
-            { 31, 119, 180}, {255, 127,  14}, { 44, 160,  44}, {214,  39,  40},
-            {148, 103, 189}, {140,  86,  75}, {227, 119, 194}, {127, 127, 127},
-            {188, 189,  34}, { 23, 190, 207}, {174, 199, 232}, {255, 187, 120},
-            {152, 223, 138}, {255, 152, 150}, {197, 176, 213}, {196, 156, 148},
-            {247, 182, 210}, {199, 199, 199}, {219, 219, 141}, {158, 218, 229},
-        };
         ImVec4 cols[20];
-        for (int i = 0; i < 20; ++i)
-            cols[i] = ImVec4(rgb[i][0] / 255.0f, rgb[i][1] / 255.0f,
-                             rgb[i][2] / 255.0f, 1.0f);
+        for (int i = 0; i < 20; ++i) cols[i] = tab20Color(static_cast<size_t>(i));
         return ImPlot::AddColormap("Tab20", cols, 20, true);
     }();
     return cmap;
@@ -354,6 +329,17 @@ const char* experimentTypeName(EnvType t) {
     return t == EnvType::Absorbance ? "Absorbance" : "Comparator";
 }
 
+// Stable window names of the experiment type's docked panels. These MUST stay
+// in sync with renderConfigWindow/renderViewWindow/renderRangingWindow/
+// renderExportWindow and app_loop.cpp's pre-DockSpace forced-selection list.
+bool isExperimentPanelName(const char* name) {
+    return name &&
+           (std::strcmp(name, "Settings##envcfg") == 0 ||
+            std::strcmp(name, "Viewer##envview") == 0 ||
+            std::strcmp(name, "Plot Ranging##envrange") == 0 ||
+            std::strcmp(name, "Export##envexp") == 0);
+}
+
 // Public label for a comparator artifact type.
 const char* artifactLabel(ComparatorArtifact a) {
     switch (a) {
@@ -395,19 +381,6 @@ void EnvironmentSession::rename(const std::string& name) {
     // 2026-08-14).
     appState.stripTabBarResetRequested = true;
     appState.needsRedraw = true;
-}
-
-void EnvironmentSession::save(AppState& s) {
-    if (!s.sessionTab.multiWorkspaceOpen || s.sessionTab.multiWorkspacePath.empty())
-        return;
-    std::string err;
-    if (!crossSaveExperiment(s, *this, s.sessionTab.multiWorkspacePath, err)) {
-        s.adapterErrorMsg = "Experiment save failed:\n" + err;
-        s.showAdapterErrorPopup = true;
-        return;
-    }
-    dirty = false;
-    s.needsRedraw = true;
 }
 
 namespace {
@@ -558,181 +531,128 @@ void clearExperiments(AppState& s) {
     s.needsRedraw = true;
 }
 
-// ── async compute ───────────────────────────────────────────────────────────
+// ── synchronous compute ─────────────────────────────────────────────────────
 
-void EnvironmentSession::startCompute(AppState& s) {
-    if (batchActive_) return;
-    batchActive_ = true;
-    completedCount_ = 0;
-    totalSubmitted_ = 0;
-    pendingFutures_.clear();
-    pendingRefs_.clear();
-    pendingFps_.clear();
-    results_.clear();
-    computed = false;
-    curveY.clear();
-    ratioY.clear();
-    gridX.clear();
-    refY.clear();
-
-    std::vector<SpectralRef> refs;
-    refs.emplace_back(SpectralRef{refKey, refMember});
-    for (const auto& smp : samples)
-        refs.push_back(SpectralRef{smp.first, smp.second});
-
-    for (const auto& ref : refs) {
-        // Cache hit → enqueue a trivial ready task (uniform drain path).
-        SpectralToolbox::ProcessedSpectrum cached;
-        if (poolTryCache(s, ref, cached)) {
-            pendingFutures_.push_back(s.computationPool->enqueue(
-                [ps = std::move(cached)]() mutable { return std::move(ps); }));
-            pendingRefs_.push_back(ref);
-            // Store-time key = the session's CURRENT fingerprint (the cached
-            // entry already matched it — poolTryCache re-verifies).
-            pendingFps_.push_back(poolCurrentFingerprint(s, ref.workspaceKey));
-            ++totalSubmitted_;
-            continue;
-        }
-        PoolInputs in;
-        bool prepared = false;
-        try {
-            prepared = poolPrepare(s, ref, in);
-        } catch (const std::exception&) {
-            prepared = false;
-        }
-        if (!prepared) {
-            // Degraded: enqueue a failing task so the ref count stays aligned.
-            pendingFutures_.push_back(s.computationPool->enqueue(
-                []() { return SpectralToolbox::ProcessedSpectrum{}; }));
-            pendingRefs_.push_back(ref);
-            pendingFps_.emplace_back();
-            ++totalSubmitted_;
-            continue;
-        }
-        pendingFutures_.push_back(s.computationPool->enqueue(
-            [in = std::move(in)]() mutable { return poolComputeRaw(in); }));
-        pendingRefs_.push_back(ref);
-        pendingFps_.push_back(in.fp);
-        ++totalSubmitted_;
+// Extract one artifact member (x/y/xUnit) for a source key. Mirrors
+// gatherCurves' per-source logic (artifactInfo + member pick, first default).
+bool EnvironmentSession::extractArtifact(AppState& s, const std::string& key,
+                                         ComparatorArtifact a,
+                                         const std::string& memberId,
+                                         ArtifactMember& out) {
+    for (const auto& src : comparatorSources(s)) {
+        if (src.key != key) continue;
+        ArtifactInfo info = artifactInfo(*src.ws, a, src.key);
+        if (info.members.empty()) return false;
+        const ArtifactMember* pick = nullptr;
+        for (const auto& m : info.members)
+            if (m.id == memberId) { pick = &m; break; }
+        if (!pick) pick = &info.members.front();
+        out = *pick;
+        return true;
     }
-    results_.assign(totalSubmitted_, SpectralToolbox::ProcessedSpectrum{});
-    s.needsRedraw = true;
+    return false;
 }
 
-void EnvironmentSession::tickAsync() {
-    if (!batchActive_) return;
-
-    for (size_t i = 0; i < pendingFutures_.size(); ++i) {
-        auto& fut = pendingFutures_[i];
-        if (!fut.valid()) continue;
-        if (fut.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
-            results_[i] = fut.get();
-            if (!results_[i].spectrumX.empty()) {
-                // Main-thread cache write (cm-1 canonical, params actually used).
-                poolStore(appState, pendingRefs_[i], results_[i], pendingFps_[i]);
-            }
-            ++completedCount_;
-            appState.needsRedraw = true;
-        }
-    }
-
-    if (completedCount_ >= totalSubmitted_ && totalSubmitted_ > 0) {
-        finalizeCompute();
-        batchActive_ = false;
-        appState.needsRedraw = true;
-    }
-}
-
-void EnvironmentSession::finalizeCompute() {
-    if (results_.empty() || results_[0].spectrumX.empty() ||
-        results_[0].spectrumY.empty()) {
-        appState.adapterErrorMsg = "Absorbance compute failed: reference spectrum is empty.";
-        appState.showAdapterErrorPopup = true;
-        computed = false;
-        return;
-    }
-
-    // Common grid = reference X in the instance's display unit.
+// Synchronous artifact-based compute. Per curve: resolve the reference and
+// sample artifacts, convert both X axes to the display unit, build the grid
+// from the reference points inside the overlapping X region, resample the
+// sample onto it, and divide (clamped). Curves that cannot be computed get a
+// status string and are skipped — never NaN, never a division by zero.
+void EnvironmentSession::computeAbsorbance(AppState& s) {
     using ST = SpectralToolbox::SpectrumXUnit;
     const auto dst = static_cast<ST>(xUnitSelector);
-    gridX.resize(results_[0].spectrumX.size());
-    for (size_t i = 0; i < results_[0].spectrumX.size(); ++i)
-        gridX[i] = SpectralToolbox::convertXValue(results_[0].spectrumX[i], ST::CmInv, dst);
-    refY = results_[0].spectrumY;
+    bool any = false;
+    storedFingerprints.clear();
+    for (auto& c : curves) {
+        c.gridX.clear();
+        c.ratioY.clear();
+        c.curveY.clear();
+        c.status.clear();
+        if (c.refKey.empty() || c.sampleKey.empty()) {
+            c.status = c.refKey.empty() ? "No reference selected" : "No sample selected";
+            continue;
+        }
+        storedFingerprints[c.refKey] = currentFingerprintForKey(s, c.refKey);
+        storedFingerprints[c.sampleKey] = currentFingerprintForKey(s, c.sampleKey);
 
-    bool anySampleFailed = false;
-    for (size_t k = 1; k < results_.size(); ++k) {
-        const auto& r = results_[k];
-        const auto& key = std::make_pair(pendingRefs_[k].workspaceKey,
-                                         pendingRefs_[k].memberId);
-        if (r.spectrumX.empty() || r.spectrumY.empty()) {
-            anySampleFailed = true;
-            continue;
+        ArtifactMember ref, smp;
+        if (!extractArtifact(s, c.refKey, static_cast<ComparatorArtifact>(c.refArtifact),
+                             c.refMember, ref)) {
+            c.status = "Reference unavailable"; continue;
         }
-        std::vector<double> sx(r.spectrumX.size());
-        for (size_t i = 0; i < r.spectrumX.size(); ++i)
-            sx[i] = SpectralToolbox::convertXValue(r.spectrumX[i], ST::CmInv, dst);
-        std::vector<double> sy = resampleToGrid(sx, r.spectrumY, gridX);
-        if (sy.size() != gridX.size()) {
-            anySampleFailed = true;
-            continue;
+        if (!extractArtifact(s, c.sampleKey, static_cast<ComparatorArtifact>(c.sampleArtifact),
+                             c.sampleMember, smp)) {
+            c.status = "Sample unavailable"; continue;
         }
-        std::vector<double> ratio(sy.size());
-        for (size_t i = 0; i < sy.size(); ++i) {
-            double rv = refY[i];
-            double v = (rv > 1e-15) ? sy[i] / rv : 0.0;
+        if (ref.x.empty() || ref.y.empty()) { c.status = "Reference empty"; continue; }
+        if (smp.x.empty() || smp.y.empty()) { c.status = "Sample empty"; continue; }
+
+        // Convert both X axes to the display unit.
+        std::vector<double> xR = ref.x, xS = smp.x;
+        const auto fromR = static_cast<ST>(ref.xUnit);
+        const auto fromS = static_cast<ST>(smp.xUnit);
+        for (double& v : xR) v = SpectralToolbox::convertXValue(v, fromR, dst);
+        for (double& v : xS) v = SpectralToolbox::convertXValue(v, fromS, dst);
+
+        // Overlap interval (direction-safe via front/back min/max).
+        const double lo = std::max(std::min(xR.front(), xR.back()),
+                                   std::min(xS.front(), xS.back()));
+        const double hi = std::min(std::max(xR.front(), xR.back()),
+                                   std::max(xS.front(), xS.back()));
+
+        // Grid = reference points inside [lo, hi], preserving reference order.
+        std::vector<double> gridX, refY;
+        gridX.reserve(xR.size());
+        refY.reserve(xR.size());
+        for (size_t i = 0; i < xR.size(); ++i)
+            if (xR[i] >= lo && xR[i] <= hi) {
+                gridX.push_back(xR[i]);
+                refY.push_back(ref.y[i]);
+            }
+        if (gridX.size() < 2) { c.status = "No overlapping X region"; continue; }
+
+        std::vector<double> smpY = resampleToGrid(xS, smp.y, gridX);
+        if (smpY.size() != gridX.size()) { c.status = "Resample failed"; continue; }
+
+        std::vector<double> ratio(smpY.size());
+        for (size_t i = 0; i < smpY.size(); ++i) {
+            const double rv = refY[i];
+            double v = (rv > 1e-15) ? smpY[i] / rv : 0.0;
             // audit §5.2: non-finite or <=1e-15 ratio clamped to 0 pre-log.
             if (!std::isfinite(v) || v <= 1e-15) v = 0.0;
             ratio[i] = v;
         }
-        ratioY[key] = std::move(ratio);
+        c.gridX = std::move(gridX);
+        c.ratioY = std::move(ratio);
+        any = true;
     }
-
-    if (anySampleFailed) {
-        appState.adapterErrorMsg =
-            "Absorbance compute finished with unavailable samples.";
-        appState.showAdapterErrorPopup = true;
-        computed = false;
-        ratioY.clear();
-        gridX.clear();
-        refY.clear();
-        return;
-    }
-
     applyYMode();
     shouldAutoscale = true;
-    computed = true;
-    // Record the fingerprints actually used (dedupe by workspace key) — the
-    // staleness badge compares against these. A fresh compute is by definition
-    // current: stale clears.
-    storedFingerprints.clear();
-    for (size_t i = 0; i < pendingRefs_.size(); ++i)
-        storedFingerprints[pendingRefs_[i].workspaceKey] = pendingFps_[i];
+    computed = any;
     stale = false;
     dirty = true;
+    s.needsRedraw = true;
 }
 
 void EnvironmentSession::applyYMode() {
-    curveY.clear();
-    for (const auto& [key, ratio] : ratioY) {
-        std::vector<double> y(ratio.size());
-        for (size_t i = 0; i < ratio.size(); ++i) {
-            double r = ratio[i];
-            y[i] = (yMode == 0) ? r * 100.0
-                                : (r > 1e-15) ? -std::log10(r) : 0.0;
+    for (auto& c : curves) {
+        c.curveY.resize(c.ratioY.size());
+        for (size_t i = 0; i < c.ratioY.size(); ++i) {
+            const double r = c.ratioY[i];
+            c.curveY[i] = (yMode == 0) ? r * 100.0
+                                       : (r > 1e-15) ? -std::log10(r) : 0.0;
         }
-        curveY[key] = std::move(y);
     }
     dirty = true;
     appState.needsRedraw = true;
 }
 
 void EnvironmentSession::convertXInPlace() {
-    if (gridX.empty()) return;
     auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(prevXUnitSelector);
     auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
-    for (double& x : gridX)
-        x = SpectralToolbox::convertXValue(x, oldU, newU);
+    for (auto& c : curves)
+        for (double& x : c.gridX)
+            x = SpectralToolbox::convertXValue(x, oldU, newU);
     // Keep the manual zoom window in the new unit.
     if (!shouldAutoscale && manualXMin < manualXMax) {
         manualXMin = SpectralToolbox::convertXValue(manualXMin, oldU, newU);
@@ -742,15 +662,35 @@ void EnvironmentSession::convertXInPlace() {
     dirty = true;
 }
 
+// Display label for a source key: open-tab label, embedded cross-source name,
+// or the raw key when neither resolves.
+std::string EnvironmentSession::sourceLabel(const std::string& key) const {
+    for (const auto& sess : appState.sessions)
+        if (sess->key == key) return sess->label();
+    const std::string& cp = appState.sessionTab.multiWorkspacePath;
+    if (!cp.empty() && key.rfind(cp + "#", 0) == 0) {
+        const std::string id = key.substr(cp.size() + 1);
+        for (const auto& src : appState.sessionTab.sources)
+            if (src.id == id) return src.name;
+    }
+    return key;
+}
+
+std::string EnvironmentSession::curveLabel(const AbsorbanceCurve& c) const {
+    return sourceLabel(c.sampleKey) + "/" + c.sampleMember + "  /  " +
+           sourceLabel(c.refKey) + "/" + c.refMember;
+}
+
 // ── render ──────────────────────────────────────────────────────────────────
 
 void EnvironmentSession::render() {
-    renderConfigWindow();
-    if (type == EnvType::Comparator) {
-        // Comparator-only dockable panels (split out of the Settings window).
-        renderRangingWindow();
-        renderExportWindow();
+    if (type == EnvType::Absorbance && resultsDirty_) {
+        resultsDirty_ = false;
+        computeAbsorbance(appState);
     }
+    renderConfigWindow();
+    renderRangingWindow();
+    renderExportWindow();
     renderViewWindow();
 }
 
@@ -803,16 +743,19 @@ void EnvironmentSession::renderViewWindow() {
         bool hasGuideline = false;
         double guideline = 0.0;
         if (type == EnvType::Absorbance) {
-            for (const auto& [key, y] : curveY) {
-                ComparatorCurve c;
-                c.label = sessionLabelForKey(key.first) + "/" + key.second;
-                c.shortLabel = key.second;   // member id (cursor box; comparator-only anyway)
-                c.x = gridX;
-                c.y = y;
-                curves.push_back(std::move(c));
+            for (size_t ci = 0; ci < this->curves.size(); ++ci) {
+                const auto& c = this->curves[ci];
+                if (c.gridX.empty() || c.curveY.empty()) continue;
+                ComparatorCurve cc;
+                cc.label = curveLabel(c);
+                cc.shortLabel = cc.label;
+                cc.x = c.gridX;
+                cc.y = c.curveY;
+                cc.color = tab20Color(ci);   // matches the Settings accent line
+                curves.push_back(std::move(cc));
             }
             xLabel = xUnitLabel(xUnitSelector);
-            yLabel = (yMode == 0) ? "Transmittance (%)" : "Absorbance (-)";
+            yLabel = (yMode == 0) ? "Transmittance [%]" : "Absorbance";
             hasGuideline = true;
             guideline = (yMode == 0) ? 100.0 : 0.0;
         } else {
@@ -821,176 +764,207 @@ void EnvironmentSession::renderViewWindow() {
             xLabel = (artifact == ComparatorArtifact::CorrectedInterferogram)
                          ? "OPD (um)"
                          : (artifact == ComparatorArtifact::RawInterferogram)
-                             ? "Sample index"
-                             : xUnitLabel(xUnitSelector);
+                              ? "Sample index"
+                              : xUnitLabel(xUnitSelector);
             yLabel = artifactLabel(artifact);
             if (yScaleSelector == 2) yLabel += " (dB)";
         }
-        renderPlot(curves, xLabel, yLabel, hasGuideline, guideline,
-                   type == EnvType::Comparator);
+        renderPlot(curves, xLabel, yLabel, hasGuideline, guideline, true);
     }
     ImGui::End();
 }
 
-// Absorbance: ref + sample pickers, [Compute], X-unit / T%/A toggles,
-// comment, export. The plot lives in the View window.
+// Absorbance: a scrollable list of curves, each with independent reference and
+// sample artifact selectors (dataset + Average/Raw + member), plus a large
+// "Add absorbance curve" button. Compute is automatic (resultsDirty_ set on any
+// change). Only the curve list scrolls; the comment stays pinned at the bottom.
 void EnvironmentSession::renderAbsorbanceConfig() {
-    // ── picker contract (D1): open workspace tabs ∪ not-yet-open cross
-    // sources; picking a cross source with no open tab auto-opens it.
     std::vector<std::pair<std::string, std::string>> datasets;  // (key, label)
     for (const auto& sess : appState.sessions)
         datasets.emplace_back(sess->key, sess->label());
     for (const auto& src : appState.sessionTab.sources) {
-        if (sessionOpen(appState.sessionTab.multiWorkspacePath + "#" + src.id))
-            continue;
-        datasets.emplace_back(appState.sessionTab.multiWorkspacePath + "#" + src.id,
-                              src.name + " (auto-open)");
+        const std::string key = appState.sessionTab.multiWorkspacePath + "#" + src.id;
+        if (sessionOpen(key)) continue;
+        datasets.emplace_back(key, src.name);
     }
 
-    auto pickDataset = [&](const char* comboLabel, std::string& keyOut,
-                           std::string& memberOut) {
-        std::string current = keyOut.empty() ? "" : sessionLabelForKey(keyOut);
-        if (ImGui::BeginCombo(comboLabel, current.c_str())) {
-            for (const auto& [key, label] : datasets) {
-                if (ImGui::Selectable(label.c_str(), key == keyOut)) {
-                    if (key != keyOut) dirty = true;
-                    keyOut = key;
-                    memberOut.clear();
-                    // Picker contract: cross sources auto-open (in-memory load).
-                    const std::string crossPrefix =
-                        appState.sessionTab.multiWorkspacePath + "#";
-                    if (key.rfind(crossPrefix, 0) == 0 && !sessionOpen(key)) {
-                        openEmbeddedInNewTab(appState,
-                                             appState.sessionTab.multiWorkspacePath,
-                                             key.substr(crossPrefix.size()));
+    static const int kArtifacts[2] = {
+        static_cast<int>(ComparatorArtifact::AverageSpectrum),
+        static_cast<int>(ComparatorArtifact::RawSpectrum)};
+
+    // One selector (dataset + artifact + member), each on its own labelled
+    // row so every control stays fully visible (no SameLine clipping).
+    // Returns true on any change.
+    auto selector = [&](const char* id, std::string& key, int& artifact,
+                        std::string& member) -> bool {
+        bool changed = false;
+
+        // Dataset.
+        ImGui::TextUnformatted("Dataset");
+        ImGui::SameLine(90.0f);
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        const std::string dsCur = key.empty() ? "" : sourceLabel(key);
+        if (ImGui::BeginCombo((std::string("##ds") + id).c_str(),
+                              dsCur.empty() ? "Select dataset..." : dsCur.c_str())) {
+            for (const auto& [k, label] : datasets) {
+                if (ImGui::Selectable(label.c_str(), k == key)) {
+                    if (k != key) {
+                        key = k;
+                        member.clear();
+                        changed = true;
                     }
                 }
             }
             ImGui::EndCombo();
         }
-    };
 
-    auto pickMember = [&](const char* comboLabel, const std::string& key,
-                          std::string& memberOut) {
-        const auto members = sessionMembers(key);
-        std::string current;
-        for (const auto& m : members)
-            if (m.first == memberOut) current = memberLabel(m);
-        if (ImGui::BeginCombo(comboLabel, current.c_str())) {
-            for (const auto& m : members) {
-                if (ImGui::Selectable(memberLabel(m).c_str(), m.first == memberOut)) {
-                    if (m.first != memberOut) dirty = true;
-                    memberOut = m.first;
+        // Artifact (Average / Raw spectrum only).
+        ImGui::TextUnformatted("Artifact");
+        ImGui::SameLine(90.0f);
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        if (ImGui::BeginCombo((std::string("##art") + id).c_str(),
+                              artifactLabel(static_cast<ComparatorArtifact>(artifact)))) {
+            for (int a : kArtifacts) {
+                if (ImGui::Selectable(artifactLabel(static_cast<ComparatorArtifact>(a)),
+                                      a == artifact)) {
+                    if (a != artifact) { artifact = a; member.clear(); changed = true; }
                 }
             }
             ImGui::EndCombo();
         }
+
+        // Member dropdown only for Raw spectrum — the Average artifact has a
+        // single "average" member per dataset, so the picker is redundant.
+        if (artifact != static_cast<int>(ComparatorArtifact::AverageSpectrum)) {
+            std::vector<std::string> ids;
+            bool available = false, st = false;
+            for (const auto& src : comparatorSources(appState)) {
+                if (src.key != key) continue;
+                ArtifactInfo info = artifactInfo(*src.ws,
+                                                 static_cast<ComparatorArtifact>(artifact),
+                                                 src.key);
+                available = info.available;
+                st = info.stale;
+                for (const auto& m : info.members) ids.push_back(m.id);
+                break;
+            }
+            std::string memCur = member;
+            if (std::find(ids.begin(), ids.end(), member) == ids.end()) memCur.clear();
+            const char* preview = !memCur.empty() ? memCur.c_str()
+                                  : ids.empty()    ? "\xE2\x80\x94"          // "—"
+                                                   : ids.front().c_str();
+            ImGui::TextUnformatted("Member");
+            ImGui::SameLine(90.0f);
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            if (!available) ImGui::PushStyleColor(ImGuiCol_Text,
+                ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+            else if (st) ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.2f, 1.0f));
+            if (ImGui::BeginCombo((std::string("##mem") + id).c_str(), preview)) {
+                for (const auto& idv : ids) {
+                    if (ImGui::Selectable(idv.c_str(), idv == memCur)) {
+                        if (idv != member) { member = idv; changed = true; }
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            if (!available || st) ImGui::PopStyleColor();
+        }
+        return changed;
     };
 
-    ImGui::TextUnformatted("Reference");
-    ImGui::SameLine(120.0f);
-    pickDataset("##refDataset", refKey, refMember);
-    ImGui::TextUnformatted("Member");
-    ImGui::SameLine(120.0f);
-    pickMember("##refMember", refKey, refMember);
-
-    ImGui::Separator();
-    ImGui::TextUnformatted("Samples");
     int removeIdx = -1;
-    for (size_t i = 0; i < samples.size(); ++i) {
-        const bool available = sessionOpen(samples[i].first);
-        ImGui::Text("%s", available
-                      ? (sessionLabelForKey(samples[i].first) + " / " +
-                         samples[i].second).c_str()
-                      : (sessionLabelForKey(samples[i].first) + " / " +
-                         samples[i].second + "  (unavailable)").c_str());
-        if (!available) {
-            ImGui::SameLine();
-            ImGui::TextDisabled("(closed workspace)");
-        }
-        ImGui::SameLine();
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-        if (ImGui::Button(("x##sample" + std::to_string(i)).c_str()))
-            removeIdx = static_cast<int>(i);
-        ImGui::PopStyleColor();
-    }
-    if (removeIdx >= 0) {
-        samples.erase(samples.begin() + removeIdx);
-        computed = false;
-        dirty = true;
-        appState.needsRedraw = true;
-    }
 
-    static std::string newSampleKey, newSampleMember;
-    pickDataset("##newSampleDataset", newSampleKey, newSampleMember);
-    ImGui::SameLine();
-    pickMember("##newSampleMember", newSampleKey, newSampleMember);
-    ImGui::SameLine();
-    if (ImGui::Button("+ Add Sample") && !newSampleKey.empty() &&
-        !newSampleMember.empty()) {
-        samples.emplace_back(newSampleKey, newSampleMember);
-        computed = false;
-        dirty = true;
-        appState.needsRedraw = true;
-    }
+    // Reserve the non-scrolling bottom (Add button + comment) so only the
+    // curve list scrolls and the comment stays visible.
+    const float lineH = ImGui::GetTextLineHeightWithSpacing();
+    const float addButtonH =
+        ImGui::GetFrameHeight() + ImGui::GetStyle().FramePadding.y * 2.0f + 8.0f;
+    const float bottomReserve = addButtonH + 7.0f * lineH;
+    ImGui::BeginChild("##absorbanceCurves", ImVec2(0.0f, -bottomReserve), true,
+                      ImGuiWindowFlags_AlwaysVerticalScrollbar);
 
-    ImGui::Separator();
+    for (size_t ci = 0; ci < curves.size(); ++ci) {
+        auto& c = curves[ci];
+        ImGui::PushID(static_cast<int>(ci));
+        bool changed = false;
+        {
+            const AccentColor ac = StringToAccentColor(appState.currentAccentColor);
+            ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
+            ImGui::PushStyleColor(ImGuiCol_Border, GetAccentSubtle(ac));
+            const bool open = ImGui::BeginChild("curve", ImVec2(0.0f, 0.0f),
+                                                ImGuiChildFlags_Borders |
+                                                    ImGuiChildFlags_AutoResizeY);
+            ImGui::PopStyleColor();
+            ImGui::PopStyleVar(2);
+            if (open) {
+                // Thick left accent line spanning the whole curve group, in
+                // the curve's tab20 color (matches the plot line + legend).
+                {
+                    ImDrawList* dl = ImGui::GetWindowDrawList();
+                    const ImVec2 wpos = ImGui::GetWindowPos();
+                    const ImVec2 wsize = ImGui::GetWindowSize();
+                    dl->AddRectFilled(
+                        ImVec2(wpos.x + 2.0f, wpos.y + 2.0f),
+                        ImVec2(wpos.x + 6.0f, wpos.y + wsize.y - 2.0f),
+                        ImGui::GetColorU32(tab20Color(ci)));
+                }
+                ImGui::TextUnformatted(("Curve " + std::to_string(ci + 1)).c_str());
+                if (!c.status.empty()) {
+                    ImGui::SameLine();
+                    ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "(%s)", c.status.c_str());
+                }
+                ImGui::SameLine();
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+                if (ImGui::Button(("x##remove" + std::to_string(ci)).c_str()))
+                    removeIdx = static_cast<int>(ci);
+                ImGui::PopStyleColor();
 
-    // X unit / Y mode (T% / A) toggles.
-    renderXUnitButtons();
-    {
-        const ImVec4 colActive = ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive);
-        const ImVec4 colInactive(0.22f, 0.22f, 0.22f, 0.7f);
-        ImGui::SameLine();
-        const char* modes[2] = {"T%", "A"};
-        for (int m = 0; m < 2; ++m) {
-            ImGui::PushStyleColor(ImGuiCol_Button, yMode == m ? colActive : colInactive);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, yMode == m ? colActive : colInactive);
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, colActive);
-            if (ImGui::Button(modes[m])) {
-                if (yMode != m) { yMode = m; applyYMode(); }
+                ImGui::TextUnformatted("Reference");
+                ImGui::Indent();
+                changed |= selector("ref", c.refKey, c.refArtifact, c.refMember);
+                ImGui::Unindent();
+                ImGui::TextUnformatted("Sample");
+                ImGui::Indent();
+                changed |= selector("smp", c.sampleKey, c.sampleArtifact, c.sampleMember);
+                ImGui::Unindent();
             }
-            ImGui::PopStyleColor(3);
-            if (m < 1) ImGui::SameLine();
+            ImGui::EndChild();
+        }
+        ImGui::PopID();
+        if (changed) {
+            resultsDirty_ = true;
+            dirty = true;
+            appState.needsRedraw = true;
         }
     }
-    renderYAxisControls();
+    ImGui::EndChild();
 
-    const bool pickerReady = !refKey.empty() && !refMember.empty() && !samples.empty();
-    if (batchActive_) {
-        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f),
-                           "Computing... %d/%d", completedCount_, totalSubmitted_);
-    } else {
+    if (removeIdx >= 0) {
+        curves.erase(curves.begin() + removeIdx);
+        resultsDirty_ = true;
+        dirty = true;
+        appState.needsRedraw = true;
+    }
+
+    // Large "Add absorbance curve" button pinned below the list.
+    {
         const AccentColor ac = StringToAccentColor(appState.currentAccentColor);
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.0f, 8.0f));
         ImGui::PushStyleColor(ImGuiCol_Button, GetAccentMuted(ac));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, GetAccentHovered(ac));
-        if (ImGui::Button("Compute", ImVec2(120, 0)) && pickerReady) {
-            startCompute(appState);
+        if (ImGui::Button("+ Add absorbance curve", ImVec2(-1.0f, 0.0f))) {
+            curves.emplace_back();
+            resultsDirty_ = true;
+            dirty = true;
+            appState.needsRedraw = true;
         }
         ImGui::PopStyleColor(2);
-        if (!pickerReady && ImGui::IsItemHovered())
-            ImGui::SetTooltip("Pick a reference, its member, and at least one sample.");
+        ImGui::PopStyleVar();
     }
 
     ImGui::Separator();
     renderCommentEditor();
-    // Phase 4: persist as a named experiment in the open .cross.h5.
-    if (appState.sessionTab.multiWorkspaceOpen) {
-        if (ImGui::Button("Save Experiment")) save(appState);
-        if (dirty) {
-            ImGui::SameLine();
-            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "Unsaved changes");
-        } else if (!id.empty()) {
-            ImGui::SameLine();
-            ImGui::TextDisabled("Saved");
-        }
-    } else {
-        ImGui::TextDisabled("Open a multi-workspace file to save experiments.");
-    }
-    if (computed) {
-        if (ImGui::Button("Export CSV...")) exportCsv();
-        ImGui::SameLine();
-    }
 }
 
 // Comment editor (multi-line), placed above the plot in both env types.
@@ -1141,6 +1115,25 @@ void EnvironmentSession::renderXUnitButtons() {
     if (xUnitSelector != prevXUnitSelector) prevXUnitSelector = xUnitSelector;
 }
 
+// T% / A toggle (Absorbance only): rewrites every curve's display Y in place.
+void EnvironmentSession::renderYModeButtons() {
+    const ImVec4 colActive = ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive);
+    const ImVec4 colInactive(0.22f, 0.22f, 0.22f, 0.7f);
+    const char* modes[2] = {"Transmittance [%]", "Absorbance"};
+    ImGui::TextUnformatted("Y mode");
+    ImGui::SameLine();
+    for (int m = 0; m < 2; ++m) {
+        ImGui::PushStyleColor(ImGuiCol_Button, yMode == m ? colActive : colInactive);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, yMode == m ? colActive : colInactive);
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, colActive);
+        if (ImGui::Button(modes[m])) {
+            if (yMode != m) { yMode = m; applyYMode(); }
+        }
+        ImGui::PopStyleColor(3);
+        if (m < 1) ImGui::SameLine();
+    }
+}
+
 // Y-axis ranging controls (all / tight / force) + forced min/max inputs —
 // the same scheme as the Spectrum/Average/SNR view panels.
 void EnvironmentSession::renderYAxisControls() {
@@ -1239,23 +1232,29 @@ void EnvironmentSession::renderCursorToggle() {
     }
 }
 
-// Plot Ranging panel (comparator): the spectrum-view navigation block (X
-// unit, Y scale, Y axis, cursor) split into its own dockable window.
+// Plot Ranging panel: the spectrum-view navigation block (X unit, Y axis,
+// cursor, downsample — plus the T%/A toggle for Absorbance and the Y-scale
+// lin/log/dB for Comparator) split into its own dockable window.
 void EnvironmentSession::renderRangingWindow() {
     ImGui::SetNextWindowDockID(mainDockSpaceId(), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Plot Ranging##envrange")) {
         if (ImGui::IsWindowAppearing()) appState.needsRedraw = true;
         forceDockSelection();
+        // Absorbance: T% / A toggle (absorbance-specific; the result Y axis).
+        if (type == EnvType::Absorbance) {
+            renderYModeButtons();
+            ImGui::Separator();
+        }
         // Interferogram artifacts plot against sample index — the unit
         // selector is meaningless and stays locked (gatherCurves skips
         // conversion for xUnit == -1 members).
-        const bool ifgArtifact = artifactSelector >= 4;
+        const bool ifgArtifact = type == EnvType::Comparator && artifactSelector >= 4;
         if (ifgArtifact) ImGui::BeginDisabled();
         renderXUnitButtons();
         if (ifgArtifact) ImGui::EndDisabled();
         if (ImGui::IsItemHovered() && ifgArtifact)
             ImGui::SetTooltip("X unit fixed for interferograms (sample index).");
-        renderYScaleButtons();
+        if (type == EnvType::Comparator) renderYScaleButtons();
         renderYAxisControls();
         ImGui::Separator();
         renderCursorToggle();
@@ -1552,8 +1551,10 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
                 if (px == &c.x) { dy = c.y; py = &dy; }
                 for (double& v : dy) v = 10.0 * std::log10(std::max(v, 1e-300));
             }
+            ImPlotSpec spec;
+            if (c.color.w > 0.0f) spec.LineColor = c.color;
             ImPlot::PlotLine(c.label.c_str(), px->data(), py->data(),
-                             static_cast<int>(std::min(px->size(), py->size())));
+                             static_cast<int>(std::min(px->size(), py->size())), spec);
             curveColors[k] = ImPlot::GetLastItemColor();
         }
         if (showLegend) ImPlot::PopColormap();
@@ -1675,9 +1676,11 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
                 std::snprintf(header, sizeof(header), "X: %.2f cm-1 / %.4f um / %.4f THz",
                               cm1, um, thz);
 
-            // (color, text) lines: white header + one colored line per curve.
+            // White value lines: header + one per curve, each preceded by a
+            // small color patch matching the curve's line (no labels/dataset
+            // names — the patch ties the value to its legend entry).
             std::vector<std::pair<ImVec4, std::string>> lines;
-            lines.emplace_back(ImVec4(1, 1, 1, 1), header);
+            lines.emplace_back(ImVec4(0, 0, 0, 0), header);   // w==0 → no patch
             for (size_t k = 0; k < curves.size(); ++k) {
                 const auto& c = curves[k];
                 if (c.x.empty() || c.y.empty()) continue;
@@ -1687,16 +1690,21 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
                 cursorSpec.MarkerFillColor = curveColors[k];
                 ImPlot::PlotScatter(("##EnvCursorPt" + c.label).c_str(),
                                     &mx, &yv, 1, cursorSpec);
-                char line[512];
-                std::snprintf(line, sizeof(line), "%s: %.4e", c.shortLabel.c_str(), yv);
+                char line[64];
+                std::snprintf(line, sizeof(line), "%.4e", yv);
                 lines.emplace_back(curveColors[k], line);
             }
 
-            // Color-coded info box on the plot draw list, clamped to the plot.
+            // Info box on the plot draw list, clamped to the plot.
             const float lineH = ImGui::GetTextLineHeightWithSpacing();
+            const float patchW = 14.0f;
+            const float patchH = std::max(4.0f, lineH - 6.0f);
             float boxW = 0.0f;
-            for (const auto& [col, text] : lines)
-                boxW = std::max(boxW, ImGui::CalcTextSize(text.c_str()).x);
+            for (const auto& [col, text] : lines) {
+                float w = ImGui::CalcTextSize(text.c_str()).x;
+                if (col.w > 0.0f) w += patchW + 6.0f;   // color patch + gap
+                boxW = std::max(boxW, w);
+            }
             boxW += 16.0f;
             const float boxH = lines.size() * lineH + 8.0f;
             ImVec2 pos = ImPlot::PlotToPixels(mx, mouse.y);
@@ -1710,7 +1718,17 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
             dl->AddRectFilled(pos, ImVec2(pos.x + boxW, pos.y + boxH), IM_COL32(0, 0, 0, 200), 4.0f);
             float ty = pos.y + 4.0f;
             for (const auto& [col, text] : lines) {
-                dl->AddText(ImVec2(pos.x + 8.0f, ty), ImGui::GetColorU32(col), text.c_str());
+                if (col.w > 0.0f) {
+                    dl->AddRectFilled(ImVec2(pos.x + 8.0f, ty + (lineH - patchH) * 0.5f),
+                                      ImVec2(pos.x + 8.0f + patchW,
+                                             ty + (lineH - patchH) * 0.5f + patchH),
+                                      ImGui::GetColorU32(col));
+                    dl->AddText(ImVec2(pos.x + 8.0f + patchW + 6.0f, ty),
+                                IM_COL32(255, 255, 255, 255), text.c_str());
+                } else {
+                    dl->AddText(ImVec2(pos.x + 8.0f, ty),
+                                IM_COL32(255, 255, 255, 255), text.c_str());
+                }
                 ty += lineH;
             }
         }
@@ -1743,59 +1761,60 @@ void EnvironmentSession::exportCsv() {
         return;
     }
 
+    // Build the display curves to export (Comparator: gatherCurves respects
+    // the Included datasets checkboxes; Absorbance: every computed curve).
+    std::vector<ComparatorCurve> curves;
     if (type == EnvType::Comparator) {
-        // Export exactly the displayed curves (gatherCurves respects the
-        // Included datasets checkboxes) within the chosen X range: all /
-        // current plot area (viewXMin/Max) / manual (exportXMin/Max).
-        double xLo = 0.0, xHi = 0.0;
-        bool rangeFilter = false;
-        if (exportXRangeMode == 1 && viewXMin < viewXMax) {
-            xLo = viewXMin;
-            xHi = viewXMax;
-            rangeFilter = true;
-        } else if (exportXRangeMode == 2 && exportXMin < exportXMax) {
-            xLo = exportXMin;
-            xHi = exportXMax;
-            rangeFilter = true;
-        }
-        const auto curves = gatherCurves(appState);
-        // Per-curve filtered points (wide table, padded to the longest curve).
-        std::vector<std::vector<double>> fx(curves.size()), fy(curves.size());
-        size_t n = 0;
-        for (size_t k = 0; k < curves.size(); ++k) {
-            const auto& c = curves[k];
-            for (size_t i = 0; i < c.x.size() && i < c.y.size(); ++i) {
-                if (rangeFilter && (c.x[i] < xLo || c.x[i] > xHi)) continue;
-                fx[k].push_back(c.x[i]);
-                fy[k].push_back(c.y[i]);
-            }
-            n = std::max(n, fx[k].size());
-        }
-        for (const auto& c : curves)
-            ofs << ",\"" << c.label << " x\",\"" << c.label << " y\"";
-        ofs << "\n";
-        for (size_t i = 0; i < n; ++i) {
-            bool first = true;
-            for (size_t k = 0; k < curves.size(); ++k) {
-                ofs << (first ? "" : ",");
-                first = false;
-                if (i < fx[k].size()) ofs << fx[k][i];
-                ofs << ",";
-                if (i < fy[k].size()) ofs << fy[k][i];
-            }
-            ofs << "\n";
-        }
+        curves = gatherCurves(appState);
     } else {
-        ofs << "x,reference";
-        for (const auto& [key, y] : curveY)
-            ofs << ",\"" << sessionLabelForKey(key.first) << "/" << key.second << "\"";
-        ofs << "\n";
-        for (size_t i = 0; i < gridX.size(); ++i) {
-            ofs << gridX[i] << "," << refY[i];
-            for (const auto& [key, y] : curveY)
-                ofs << "," << y[i];
-            ofs << "\n";
+        for (const auto& c : this->curves) {
+            if (c.gridX.empty() || c.curveY.empty()) continue;
+            ComparatorCurve cc;
+            cc.label = curveLabel(c);
+            cc.x = c.gridX;
+            cc.y = c.curveY;
+            curves.push_back(std::move(cc));
         }
+    }
+
+    // X range filter: all / current plot area (viewXMin/Max) / manual.
+    double xLo = 0.0, xHi = 0.0;
+    bool rangeFilter = false;
+    if (exportXRangeMode == 1 && viewXMin < viewXMax) {
+        xLo = viewXMin;
+        xHi = viewXMax;
+        rangeFilter = true;
+    } else if (exportXRangeMode == 2 && exportXMin < exportXMax) {
+        xLo = exportXMin;
+        xHi = exportXMax;
+        rangeFilter = true;
+    }
+
+    // Per-curve filtered points (wide table, padded to the longest curve).
+    std::vector<std::vector<double>> fx(curves.size()), fy(curves.size());
+    size_t n = 0;
+    for (size_t k = 0; k < curves.size(); ++k) {
+        const auto& c = curves[k];
+        for (size_t i = 0; i < c.x.size() && i < c.y.size(); ++i) {
+            if (rangeFilter && (c.x[i] < xLo || c.x[i] > xHi)) continue;
+            fx[k].push_back(c.x[i]);
+            fy[k].push_back(c.y[i]);
+        }
+        n = std::max(n, fx[k].size());
+    }
+    for (const auto& c : curves)
+        ofs << ",\"" << c.label << " x\",\"" << c.label << " y\"";
+    ofs << "\n";
+    for (size_t i = 0; i < n; ++i) {
+        bool first = true;
+        for (size_t k = 0; k < curves.size(); ++k) {
+            ofs << (first ? "" : ",");
+            first = false;
+            if (i < fx[k].size()) ofs << fx[k][i];
+            ofs << ",";
+            if (i < fy[k].size()) ofs << fy[k][i];
+        }
+        ofs << "\n";
     }
     ofs.close();
     appState.saveToastUntil = glfwGetTime() + 1.5;
@@ -1831,11 +1850,15 @@ static nlohmann::json experimentConfigJson(const EnvironmentSession& env) {
     // a closed-but-kept experiment does not auto-reopen on project load.
     j["tabHidden"] = env.tabHidden;
     if (env.type == EnvType::Absorbance) {
-        j["refKey"] = env.refKey;
-        j["refMember"] = env.refMember;
-        j["samples"] = nlohmann::json::array();
-        for (const auto& smp : env.samples)
-            j["samples"].push_back({smp.first, smp.second});
+        j["curves"] = nlohmann::json::array();
+        for (const auto& c : env.curves) {
+            j["curves"].push_back({{"refKey", c.refKey},
+                                   {"refArtifact", c.refArtifact},
+                                   {"refMember", c.refMember},
+                                   {"sampleKey", c.sampleKey},
+                                   {"sampleArtifact", c.sampleArtifact},
+                                   {"sampleMember", c.sampleMember}});
+        }
     } else {
         j["artifactSelector"] = env.artifactSelector;
         j["comparatorKeys"] = env.comparatorKeys;
@@ -1874,12 +1897,17 @@ static void experimentApplyConfig(EnvironmentSession& env, const nlohmann::json&
     // Legacy configs without the key default to visible (today's behavior).
     env.tabHidden = j.value("tabHidden", false);
     if (env.type == EnvType::Absorbance) {
-        env.refKey = j.value("refKey", "");
-        env.refMember = j.value("refMember", "");
-        env.samples.clear();
-        for (const auto& s : j.value("samples", nlohmann::json::array()))
-            if (s.is_array() && s.size() == 2 && s[0].is_string() && s[1].is_string())
-                env.samples.emplace_back(s[0].get<std::string>(), s[1].get<std::string>());
+        env.curves.clear();
+        for (const auto& cc : j.value("curves", nlohmann::json::array())) {
+            AbsorbanceCurve c;
+            c.refKey = cc.value("refKey", "");
+            c.refArtifact = cc.value("refArtifact", 0);
+            c.refMember = cc.value("refMember", "");
+            c.sampleKey = cc.value("sampleKey", "");
+            c.sampleArtifact = cc.value("sampleArtifact", 0);
+            c.sampleMember = cc.value("sampleMember", "");
+            env.curves.push_back(std::move(c));
+        }
     } else {
         env.artifactSelector = j.value("artifactSelector", 0);
         // log/dB are invalid for T100/IFG — never restore an invalid state
@@ -1900,21 +1928,21 @@ static void experimentApplyConfig(EnvironmentSession& env, const nlohmann::json&
 static nlohmann::json experimentStatsJson(const EnvironmentSession& env) {
     nlohmann::json stats = nlohmann::json::array();
     if (env.type != EnvType::Absorbance) return stats;
-    for (const auto& [key, y] : env.curveY) {
+    for (const auto& c : env.curves) {
+        if (c.curveY.empty()) continue;
         nlohmann::json s;
-        s["label"] = key.first + "/" + key.second;
-        if (!y.empty()) {
-            auto [mn, mx] = std::minmax_element(y.begin(), y.end());
-            double sum = 0.0;
-            for (double v : y) sum += v;
-            double mean = sum / static_cast<double>(y.size());
-            double sq = 0.0;
-            for (double v : y) sq += (v - mean) * (v - mean);
-            s["min"] = *mn;
-            s["max"] = *mx;
-            s["mean"] = mean;
-            s["std"] = std::sqrt(sq / static_cast<double>(y.size()));
-        }
+        s["label"] = env.curveLabel(c);
+        const auto& y = c.curveY;
+        auto [mn, mx] = std::minmax_element(y.begin(), y.end());
+        double sum = 0.0;
+        for (double v : y) sum += v;
+        double mean = sum / static_cast<double>(y.size());
+        double sq = 0.0;
+        for (double v : y) sq += (v - mean) * (v - mean);
+        s["min"] = *mn;
+        s["max"] = *mx;
+        s["mean"] = mean;
+        s["std"] = std::sqrt(sq / static_cast<double>(y.size()));
         stats.push_back(std::move(s));
     }
     return stats;
@@ -1937,13 +1965,12 @@ bool crossSaveExperiment(AppState& s, EnvironmentSession& env,
         fps[key] = fingerprintToJson(fp);
     std::map<std::string, std::vector<double>> results;
     if (env.type == EnvType::Absorbance && env.computed) {
-        results["x_common"] = env.gridX;
-        results["ref_y"] = env.refY;
         size_t k = 0;
-        for (const auto& smp : env.samples) {
-            auto it = env.ratioY.find(std::make_pair(smp.first, smp.second));
-            if (it != env.ratioY.end())
-                results["ratio_" + std::to_string(k) + "_y"] = it->second;
+        for (const auto& c : env.curves) {
+            if (!c.gridX.empty() && !c.ratioY.empty()) {
+                results["curve_" + std::to_string(k) + "_x"] = c.gridX;
+                results["curve_" + std::to_string(k) + "_ratio"] = c.ratioY;
+            }
             ++k;
         }
     }
@@ -1989,27 +2016,22 @@ bool crossLoadExperiments(AppState& s, const std::string& path, std::string& err
             // derived via applyYMode), so no secondary math exists in the
             // loader: what was plotted is what is stored (bitwise).
             if (t == EnvType::Absorbance && env->computed) {
-                auto x = results.find("x_common");
-                auto r = results.find("ref_y");
-                if (x != results.end() && r != results.end()) {
-                    env->gridX = x->second;
-                    env->refY = r->second;
-                    size_t k = 0;
-                    bool anyRatio = false;
-                    for (const auto& smp : env->samples) {
-                        auto it = results.find("ratio_" + std::to_string(k) + "_y");
-                        if (it != results.end()) {
-                            env->ratioY[std::make_pair(smp.first, smp.second)] = it->second;
-                            anyRatio = true;
-                        }
-                        ++k;
+                size_t k = 0;
+                bool any = false;
+                for (auto& c : env->curves) {
+                    auto x = results.find("curve_" + std::to_string(k) + "_x");
+                    auto r = results.find("curve_" + std::to_string(k) + "_ratio");
+                    if (x != results.end() && r != results.end() &&
+                        !x->second.empty() && x->second.size() == r->second.size()) {
+                        c.gridX = x->second;
+                        c.ratioY = r->second;
+                        any = true;
                     }
-                    if (anyRatio && !env->gridX.empty()) {
-                        env->applyYMode();   // sets dirty — reset below
-                        env->shouldAutoscale = true;
-                    } else {
-                        env->computed = false;
-                    }
+                    ++k;
+                }
+                if (any) {
+                    env->applyYMode();   // sets dirty — reset below
+                    env->shouldAutoscale = true;
                 } else {
                     env->computed = false;
                 }

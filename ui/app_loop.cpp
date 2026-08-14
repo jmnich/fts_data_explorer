@@ -16,6 +16,7 @@
 #include "app_dirs.h"
 #include "file_browser.h"
 #include "session/cross_store.h"
+#include "environment_session.h"
 #include "layout_persistence.h"
 #include <imgui.h>
 #include "imgui_internal.h" // DockBuilder API
@@ -1385,14 +1386,13 @@ void AppLoop::handleInput() {
             }  // wsActive-only shortcuts (Ctrl+Y/A/D touch appState.active)
 
             // 'Ctrl+Q' - Toggle tracking cursor (only on initial press).
-            // Workspace: spectrum view cursor. Comparator: experiment cursor.
+            // Workspace: spectrum view cursor. Experiment (either type):
+            // the experiment cursor.
             if (qKeyPressed && !appState.qKeyPressedLastFrame) {
                 if (wsActive) {
                     appState.active->spectrum.showTrackingCursor =
                         !appState.active->spectrum.showTrackingCursor;
-                } else if (envActive &&
-                           appState.experiments[appState.activeExperimentIdx]->type ==
-                               EnvType::Comparator) {
+                } else if (envActive) {
                     auto& env = *appState.experiments[appState.activeExperimentIdx];
                     env.showTrackingCursor = !env.showTrackingCursor;
                     env.dirty = true;   // persisted like the panel toggle
@@ -1881,6 +1881,13 @@ void AppLoop::renderUI() {
                                           "Plot Ranging##envrange", "Export##envexp"}) {
                         if (ImGuiWindow* pw = ImGui::FindWindowByName(n)) {
                             if (pw->DockNode) {
+                                // Never override the user's tab choice among
+                                // stacked experiment panels (Plot Ranging /
+                                // Export share a node when stacked) — only
+                                // force when the node's current tab is a
+                                // non-experiment window.
+                                if (ImGuiWindow* sel = ImGui::FindWindowByID(pw->DockNode->SelectedTabId))
+                                    if (isExperimentPanelName(sel->Name)) continue;
                                 pw->DockNode->SelectedTabId = pw->TabId;
                                 if (pw->DockNode->TabBar)
                                     pw->DockNode->TabBar->NextSelectedTabId = pw->TabId;

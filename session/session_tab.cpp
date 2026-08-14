@@ -490,8 +490,8 @@ void SessionTab::renderActiveExperimentsPanel() {
         // not explicit = auto-all, i.e. every open workspace tab).
         std::string meta;
         if (env->type == EnvType::Absorbance) {
-            meta = std::to_string(env->samples.size()) + " sample" +
-                   (env->samples.size() == 1 ? "" : "s");
+            meta = std::to_string(env->curves.size()) + " curve" +
+                   (env->curves.size() == 1 ? "" : "s");
         } else {
             const size_t n = env->comparatorKeys.empty() && !env->comparatorKeysExplicit
                                  ? appState.sessions.size()

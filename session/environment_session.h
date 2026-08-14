@@ -1,7 +1,6 @@
 #pragma once
 
-#include "pthread_compat.h"   // GCC 16+: must precede <future>/<mutex> (_GNU_SOURCE undefined)
-#include <future>
+#include "pthread_compat.h"   // GCC 16+: must precede <mutex> (_GNU_SOURCE undefined)
 #include <map>
 #include <string>
 #include <utility>
@@ -9,6 +8,8 @@
 
 #include "session_base.h"
 #include "spectral_pool.h"
+
+#include <imgui.h>   // ImVec4 (ComparatorCurve::color)
 
 struct AppState;
 struct InterferogramMember;
@@ -35,6 +36,9 @@ enum class ComparatorArtifact {
 
 const char* experimentTypeName(EnvType t);              // "Absorbance" / "Comparator"
 const char* artifactLabel(ComparatorArtifact a); // "Average spectrum" / "SNR" / …
+// True if `name` is one of the experiment type's docked panels (stable window
+// names). Shared with app_loop.cpp's pre-DockSpace forced tab selection.
+bool isExperimentPanelName(const char* name);
 
 // One overlay curve: label + x/y already in the instance's display unit
 // (or sample index for interferograms).
@@ -42,6 +46,7 @@ struct ComparatorCurve {
     std::string label;       // full label (legend / CSV headers)
     std::string shortLabel;  // compact label (cursor info box, no dataset name)
     std::vector<double> x, y;
+    ImVec4 color;            // explicit line color; w==0 → use the colormap
 };
 
 // One selectable member of an artifact type. `xUnit` is the member's STORED
@@ -57,6 +62,17 @@ struct ArtifactInfo {
     bool available = false;              // ≥1 member
     bool stale = false;                  // any member stale
     std::vector<ArtifactMember> members;
+};
+
+// One absorbance record: a reference artifact and a sample artifact, each an
+// Average/Raw-spectrum member of some dataset, plus the computed result (the
+// overlapping X grid in the display unit + clamped ratio + display curve).
+// `status` is empty when the curve computed OK, else a short reason.
+struct AbsorbanceCurve {
+    std::string refKey;    int refArtifact = 0;    std::string refMember;
+    std::string sampleKey; int sampleArtifact = 0; std::string sampleMember;
+    std::vector<double> gridX, ratioY, curveY;
+    std::string status;
 };
 
 // Correction parameters used to derive the corrected-IFG OPD axis from a raw
@@ -122,17 +138,14 @@ public:
     // key = dataset stable key, value = member id ("" / absent = first member).
     std::map<std::string, std::string> memberPicks;
 
-    // Absorbance picks.
-    // STABLE keys — resolved per use; degraded, never re-pointed.
-    std::string refKey;
-    std::string refMember;
-    std::vector<std::pair<std::string, std::string>> samples;  // (workspaceKey, memberId)
-    // Computed results: common grid (display unit) + raw clamped ratio per
-    // sample (T%/A source, audit §5.2) + display curve per current yMode.
-    std::vector<double> gridX, refY;
-    std::map<std::pair<std::string, std::string>, std::vector<double>> ratioY;
-    std::map<std::pair<std::string, std::string>, std::vector<double>> curveY;
+    // Absorbance curves: one record per reference/sample pair. STABLE keys —
+    // resolved per use; degraded, never re-pointed.
+    std::vector<AbsorbanceCurve> curves;
+    // True once a compute ran and produced a ratio for ≥1 curve.
     bool computed = false;
+    // Set by any selector/curve mutation; consumed at the top of render() to
+    // re-run the synchronous compute.
+    bool resultsDirty_ = false;
 
     // T100-pattern plot interaction (t100.h subset).
     bool isSelectingXRange = false;
@@ -151,25 +164,16 @@ public:
     int exportXRangeMode = 0;
     double exportXMin = 0.0, exportXMax = 0.0;
 
-    // Async compute (IMGUI_GUIDE §13): futures + main-thread counters only.
-    std::vector<std::future<SpectralToolbox::ProcessedSpectrum>> pendingFutures_;
-    std::vector<SpectralRef> pendingRefs_;         // aligned with pendingFutures_
-    std::vector<ParamFingerprint> pendingFps_;     // aligned: params actually used
-    std::vector<SpectralToolbox::ProcessedSpectrum> results_;  // cm-1, ref first
-    int totalSubmitted_ = 0;
-    int completedCount_ = 0;
-    bool batchActive_ = false;
+    // Synchronous artifact-based compute (Average/Raw spectra, no FFT pool):
+    // per curve, resample the sample onto the reference's overlapping X region
+    // and divide (clamped). Idempotent; cheap enough to run on selector change.
+    void computeAbsorbance(AppState& s);
 
     EnvironmentSession(EnvType t, const std::string& name);
     EnvironmentSession(const EnvironmentSession&) = delete;
     EnvironmentSession& operator=(const EnvironmentSession&) = delete;
 
-    // Enqueue poolComputeRaw per ref (workers capture by value, never touch
-    // AppState — average_spectrum.cpp:616 pattern); cache hits enqueue a
-    // trivial ready task. Main-thread only.
-    void startCompute(AppState& s);
-    // Poll ready futures; apply results on completion (main thread only).
-    void tickAsync() override;
+    void tickAsync() override {}          // synchronous compute; no per-frame poll
     void render() override;              // config window + view window (docked)
     // Tab-selector close: DEACTIVATES the tab only (focus the Session tab) —
     // the instance stays live and listed in the Active Experiments panel.
@@ -185,9 +189,6 @@ public:
 
     // Rename the experiment (label + window title); marks dirty.
     void rename(const std::string& name);
-    // Save this experiment into the open .cross.h5 (id assigned on first
-    // save); clears dirty. No-op when no multi-workspace is open.
-    void save(AppState& s);
     // Re-derive the staleness flag from storedFingerprints vs the sources'
     // current params (open tab → parked session; not open → persisted
     // workspace.json). Call at load and after [Compute].
@@ -195,10 +196,16 @@ public:
     // Tab label with dirty star + staleness badge ("Name * ⚠").
     std::string tabLabel() const;
 
-    // yMode toggle: rewrite curveY from ratioY — instant, no recompute.
+    // yMode toggle: rewrite every curve's curveY from its ratioY — instant.
     void applyYMode();
-    // xUnit change: convert gridX in place (ratios are unit-independent).
+    // xUnit change: convert every curve's gridX in place (ratios are
+    // unit-independent).
     void convertXInPlace();
+    // Display label for a curve's source key (open-tab label, cross-source
+    // name, or the raw key).
+    std::string sourceLabel(const std::string& key) const;
+    // Legend/CSV label for one curve: "<sample>/<member> / <ref>/<member>".
+    std::string curveLabel(const AbsorbanceCurve& c) const;
 
     // Extract overlay curves for the selected artifact from the selected
     // datasets (public for the roundtrip test; pure data extraction).
@@ -224,13 +231,17 @@ private:
     std::vector<double> derivedOpdAxis(const std::string& sourceKey,
                                        const InterferogramMember& m,
                                        const IfgDeriveParams& p);
-    void finalizeCompute();              // ref grid + ratios + curveY (main thread)
+    // Extract one artifact member (x/y/xUnit) for a source key; false when the
+    // source is absent or the artifact has no members (mirrors gatherCurves).
+    bool extractArtifact(AppState& s, const std::string& key, ComparatorArtifact a,
+                         const std::string& memberId, ArtifactMember& out);
     void renderConfigWindow();           // instanceName (pickers/selectors/comment)
     void renderViewWindow();             // instanceName + " View" (plot)
     void renderAbsorbanceConfig();
     void renderComparatorConfig();
     void renderDatasetSelector();        // comparator included-datasets checkbox list
     void renderXUnitButtons();
+    void renderYModeButtons();           // Absorbance: T% / A toggle
     void renderYAxisControls();
     void renderYScaleButtons();          // lin/log/dB, gated off for T100/IFG
     void renderCursorToggle();

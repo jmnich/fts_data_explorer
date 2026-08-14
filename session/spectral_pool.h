@@ -57,7 +57,7 @@ struct PoolEntry {
 // degrades) or the member cannot be computed.
 SpectralToolbox::ProcessedSpectrum poolSpectrum(AppState& s, const SpectralRef& ref, int xUnit);
 
-// ── Async compute support (M3.2): the instance's startCompute runs on the
+// ── Async compute support (M3.2): callers (e.g. poolSpectrum) run on the
 // main thread; workers must never touch AppState (average_spectrum.cpp:616
 // pattern — read the member data on the main thread, capture by value). ──
 

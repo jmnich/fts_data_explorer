@@ -994,10 +994,12 @@ void test9_env() {
     CHECK(s.extraRedrawAfterKindSwitch == true);
     s.extraRedrawAfterKindSwitch = false;            // AppLoop consumes it
 
-    a1->refKey = "wsA"; a1->refMember = "specA";
-    a1->samples = {{"wsA", "specB"}};
-    CHECK(a2->refKey.empty());                       // independent state
-    CHECK(a2->samples.empty());
+    a1->curves.push_back(AbsorbanceCurve{});
+    a1->curves[0].refKey = "wsA";
+    a1->curves[0].refMember = "specA";
+    a1->curves[0].sampleKey = "wsA";
+    a1->curves[0].sampleMember = "specB";
+    CHECK(a2->curves.empty());                       // independent state
 
     // Activation + removal index fixups.
     activateExperiment(s, 0);
@@ -1115,133 +1117,91 @@ void test9b_envActivationParksWorkspace() {
 }
 
 
-// M3.3: T%/A parity vs the t100 panel (same-workspace ref+sample), clamp
-// cases, and the yMode toggle. Runs on the GLOBAL appState: the env
-// instance's tickAsync/finalizeCompute read the global (codebase
-// convention), so the pool-cache round-trip is only observable there.
+// M3.3: absorbance compute — synchronous, artifact-based. Ratio math
+// (T%/A), the yMode toggle, the division-by-zero clamps, and the
+// no-overlapping-X-region edge case.
 void test10_t100Parity() {
-    std::printf("test10: T%%/A parity vs t100 panel + clamps...\n");
-    AppState& s = ::appState;
-    // Fresh global state (tests run sequentially; nothing else holds it).
-    s.sessions.clear();
-    s.experiments.clear();
-    s.poolCache.clear();
-    s.activeTabKind = ActiveTabKind::Session;
-    s.activeSessionIdx = -1;
-    s.activeExperimentIdx = -1;
-    s.pendingSwapIdx = -1;
-    s.pendingSwapToSession = false;
+    std::printf("test10: absorbance compute (ratio/T%%/A + clamps + overlap)...\n");
+    AppState s;
+    auto sess = std::make_unique<WorkspaceSession>();
+    sess->key = "/tmp/parity.h5";
+    sess->path = "/tmp/parity.h5";
+    sess->workspace = makeFixtureWorkspace("parity");
+    sess->workspacePath = sess->path;
+    s.sessions.push_back(std::move(sess));
 
-    // Session with a panel-cache spectrum pair (cm-1). ACTIVE tab: the data
-    // lives in the flat fields — t100 reads the flat fields (panel
-    // back-pointer) and the pool's active branch reads the same fields, so
-    // both see identical spectra (the parity contract).
-    makeSession(s, "parity", "/tmp/parity.h5");
-    activateSession(s, 0);
-    s.active->datasetInfo = workspaceDatasetInfo(s.active->workspace);
-    s.active->spectrum.xUnitSelector = 0;
-    s.active->spectrum.refLaserTextbox = 1.55f;
-    s.active->spectrum.Kpadding = 2;
-    const std::vector<double> refX = {1000.0, 1250.0, 1500.0, 1750.0, 2000.0};
-    const std::vector<double> refY = {1.0, 1.0, 1.0, 1.0, 1.0};       // unit ref
-    const std::vector<double> smpX = {1000.0, 1500.0, 2000.0};
-    const std::vector<double> smpY = {0.8, 0.8, 0.8};                  // ratio 0.8
-    s.active->spectrum.cachedFrequencies["specRef"] = refX;
-    s.active->spectrum.cachedSpectra["specRef"] = refY;
-    s.active->spectrum.cachedFrequencies["specSmp"] = smpX;
-    s.active->spectrum.cachedSpectra["specSmp"] = smpY;
+    // Seed raw spectra members (the absorbance RawSpectrum artifact).
+    auto seedSpectra = [&](const std::string& id, std::vector<double> x,
+                           std::vector<double> y) {
+        TwoColumnMember m;
+        m.id = id;
+        m.kind = MemberKind::Original;
+        m.units = {"cm-1", "a.u."};
+        m.x = std::move(x);
+        m.y = std::move(y);
+        s.sessions[0]->workspace.spectra.members.push_back(std::move(m));
+    };
+    seedSpectra("specRef", {1000.0, 1250.0, 1500.0, 1750.0, 2000.0},
+                {1.0, 1.0, 1.0, 1.0, 1.0});                      // unit ref
+    seedSpectra("specSmp", {1000.0, 1500.0, 2000.0},
+                {0.8, 0.8, 0.8});                                // ratio 0.8
 
-    // t100 panel: reference = specRef, sample = specSmp.
-    s.active->t100.xUnitSelector = 0;
-    s.active->t100.refX = refX;
-    s.active->t100.refY = refY;
-    s.active->t100.refXUnit = 0;
-    s.active->t100.referenceAvailable = true;
-    CHECK(s.active->t100.computeTransmittanceForFile("specSmp") == true);
-    const std::vector<double> t100Y = s.active->t100.cachedTransY["specSmp"];
-    CHECK(t100Y.size() == refX.size());              // overlap = full ref grid
-    for (double v : t100Y) CHECK(std::fabs(v - 80.0) < 1e-12);   // 0.8*100
-
-    // Experiment instance: same ref/sample pair through the pool.
     EnvironmentSession* env = createExperiment(s, EnvType::Absorbance);
-    s.activeTabKind = ActiveTabKind::Workspace;      // pool reads flat fields
-    s.activeSessionIdx = 0;
-    env->refKey = "/tmp/parity.h5";
-    env->refMember = "specRef";
-    env->samples = {{"/tmp/parity.h5", "specSmp"}};
     env->xUnitSelector = 0;
-    env->startCompute(s);
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (env->batchActive_ && std::chrono::steady_clock::now() < deadline) {
-        env->tickAsync();
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    CHECK(env->batchActive_ == false);
+    env->curves.push_back(AbsorbanceCurve{});
+    AbsorbanceCurve& c = env->curves[0];
+    c.refKey = "/tmp/parity.h5";
+    c.refArtifact = static_cast<int>(ComparatorArtifact::RawSpectrum);
+    c.refMember = "specRef";
+    c.sampleKey = "/tmp/parity.h5";
+    c.sampleArtifact = static_cast<int>(ComparatorArtifact::RawSpectrum);
+    c.sampleMember = "specSmp";
+
+    env->computeAbsorbance(s);
     CHECK(env->computed == true);
-    checkVecEq(env->gridX, refX, "env gridX == ref X");
-    const auto rkey = std::make_pair(std::string("/tmp/parity.h5"), std::string("specSmp"));
-    CHECK(env->ratioY.count(rkey) == 1);
-    for (double v : env->ratioY[rkey]) CHECK(std::fabs(v - 0.8) < 1e-12);
-    for (double v : env->curveY[rkey]) CHECK(std::fabs(v - 80.0) < 1e-12);   // T% mode
+    CHECK(c.status.empty());
+    CHECK(c.gridX.size() == 5);                  // full ref grid (sample overlaps all)
+    for (double v : c.ratioY) CHECK(std::fabs(v - 0.8) < 1e-12);
+    for (double v : c.curveY) CHECK(std::fabs(v - 80.0) < 1e-12);   // T% mode
 
     // yMode toggle: A = -log10(ratio).
     env->yMode = 1;
     env->applyYMode();
     const double wantA = -std::log10(0.8);
-    for (double v : env->curveY[rkey]) CHECK(std::fabs(v - wantA) < 1e-12);
+    for (double v : c.curveY) CHECK(std::fabs(v - wantA) < 1e-12);
     env->yMode = 0;
     env->applyYMode();
-
-    // Recompute with identical params: the pool cache now hits (trivial
-    // tasks); the store-time fingerprint must match the session's current
-    // one so the entry stays valid (poolTryCache re-verification).
-    env->startCompute(s);
-    while (env->batchActive_ && std::chrono::steady_clock::now() < deadline) {
-        env->tickAsync();
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    CHECK(env->computed == true);
-    SpectralToolbox::ProcessedSpectrum cachedAgain;
-    CHECK(poolTryCache(s, SpectralRef{"/tmp/parity.h5", "specSmp"}, cachedAgain) == true);
-    CHECK(cachedAgain.spectrumY.size() == smpY.size());
 
     // Clamp: zero reference value → ratio 0, T% 0, A 0 (no NaN/Inf).
-    // Raw-data change → the app evicts the pool (clearWorkspacePanels /
-    // source reload); mirror that here so the stale entry can't mask the
-    // recompute.
-    std::vector<double> refY0 = refY;
-    refY0[2] = 0.0;                                  // division-by-zero trap
-    s.active->spectrum.cachedSpectra["specRef"] = refY0;
-    poolEvictKey(s, "/tmp/parity.h5");
-    env->startCompute(s);
-    while (env->batchActive_ && std::chrono::steady_clock::now() < deadline) {
-        env->tickAsync();
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
+    // spectra.members = [spec_record_0 (fixture), specRef, specSmp].
+    s.sessions[0]->workspace.spectra.members[1].y[2] = 0.0;   // specRef y[2] = 0
+    env->computeAbsorbance(s);
     CHECK(env->computed == true);
-    const auto& ratio = env->ratioY[rkey];
-    CHECK(ratio[2] == 0.0);                          // clamped, not NaN
+    CHECK(c.ratioY[2] == 0.0);                   // clamped, not NaN
     env->yMode = 1;
     env->applyYMode();
-    CHECK(env->curveY[rkey][2] == 0.0);              // A(0) = 0
-    CHECK(std::isfinite(env->curveY[rkey][2]));
+    CHECK(c.curveY[2] == 0.0);                   // A(0) = 0
+    CHECK(std::isfinite(c.curveY[2]));
     env->yMode = 0;
     env->applyYMode();
 
-    // Tiny ratio clamp: sample ≈ 0 → ratio ≤ 1e-15 → 0.
-    std::vector<double> smpY0 = {0.0, 0.0, 0.0};
-    s.active->spectrum.cachedSpectra["specSmp"] = smpY0;
-    poolEvictKey(s, "/tmp/parity.h5");               // raw-data change → evict
-    env->startCompute(s);
-    while (env->batchActive_ && std::chrono::steady_clock::now() < deadline) {
-        env->tickAsync();
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
+    // Tiny ratio clamp: sample all-zero → ratio ≤ 1e-15 → 0.
+    s.sessions[0]->workspace.spectra.members[2].y = {0.0, 0.0, 0.0};   // specSmp
+    env->computeAbsorbance(s);
     CHECK(env->computed == true);
-    for (double v : env->ratioY[rkey]) CHECK(v == 0.0);
+    for (double v : c.ratioY) CHECK(v == 0.0);
     env->yMode = 1;
     env->applyYMode();
-    for (double v : env->curveY[rkey]) CHECK(v == 0.0);
+    for (double v : c.curveY) CHECK(v == 0.0);
+
+    // No overlap: sample X entirely below the reference X → skipped + status.
+    s.sessions[0]->workspace.spectra.members[2].x = {10.0, 20.0, 30.0};   // specSmp
+    s.sessions[0]->workspace.spectra.members[2].y = {0.5, 0.5, 0.5};
+    env->computeAbsorbance(s);
+    CHECK(c.status == "No overlapping X region");
+    CHECK(c.gridX.empty() && c.curveY.empty());
+    CHECK(env->computed == false);               // no curve produced a ratio
+
     removeExperiment(s, 0);
 }
 
@@ -1420,7 +1380,7 @@ void test12_experimentPersistence() {
     s.pendingSwapToSession = false;
     s.pendingExperimentIdx = -1;
 
-    // Workspace with a panel-cache spectrum pair (test10 pattern).
+    // Workspace with two raw spectra members (test10 pattern).
     makeSession(s, "exp", "/tmp/parity.h5");
     activateSession(s, 0);
     s.active->datasetInfo = workspaceDatasetInfo(s.active->workspace);
@@ -1434,19 +1394,31 @@ void test12_experimentPersistence() {
     const std::vector<double> refY = {1.0, 1.0, 1.0, 1.0, 1.0};
     const std::vector<double> smpX = {1000.0, 1500.0, 2000.0};
     const std::vector<double> smpY = {0.8, 0.8, 0.8};
-    s.active->spectrum.cachedFrequencies["specRef"] = refX;
-    s.active->spectrum.cachedSpectra["specRef"] = refY;
-    s.active->spectrum.cachedFrequencies["specSmp"] = smpX;
-    s.active->spectrum.cachedSpectra["specSmp"] = smpY;
+    auto seedSpectra = [&](const std::string& id, const std::vector<double>& x,
+                           const std::vector<double>& y) {
+        TwoColumnMember m;
+        m.id = id;
+        m.kind = MemberKind::Original;
+        m.units = {"cm-1", "a.u."};
+        m.x = x;
+        m.y = y;
+        s.sessions[0]->workspace.spectra.members.push_back(std::move(m));
+    };
+    seedSpectra("specRef", refX, refY);
+    seedSpectra("specSmp", smpX, smpY);
 
-    // Absorbance instance: rename (dirty) + compute through the pool.
+    // Absorbance instance: rename (dirty) + synchronous artifact compute.
     s.pendingExperimentIdx = -1;   // the test drives compute directly; the queued env activation is not wanted
     activateSession(s, 0);
     EnvironmentSession* env = createExperiment(s, EnvType::Absorbance);
     s.pendingExperimentIdx = -1;   // cancel the queued activation (compute is driven directly)
-    env->refKey = "/tmp/parity.h5";
-    env->refMember = "specRef";
-    env->samples = {{"/tmp/parity.h5", "specSmp"}};
+    env->curves.push_back(AbsorbanceCurve{});
+    env->curves[0].refKey = "/tmp/parity.h5";
+    env->curves[0].refArtifact = static_cast<int>(ComparatorArtifact::RawSpectrum);
+    env->curves[0].refMember = "specRef";
+    env->curves[0].sampleKey = "/tmp/parity.h5";
+    env->curves[0].sampleArtifact = static_cast<int>(ComparatorArtifact::RawSpectrum);
+    env->curves[0].sampleMember = "specSmp";
     env->xUnitSelector = 0;
     env->comment = "my experiment";
     // Bugfix 2026-08-14: the strip key and plot id are RENAME-STABLE —
@@ -1456,15 +1428,8 @@ void test12_experimentPersistence() {
     env->rename("Absorbance Roundtrip");
     CHECK(env->stripKey == stripKey);
     CHECK(env->dirty == true);
-    env->startCompute(s);
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (env->batchActive_ && std::chrono::steady_clock::now() < deadline) {
-        env->tickAsync();
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    CHECK(env->batchActive_ == false);
+    env->computeAbsorbance(s);
     CHECK(env->computed == true);
-    const auto rkey = std::make_pair(std::string("/tmp/parity.h5"), std::string("specSmp"));
     CHECK(env->storedFingerprints.count("/tmp/parity.h5") == 1);
     CHECK(env->storedFingerprints["/tmp/parity.h5"].K == 2);
     CHECK(std::fabs(env->storedFingerprints["/tmp/parity.h5"].refLaser - 1.55f) < 1e-6);
@@ -1490,11 +1455,13 @@ void test12_experimentPersistence() {
     CHECK(config["name"] == "Absorbance Roundtrip");
     CHECK(config["comment"] == "my experiment");
     CHECK(config["computed"] == true);
-    CHECK(results.count("x_common") == 1);
-    checkVecEq(results["x_common"], refX, "persisted x_common");
-    checkVecEq(results["ref_y"], refY, "persisted ref_y");
-    CHECK(results.count("ratio_0_y") == 1);
-    checkVecEq(results["ratio_0_y"], env->ratioY[rkey], "persisted ratio");
+    CHECK(config["curves"].is_array() && config["curves"].size() == 1);
+    CHECK(config["curves"][0]["refMember"] == "specRef");
+    CHECK(config["curves"][0]["sampleMember"] == "specSmp");
+    CHECK(results.count("curve_0_x") == 1);
+    checkVecEq(results["curve_0_x"], refX, "persisted curve_0_x");
+    CHECK(results.count("curve_0_ratio") == 1);
+    checkVecEq(results["curve_0_ratio"], env->curves[0].ratioY, "persisted ratio");
     CHECK(fps["/tmp/parity.h5"]["K"] == 2);
     CHECK(stats.is_array());
 
@@ -1511,11 +1478,12 @@ void test12_experimentPersistence() {
     CHECK(e2->comment == "my experiment");
     CHECK(e2->dirty == false);
     CHECK(e2->computed == true);
-    checkVecEq(e2->gridX, env->gridX, "restored gridX");
-    checkVecEq(e2->refY, env->refY, "restored refY");
-    CHECK(e2->ratioY.count(rkey) == 1);
-    checkVecEq(e2->ratioY[rkey], env->ratioY[rkey], "restored ratio");
-    checkVecEq(e2->curveY[rkey], env->curveY[rkey], "restored curveY (applyYMode)");
+    CHECK(e2->curves.size() == 1);
+    CHECK(e2->curves[0].refMember == "specRef");
+    CHECK(e2->curves[0].sampleMember == "specSmp");
+    checkVecEq(e2->curves[0].gridX, env->curves[0].gridX, "restored gridX");
+    checkVecEq(e2->curves[0].ratioY, env->curves[0].ratioY, "restored ratio");
+    checkVecEq(e2->curves[0].curveY, env->curves[0].curveY, "restored curveY (applyYMode)");
     CHECK(e2->storedFingerprints.count("/tmp/parity.h5") == 1);
     CHECK(e2->stale == true);
 
@@ -1547,9 +1515,11 @@ void test12_experimentPersistence() {
     CHECK(cmp->dirty == true);
     EnvironmentSession* abs = createExperiment(s3, EnvType::Absorbance);
     CHECK(abs->dirty == true);
-    abs->refKey = "/tmp/parity.h5";
-    abs->refMember = "specRef";
-    abs->samples = {{"/tmp/parity.h5", "specSmp"}};
+    abs->curves.push_back(AbsorbanceCurve{});
+    abs->curves[0].refKey = "/tmp/parity.h5";
+    abs->curves[0].refMember = "specRef";
+    abs->curves[0].sampleKey = "/tmp/parity.h5";
+    abs->curves[0].sampleMember = "specSmp";
     cmp->artifactSelector = 3;                  // 100% T
     cmp->comparatorKeys = {"/tmp/parity.h5", "/tmp/other.h5"};
     cmp->comparatorKeysExplicit = true;
@@ -1580,13 +1550,13 @@ void test12_experimentPersistence() {
     // The fresh Absorbance (never computed) restores its config too.
     EnvironmentSession* a2b = nullptr;
     for (auto& e : s4.experiments)
-        if (e->type == EnvType::Absorbance && e->refKey == "/tmp/parity.h5")
+        if (e->type == EnvType::Absorbance && !e->curves.empty() &&
+            e->curves[0].refKey == "/tmp/parity.h5")
             a2b = e.get();
     CHECK(a2b != nullptr);
-    CHECK(a2b->refMember == "specRef");
-    CHECK(a2b->samples.size() == 1);
-    CHECK(a2b->samples[0] == std::make_pair(std::string("/tmp/parity.h5"),
-                                            std::string("specSmp")));
+    CHECK(a2b->curves.size() == 1);
+    CHECK(a2b->curves[0].refMember == "specRef");
+    CHECK(a2b->curves[0].sampleMember == "specSmp");
     CHECK(a2b->computed == false);
     CHECK(a2b->dirty == false);
     EnvironmentSession* c2 = nullptr;
@@ -1691,25 +1661,32 @@ void test13_stalenessPersisted() {
     const std::vector<double> refY = {1.0, 1.0, 1.0, 1.0, 1.0};
     const std::vector<double> smpX = {1000.0, 1500.0, 2000.0};
     const std::vector<double> smpY = {0.8, 0.8, 0.8};
-    s.active->spectrum.cachedFrequencies["specRef"] = refX;
-    s.active->spectrum.cachedSpectra["specRef"] = refY;
-    s.active->spectrum.cachedFrequencies["specSmp"] = smpX;
-    s.active->spectrum.cachedSpectra["specSmp"] = smpY;
+    auto seedSpectra = [&](const std::string& id, const std::vector<double>& x,
+                           const std::vector<double>& y) {
+        TwoColumnMember m;
+        m.id = id;
+        m.kind = MemberKind::Original;
+        m.units = {"cm-1", "a.u."};
+        m.x = x;
+        m.y = y;
+        sess->workspace.spectra.members.push_back(std::move(m));
+    };
+    seedSpectra("specRef", refX, refY);
+    seedSpectra("specSmp", smpX, smpY);
 
     s.pendingExperimentIdx = -1;   // the test drives compute directly; the queued env activation is not wanted
     activateSession(s, 0);
     EnvironmentSession* env = createExperiment(s, EnvType::Absorbance);
     s.pendingExperimentIdx = -1;   // cancel the queued activation (compute is driven directly)
-    env->refKey = srcPath;
-    env->refMember = "specRef";
-    env->samples = {{srcPath, "specSmp"}};
+    env->curves.push_back(AbsorbanceCurve{});
+    env->curves[0].refKey = srcPath;
+    env->curves[0].refArtifact = static_cast<int>(ComparatorArtifact::RawSpectrum);
+    env->curves[0].refMember = "specRef";
+    env->curves[0].sampleKey = srcPath;
+    env->curves[0].sampleArtifact = static_cast<int>(ComparatorArtifact::RawSpectrum);
+    env->curves[0].sampleMember = "specSmp";
     env->xUnitSelector = 0;
-    env->startCompute(s);
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (env->batchActive_ && std::chrono::steady_clock::now() < deadline) {
-        env->tickAsync();
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
+    env->computeAbsorbance(s);
     CHECK(env->computed == true);
     CHECK(crossCreate(crossPath, err));
     CHECK(crossSaveExperiment(s, *env, crossPath, err));
@@ -1760,9 +1737,11 @@ void test14_openTabPersistence() {
     // A persisted experiment (its id comes from the first save).
     EnvironmentSession* exp = createExperiment(s, EnvType::Absorbance);
     s.pendingExperimentIdx = -1;
-    exp->refKey = srcPath;
-    exp->refMember = "specRef";
-    exp->samples = {{srcPath, "specSmp"}};
+    exp->curves.push_back(AbsorbanceCurve{});
+    exp->curves[0].refKey = srcPath;
+    exp->curves[0].refMember = "specRef";
+    exp->curves[0].sampleKey = srcPath;
+    exp->curves[0].sampleMember = "specSmp";
     CHECK(crossSaveExperiment(s, *exp, crossPath, err));
     const std::string expId = exp->id;
     CHECK(!expId.empty());
