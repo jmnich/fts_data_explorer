@@ -302,7 +302,16 @@ void removeTab(AppState& s, int idx) {
     if (s.activeSessionIdx > idx) s.activeSessionIdx--;
     else if (s.activeSessionIdx == idx) {
         s.activeSessionIdx = -1;
-        s.activeTabKind = ActiveTabKind::Session;
+        if (s.activeTabKind == ActiveTabKind::Workspace) {
+            // Bugfix 2026-08-14: the old direct kind flip skipped
+            // executePendingSwap's layout-snapshot bookkeeping. The Session
+            // panels' dock nodes are wiped by every workspace-kind restore,
+            // so with no restore of the session layout they rendered FLOATING
+            // on the Session tab after closing the workspace tab. Queue the
+            // fallback instead — the swap restores the session snapshot
+            // (one frame later, the same pattern as every other kind switch).
+            focusSessionTab(s);
+        }
     }
     if (s.lastActiveSessionIdx > idx) s.lastActiveSessionIdx--;
     else if (s.lastActiveSessionIdx == idx) s.lastActiveSessionIdx = -1;

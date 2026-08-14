@@ -11,6 +11,7 @@
 #include "spectral_pool.h"
 
 struct AppState;
+struct InterferogramMember;
 
 // Phase-3 M3.2 — instantiable cross-workspace analysis tab (audit §3.3).
 // LIVE object, never folded: multiple instances of a type coexist, each owns
@@ -21,12 +22,15 @@ struct AppState;
 enum class EnvType { Absorbance, Comparator };   // Pca removed (Phase-2 user decision)
 
 // Comparator artifact types: what to overlay across the selected datasets.
+// CorrectedInterferogram keeps value 4 so persisted configs from the merged
+// "Interferogram" artifact (which preferred corrected) map faithfully.
 enum class ComparatorArtifact {
-    AverageSpectrum,   // session average spectrum (cachedAverageX/Y)
-    RawSpectrum,       // individual spectra members (via the spectral pool)
-    Snr,               // SNR-per-wavelength (cachedSnrX/Y)
-    T100,              // 100% T transmittance curves (cachedTransX/Y per member)
-    Interferogram,     // raw interferograms (primary detector vs sample index)
+    AverageSpectrum,       // session average spectrum (cachedAverageX/Y)
+    RawSpectrum,           // individual spectra members (via the spectral pool)
+    Snr,                   // SNR-per-wavelength (cachedSnrX/Y)
+    T100,                  // 100% T transmittance curves (cachedTransX/Y per member)
+    CorrectedInterferogram,// corrected interferograms (primary detector vs sample index)
+    RawInterferogram,      // uncorrected interferograms (primary detector vs sample index)
 };
 
 const char* experimentTypeName(EnvType t);              // "Absorbance" / "Comparator"
@@ -38,6 +42,29 @@ struct ComparatorCurve {
     std::string label;       // full label (legend / CSV headers)
     std::string shortLabel;  // compact label (cursor info box, no dataset name)
     std::vector<double> x, y;
+};
+
+// One selectable member of an artifact type. `xUnit` is the member's STORED
+// x-unit (0/1/2), or -1 for interferograms (sample-index / OPD X, no conversion).
+struct ArtifactMember {
+    std::string id;
+    int xUnit = 0;
+    std::vector<double> x, y;
+    bool stale = false;
+};
+
+struct ArtifactInfo {
+    bool available = false;              // ≥1 member
+    bool stale = false;                  // any member stale
+    std::vector<ArtifactMember> members;
+};
+
+// Correction parameters used to derive the corrected-IFG OPD axis from a raw
+// interferogram (mirrors the interferogram view + spectrum pipeline).
+struct IfgDeriveParams {
+    double laserUm = 1.550;
+    int method = 0;                      // 0 Hilbert, 1 peak-finding
+    float prominence = 0.02f;
 };
 
 class EnvironmentSession : public SessionBase {
@@ -80,6 +107,10 @@ public:
     int prevYScaleSelector = -1;
     // Tracking cursor (spectrum-view scheme): marks ALL displayed curves.
     bool showTrackingCursor = false;
+    // Display-only stride downsampling to maxPointsBeforeDownsampling (the
+    // interferogram-view scheme). OFF by default: full-resolution display;
+    // the cursor reads full-res data and CSV export never downsamples.
+    bool downsampleDisplay = false;
 
     // Comparator selection.
     int artifactSelector = 0;            // ComparatorArtifact index
@@ -175,6 +206,24 @@ public:
 
 private:
     std::string titleCache_;
+    // Corrected-IFG derivation (sourceKey#memberId -> OPD axis um, RAM only):
+    // rebuilt per entry when the source's correction params change.
+    std::map<std::string, std::vector<double>> derivedOpdCache_;
+    std::map<std::string, IfgDeriveParams> derivedOpdParams_;
+    // Members available in a workspace for one artifact type. For
+    // CorrectedInterferogram the persisted group wins; datasets without it
+    // fall back to deriving corrected IFGs from the raw group (cached).
+    ArtifactInfo artifactInfo(const Workspace& ws, ComparatorArtifact a,
+                              const std::string& sourceKey);
+    // Correction params for a comparator source: live session when open,
+    // else the persisted workspace params, else defaults.
+    IfgDeriveParams ifgDeriveParamsFor(const std::string& sourceKey,
+                                       const Workspace& ws);
+    // OPD axis (um) for an uncorrected IFG member: mirror displacement ×2
+    // from the reference detector (view/pipeline algorithm), cached.
+    std::vector<double> derivedOpdAxis(const std::string& sourceKey,
+                                       const InterferogramMember& m,
+                                       const IfgDeriveParams& p);
     void finalizeCompute();              // ref grid + ratios + curveY (main thread)
     void renderConfigWindow();           // instanceName (pickers/selectors/comment)
     void renderViewWindow();             // instanceName + " View" (plot)

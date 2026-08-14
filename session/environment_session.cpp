@@ -98,20 +98,7 @@ std::string memberLabel(const std::pair<std::string, bool>& m) {
 }
 
 // ── Comparator artifact model (persisted workspace members) ─────────────────
-// One selectable member of an artifact type. `xUnit` is the member's STORED
-// x-unit (0/1/2), or -1 for interferograms (sample-index X, no conversion).
-struct ArtifactMember {
-    std::string id;
-    int xUnit = 0;
-    std::vector<double> x, y;
-    bool stale = false;
-};
-
-struct ArtifactInfo {
-    bool available = false;              // ≥1 member
-    bool stale = false;                  // any member stale
-    std::vector<ArtifactMember> members;
-};
+// ArtifactMember/ArtifactInfo live in the header (EnvironmentSession members).
 
 int memberXUnit(const TwoColumnMember& m) {
     if (!m.units.empty()) {
@@ -119,65 +106,6 @@ int memberXUnit(const TwoColumnMember& m) {
         if (m.units[0] == "thz") return 2;
     }
     return 0;
-}
-
-// Members available in a workspace for one artifact type (read from the
-// persisted model — works for both open tabs and embedded cross sources).
-ArtifactInfo artifactInfo(const Workspace& ws, ComparatorArtifact a) {
-    ArtifactInfo info;
-    auto push2c = [&](const TwoColumnMember& m) {
-        ArtifactMember am;
-        am.id = m.id;
-        am.xUnit = memberXUnit(m);
-        am.x = m.x;
-        am.y = m.y;
-        am.stale = m.stale;
-        info.members.push_back(std::move(am));
-    };
-    switch (a) {
-    case ComparatorArtifact::AverageSpectrum:
-        for (const auto& m : ws.averageSpectra.members) push2c(m);
-        break;
-    case ComparatorArtifact::Snr:
-        for (const auto& m : ws.snrSpectra.members) push2c(m);
-        break;
-    case ComparatorArtifact::RawSpectrum:
-        for (const auto& m : ws.spectra.members) push2c(m);
-        break;
-    case ComparatorArtifact::T100:
-        for (const auto& m : ws.t100.members) {
-            for (const auto& c : m.curves) {
-                ArtifactMember am;
-                am.id = c.fileId;
-                am.xUnit = memberXUnit(m.reference);
-                am.x = c.x;
-                am.y = c.y;
-                am.stale = m.stale;
-                info.members.push_back(std::move(am));
-            }
-        }
-        break;
-    case ComparatorArtifact::Interferogram: {
-        // corrected: col0 = primary, col1 = OPD. Prefer corrected over uncorrected.
-        auto add = [&](const InterferogramMember& m, const std::vector<double>& prim) {
-            ArtifactMember am;
-            am.id = m.id;
-            am.xUnit = -1;   // sample-index X, no conversion
-            am.y = prim;
-            am.x.resize(am.y.size());
-            for (size_t i = 0; i < am.x.size(); ++i) am.x[i] = static_cast<double>(i);
-            am.stale = m.stale;
-            info.members.push_back(std::move(am));
-        };
-        for (const auto& m : ws.correctedIfg.members) add(m, m.col0);
-        for (const auto& m : ws.uncorrectedIfg.members) add(m, m.col1);
-        break;
-    }
-    }
-    info.available = !info.members.empty();
-    for (const auto& m : info.members)
-        if (m.stale) { info.stale = true; break; }
-    return info;
 }
 
 // Count from a derivative member's config (avg "count" / snr "fileCount"), 0 if
@@ -237,6 +165,27 @@ void downsampleCurve(const std::vector<double>& x, const std::vector<double>& y,
     }
 }
 
+// matplotlib "tab20" qualitative colormap (20 colors, matplotlib standard;
+// RGB values from the matplotlib source). Registered once into ImPlot, then
+// pushed for comparator overlay plots (cyclic: curve 21 wraps to color 0).
+ImPlotColormap tab20Colormap() {
+    static ImPlotColormap cmap = [] {
+        static const unsigned char rgb[20][3] = {
+            { 31, 119, 180}, {255, 127,  14}, { 44, 160,  44}, {214,  39,  40},
+            {148, 103, 189}, {140,  86,  75}, {227, 119, 194}, {127, 127, 127},
+            {188, 189,  34}, { 23, 190, 207}, {174, 199, 232}, {255, 187, 120},
+            {152, 223, 138}, {255, 152, 150}, {197, 176, 213}, {196, 156, 148},
+            {247, 182, 210}, {199, 199, 199}, {219, 219, 141}, {158, 218, 229},
+        };
+        ImVec4 cols[20];
+        for (int i = 0; i < 20; ++i)
+            cols[i] = ImVec4(rgb[i][0] / 255.0f, rgb[i][1] / 255.0f,
+                             rgb[i][2] / 255.0f, 1.0f);
+        return ImPlot::AddColormap("Tab20", cols, 20, true);
+    }();
+    return cmap;
+}
+
 // Index of the sample nearest to xv (ascending or descending x).
 size_t nearestIndex(const std::vector<double>& x, double xv) {
     if (x.size() <= 1) return 0;
@@ -258,6 +207,148 @@ size_t nearestIndex(const std::vector<double>& x, double xv) {
 
 }  // namespace
 
+// ── corrected-IFG derivation ─────────────────────────────────────────────────
+
+// Correction params for a comparator source: live session when open, else the
+// persisted workspace params (the pool's staleness pattern), else defaults.
+IfgDeriveParams EnvironmentSession::ifgDeriveParamsFor(const std::string& sourceKey,
+                                                       const Workspace& ws) {
+    IfgDeriveParams p;
+    for (const auto& sess : appState.sessions) {
+        if (sess->key != sourceKey) continue;
+        p.laserUm = sess->spectrum.refLaserTextbox;
+        p.method = sess->xCorrectionMethod;
+        p.prominence = sess->peakProminenceThreshold;
+        return p;
+    }
+    Spectrum sp;
+    int method = 0;
+    float prominence = 0.02f;
+    if (persistedSpectrumParams(ws, sp, method, prominence)) {
+        p.laserUm = sp.refLaserTextbox;
+        p.method = method;
+        p.prominence = prominence;
+    }
+    return p;
+}
+
+// OPD axis (um) for an uncorrected IFG member: mirror displacement ×2 from
+// the reference detector — the interferogram view's algorithm. Cached per
+// (source, member); recomputed only when the source's params change.
+std::vector<double> EnvironmentSession::derivedOpdAxis(const std::string& sourceKey,
+                                                       const InterferogramMember& m,
+                                                       const IfgDeriveParams& p) {
+    const std::string key = sourceKey + "#" + m.id;
+    auto pit = derivedOpdParams_.find(key);
+    if (pit != derivedOpdParams_.end()) {
+        const IfgDeriveParams& cp = pit->second;
+        if (cp.laserUm == p.laserUm && cp.method == p.method &&
+            cp.prominence == p.prominence) {
+            auto it = derivedOpdCache_.find(key);
+            if (it != derivedOpdCache_.end()) return it->second;
+        }
+    }
+    std::vector<double> opd;
+    if (p.method == 1)
+        SpectralToolbox::xAxisFromPeaks(m.col0, p.laserUm, p.prominence, opd);
+    else
+        SpectralToolbox::xAxisFromHilbert(m.col0, p.laserUm, opd);
+    if (!opd.empty()) {
+        for (double& v : opd) v *= 2.0;   // mirror displacement -> OPD (view convention)
+        derivedOpdCache_[key] = opd;
+        derivedOpdParams_[key] = p;
+    }
+    return opd;
+}
+
+// Members available in a workspace for one artifact type (read from the
+// persisted model — works for both open tabs and embedded cross sources).
+// CorrectedInterferogram: the persisted igm_corrected_x/ group wins; datasets
+// without it derive corrected IFGs from the raw group (primary detector + the
+// source's Hilbert/peak OPD axis) — every raw interferogram has one.
+ArtifactInfo EnvironmentSession::artifactInfo(const Workspace& ws,
+                                              ComparatorArtifact a,
+                                              const std::string& sourceKey) {
+    ArtifactInfo info;
+    auto push2c = [&](const TwoColumnMember& m) {
+        ArtifactMember am;
+        am.id = m.id;
+        am.xUnit = memberXUnit(m);
+        am.x = m.x;
+        am.y = m.y;
+        am.stale = m.stale;
+        info.members.push_back(std::move(am));
+    };
+    switch (a) {
+    case ComparatorArtifact::AverageSpectrum:
+        for (const auto& m : ws.averageSpectra.members) push2c(m);
+        break;
+    case ComparatorArtifact::Snr:
+        for (const auto& m : ws.snrSpectra.members) push2c(m);
+        break;
+    case ComparatorArtifact::RawSpectrum:
+        for (const auto& m : ws.spectra.members) push2c(m);
+        break;
+    case ComparatorArtifact::T100:
+        for (const auto& m : ws.t100.members) {
+            for (const auto& c : m.curves) {
+                ArtifactMember am;
+                am.id = c.fileId;
+                am.xUnit = memberXUnit(m.reference);
+                am.x = c.x;
+                am.y = c.y;
+                am.stale = m.stale;
+                info.members.push_back(std::move(am));
+            }
+        }
+        break;
+    case ComparatorArtifact::CorrectedInterferogram: {
+        // corrected: col0 = primary, col1 = OPD axis (um).
+        for (const auto& m : ws.correctedIfg.members) {
+            ArtifactMember am;
+            am.id = m.id;
+            am.xUnit = -1;   // OPD is a distance axis: no spectral conversion
+            am.y = m.col0;
+            am.x = m.col1;
+            am.stale = m.stale;
+            info.members.push_back(std::move(am));
+        }
+        if (info.members.empty()) {
+            const IfgDeriveParams p = ifgDeriveParamsFor(sourceKey, ws);
+            for (const auto& m : ws.uncorrectedIfg.members) {
+                ArtifactMember am;
+                am.id = m.id;
+                am.xUnit = -1;
+                am.y = m.col1;               // primary detector
+                am.x = derivedOpdAxis(sourceKey, m, p);
+                if (am.x.empty()) continue;  // axis computation failed
+                am.stale = m.stale;
+                info.members.push_back(std::move(am));
+            }
+        }
+        break;
+    }
+    case ComparatorArtifact::RawInterferogram: {
+        // uncorrected: col1 = primary, sample-index X.
+        for (const auto& m : ws.uncorrectedIfg.members) {
+            ArtifactMember am;
+            am.id = m.id;
+            am.xUnit = -1;
+            am.y = m.col1;
+            am.x.resize(am.y.size());
+            for (size_t i = 0; i < am.x.size(); ++i) am.x[i] = static_cast<double>(i);
+            am.stale = m.stale;
+            info.members.push_back(std::move(am));
+        }
+        break;
+    }
+    }
+    info.available = !info.members.empty();
+    for (const auto& m : info.members)
+        if (m.stale) { info.stale = true; break; }
+    return info;
+}
+
 // Public label for an experiment type ("Absorbance" / "Comparator").
 const char* experimentTypeName(EnvType t) {
     return t == EnvType::Absorbance ? "Absorbance" : "Comparator";
@@ -266,11 +357,12 @@ const char* experimentTypeName(EnvType t) {
 // Public label for a comparator artifact type.
 const char* artifactLabel(ComparatorArtifact a) {
     switch (a) {
-        case ComparatorArtifact::AverageSpectrum: return "Average spectrum";
-        case ComparatorArtifact::RawSpectrum:     return "Raw spectrum";
-        case ComparatorArtifact::Snr:             return "SNR";
-        case ComparatorArtifact::T100:            return "100% T";
-        case ComparatorArtifact::Interferogram:   return "Interferogram";
+        case ComparatorArtifact::AverageSpectrum:       return "Average spectrum";
+        case ComparatorArtifact::RawSpectrum:           return "Raw spectrum";
+        case ComparatorArtifact::Snr:                   return "SNR";
+        case ComparatorArtifact::T100:                  return "100% T";
+        case ComparatorArtifact::CorrectedInterferogram: return "Corrected interferogram";
+        case ComparatorArtifact::RawInterferogram:      return "Raw interferogram";
     }
     return "?";
 }
@@ -726,9 +818,11 @@ void EnvironmentSession::renderViewWindow() {
         } else {
             curves = gatherCurves(appState);
             const auto artifact = static_cast<ComparatorArtifact>(artifactSelector);
-            xLabel = (artifact == ComparatorArtifact::Interferogram)
-                         ? "Sample index"
-                         : xUnitLabel(xUnitSelector);
+            xLabel = (artifact == ComparatorArtifact::CorrectedInterferogram)
+                         ? "OPD (um)"
+                         : (artifact == ComparatorArtifact::RawInterferogram)
+                             ? "Sample index"
+                             : xUnitLabel(xUnitSelector);
             yLabel = artifactLabel(artifact);
             if (yScaleSelector == 2) yLabel += " (dB)";
         }
@@ -916,20 +1010,20 @@ void EnvironmentSession::renderCommentEditor() {
 // comment. Plot ranging (X unit / Y scale / Y axis / cursor) lives in the
 // Plot Ranging panel, CSV export in the Export panel (split out 2026-08-14).
 void EnvironmentSession::renderComparatorConfig() {
-    static const char* names[5] = {"Average spectrum", "Raw spectrum", "SNR",
-                                   "100% T", "Interferogram"};
+    static const char* names[6] = {"Average spectrum", "Raw spectrum", "SNR",
+                                   "100% T", "Corrected interferogram",
+                                   "Raw interferogram"};
     ImGui::TextUnformatted("Artifact");
     ImGui::SameLine();
     ImGui::SetNextItemWidth(-FLT_MIN);
     if (ImGui::BeginCombo("##artifact", names[artifactSelector])) {
-        for (int a = 0; a < 5; ++a) {
+        for (int a = 0; a < 6; ++a) {
             if (ImGui::Selectable(names[a], a == artifactSelector)) {
                 if (artifactSelector != a) {
                     artifactSelector = a;
                     shouldAutoscale = true;
                     // T100/IFG have no log/dB scale — drop back to lin.
-                    if (yScaleSelector != 0 &&
-                        (a == 3 /* T100 */ || a == 4 /* Interferogram */))
+                    if (yScaleSelector != 0 && a >= 3 /* T100 / IFG */)
                         yScaleSelector = 0;
                     dirty = true;
                     appState.needsRedraw = true;
@@ -966,7 +1060,7 @@ void EnvironmentSession::renderDatasetSelector() {
     for (const auto& src : sources) {
         const bool isOpen = sessionOpen(src.key);
         bool checked = isOpen ? (autoAll || hasKey(src.key)) : hasKey(src.key);
-        const ArtifactInfo info = artifactInfo(*src.ws, artifact);
+        const ArtifactInfo info = artifactInfo(*src.ws, artifact, src.key);
 
         // Row coloring: grey (unavailable) / yellow (stale) / default.
         if (!info.available) ImGui::PushStyleColor(ImGuiCol_Text,
@@ -1095,8 +1189,7 @@ void EnvironmentSession::renderYAxisControls() {
 // meaningless for T100 (transmittance around 100%) and interferograms (bipolar
 // raw signal), so those artifacts only expose lin.
 void EnvironmentSession::renderYScaleButtons() {
-    const bool logDbAllowed = !(artifactSelector == 3 /* T100 */ ||
-                                artifactSelector == 4 /* Interferogram */);
+    const bool logDbAllowed = artifactSelector < 3;   // T100/IFG: no log/dB
     const ImVec4 colActive = ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive);
     const ImVec4 colInactive(0.22f, 0.22f, 0.22f, 0.7f);
     const char* names[3] = {"lin", "log", "dB"};
@@ -1153,11 +1246,45 @@ void EnvironmentSession::renderRangingWindow() {
     if (ImGui::Begin("Plot Ranging##envrange")) {
         if (ImGui::IsWindowAppearing()) appState.needsRedraw = true;
         forceDockSelection();
+        // Interferogram artifacts plot against sample index — the unit
+        // selector is meaningless and stays locked (gatherCurves skips
+        // conversion for xUnit == -1 members).
+        const bool ifgArtifact = artifactSelector >= 4;
+        if (ifgArtifact) ImGui::BeginDisabled();
         renderXUnitButtons();
+        if (ifgArtifact) ImGui::EndDisabled();
+        if (ImGui::IsItemHovered() && ifgArtifact)
+            ImGui::SetTooltip("X unit fixed for interferograms (sample index).");
         renderYScaleButtons();
         renderYAxisControls();
         ImGui::Separator();
         renderCursorToggle();
+        {
+            const ImVec4 colActive = ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive);
+            const ImVec4 colInactive(0.22f, 0.22f, 0.22f, 0.7f);
+            ImGui::TextUnformatted("Downsample");
+            ImGui::SameLine();
+            for (int m = 0; m < 2; ++m) {
+                const bool on = (m == 0);
+                const bool sel = (downsampleDisplay == on);
+                ImGui::PushStyleColor(ImGuiCol_Button, sel ? colActive : colInactive);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, sel ? colActive : colInactive);
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, colActive);
+                if (ImGui::Button(on ? "On##EnvDsOn" : "Off##EnvDsOff")) {
+                    if (downsampleDisplay != on) {
+                        downsampleDisplay = on;
+                        dirty = true;
+                        appState.needsRedraw = true;
+                    }
+                }
+                ImGui::PopStyleColor(3);
+                if (m < 1) ImGui::SameLine();
+            }
+        }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Display-only: stride-downsample curves >%zu points.\n"
+                              "CSV export and the tracking cursor always use full-resolution data.",
+                              appState.maxPointsBeforeDownsampling);
     }
     ImGui::End();
 }
@@ -1238,7 +1365,7 @@ std::vector<ComparatorCurve> EnvironmentSession::gatherCurves(AppState& s) {
 
     for (const auto& src : comparatorSources(s)) {
         if (!included(src.key)) continue;
-        ArtifactInfo info = artifactInfo(*src.ws, artifact);
+        ArtifactInfo info = artifactInfo(*src.ws, artifact, src.key);
         if (info.members.empty()) continue;
 
         const ArtifactMember* pick = nullptr;
@@ -1405,19 +1532,31 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
         if (hasGuideline) ImPlot::PlotInfLines("##guideline", &guideline, 1);
 
         // Per-curve line colors (captured right after each PlotLine — the
-        // cursor markers and info box reuse them).
+        // cursor markers and info box reuse them). tab20 cyclic palette for
+        // comparator overlays (matplotlib convention); the cursor still reads
+        // the full-res curves below, so downsampling never skews its values.
+        if (showLegend) ImPlot::PushColormap(tab20Colormap());
         std::vector<ImVec4> curveColors(curves.size());
         for (size_t k = 0; k < curves.size(); ++k) {
             const auto& c = curves[k];
+            const std::vector<double>* px = &c.x;
+            const std::vector<double>* py = &c.y;
             std::vector<double> dx, dy;
-            downsampleCurve(c.x, c.y, appState.maxPointsBeforeDownsampling, dx, dy);
+            if (downsampleDisplay) {
+                downsampleCurve(c.x, c.y, appState.maxPointsBeforeDownsampling, dx, dy);
+                px = &dx;
+                py = &dy;
+            }
             if (yScaleSelector == 2) {
+                // dB needs a writable buffer: copy only when not downsampled.
+                if (px == &c.x) { dy = c.y; py = &dy; }
                 for (double& v : dy) v = 10.0 * std::log10(std::max(v, 1e-300));
             }
-            ImPlot::PlotLine(c.label.c_str(), dx.data(), dy.data(),
-                             static_cast<int>(dx.size()));
+            ImPlot::PlotLine(c.label.c_str(), px->data(), py->data(),
+                             static_cast<int>(std::min(px->size(), py->size())));
             curveColors[k] = ImPlot::GetLastItemColor();
         }
+        if (showLegend) ImPlot::PopColormap();
 
         // Interaction: ESC autoscale, arrows pan 10%, shift+drag range.
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) &&
@@ -1527,7 +1666,9 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
             double um  = (unit == ST::Um)    ? mx : SpectralToolbox::convertXValue(mx, unit, ST::Um);
             double thz = (unit == ST::THz)   ? mx : SpectralToolbox::convertXValue(mx, unit, ST::THz);
             char header[128];
-            if (artifactSelector == 4 /* Interferogram */)
+            if (artifactSelector == 4 /* corrected: OPD axis */)
+                std::snprintf(header, sizeof(header), "OPD: %.4f um", mx);
+            else if (artifactSelector == 5 /* raw: sample index */)
                 std::snprintf(header, sizeof(header), "Index: %lld",
                               static_cast<long long>(mx));
             else
@@ -1679,6 +1820,7 @@ static nlohmann::json experimentConfigJson(const EnvironmentSession& env) {
     j["forcedYMax"] = env.forcedYMax;
     j["yScale"] = env.yScaleSelector;
     j["showCursor"] = env.showTrackingCursor;
+    j["downsampleDisplay"] = env.downsampleDisplay;
     j["computed"] = env.computed;
     // View X range (bugfix 2026-08-14): manual zoom window, same convention
     // as the workspace panels' view state (§8.1 spectrumView etc.) — unit is
@@ -1717,6 +1859,7 @@ static void experimentApplyConfig(EnvironmentSession& env, const nlohmann::json&
     env.yScaleSelector = j.value("yScale", 0);
     env.prevYScaleSelector = env.yScaleSelector;
     env.showTrackingCursor = j.value("showCursor", false);
+    env.downsampleDisplay = j.value("downsampleDisplay", false);
     env.computed = j.value("computed", false);
     // Restored X range: latched for one-shot application on the first render
     // (renderPlot consumes pendingNextXMin/Max); legacy configs without the
@@ -1741,7 +1884,7 @@ static void experimentApplyConfig(EnvironmentSession& env, const nlohmann::json&
         env.artifactSelector = j.value("artifactSelector", 0);
         // log/dB are invalid for T100/IFG — never restore an invalid state
         // (defensive; the UI already resets on artifact switch).
-        if (env.artifactSelector == 3 || env.artifactSelector == 4)
+        if (env.artifactSelector >= 3)
             env.yScaleSelector = 0;
         env.comparatorKeys = j.value("comparatorKeys", std::vector<std::string>{});
         env.comparatorKeysExplicit = j.value("comparatorKeysExplicit", false);

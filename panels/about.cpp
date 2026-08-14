@@ -61,6 +61,7 @@ void renderAboutPopup() {
     ImGui::BulletText("tinyfiledialogs (zlib/libpng) - sourceforge.net/projects/tinyfiledialogs");
     ImGui::BulletText("stb_image (MIT/public domain) - github.com/nothings/stb");
     ImGui::BulletText("Nlohmann JSON (MIT) - github.com/nlohmann/json");
+    ImGui::BulletText("HDF5 (BSD-3-Clause) - github.com/HDFGroup/hdf5");
     ImGui::Text(" ");
     ImGui::Separator();
     ImGui::Text(" ");
@@ -86,6 +87,11 @@ void renderAboutPopup() {
     ImGui::Text("    No. v. 171 in Chemical analysis, Hoboken, N.J: Wiley-Interscience, 2nd ed ed., 2007");
     ImGui::Text(" ");
 
+    ImGui::BulletText("HDF5 data format (workspace storage):");
+    ImGui::Text("    The HDF Group, Hierarchical Data Format, version 5 [Software]. The HDF Group.");
+    ImGui::Text("    https://github.com/HDFGroup/hdf5, DOI: 10.5281/zenodo.17808614");
+    ImGui::Text(" ");
+
     // ── Disclosure ────────────────────────────
     ImGui::Separator();
     ImGui::Text("AI disclosure:");
@@ -101,6 +107,10 @@ void renderAboutPopup() {
     if (modalButtonRow({"Close"}, closeFocus, wasOpen, accent) == 0 ||
         ImGui::IsKeyPressed(ImGuiKey_Escape)) {
         ImGui::CloseCurrentPopup();
+        // Idle-render gate: without this the popup stays on screen until the
+        // next event wakes the loop (mouse move) — the closing frame still
+        // presents the popup (session_tab.cpp:74 pattern).
+        appState.needsRedraw = true;
     }
     wasOpen = true;
 

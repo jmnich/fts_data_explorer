@@ -664,6 +664,7 @@ void test4_closeFlow() {
         const int idx = s.pendingRemoveIdx;
         s.pendingRemoveIdx = -1;
         removeTab(s, idx);
+        executePendingSwap(s);                       // next frame-top swap
     }
     CHECK(s.sessions.size() == 1);
     CHECK(s.activeSessionIdx == -1);
@@ -696,6 +697,7 @@ void test4_closeFlow() {
         const int idx = s.pendingRemoveIdx;
         s.pendingRemoveIdx = -1;
         removeTab(s, idx);
+        executePendingSwap(s);                       // next frame-top swap
     }
     CHECK(s.sessions.size() == 1);
     CHECK(s.activeSessionIdx == -1);
@@ -735,6 +737,7 @@ void test4_closeFlow() {
         const int idx = s.pendingRemoveIdx;
         s.pendingRemoveIdx = -1;
         removeTab(s, idx);
+        executePendingSwap(s);                       // next frame-top swap
     }
     CHECK(s.sessions.size() == 1);
     CHECK(s.activeSessionIdx == -1);
@@ -1342,9 +1345,10 @@ void test11_comparator() {
     CHECK(curves.size() == 1 && curves[0].label == "cmp_a/f2");
     CHECK(curves[0].y[0] == 50.0);
 
-    // Interferogram artifact: primary detector vs sample index.
+    // Interferogram artifact: primary detector vs sample index (uncorrected
+    // col1 — the fixture has no corrected IFG members yet).
     cmp.memberPicks.clear();
-    cmp.artifactSelector = static_cast<int>(ComparatorArtifact::Interferogram);
+    cmp.artifactSelector = static_cast<int>(ComparatorArtifact::RawInterferogram);
     cmp.comparatorKeys = {"/tmp/cmp_a.h5"};   // one dataset → one curve
     curves = cmp.gatherCurves(s);
     CHECK(curves.size() == 1);
@@ -1352,6 +1356,48 @@ void test11_comparator() {
     CHECK(curves[0].x.size() == 4);
     for (size_t i = 0; i < 4; ++i) CHECK(curves[0].x[i] == (double)i);   // sample index
     CHECK(curves[0].y[0] == 5.0 && curves[0].y[3] == 8.0);               // col1
+
+    // Corrected artifact on a dataset WITHOUT a persisted corrected group:
+    // derived from the raw IFG — primary detector + the Hilbert OPD axis
+    // (mirror displacement ×2), same function the view/pipeline uses. The
+    // open session's spectrum defaults (1.550 um, Hilbert) apply.
+    cmp.artifactSelector = static_cast<int>(ComparatorArtifact::CorrectedInterferogram);
+    curves = cmp.gatherCurves(s);
+    CHECK(curves.size() == 1 && curves[0].label == "cmp_a/record_0");
+    CHECK(curves[0].y[0] == 5.0 && curves[0].y[3] == 8.0);               // primary = col1
+    CHECK(curves[0].x.size() == 4);                                      // OPD axis (um)
+    std::vector<double> expectOpd;
+    SpectralToolbox::xAxisFromHilbert({1.0, 2.0, 3.0, 4.0}, 1.550, expectOpd);
+    CHECK(expectOpd.size() == 4);
+    for (double& v : expectOpd) v *= 2.0;
+    // FFTW is not bitwise reproducible across plan executions — tolerance.
+    for (size_t i = 0; i < 4; ++i)
+        CHECK(std::fabs(curves[0].x[i] - expectOpd[i]) < 1e-6);
+    CHECK(curves[0].x[0] == 0.0);                                        // OPD starts at 0
+
+    // Persisted corrected group now exists: it wins over derivation — col0
+    // primary, col1 OPD axis (um). Raw/corrected ids may repeat across groups
+    // without leaking into each other.
+    InterferogramMember corr;
+    corr.id = "record_0";
+    corr.kind = MemberKind::Original;
+    corr.col0 = {9.0, 10.0, 11.0, 12.0};
+    corr.col1 = {0.0, 0.0, 0.0, 0.0};
+    corr.columns = {"Reference detector", "Primary detector"};
+    corr.units = {"V", "V"};
+    // sessA was moved into s.sessions (line 1279) — the local is null; reach
+    // the live session via the sessions vector.
+    s.sessions[0]->workspace.correctedIfg.origin = makeOriginJson("FTS Data Explorer", "26.08.3").dump();
+    s.sessions[0]->workspace.correctedIfg.members.push_back(corr);
+    cmp.artifactSelector = static_cast<int>(ComparatorArtifact::CorrectedInterferogram);
+    curves = cmp.gatherCurves(s);
+    CHECK(curves.size() == 1 && curves[0].label == "cmp_a/record_0");
+    CHECK(curves[0].y[0] == 9.0 && curves[0].y[3] == 12.0);              // col0
+    CHECK(curves[0].x[0] == 0.0 && curves[0].x[3] == 0.0);               // OPD axis = col1
+    // The raw artifact still reads only the uncorrected group.
+    cmp.artifactSelector = static_cast<int>(ComparatorArtifact::RawInterferogram);
+    curves = cmp.gatherCurves(s);
+    CHECK(curves.size() == 1 && curves[0].y[0] == 5.0);
 }
 
 // M4.1: experiment persistence round-trip — save an Absorbance experiment

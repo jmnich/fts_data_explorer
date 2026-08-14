@@ -171,8 +171,8 @@ void renderAddDatasetButton() {
 }
 
 // Accent-framed identity card: filename, shortened path (tooltip = full),
-// dataset/measurement counts. Path wraps (clamped to 2 lines) instead of the
-// old manual "…" truncation.
+// dataset count + on-disk size in MB. Path wraps (clamped to 2 lines) instead
+// of the old manual "…" truncation.
 std::vector<std::string> wrapToLines(const std::string& text, float maxWidth,
                                      int maxLines);   // defined below
 void renderMultiWorkspaceCard(const std::string& path) {
@@ -201,13 +201,14 @@ void renderMultiWorkspaceCard(const std::string& path) {
                               ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
         for (const auto& l : pathLines) ImGui::TextUnformatted(l.c_str());
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", path.c_str());
-        size_t measurements = 0;
-        for (const auto& src : appState.sessionTab.sources)
-            measurements += src.memberCount;
-        ImGui::Text("%zu dataset%s · %zu measurement%s",
-                    appState.sessionTab.sources.size(),
-                    appState.sessionTab.sources.size() == 1 ? "" : "s",
-                    measurements, measurements == 1 ? "" : "s");
+        const size_t datasets = appState.sessionTab.sources.size();
+        std::error_code ec;
+        const auto fileBytes =
+            std::filesystem::file_size(appState.sessionTab.multiWorkspacePath, ec);
+        const double sizeMB = ec ? 0.0
+                                 : static_cast<double>(fileBytes) / (1024.0 * 1024.0);
+        ImGui::Text("%zu dataset%s · %.1f MB",
+                    datasets, datasets == 1 ? "" : "s", sizeMB);
         ImGui::PopStyleColor();
     }
     ImGui::EndChild();
@@ -485,9 +486,19 @@ void SessionTab::renderActiveExperimentsPanel() {
         const float availW = ImGui::GetContentRegionAvail().x - 10.0f;
         const std::vector<std::string> titleLines =
             wrapToLines(env->tabLabel(), availW, 2);
-        const std::string meta =
-            std::to_string(env->samples.size()) + " sample" +
-            (env->samples.size() == 1 ? "" : "s") + " · " + experimentTypeName(env->type);
+        // Absorbance: picked samples. Comparator: included datasets (empty +
+        // not explicit = auto-all, i.e. every open workspace tab).
+        std::string meta;
+        if (env->type == EnvType::Absorbance) {
+            meta = std::to_string(env->samples.size()) + " sample" +
+                   (env->samples.size() == 1 ? "" : "s");
+        } else {
+            const size_t n = env->comparatorKeys.empty() && !env->comparatorKeysExplicit
+                                 ? appState.sessions.size()
+                                 : env->comparatorKeys.size();
+            meta = std::to_string(n) + " dataset" + (n == 1 ? "" : "s");
+        }
+        meta += " · " + std::string(experimentTypeName(env->type));
         std::vector<std::string> lines = titleLines;
         for (auto& l : wrapToLines(meta, availW, 1)) lines.push_back(std::move(l));
         if (!env->comment.empty())
