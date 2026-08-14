@@ -939,10 +939,26 @@ static void rebuildDefaultLayout(ImGuiID dockspace_id, float topOffset) {
     // node. DockBuilderDockWindow writes the DockId into the windows'
     // settings even though they do not exist yet — first env instance picks
     // them up when it appears.
+    // v6 (2026-08-14): Plot Ranging + Export split out of Settings into a
+    // stacked column below it (Plot Ranging above Export).
     ImGuiID dock_env_viewer;
     ImGui::DockBuilderSplitNode(dock_center, ImGuiDir_Right, 0.55f,
                                 &dock_env_viewer, &dock_center);
-    ImGui::DockBuilderDockWindow("Settings##envcfg", dock_center);
+    ImGuiID dock_env_settings, dock_env_below;
+    ImGui::DockBuilderSplitNode(dock_center, ImGuiDir_Down, 0.5f,
+                                &dock_env_below, &dock_env_settings);
+    // The Down split made the old dock_center id a PARENT node; workspace view
+    // windows docked below must NOT point at it (ImGui undocks windows whose
+    // DockId resolves to a split node). Point them at the Settings node — they
+    // share it exactly like they shared dock_center before (mutually exclusive
+    // by tab type, so the tabs never coexist).
+    dock_center = dock_env_settings;
+    ImGuiID dock_env_range, dock_env_export;
+    ImGui::DockBuilderSplitNode(dock_env_below, ImGuiDir_Up, 0.5f,
+                                &dock_env_range, &dock_env_export);
+    ImGui::DockBuilderDockWindow("Settings##envcfg", dock_env_settings);
+    ImGui::DockBuilderDockWindow("Plot Ranging##envrange", dock_env_range);
+    ImGui::DockBuilderDockWindow("Export##envexp", dock_env_export);
     ImGui::DockBuilderDockWindow("Viewer##envview", dock_env_viewer);
 
     ImGui::DockBuilderDockWindow("Files",              dock_left_top);
@@ -1266,24 +1282,29 @@ void AppLoop::handleInput() {
         // after the next swap.
         const bool wsActive = (appState.activeTabKind == ActiveTabKind::Workspace &&
                                appState.activeSessionIdx >= 0 && appState.active);
-        if (!wsActive) {
+        const bool envActive =
+            (appState.activeTabKind == ActiveTabKind::Experiment &&
+             appState.activeExperimentIdx >= 0 &&
+             appState.activeExperimentIdx < static_cast<int>(appState.experiments.size()));
+        if (!wsActive && !envActive) {
             appState.yKeyPressedLastFrame = false;
             appState.aKeyPressedLastFrame = false;
             appState.dKeyPressedLastFrame = false;
             appState.qKeyPressedLastFrame = false;
-        } else {
+        } else if (wsActive) {
         appState.active->multiSelectMode = ImGui::GetIO().KeyCtrl;
         appState.active->shiftSelectMode = ImGui::GetIO().KeyShift;
         }
 
         // Handle keyboard shortcuts - only trigger once per key press
-        if (wsActive && !ImGui::GetIO().WantCaptureKeyboard) {
+        if ((wsActive || envActive) && !ImGui::GetIO().WantCaptureKeyboard) {
             bool yKeyPressed = glfwGetKey(window_, GLFW_KEY_Y) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
             bool aKeyPressed = glfwGetKey(window_, GLFW_KEY_A) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
             bool dKeyPressed = glfwGetKey(window_, GLFW_KEY_D) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
             bool qKeyPressed = glfwGetKey(window_, GLFW_KEY_Q) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
             
             // 'Ctrl+Y' - Toggle auto-fit Y-axis (only on initial press)
+            if (wsActive) {
             if (yKeyPressed && !appState.yKeyPressedLastFrame) {
                 appState.active->autoFitYAxis = !appState.active->autoFitYAxis;
                 if (appState.active->autoFitYAxis && appState.active->dataLoaded) {
@@ -1361,10 +1382,21 @@ void AppLoop::handleInput() {
                     }
                 }
             }
-            
-            // 'Ctrl+Q' - Toggle tracking cursor (only on initial press)
+            }  // wsActive-only shortcuts (Ctrl+Y/A/D touch appState.active)
+
+            // 'Ctrl+Q' - Toggle tracking cursor (only on initial press).
+            // Workspace: spectrum view cursor. Comparator: experiment cursor.
             if (qKeyPressed && !appState.qKeyPressedLastFrame) {
-                appState.active->spectrum.showTrackingCursor = !appState.active->spectrum.showTrackingCursor;
+                if (wsActive) {
+                    appState.active->spectrum.showTrackingCursor =
+                        !appState.active->spectrum.showTrackingCursor;
+                } else if (envActive &&
+                           appState.experiments[appState.activeExperimentIdx]->type ==
+                               EnvType::Comparator) {
+                    auto& env = *appState.experiments[appState.activeExperimentIdx];
+                    env.showTrackingCursor = !env.showTrackingCursor;
+                    env.dirty = true;   // persisted like the panel toggle
+                }
                 appState.needsRedraw = true;
             }
 
@@ -1845,7 +1877,8 @@ void AppLoop::renderUI() {
                 if (appState.activeTabKind == ActiveTabKind::Experiment &&
                     appState.activeExperimentIdx >= 0 &&
                     appState.activeExperimentIdx < static_cast<int>(appState.experiments.size())) {
-                    for (const char* n : {"Settings##envcfg", "Viewer##envview"}) {
+                    for (const char* n : {"Settings##envcfg", "Viewer##envview",
+                                          "Plot Ranging##envrange", "Export##envexp"}) {
                         if (ImGuiWindow* pw = ImGui::FindWindowByName(n)) {
                             if (pw->DockNode) {
                                 pw->DockNode->SelectedTabId = pw->TabId;
@@ -1887,6 +1920,9 @@ void AppLoop::renderUI() {
                 // stale session snapshot reset) and of the tab-type key
                 // ("environment" → "experiment" — the layout snapshot file is
                 // migrated by rename so saved experiment layouts survive).
+                // v6 (2026-08-14): "Plot Ranging" + "Export" windows split
+                // out of the comparator Settings window (window names
+                // changed → one rebuild; stale experiment snapshot reset).
                 if (config_.sessionPanelLayoutVersion < 4) {
                     config_.sessionPanelLayoutVersion = 4;
                     config_.saveToFile(configFilePath_);
@@ -1905,6 +1941,19 @@ void AppLoop::renderUI() {
                             std::filesystem::rename(oldPath, newPath);
                     }
                     rebuildDefaultLayout(dockspace_id, topOffset);
+                }
+                if (config_.sessionPanelLayoutVersion < 6) {
+                    config_.sessionPanelLayoutVersion = 6;
+                    config_.saveToFile(configFilePath_);
+                    resetTabLayout(tabTypeName(static_cast<int>(ActiveTabKind::Experiment)));
+                    rebuildDefaultLayout(dockspace_id, topOffset);
+                    // Seed the experiment snapshot from the new default layout
+                    // (it was just deleted): on the first experiment-tab switch
+                    // after the bump, restoreTabLayout would otherwise find no
+                    // snapshot and fall back to the restored workspace layout,
+                    // leaving the two new panels floating (their DockIds only
+                    // exist in the new tree, which the workspace snapshot lacks).
+                    saveTabLayout(tabTypeName(static_cast<int>(ActiveTabKind::Experiment)));
                 }
 
 ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);

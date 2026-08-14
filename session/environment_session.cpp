@@ -8,7 +8,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
+#include <limits>
 #include <string>
 
 #include "app_state.h"
@@ -233,6 +235,25 @@ void downsampleCurve(const std::vector<double>& x, const std::vector<double>& y,
         outX.push_back(x[i]);
         outY.push_back(y[i]);
     }
+}
+
+// Index of the sample nearest to xv (ascending or descending x).
+size_t nearestIndex(const std::vector<double>& x, double xv) {
+    if (x.size() <= 1) return 0;
+    if (x.front() < x.back()) {
+        auto it = std::lower_bound(x.begin(), x.end(), xv);
+        if (it == x.begin()) return 0;
+        if (it == x.end()) return x.size() - 1;
+        const size_t hi = it - x.begin();
+        const size_t lo = hi - 1;
+        return (xv - x[lo] <= x[hi] - xv) ? lo : hi;
+    }
+    auto it = std::lower_bound(x.begin(), x.end(), xv, std::greater<double>());
+    if (it == x.begin()) return 0;
+    if (it == x.end()) return x.size() - 1;
+    const size_t hi = it - x.begin();
+    const size_t lo = hi - 1;
+    return (std::fabs(xv - x[lo]) <= std::fabs(x[hi] - xv)) ? lo : hi;
 }
 
 }  // namespace
@@ -633,6 +654,11 @@ void EnvironmentSession::convertXInPlace() {
 
 void EnvironmentSession::render() {
     renderConfigWindow();
+    if (type == EnvType::Comparator) {
+        // Comparator-only dockable panels (split out of the Settings window).
+        renderRangingWindow();
+        renderExportWindow();
+    }
     renderViewWindow();
 }
 
@@ -688,6 +714,7 @@ void EnvironmentSession::renderViewWindow() {
             for (const auto& [key, y] : curveY) {
                 ComparatorCurve c;
                 c.label = sessionLabelForKey(key.first) + "/" + key.second;
+                c.shortLabel = key.second;   // member id (cursor box; comparator-only anyway)
                 c.x = gridX;
                 c.y = y;
                 curves.push_back(std::move(c));
@@ -703,6 +730,7 @@ void EnvironmentSession::renderViewWindow() {
                          ? "Sample index"
                          : xUnitLabel(xUnitSelector);
             yLabel = artifactLabel(artifact);
+            if (yScaleSelector == 2) yLabel += " (dB)";
         }
         renderPlot(curves, xLabel, yLabel, hasGuideline, guideline,
                    type == EnvType::Comparator);
@@ -885,7 +913,8 @@ void EnvironmentSession::renderCommentEditor() {
 }
 
 // Comparator config: artifact type selector, included-dataset checkbox list,
-// X unit + Y-axis ranging, comment, export.
+// comment. Plot ranging (X unit / Y scale / Y axis / cursor) lives in the
+// Plot Ranging panel, CSV export in the Export panel (split out 2026-08-14).
 void EnvironmentSession::renderComparatorConfig() {
     static const char* names[5] = {"Average spectrum", "Raw spectrum", "SNR",
                                    "100% T", "Interferogram"};
@@ -898,6 +927,10 @@ void EnvironmentSession::renderComparatorConfig() {
                 if (artifactSelector != a) {
                     artifactSelector = a;
                     shouldAutoscale = true;
+                    // T100/IFG have no log/dB scale — drop back to lin.
+                    if (yScaleSelector != 0 &&
+                        (a == 3 /* T100 */ || a == 4 /* Interferogram */))
+                        yScaleSelector = 0;
                     dirty = true;
                     appState.needsRedraw = true;
                 }
@@ -910,25 +943,7 @@ void EnvironmentSession::renderComparatorConfig() {
     renderDatasetSelector();
 
     ImGui::Separator();
-    renderXUnitButtons();
-    renderYAxisControls();
-
-    ImGui::Separator();
     renderCommentEditor();
-
-    if (appState.sessionTab.multiWorkspaceOpen) {
-        if (ImGui::Button("Save Experiment")) save(appState);
-        if (dirty) {
-            ImGui::SameLine();
-            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "Unsaved changes");
-        } else if (!id.empty()) {
-            ImGui::SameLine();
-            ImGui::TextDisabled("Saved");
-        }
-    } else {
-        ImGui::TextDisabled("Open a multi-workspace file to save experiments.");
-    }
-    if (ImGui::Button("Export CSV...")) exportCsv();
 }
 
 // Comparator: checkbox list of available datasets (open tabs ∪ embedded cross
@@ -1076,6 +1091,129 @@ void EnvironmentSession::renderYAxisControls() {
     }
 }
 
+// Y-scale toggle (lin / log / dB) — the spectrum-view scheme. log/dB are
+// meaningless for T100 (transmittance around 100%) and interferograms (bipolar
+// raw signal), so those artifacts only expose lin.
+void EnvironmentSession::renderYScaleButtons() {
+    const bool logDbAllowed = !(artifactSelector == 3 /* T100 */ ||
+                                artifactSelector == 4 /* Interferogram */);
+    const ImVec4 colActive = ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive);
+    const ImVec4 colInactive(0.22f, 0.22f, 0.22f, 0.7f);
+    const char* names[3] = {"lin", "log", "dB"};
+    ImGui::TextUnformatted("Y scale");
+    ImGui::SameLine();
+    for (int m = 0; m < 3; ++m) {
+        if (m != 0 && !logDbAllowed) ImGui::BeginDisabled();
+        ImGui::PushStyleColor(ImGuiCol_Button, yScaleSelector == m ? colActive : colInactive);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, yScaleSelector == m ? colActive : colInactive);
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, colActive);
+        if (ImGui::Button(names[m])) {
+            if (yScaleSelector != m) {
+                yScaleSelector = m;
+                dirty = true;
+                appState.needsRedraw = true;
+            }
+        }
+        ImGui::PopStyleColor(3);
+        if (m != 0 && !logDbAllowed) ImGui::EndDisabled();
+        if (m < 2) ImGui::SameLine();
+    }
+    if (ImGui::IsItemHovered() && !logDbAllowed)
+        ImGui::SetTooltip("log/dB unavailable for this artifact (non-positive values).");
+}
+
+// Tracking cursor On/Off (spectrum-view scheme).
+void EnvironmentSession::renderCursorToggle() {
+    const ImVec4 colActive = ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive);
+    const ImVec4 colInactive(0.22f, 0.22f, 0.22f, 0.7f);
+    ImGui::TextUnformatted("Cursor");
+    ImGui::SameLine();
+    for (int m = 0; m < 2; ++m) {
+        const bool on = (m == 0);
+        const bool sel = (showTrackingCursor == on);
+        ImGui::PushStyleColor(ImGuiCol_Button, sel ? colActive : colInactive);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, sel ? colActive : colInactive);
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, colActive);
+        if (ImGui::Button(on ? "On##EnvCursorOn" : "Off##EnvCursorOff")) {
+            if (showTrackingCursor != on) {
+                showTrackingCursor = on;
+                dirty = true;
+                appState.needsRedraw = true;
+            }
+        }
+        ImGui::PopStyleColor(3);
+        if (m < 1) ImGui::SameLine();
+    }
+}
+
+// Plot Ranging panel (comparator): the spectrum-view navigation block (X
+// unit, Y scale, Y axis, cursor) split into its own dockable window.
+void EnvironmentSession::renderRangingWindow() {
+    ImGui::SetNextWindowDockID(mainDockSpaceId(), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Plot Ranging##envrange")) {
+        if (ImGui::IsWindowAppearing()) appState.needsRedraw = true;
+        forceDockSelection();
+        renderXUnitButtons();
+        renderYScaleButtons();
+        renderYAxisControls();
+        ImGui::Separator();
+        renderCursorToggle();
+    }
+    ImGui::End();
+}
+
+// Export panel (comparator): X-range mode (all / current plot area / manual
+// min-max) + Export. Writes the currently displayed curves (the Included
+// datasets checkboxes drive which curves gatherCurves returns — no separate
+// export checkboxes).
+void EnvironmentSession::renderExportWindow() {
+    ImGui::SetNextWindowDockID(mainDockSpaceId(), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Export##envexp")) {
+        if (ImGui::IsWindowAppearing()) appState.needsRedraw = true;
+        forceDockSelection();
+        const ImVec4 colActive = ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive);
+        const ImVec4 colInactive(0.22f, 0.22f, 0.22f, 0.7f);
+        const char* names[3] = {"all", "current plot area", "manual"};
+        ImGui::TextUnformatted("X range");
+        ImGui::SameLine();
+        for (int m = 0; m < 3; ++m) {
+            ImGui::PushStyleColor(ImGuiCol_Button, exportXRangeMode == m ? colActive : colInactive);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, exportXRangeMode == m ? colActive : colInactive);
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, colActive);
+            if (ImGui::Button(names[m])) {
+                if (exportXRangeMode != m) {
+                    exportXRangeMode = m;
+                    appState.needsRedraw = true;
+                }
+            }
+            ImGui::PopStyleColor(3);
+            if (m < 2) ImGui::SameLine();
+        }
+        if (exportXRangeMode == 2) {
+            ImGui::Text("min:");
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(80.0f);
+            ImGui::InputDouble("##EnvExportXMin", &exportXMin, 0.0, 0.0, "%.6g");
+            ImGui::SameLine();
+            ImGui::Text("max:");
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(80.0f);
+            ImGui::InputDouble("##EnvExportXMax", &exportXMax, 0.0, 0.0, "%.6g");
+            if (exportXMin >= exportXMax) {
+                ImGui::SameLine();
+                ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "(min<max!)");
+            }
+        }
+        ImGui::Separator();
+        ImGui::BeginDisabled(exportXRangeMode == 2 && exportXMin >= exportXMax);
+        if (ImGui::Button("Export CSV...", ImVec2(-1, 0))) exportCsv();
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered() && exportXRangeMode == 2 && exportXMin >= exportXMax)
+            ImGui::SetTooltip("Fix the manual X range first (min<max).");
+    }
+    ImGui::End();
+}
+
 // Extract the overlay curves for the selected artifact from the selected
 // datasets. All artifact types read the persisted workspace model, so embedded
 // cross sources work without an open tab. Multi-member artifacts show one
@@ -1117,14 +1255,17 @@ std::vector<ComparatorCurve> EnvironmentSession::gatherCurves(AppState& s) {
                 if (m.id == pick->id) n = memberCountFromConfig(m, "count");
             c.label = n > 0 ? src.label + " (avg of " + std::to_string(n) + ")"
                             : src.label + " · average";
+            c.shortLabel = n > 0 ? "avg of " + std::to_string(n) : "average";
         } else if (artifact == ComparatorArtifact::Snr) {
             int n = 0;
             for (const auto& m : src.ws->snrSpectra.members)
                 if (m.id == pick->id) n = memberCountFromConfig(m, "fileCount");
             c.label = n > 0 ? src.label + " (SNR of " + std::to_string(n) + ")"
                             : src.label + " · snr";
+            c.shortLabel = n > 0 ? "SNR of " + std::to_string(n) : "snr";
         } else {
             c.label = src.label + "/" + pick->id;
+            c.shortLabel = pick->id;
         }
         c.x = pick->x;
         if (pick->xUnit >= 0) {
@@ -1161,6 +1302,11 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
             ImPlot::SetNextAxisLimits(ImAxis_Y1, forcedYMin, forcedYMax, ImPlotCond_Always);
         prevYAxisMode = yAxisMode;
     }
+    // Y-scale change: re-fit so the new scale's data is fully visible.
+    if (yScaleSelector != prevYScaleSelector) {
+        if (yAxisMode == 0 || yAxisMode == 1) ImPlot::SetNextAxisToFit(ImAxis_Y1);
+        prevYScaleSelector = yScaleSelector;
+    }
 
     ImVec4 gridCol = ImPlot::GetStyle().Colors[ImPlotCol_AxisGrid];
     gridCol.w *= appState.gridAlpha;
@@ -1179,9 +1325,21 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
         else if (yAxisMode == 1) y_flags |= ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_RangeFit;
         ImPlot::SetupAxes(xLabel.c_str(), yLabel.c_str(), x_flags, y_flags);
 
+        // Legend in the top-right corner (item 7).
+        if (showLegend) ImPlot::SetupLegend(ImPlotLocation_NorthEast);
+
+        // Y-axis scale (spectrum-view scheme): log10 axis for log mode.
+        if (yScaleSelector == 1) ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Log10);
+
         const bool forceY = (yAxisMode == 2) && (forcedYMin < forcedYMax);
-        if (forceY)
-            ImPlot::SetupAxisLimits(ImAxis_Y1, forcedYMin, forcedYMax, ImPlotCond_Always);
+        if (forceY) {
+            // Log scale requires strictly positive Y limits (spectrum.cpp:638 pattern).
+            double yMin = forcedYMin;
+            double yMax = forcedYMax;
+            if (yScaleSelector == 1 && yMin <= 0.0)
+                yMin = (yMax > 0.0 ? yMax * 1e-6 : 1e-6);
+            ImPlot::SetupAxisLimits(ImAxis_Y1, yMin, yMax, ImPlotCond_Always);
+        }
 
         if (shouldAutoscale) {
             double x0 = 0.0, x1 = 0.0, y0 = 0.0, y1 = 0.0;
@@ -1193,9 +1351,15 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
                 if (!haveX) { x0 = lo; x1 = hi; haveX = true; }
                 else { x0 = std::min(x0, lo); x1 = std::max(x1, hi); }
                 if (!forceY) {
-                    auto [ymn, ymx] = std::minmax_element(c.y.begin(), c.y.end());
-                    if (!haveY) { y0 = *ymn; y1 = *ymx; haveY = true; }
-                    else { y0 = std::min(y0, *ymn); y1 = std::max(y1, *ymx); }
+                    double ymn = std::numeric_limits<double>::max();
+                    double ymx = std::numeric_limits<double>::lowest();
+                    for (double v : c.y) {
+                        if (yScaleSelector == 2) v = 10.0 * std::log10(std::max(v, 1e-300));
+                        ymn = std::min(ymn, v);
+                        ymx = std::max(ymx, v);
+                    }
+                    if (!haveY) { y0 = ymn; y1 = ymx; haveY = true; }
+                    else { y0 = std::min(y0, ymn); y1 = std::max(y1, ymx); }
                 }
             }
             if (haveX) {
@@ -1204,8 +1368,11 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
                     curves.front().x.front() > curves.front().x.back())
                     std::swap(x0, x1);
                 ImPlot::SetupAxisLimits(ImAxis_X1, x0, x1, ImPlotCond_Always);
-                if (!forceY && haveY)
+                if (!forceY && haveY) {
+                    if (yScaleSelector == 1 && y0 <= 0.0)
+                        y0 = (y1 > 0.0 ? y1 * 1e-6 : 1e-6);
                     ImPlot::SetupAxisLimits(ImAxis_Y1, y0, y1, ImPlotCond_Always);
+                }
             }
             shouldAutoscale = false;
         }
@@ -1237,11 +1404,19 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
 
         if (hasGuideline) ImPlot::PlotInfLines("##guideline", &guideline, 1);
 
-        for (const auto& c : curves) {
+        // Per-curve line colors (captured right after each PlotLine — the
+        // cursor markers and info box reuse them).
+        std::vector<ImVec4> curveColors(curves.size());
+        for (size_t k = 0; k < curves.size(); ++k) {
+            const auto& c = curves[k];
             std::vector<double> dx, dy;
             downsampleCurve(c.x, c.y, appState.maxPointsBeforeDownsampling, dx, dy);
+            if (yScaleSelector == 2) {
+                for (double& v : dy) v = 10.0 * std::log10(std::max(v, 1e-300));
+            }
             ImPlot::PlotLine(c.label.c_str(), dx.data(), dy.data(),
                              static_cast<int>(dx.size()));
+            curveColors[k] = ImPlot::GetLastItemColor();
         }
 
         // Interaction: ESC autoscale, arrows pan 10%, shift+drag range.
@@ -1327,6 +1502,85 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
             double ex[2] = {selectionEndX, selectionEndX};
             ImPlot::PlotLine("##SelEnd", ex, sy, 2);
         }
+
+        // Tracking cursor (spectrum-view scheme): marks and annotates ALL
+        // displayed curves. Markers + info-box text are color-coded to match
+        // each curve's line; labels are the short form (no dataset names).
+        if (showTrackingCursor && ImPlot::IsPlotHovered()) {
+            const ImPlotRect lim = ImPlot::GetPlotLimits();
+            ImPlotPoint mouse = ImPlot::GetPlotMousePos();
+            const double xLo = std::min(lim.X.Min, lim.X.Max);
+            const double xHi = std::max(lim.X.Min, lim.X.Max);
+            const double mx = std::min(std::max(mouse.x, xLo), xHi);
+            double lineY[2] = {lim.Y.Min, lim.Y.Max};
+            double lineX[2] = {mx, mx};
+            ImPlot::PlotLine("##EnvCursorLine", lineX, lineY, 2);
+
+            ImPlotSpec cursorSpec;
+            cursorSpec.Marker = ImPlotMarker_Circle;
+            cursorSpec.MarkerSize = 4.0f;
+            cursorSpec.MarkerLineColor = ImVec4(1, 1, 1, 1);   // white edge keeps the dot visible on its own line
+
+            using ST = SpectralToolbox::SpectrumXUnit;
+            const auto unit = static_cast<ST>(xUnitSelector);
+            double cm1 = (unit == ST::CmInv) ? mx : SpectralToolbox::convertXValue(mx, unit, ST::CmInv);
+            double um  = (unit == ST::Um)    ? mx : SpectralToolbox::convertXValue(mx, unit, ST::Um);
+            double thz = (unit == ST::THz)   ? mx : SpectralToolbox::convertXValue(mx, unit, ST::THz);
+            char header[128];
+            if (artifactSelector == 4 /* Interferogram */)
+                std::snprintf(header, sizeof(header), "Index: %lld",
+                              static_cast<long long>(mx));
+            else
+                std::snprintf(header, sizeof(header), "X: %.2f cm-1 / %.4f um / %.4f THz",
+                              cm1, um, thz);
+
+            // (color, text) lines: white header + one colored line per curve.
+            std::vector<std::pair<ImVec4, std::string>> lines;
+            lines.emplace_back(ImVec4(1, 1, 1, 1), header);
+            for (size_t k = 0; k < curves.size(); ++k) {
+                const auto& c = curves[k];
+                if (c.x.empty() || c.y.empty()) continue;
+                const size_t idx = nearestIndex(c.x, mx);
+                double yv = c.y[idx];
+                if (yScaleSelector == 2) yv = 10.0 * std::log10(std::max(yv, 1e-300));
+                cursorSpec.MarkerFillColor = curveColors[k];
+                ImPlot::PlotScatter(("##EnvCursorPt" + c.label).c_str(),
+                                    &mx, &yv, 1, cursorSpec);
+                char line[512];
+                std::snprintf(line, sizeof(line), "%s: %.4e", c.shortLabel.c_str(), yv);
+                lines.emplace_back(curveColors[k], line);
+            }
+
+            // Color-coded info box on the plot draw list, clamped to the plot.
+            const float lineH = ImGui::GetTextLineHeightWithSpacing();
+            float boxW = 0.0f;
+            for (const auto& [col, text] : lines)
+                boxW = std::max(boxW, ImGui::CalcTextSize(text.c_str()).x);
+            boxW += 16.0f;
+            const float boxH = lines.size() * lineH + 8.0f;
+            ImVec2 pos = ImPlot::PlotToPixels(mx, mouse.y);
+            pos.x += 10.0f;
+            pos.y += 10.0f;
+            const ImVec2 plotPos = ImPlot::GetPlotPos();
+            const ImVec2 plotSize = ImPlot::GetPlotSize();
+            pos.x = std::min(std::max(pos.x, plotPos.x + 4.0f), plotPos.x + plotSize.x - boxW - 4.0f);
+            pos.y = std::min(std::max(pos.y, plotPos.y + 4.0f), plotPos.y + plotSize.y - boxH - 4.0f);
+            ImDrawList* dl = ImPlot::GetPlotDrawList();
+            dl->AddRectFilled(pos, ImVec2(pos.x + boxW, pos.y + boxH), IM_COL32(0, 0, 0, 200), 4.0f);
+            float ty = pos.y + 4.0f;
+            for (const auto& [col, text] : lines) {
+                dl->AddText(ImVec2(pos.x + 8.0f, ty), ImGui::GetColorU32(col), text.c_str());
+                ty += lineH;
+            }
+        }
+
+        // Capture the current X limits every frame (the export "current plot
+        // area" source; spectrum.cpp:1206 pattern).
+        {
+            const ImPlotRect lim = ImPlot::GetPlotLimits();
+            viewXMin = std::min(lim.X.Min, lim.X.Max);
+            viewXMax = std::max(lim.X.Min, lim.X.Max);
+        }
         ImPlot::EndPlot();
     }
     ImPlot::PopStyleColor();
@@ -1349,20 +1603,44 @@ void EnvironmentSession::exportCsv() {
     }
 
     if (type == EnvType::Comparator) {
+        // Export exactly the displayed curves (gatherCurves respects the
+        // Included datasets checkboxes) within the chosen X range: all /
+        // current plot area (viewXMin/Max) / manual (exportXMin/Max).
+        double xLo = 0.0, xHi = 0.0;
+        bool rangeFilter = false;
+        if (exportXRangeMode == 1 && viewXMin < viewXMax) {
+            xLo = viewXMin;
+            xHi = viewXMax;
+            rangeFilter = true;
+        } else if (exportXRangeMode == 2 && exportXMin < exportXMax) {
+            xLo = exportXMin;
+            xHi = exportXMax;
+            rangeFilter = true;
+        }
         const auto curves = gatherCurves(appState);
+        // Per-curve filtered points (wide table, padded to the longest curve).
+        std::vector<std::vector<double>> fx(curves.size()), fy(curves.size());
+        size_t n = 0;
+        for (size_t k = 0; k < curves.size(); ++k) {
+            const auto& c = curves[k];
+            for (size_t i = 0; i < c.x.size() && i < c.y.size(); ++i) {
+                if (rangeFilter && (c.x[i] < xLo || c.x[i] > xHi)) continue;
+                fx[k].push_back(c.x[i]);
+                fy[k].push_back(c.y[i]);
+            }
+            n = std::max(n, fx[k].size());
+        }
         for (const auto& c : curves)
             ofs << ",\"" << c.label << " x\",\"" << c.label << " y\"";
         ofs << "\n";
-        size_t n = 0;
-        for (const auto& c : curves) n = std::max(n, c.x.size());
         for (size_t i = 0; i < n; ++i) {
             bool first = true;
-            for (const auto& c : curves) {
+            for (size_t k = 0; k < curves.size(); ++k) {
                 ofs << (first ? "" : ",");
-                if (i < c.x.size()) ofs << c.x[i];
-                ofs << ",";
-                if (i < c.y.size()) ofs << c.y[i];
                 first = false;
+                if (i < fx[k].size()) ofs << fx[k][i];
+                ofs << ",";
+                if (i < fy[k].size()) ofs << fy[k][i];
             }
             ofs << "\n";
         }
@@ -1399,6 +1677,8 @@ static nlohmann::json experimentConfigJson(const EnvironmentSession& env) {
     j["yAxisMode"] = env.yAxisMode;
     j["forcedYMin"] = env.forcedYMin;
     j["forcedYMax"] = env.forcedYMax;
+    j["yScale"] = env.yScaleSelector;
+    j["showCursor"] = env.showTrackingCursor;
     j["computed"] = env.computed;
     // View X range (bugfix 2026-08-14): manual zoom window, same convention
     // as the workspace panels' view state (§8.1 spectrumView etc.) — unit is
@@ -1434,6 +1714,9 @@ static void experimentApplyConfig(EnvironmentSession& env, const nlohmann::json&
     env.prevYAxisMode = env.yAxisMode;
     env.forcedYMin = j.value("forcedYMin", 0.0);
     env.forcedYMax = j.value("forcedYMax", 1.0);
+    env.yScaleSelector = j.value("yScale", 0);
+    env.prevYScaleSelector = env.yScaleSelector;
+    env.showTrackingCursor = j.value("showCursor", false);
     env.computed = j.value("computed", false);
     // Restored X range: latched for one-shot application on the first render
     // (renderPlot consumes pendingNextXMin/Max); legacy configs without the
@@ -1456,6 +1739,10 @@ static void experimentApplyConfig(EnvironmentSession& env, const nlohmann::json&
                 env.samples.emplace_back(s[0].get<std::string>(), s[1].get<std::string>());
     } else {
         env.artifactSelector = j.value("artifactSelector", 0);
+        // log/dB are invalid for T100/IFG — never restore an invalid state
+        // (defensive; the UI already resets on artifact switch).
+        if (env.artifactSelector == 3 || env.artifactSelector == 4)
+            env.yScaleSelector = 0;
         env.comparatorKeys = j.value("comparatorKeys", std::vector<std::string>{});
         env.comparatorKeysExplicit = j.value("comparatorKeysExplicit", false);
         auto mp = j.find("memberPicks");

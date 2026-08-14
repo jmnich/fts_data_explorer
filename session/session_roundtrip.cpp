@@ -1512,6 +1512,8 @@ void test12_experimentPersistence() {
     cmp->yAxisMode = 2;
     cmp->forcedYMin = -1.0;
     cmp->forcedYMax = 5.0;
+    cmp->yScaleSelector = 1;
+    cmp->showTrackingCursor = true;
     cmp->comment = "comparator experiment";
     // View X range persists like the workspace panels' view state (bugfix
     // 2026-08-14: the comparator's zoom window was lost on relaunch).
@@ -1555,6 +1557,10 @@ void test12_experimentPersistence() {
     CHECK(c2->xUnitSelector == 1);
     CHECK(c2->yAxisMode == 2);
     CHECK(c2->forcedYMin == -1.0 && c2->forcedYMax == 5.0);
+    // yScale was saved as 1 (log) but T100/IFG artifacts never allow log/dB —
+    // the load path clamps it back to lin (defensive, mirrors the UI reset).
+    CHECK(c2->yScaleSelector == 0);
+    CHECK(c2->showTrackingCursor == true);
     CHECK(c2->comment == "comparator experiment");
     CHECK(c2->computed == false);
     CHECK(c2->dirty == false);

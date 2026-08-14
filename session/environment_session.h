@@ -35,7 +35,8 @@ const char* artifactLabel(ComparatorArtifact a); // "Average spectrum" / "SNR" /
 // One overlay curve: label + x/y already in the instance's display unit
 // (or sample index for interferograms).
 struct ComparatorCurve {
-    std::string label;
+    std::string label;       // full label (legend / CSV headers)
+    std::string shortLabel;  // compact label (cursor info box, no dataset name)
     std::vector<double> x, y;
 };
 
@@ -73,6 +74,12 @@ public:
     int yAxisMode = 0;
     int prevYAxisMode = -1;
     double forcedYMin = 0.0, forcedYMax = 1.0;
+    // Y scale (spectrum-view scheme): 0 lin, 1 log10, 2 dB. log/dB are gated
+    // off for T100 and Interferogram artifacts (non-positive values).
+    int yScaleSelector = 0;
+    int prevYScaleSelector = -1;
+    // Tracking cursor (spectrum-view scheme): marks ALL displayed curves.
+    bool showTrackingCursor = false;
 
     // Comparator selection.
     int artifactSelector = 0;            // ComparatorArtifact index
@@ -106,6 +113,12 @@ public:
     bool leftArrowPressedLastFrame = false, rightArrowPressedLastFrame = false;
     bool leftArrowHandleFlag = false, rightArrowHandleFlag = false;
     double pendingNextXMin = 0.0, pendingNextXMax = -1.0;
+    // Last-rendered plot X limits (captured each frame in renderPlot) — the
+    // "current plot area" source for the export X-range mode.
+    double viewXMin = 0.0, viewXMax = 0.0;
+    // Export X-range mode: 0 all, 1 current plot area, 2 manual.
+    int exportXRangeMode = 0;
+    double exportXMin = 0.0, exportXMax = 0.0;
 
     // Async compute (IMGUI_GUIDE §13): futures + main-thread counters only.
     std::vector<std::future<SpectralToolbox::ProcessedSpectrum>> pendingFutures_;
@@ -170,6 +183,13 @@ private:
     void renderDatasetSelector();        // comparator included-datasets checkbox list
     void renderXUnitButtons();
     void renderYAxisControls();
+    void renderYScaleButtons();          // lin/log/dB, gated off for T100/IFG
+    void renderCursorToggle();
+    // Docked "Plot Ranging" panel (comparator): X unit / Y scale / Y axis /
+    // cursor — the spectrum-view navigation block, split into its own window.
+    void renderRangingWindow();
+    // Docked "Export" panel (comparator): X-range mode + manual min/max.
+    void renderExportWindow();
     void renderCommentEditor();
     // Common overlay plot with spectrum-view navigation (locked/tight/all Y,
     // shift+drag range, ESC fit-all, arrows pan, wheel zoom).
