@@ -9,6 +9,7 @@
 #include "hdf/workspace.h"
 
 struct AppState;
+class WorkspaceSession;
 struct Spectrum;
 
 // Map Workspace availability flags 1:1 onto DatasetInfo so the engine's
@@ -100,6 +101,10 @@ void seedPanelsFromWorkspace(AppState& s);
 // intentionally absent — the latch must not false-dirty on first load (decision
 // 3); captureViewState adds it to the file only.
 nlohmann::json viewStateJson(const AppState& s);
+// Per-session variant: sessions are canonical (AppState::active is null while
+// a non-workspace tab is focused), so bulk saves read any parked session's
+// fields directly. The AppState form delegates to *s.active.
+nlohmann::json viewStateJson(const WorkspaceSession& ws);
 
 // Merge viewStateJson() into workspace.workspaceJson under
 // applications["FTS Data Explorer"] (+ the transient selectedFiles set), write
@@ -107,6 +112,9 @@ nlohmann::json viewStateJson(const AppState& s);
 // (spec rule 9) and other apps' subtrees. Does NOT set dirty. Called at Save/
 // Save As before the pruneStale copy.
 void captureViewState(AppState& s);
+// Per-session variant (see viewStateJson); writes the parked session's
+// workspaceJson.
+void captureViewState(WorkspaceSession& ws);
 
 // Apply the restore subset (decision 3) from workspace.workspaceJson to
 // AppState. Pure AppState write; does NOT set dirty. Resizes

@@ -67,6 +67,15 @@ void openWorkspaceInNewTab(AppState& s, const std::string& path) {
             // is also reachable from the launch welcome — dismissing it here
             // is what makes the welcome's recent-cross click work (bugfix
             // 2026-08-13: focusSessionTab alone left the welcome overlay up).
+            // Bugfix 2026-08-14: go-home clears the environments while the
+            // session file stays open, so the welcome's recent-cross click
+            // would leave Active Environments empty; reload the experiments.
+            // crossLoadExperiments dedupes by id — safe to run on every visit.
+            std::string err;
+            if (!crossLoadExperiments(s, path, err)) {
+                s.adapterErrorMsg = std::string("Failed to reload experiments:\n") + err;
+                s.showAdapterErrorPopup = true;
+            }
             s.showWelcomeScreen = false;
             s.welcomeScreenInitialized = true;
         } else if (s.sessionTab.multiWorkspaceOpen) {
@@ -327,6 +336,43 @@ void doSaveWorkspace(AppState& s, const std::string& asPath) {
     s.needsRedraw = true;
     // The save was effective (no exception, no cancel): show the "Saved" toast.
     s.saveToastUntil = glfwGetTime() + 1.5;
+}
+
+// Ctrl+S / File→Save from ANY tab kind: everything dirty gets saved — every
+// workspace tab (embedded save-back via crossSaveSource, filesystem tabs via
+// H5Store::save) with per-session view-state capture and rebaseline, plus all
+// dirty experiments (crossSaveExperiments). No stale-drop prompt here: the
+// save writes stale categories verbatim instead of pruning (nothing silently
+// dropped; matches exit Save All). Throws H5Error on failure.
+void saveEverything(AppState& s) {
+    for (auto& sess : s.sessions) {
+        if (!sess->workspace.dirty) continue;
+        captureViewState(*sess);
+        const size_t hash = sess->key.find('#');
+        if (hash != std::string::npos) {
+            const std::string crossPath = sess->key.substr(0, hash);
+            const std::string sourceId = sess->key.substr(hash + 1);
+            std::string err;
+            crossSaveSource(crossPath, sourceId, sess->workspace, err);   // throws
+        } else {
+            H5Store::save(sess->workspacePath, sess->workspace);          // throws
+        }
+        sess->workspace.dirty = false;
+        sess->workspace.changeLog.clear();
+        sess->viewStateBaseline = viewStateJson(*sess);
+        sess->viewStateBaselinePending = false;
+    }
+    if (s.sessionTab.multiWorkspaceOpen) {
+        std::string err;
+        if (!crossSaveExperiments(s, s.sessionTab.multiWorkspacePath, err))
+            throw H5Error(err);
+    }
+    s.needsRedraw = true;
+    // Toast only when there is something that could hold state (launch welcome
+    // has none — a "Saved" toast there would be a lie).
+    if (!s.sessions.empty() || !s.environments.empty() ||
+        s.sessionTab.multiWorkspaceOpen)
+        s.saveToastUntil = glfwGetTime() + 1.5;
 }
 
 void requestSaveWorkspace(AppState& s, const std::string& asPath) {

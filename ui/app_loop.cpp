@@ -16,6 +16,7 @@
 #include "app_dirs.h"
 #include "file_browser.h"
 #include "session/cross_store.h"
+#include "layout_persistence.h"
 #include <imgui.h>
 #include "imgui_internal.h" // DockBuilder API
 #include "imgui_impl_glfw.h"
@@ -620,8 +621,12 @@ static float renderTabStrip() {
         // Environment instances (Phase 3): live tabs, same close affordances
         // (hover [x] / middle-click / context). IDs ##env<i> resolve to the
         // environments vector — a reorder remaps only the strip order.
+        // tabHidden instances were closed in the strip: no tab item is
+        // submitted, so they stay hidden until re-activated via the Active
+        // Environments panel.
         for (int i = 0; i < static_cast<int>(appState.environments.size()); ++i) {
             auto* env = appState.environments[i].get();
+            if (env->tabHidden) continue;
             const bool isActive = (appState.activeTabKind == ActiveTabKind::Environment &&
                                    appState.activeEnvIdx == i);
             const std::string label =
@@ -641,8 +646,9 @@ static float renderTabStrip() {
                 ImGui::EndTabItem();
             }
             if (!open) {
+                // Close = deactivate only (never delete): the instance stays
+                // live and re-openable via the Active Environments panel.
                 env->closeRequest();
-                break;   // environments vector changed — stop iterating
             }
         }
         ImGui::EndTabBar();
@@ -795,6 +801,18 @@ static void rebuildDefaultLayout(ImGuiID dockspace_id, float topOffset) {
 
     ImGuiID dock_right_top, dock_right_bottom;
     ImGui::DockBuilderSplitNode(dock_right_panel, ImGuiDir_Up, 0.50f, &dock_right_top, &dock_right_bottom);
+
+    // Environment panels (Bug 2, 2026-08-14): Settings docked left, Viewer
+    // right, by default. The split keeps the workspace view windows in the
+    // left node (which also gets Settings); Viewer lands in the new right
+    // node. DockBuilderDockWindow writes the DockId into the windows'
+    // settings even though they do not exist yet — first env instance picks
+    // them up when it appears.
+    ImGuiID dock_env_viewer;
+    ImGui::DockBuilderSplitNode(dock_center, ImGuiDir_Right, 0.55f,
+                                &dock_env_viewer, &dock_center);
+    ImGui::DockBuilderDockWindow("Settings##envcfg", dock_center);
+    ImGui::DockBuilderDockWindow("Viewer##envview", dock_env_viewer);
 
     ImGui::DockBuilderDockWindow("Files",              dock_left_top);
     // Session-tab panels dock directly in the main dock space (no
@@ -966,6 +984,15 @@ bool AppLoop::runFrame() {
     handleInput();
     renderUI();
     present();
+    // Black-first-frame fix (2026-08-14): after a tab-kind switch the just-
+    // rendered frame could not show the incoming dock panels (the tab bars
+    // skipped windows unsubmitted last frame); render one follow-up frame so
+    // they appear — the idle gate would otherwise freeze the black frame
+    // until an input event (mouse move) wakes the loop.
+    if (appState.extraRedrawAfterKindSwitch) {
+        appState.extraRedrawAfterKindSwitch = false;
+        appState.needsRedraw = true;
+    }
     return true;
 }
 
@@ -1113,7 +1140,6 @@ void AppLoop::handleInput() {
             appState.aKeyPressedLastFrame = false;
             appState.dKeyPressedLastFrame = false;
             appState.qKeyPressedLastFrame = false;
-            appState.sKeyPressedLastFrame = false;
         } else {
         appState.active->multiSelectMode = ImGui::GetIO().KeyCtrl;
         appState.active->shiftSelectMode = ImGui::GetIO().KeyShift;
@@ -1125,7 +1151,6 @@ void AppLoop::handleInput() {
             bool aKeyPressed = glfwGetKey(window_, GLFW_KEY_A) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
             bool dKeyPressed = glfwGetKey(window_, GLFW_KEY_D) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
             bool qKeyPressed = glfwGetKey(window_, GLFW_KEY_Q) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
-            bool sKeyPressed = glfwGetKey(window_, GLFW_KEY_S) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
             
             // 'Ctrl+Y' - Toggle auto-fit Y-axis (only on initial press)
             if (yKeyPressed && !appState.yKeyPressedLastFrame) {
@@ -1212,35 +1237,41 @@ void AppLoop::handleInput() {
                 appState.needsRedraw = true;
             }
 
-#if FTS_BUILD_HDF5
-            // 'Ctrl+S' - Save workspace; 'Ctrl+Shift+S' - Save As (workspace mode only)
-            if (sKeyPressed && !appState.sKeyPressedLastFrame && appState.hasWorkspace()) {
-                try {
-                    if (ImGui::GetIO().KeyShift)
-                        saveWorkspaceAs(appState, window_);
-                    else
-                        requestSaveWorkspace(appState, "");
-                } catch (const std::exception& e) {
-                    appState.adapterErrorMsg = std::string("Save failed:\n") + e.what();
-                    appState.showAdapterErrorPopup = true;
-                }
-                appState.needsRedraw = true;
-            }
-#endif
-
             // Update key state tracking for next frame
             appState.yKeyPressedLastFrame = yKeyPressed;
             appState.aKeyPressedLastFrame = aKeyPressed;
             appState.dKeyPressedLastFrame = dKeyPressed;
             appState.qKeyPressedLastFrame = qKeyPressed;
-            appState.sKeyPressedLastFrame = sKeyPressed;
         } else {
             // Reset key states when keyboard is captured (e.g., typing in text field)
             appState.yKeyPressedLastFrame = false;
             appState.aKeyPressedLastFrame = false;
             appState.qKeyPressedLastFrame = false;
-            appState.sKeyPressedLastFrame = false;
+            appState.dKeyPressedLastFrame = false;
         }
+
+        // 'Ctrl+S' - Save EVERYTHING (any tab kind: workspace, session,
+        // environment): all dirty workspace tabs + all dirty experiments, one
+        // toast. Also 'Ctrl+Shift+S' - Save As (active workspace only).
+        const bool sKeyPressed =
+            glfwGetKey(window_, GLFW_KEY_S) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
+        if (sKeyPressed && !appState.sKeyPressedLastFrame &&
+            !ImGui::GetIO().WantCaptureKeyboard) {
+#if FTS_BUILD_HDF5
+            try {
+                if (wsActive && appState.hasWorkspace() && ImGui::GetIO().KeyShift) {
+                    saveWorkspaceAs(appState, window_);
+                } else {
+                    saveEverything(appState);
+                }
+            } catch (const std::exception& e) {
+                appState.adapterErrorMsg = std::string("Save failed:\n") + e.what();
+                appState.showAdapterErrorPopup = true;
+            }
+#endif
+            appState.needsRedraw = true;
+        }
+        appState.sKeyPressedLastFrame = sKeyPressed;
 
         // Reapply UI scaling if size changed
         handleUIScaling(io, appState.uiScale, appState.currentUiSize, appState.uiSizeChanged);
@@ -1678,14 +1709,13 @@ void AppLoop::renderUI() {
                 // Phase 3: same forced selection for the active environment
                 // instance's window (its dock tab must be visible after a
                 // strip click; the instance's render arms the next frame via
-                // IsWindowAppearing + needsRedraw).
+                // IsWindowAppearing + needsRedraw). Stable window names —
+                // renaming the instance must not churn the dock identity.
                 if (appState.activeTabKind == ActiveTabKind::Environment &&
                     appState.activeEnvIdx >= 0 &&
                     appState.activeEnvIdx < static_cast<int>(appState.environments.size())) {
-                    const std::string winName = appState.environments[appState.activeEnvIdx]->title();
-                    const std::string viewName = winName + " View";
-                    for (const std::string& n : {winName, viewName}) {
-                        if (ImGuiWindow* pw = ImGui::FindWindowByName(n.c_str())) {
+                    for (const char* n : {"Settings##envcfg", "Viewer##envview"}) {
+                        if (ImGuiWindow* pw = ImGui::FindWindowByName(n)) {
                             if (pw->DockNode) {
                                 pw->DockNode->SelectedTabId = pw->TabId;
                                 if (pw->DockNode->TabBar)
@@ -1715,9 +1745,16 @@ void AppLoop::renderUI() {
                 // positions. One rebuild re-docks them (DockBuilderDockWindow
                 // overwrites the DockIds); the persisted version fires this
                 // exactly once.
-                if (config_.sessionPanelLayoutVersion < 3) {
-                    config_.sessionPanelLayoutVersion = 3;
+                // v4 (bugfix 2026-08-14): environment windows got STABLE names
+                // ("Settings##envcfg"/"Viewer##envview") and a default dock
+                // layout (Settings left, Viewer right). Old window names are
+                // gone — the stale environment layout snapshot (and its
+                // DockIds) must not survive, or the first env-tab switch
+                // restores the old naming and undocks the new windows.
+                if (config_.sessionPanelLayoutVersion < 4) {
+                    config_.sessionPanelLayoutVersion = 4;
                     config_.saveToFile(configFilePath_);
+                    resetTabLayout(tabTypeName(static_cast<int>(ActiveTabKind::Environment)));
                     rebuildDefaultLayout(dockspace_id, topOffset);
                 }
 

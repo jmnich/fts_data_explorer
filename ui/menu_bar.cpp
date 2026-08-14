@@ -42,9 +42,11 @@ void renderMainMenuBar(AppConfig& config, const std::string& configFilePath,
                         requestWorkspaceDiscard(appState, PendingWorkspaceAction::CloseWorkspace, "");
                     }
                     ImGui::Separator();
-                    if (ImGui::MenuItem("Save", "Ctrl+S", false, appState.hasWorkspace())) {
+                    if (ImGui::MenuItem("Save", "Ctrl+S", false,
+                                        appState.hasWorkspace() ||
+                                        appState.sessionTab.multiWorkspaceOpen)) {
                         try {
-                            requestSaveWorkspace(appState, "");
+                            saveEverything(appState);
                         } catch (const std::exception& e) {
                             appState.adapterErrorMsg = std::string("Save failed:\n") + e.what();
                             appState.showAdapterErrorPopup = true;

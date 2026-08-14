@@ -418,86 +418,94 @@ bool persistedSpectrumParams(const Workspace& ws, Spectrum& out,
     return true;
 }
 
-nlohmann::json viewStateJson(const AppState& s) {
+nlohmann::json viewStateJson(const WorkspaceSession& ws) {
     nlohmann::json j;
     j["plotDefaults"] = {
-        {"maxAtZero", s.active->maxAtZero},
-        {"xAxisBase", s.active->xAxisBase},
-        {"xCorrectionMethod", s.active->xCorrectionMethod},
-        {"peakProminence", s.active->peakProminenceThreshold}
+        {"maxAtZero", ws.maxAtZero},
+        {"xAxisBase", ws.xAxisBase},
+        {"xCorrectionMethod", ws.xCorrectionMethod},
+        {"peakProminence", ws.peakProminenceThreshold}
     };
     j["selection"] = {
-        {"sortedFiles", s.active->sortedFiles},
-        {"filesSelectedForAveraging", s.active->filesSelectedForAveraging},
-        {"currentSortedFileIndex", s.active->currentSortedFileIndex}
+        {"sortedFiles", ws.sortedFiles},
+        {"filesSelectedForAveraging", ws.filesSelectedForAveraging},
+        {"currentSortedFileIndex", ws.currentSortedFileIndex}
     };
     j["spectrumView"] = {
-        {"xUnit", s.active->spectrum.xUnitSelector},
-        {"yScale", s.active->spectrum.yScaleSelector},
-        {"yAxisMode", s.active->spectrum.yAxisMode},
-        {"forcedYMin", s.active->spectrum.forcedYMin},
-        {"forcedYMax", s.active->spectrum.forcedYMax},
-        {"manualXMin", s.active->spectrum.manualXMin},
-        {"manualXMax", s.active->spectrum.manualXMax},
-        {"detectorSensitivityKVPerW", s.active->spectrum.detectorSensitivity},
-        {"refLaserUm", s.active->spectrum.refLaserTextbox},
-        {"zeroPadK", s.active->spectrum.Kpadding},
-        {"apodization", makeApodizationJson(s.active->spectrum.apodizationSelector,
-                                            s.active->spectrum.apodizationParams)}
+        {"xUnit", ws.spectrum.xUnitSelector},
+        {"yScale", ws.spectrum.yScaleSelector},
+        {"yAxisMode", ws.spectrum.yAxisMode},
+        {"forcedYMin", ws.spectrum.forcedYMin},
+        {"forcedYMax", ws.spectrum.forcedYMax},
+        {"manualXMin", ws.spectrum.manualXMin},
+        {"manualXMax", ws.spectrum.manualXMax},
+        {"detectorSensitivityKVPerW", ws.spectrum.detectorSensitivity},
+        {"refLaserUm", ws.spectrum.refLaserTextbox},
+        {"zeroPadK", ws.spectrum.Kpadding},
+        {"apodization", makeApodizationJson(ws.spectrum.apodizationSelector,
+                                            ws.spectrum.apodizationParams)}
     };
     j["averageView"] = {
-        {"xUnit", s.active->averageSpectrum.xUnitSelector},
-        {"yScale", s.active->averageSpectrum.yScaleSelector},
-        {"yAxisMode", s.active->averageSpectrum.yAxisMode},
-        {"forcedYMin", s.active->averageSpectrum.forcedYMin},
-        {"forcedYMax", s.active->averageSpectrum.forcedYMax},
-        {"manualXMin", s.active->averageSpectrum.manualXMin},
-        {"manualXMax", s.active->averageSpectrum.manualXMax}
+        {"xUnit", ws.averageSpectrum.xUnitSelector},
+        {"yScale", ws.averageSpectrum.yScaleSelector},
+        {"yAxisMode", ws.averageSpectrum.yAxisMode},
+        {"forcedYMin", ws.averageSpectrum.forcedYMin},
+        {"forcedYMax", ws.averageSpectrum.forcedYMax},
+        {"manualXMin", ws.averageSpectrum.manualXMin},
+        {"manualXMax", ws.averageSpectrum.manualXMax}
     };
     j["snrView"] = {
-        {"xUnit", s.active->snrSpectrum.xUnitSelector},
-        {"yScale", s.active->snrSpectrum.yScaleSelector},
-        {"yAxisMode", s.active->snrSpectrum.yAxisMode},
-        {"forcedYMin", s.active->snrSpectrum.forcedYMin},
-        {"forcedYMax", s.active->snrSpectrum.forcedYMax},
-        {"manualXMin", s.active->snrSpectrum.manualXMin},
-        {"manualXMax", s.active->snrSpectrum.manualXMax}
+        {"xUnit", ws.snrSpectrum.xUnitSelector},
+        {"yScale", ws.snrSpectrum.yScaleSelector},
+        {"yAxisMode", ws.snrSpectrum.yAxisMode},
+        {"forcedYMin", ws.snrSpectrum.forcedYMin},
+        {"forcedYMax", ws.snrSpectrum.forcedYMax},
+        {"manualXMin", ws.snrSpectrum.manualXMin},
+        {"manualXMax", ws.snrSpectrum.manualXMax}
     };
     j["allanView"] = {
-        {"xUnit", s.active->allanVariance.xUnitSelector},
-        {"wavelengthDecimation", s.active->allanVariance.wavelengthDecimation},
-        {"sliceIndex", s.active->allanVariance.selectedSliceIndex},
-        {"xRangeMin", s.active->allanVariance.xRangeMin},
-        {"xRangeMax", s.active->allanVariance.xRangeMax},
-        {"calcBase", s.active->allanVariance.calcBaseSelector},
-        {"manualXMin", s.active->allanVariance.manualXMin},
-        {"manualXMax", s.active->allanVariance.manualXMax}
+        {"xUnit", ws.allanVariance.xUnitSelector},
+        {"wavelengthDecimation", ws.allanVariance.wavelengthDecimation},
+        {"sliceIndex", ws.allanVariance.selectedSliceIndex},
+        {"xRangeMin", ws.allanVariance.xRangeMin},
+        {"xRangeMax", ws.allanVariance.xRangeMax},
+        {"calcBase", ws.allanVariance.calcBaseSelector},
+        {"manualXMin", ws.allanVariance.manualXMin},
+        {"manualXMax", ws.allanVariance.manualXMax}
     };
     j["t100View"] = {
-        {"xUnit", s.active->t100.xUnitSelector},
-        {"yAxisMode", s.active->t100.yAxisMode},
-        {"forcedYMin", s.active->t100.forcedYMin},
-        {"forcedYMax", s.active->t100.forcedYMax},
-        {"referenceSource", s.active->t100.referenceSource},
-        {"manualXMin", s.active->t100.manualXMin},
-        {"manualXMax", s.active->t100.manualXMax},
+        {"xUnit", ws.t100.xUnitSelector},
+        {"yAxisMode", ws.t100.yAxisMode},
+        {"forcedYMin", ws.t100.forcedYMin},
+        {"forcedYMax", ws.t100.forcedYMax},
+        {"referenceSource", ws.t100.referenceSource},
+        {"manualXMin", ws.t100.manualXMin},
+        {"manualXMax", ws.t100.manualXMax},
         {"energyRatios", nlohmann::json::array({
-            {{"num", std::string(s.active->t100.energyRatioNumA)}, {"den", std::string(s.active->t100.energyRatioDenA)}},
-            {{"num", std::string(s.active->t100.energyRatioNumB)}, {"den", std::string(s.active->t100.energyRatioDenB)}},
-            {{"num", std::string(s.active->t100.energyRatioNumC)}, {"den", std::string(s.active->t100.energyRatioDenC)}}
+            {{"num", std::string(ws.t100.energyRatioNumA)}, {"den", std::string(ws.t100.energyRatioDenA)}},
+            {{"num", std::string(ws.t100.energyRatioNumB)}, {"den", std::string(ws.t100.energyRatioDenB)}},
+            {{"num", std::string(ws.t100.energyRatioNumC)}, {"den", std::string(ws.t100.energyRatioDenC)}}
         })}
     };
     return j;
 }
 
-void captureViewState(AppState& s) {
-    nlohmann::json& j = s.active->workspace.workspaceJson;
-    j["applications"][kAppName] = viewStateJson(s);
+nlohmann::json viewStateJson(const AppState& s) {
+    return viewStateJson(*s.active);
+}
+
+void captureViewState(WorkspaceSession& ws) {
+    nlohmann::json& j = ws.workspace.workspaceJson;
+    j["applications"][kAppName] = viewStateJson(ws);
     // Transient plotted set: written to the file (decision 3 preserves it) but
     // deliberately absent from viewStateJson so the frame-loop latch never
     // false-dirties on first-load selection.
-    j["applications"][kAppName]["selection"]["selectedFiles"] = s.active->selectedFiles;
+    j["applications"][kAppName]["selection"]["selectedFiles"] = ws.selectedFiles;
     j["app"] = {{"name", kAppName}, {"version", APP_VERSION}};
+}
+
+void captureViewState(AppState& s) {
+    captureViewState(*s.active);
 }
 
 void applyViewState(AppState& s) {

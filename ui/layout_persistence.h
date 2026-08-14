@@ -21,3 +21,7 @@ void saveTabLayout(const char* type);
 // full settings state — windows created after this call pick up their saved
 // dock ids.
 void restoreTabLayout(const char* type);
+
+// Delete the type's snapshot file (e.g. after a layout-version bump that
+// renamed windows — the stale DockIds must not be restorable).
+void resetTabLayout(const char* type);

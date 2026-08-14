@@ -472,11 +472,13 @@ void SessionTab::renderActiveEnvironmentsPanel() {
         renderCenteredEmptyLine("No environments open.", 0.45f);
     }
     for (size_t i = 0; i < appState.environments.size(); ++i) {
-        const auto* env = appState.environments[i].get();
+        auto* env = appState.environments[i].get();
         const bool isActive = (appState.activeTabKind == ActiveTabKind::Environment &&
                                appState.activeEnvIdx == static_cast<int>(i));
         if (renderRowRemoveButton(static_cast<int>(i))) {
-            removeEnvironment(appState, static_cast<int>(i));
+            // Deletion happens HERE (the tab selector's close only
+            // deactivates). Dirty/persisted instances confirm via the modal.
+            env->requestDelete();
             break;   // environments vector changed
         }
 
@@ -527,19 +529,38 @@ static void renderEnvTypeCard(const char* title, const char* desc, EnvType type)
     ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, 8.0f));
     ImGui::PushStyleColor(ImGuiCol_Border, GetAccentSubtle(ac));
+    // First row: title + 2x-size "+ New" (drawn via the draw list — no second
+    // font is loaded; AddText scales the default font's glyphs). The band is
+    // tall enough for the big label; the description starts below it.
+    const float bigH = ImGui::GetFontSize() * 1.5f;
     const bool open = ImGui::BeginChild(title,
-        ImVec2(0.0f, ImGui::GetTextLineHeightWithSpacing() * 2.0f + 16.0f), true);
+        ImVec2(0.0f, 8.0f + bigH + 6.0f + ImGui::GetTextLineHeightWithSpacing() + 8.0f), true);
     ImGui::PopStyleColor();
     ImGui::PopStyleVar(3);
     if (open) {
+        // Hover highlight matching the Active Environments rows (Selectable
+        // hover = ImGuiCol_HeaderHovered). Child windows share the parent's
+        // draw list, so the fill lands under the text, inside the child rect.
+        if (ImGui::IsWindowHovered()) {
+            const ImVec2 wpos = ImGui::GetWindowPos();
+            const ImVec2 wsize = ImGui::GetWindowSize();
+            ImGui::GetWindowDrawList()->AddRectFilled(
+                wpos, ImVec2(wpos.x + wsize.x, wpos.y + wsize.y),
+                ImGui::ColorConvertFloat4ToU32(GetAccentHovered(ac)), 6.0f);
+        }
         ImGui::TextUnformatted(title);
-        ImGui::SameLine();
-        ImGui::SetCursorPosX(ImGui::GetWindowWidth() -
-                             ImGui::CalcTextSize("+ New").x -
-                             ImGui::GetStyle().WindowPadding.x);
-        ImGui::PushStyleColor(ImGuiCol_Text, modalAccent());
-        ImGui::TextUnformatted("+ New");
-        ImGui::PopStyleColor();
+        {
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            const ImVec2 wpos = ImGui::GetWindowPos();
+            const char* newLabel = "+ New";
+            const float newW = ImGui::CalcTextSize(newLabel).x * 1.5f;
+            dl->AddText(ImGui::GetFont(), bigH,
+                        ImVec2(wpos.x + ImGui::GetWindowWidth() -
+                                   ImGui::GetStyle().WindowPadding.x - newW,
+                               wpos.y + 8.0f),
+                        ImGui::ColorConvertFloat4ToU32(modalAccent()), newLabel);
+        }
+        ImGui::SetCursorPosY(8.0f + bigH + 6.0f);
         ImGui::PushStyleColor(ImGuiCol_Text,
                               ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
         ImGui::PushTextWrapPos(ImGui::GetContentRegionMax().x);

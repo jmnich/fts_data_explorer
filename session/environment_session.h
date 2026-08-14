@@ -53,6 +53,10 @@ public:
     // source params — advisory only; the pool cache re-verifies on every read).
     bool dirty = false;
     bool stale = false;
+    // Tab-strip visibility (bugfix 2026-08-14): closing the tab HIDES it from
+    // the strip — the instance stays live in environments[] and re-opens via
+    // the Active Environments panel row (activateEnvironment clears it).
+    bool tabHidden = false;
     // FFT-param fingerprints per referenced source at compute time (M4.1);
     // the staleness badge compares these to the current params (M4.3).
     std::map<std::string, ParamFingerprint> storedFingerprints;
@@ -117,7 +121,13 @@ public:
     // Poll ready futures; apply results on completion (main thread only).
     void tickAsync() override;
     void render() override;              // config window + view window (docked)
-    void closeRequest() override;        // dirty → confirm; else direct removal
+    // Tab-selector close: DEACTIVATES the tab only (focus the Session tab) —
+    // the instance stays live and listed in the Active Environments panel.
+    // Deletion happens exclusively via requestDelete() from that panel.
+    void closeRequest() override;
+    // Delete the instance: dirty or persisted experiments confirm via the
+    // delete modal; transient clean instances remove directly.
+    void requestDelete();
     bool isDirty() const override { return dirty; }
     const std::string& title() const override { return titleCache_; }
     void onActivate() override {}        // AppLoop sets needsRedraw

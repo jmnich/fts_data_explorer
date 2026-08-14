@@ -135,7 +135,15 @@ void executePendingSwap(AppState& s) {
     // Phase 4 (M4.4): layout snapshot per tab type — save the outgoing type
     // (if it had tabs), restore the incoming type's snapshot (if any).
     if (outHasTabs && inKind != outKind) saveTabLayout(tabTypeName(static_cast<int>(outKind)));
-    if (inKind != outKind) restoreTabLayout(tabTypeName(static_cast<int>(inKind)));
+    if (inKind != outKind) {
+        restoreTabLayout(tabTypeName(static_cast<int>(inKind)));
+        // Black-first-frame fix (2026-08-14): the incoming kind's dock panels
+        // were not submitted last frame, so DockNodeUpdateTabBar skips them
+        // (LastFrameActive + 1 < FrameCount) and the node stays empty; one
+        // follow-up frame makes them visible. Consumed by AppLoop after
+        // present().
+        s.extraRedrawAfterKindSwitch = true;
+    }
     s.needsRedraw = true;
 }
 

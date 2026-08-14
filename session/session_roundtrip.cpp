@@ -975,10 +975,20 @@ void test9_env() {
     CHECK(c1->instanceName == "Comparator 1");
     CHECK(a2->instanceName == "Absorbance 2");
     CHECK(s.environments.size() == 3);
+    // Bugfix 2026-08-14: creation marks the instance dirty (both types) so
+    // bulk save paths persist it — a created-but-unmodified instance must not
+    // vanish from the project.
+    CHECK(a1->dirty == true);
+    CHECK(c1->dirty == true);
+    CHECK(a2->dirty == true);
     CHECK(s.pendingEnvIdx == 2);                     // queued, not yet active
     executePendingSwap(s);                           // frame-top executor
     CHECK(s.activeEnvIdx == 2);
     CHECK(s.activeTabKind == ActiveTabKind::Environment);
+    // Kind change (Workspace → Environment): one-shot follow-up redraw armed
+    // (black-first-frame fix) so the incoming dock panels become visible.
+    CHECK(s.extraRedrawAfterKindSwitch == true);
+    s.extraRedrawAfterKindSwitch = false;            // AppLoop consumes it
 
     a1->refKey = "wsA"; a1->refMember = "specA";
     a1->samples = {{"wsA", "specB"}};
@@ -989,15 +999,34 @@ void test9_env() {
     activateEnvironment(s, 0);
     executePendingSwap(s);
     CHECK(s.activeEnvIdx == 0);
+    CHECK(s.extraRedrawAfterKindSwitch == false);    // env → env: no kind change
     removeEnvironment(s, 0);                         // remove active → Session
     CHECK(s.environments.size() == 2);
     CHECK(s.activeEnvIdx == -1);
     CHECK(s.pendingSwapToSession == true);           // focus queued (frame top)
     executePendingSwap(s);                           // frame-top executor
     CHECK(s.activeTabKind == ActiveTabKind::Session);
+    CHECK(s.extraRedrawAfterKindSwitch == true);     // env → session: re-armed
+    s.extraRedrawAfterKindSwitch = false;
     activateEnvironment(s, 1);
     executePendingSwap(s);
     CHECK(s.activeEnvIdx == 1);
+    // Bugfix 2026-08-14: closing an experiment tab HIDES the tab + deactivates
+    // — the instance stays live for the Active Environments panel (deletion is
+    // a separate action, requestDelete). Re-activation re-shows the tab.
+    // closeRequest talks to the global ::appState, so the check runs against a
+    // throwaway instance there.
+    ::appState.environments.clear();
+    EnvironmentSession* tEnv = createEnvironment(::appState, EnvType::Absorbance);
+    ::appState.pendingEnvIdx = -1;             // no activation wanted
+    const size_t globalCount = ::appState.environments.size();
+    tEnv->closeRequest();
+    CHECK(::appState.environments.size() == globalCount);   // instance kept
+    CHECK(tEnv->tabHidden == true);                         // tab hidden
+    CHECK(::appState.pendingSwapToSession == true);         // deactivated only
+    activateEnvironment(::appState, 0);                     // panel row click
+    CHECK(tEnv->tabHidden == false);                        // tab re-shown
+    ::appState.environments.clear();
     removeEnvironment(s, 0);                         // remove parked (0 < active 1)
     CHECK(s.activeEnvIdx == 0);
     CHECK(s.environments.size() == 1);
@@ -1453,9 +1482,19 @@ void test12_experimentPersistence() {
     e2->updateStaleness(s2);
     CHECK(e2->stale == false);
 
-    // Comparator: config round-trip, no results group.
+    // Comparator: config round-trip, no results group. Bugfix 2026-08-14:
+    // creation marks the instance dirty so the BULK save path (dirty-gated
+    // crossSaveExperiments) persists it — a created-but-unmodified instance
+    // must not vanish from the project on save. Absorbance rides the same
+    // path (both created dirty, both saved by one bulk call).
     AppState s3;
     EnvironmentSession* cmp = createEnvironment(s3, EnvType::Comparator);
+    CHECK(cmp->dirty == true);
+    EnvironmentSession* abs = createEnvironment(s3, EnvType::Absorbance);
+    CHECK(abs->dirty == true);
+    abs->refKey = "/tmp/parity.h5";
+    abs->refMember = "specRef";
+    abs->samples = {{"/tmp/parity.h5", "specSmp"}};
     cmp->artifactSelector = 3;                  // 100% T
     cmp->comparatorKeys = {"/tmp/parity.h5", "/tmp/other.h5"};
     cmp->comparatorKeysExplicit = true;
@@ -1465,13 +1504,27 @@ void test12_experimentPersistence() {
     cmp->forcedYMin = -1.0;
     cmp->forcedYMax = 5.0;
     cmp->comment = "comparator experiment";
-    CHECK(crossSaveExperiment(s3, *cmp, crossPath, err));
+    CHECK(crossSaveExperiments(s3, crossPath, err));
+    CHECK(cmp->dirty == false);
+    CHECK(abs->dirty == false);
     std::vector<nlohmann::json> entries2;
     CHECK(crossExperimentList(crossPath, entries2, err));
-    CHECK(entries2.size() == 2);
+    CHECK(entries2.size() == 3);   // absorbance + comparator + fresh absorbance
     AppState s4;
     CHECK(crossLoadExperiments(s4, crossPath, err));
-    CHECK(s4.environments.size() == 2);   // absorbance + comparator
+    CHECK(s4.environments.size() == 3);   // absorbance + comparator + fresh absorbance
+    // The fresh Absorbance (never computed) restores its config too.
+    EnvironmentSession* a2b = nullptr;
+    for (auto& e : s4.environments)
+        if (e->type == EnvType::Absorbance && e->refKey == "/tmp/parity.h5")
+            a2b = e.get();
+    CHECK(a2b != nullptr);
+    CHECK(a2b->refMember == "specRef");
+    CHECK(a2b->samples.size() == 1);
+    CHECK(a2b->samples[0] == std::make_pair(std::string("/tmp/parity.h5"),
+                                            std::string("specSmp")));
+    CHECK(a2b->computed == false);
+    CHECK(a2b->dirty == false);
     EnvironmentSession* c2 = nullptr;
     for (auto& e : s4.environments)
         if (e->type == EnvType::Comparator) c2 = e.get();
@@ -1492,7 +1545,16 @@ void test12_experimentPersistence() {
 
     // Dedupe: repeated loads add nothing.
     CHECK(crossLoadExperiments(s4, crossPath, err));
-    CHECK(s4.environments.size() == 2);
+    CHECK(s4.environments.size() == 3);
+
+    // Bugfix 2026-08-14: Ctrl+H go-home clears environments while the session
+    // file stays open; re-entering it (welcome Recents click) must reload
+    // them. crossLoadExperiments is idempotent by id.
+    clearEnvironments(s4);
+    CHECK(s4.environments.empty());
+    CHECK(crossLoadExperiments(s4, crossPath, err));
+    CHECK(s4.environments.size() == 3);
+    CHECK(s4.environments[0]->id == expId);   // restored with ids intact
 
     std::remove(crossPath.c_str());
 }

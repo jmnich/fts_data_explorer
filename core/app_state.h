@@ -62,6 +62,12 @@ void finishWorkspaceLoad(AppState& s, const std::string& displayName,
 void requestSaveWorkspace(AppState& s, const std::string& asPath);
 void doSaveWorkspace(AppState& s, const std::string& asPath);
 void saveWorkspaceAs(AppState& s, GLFWwindow* window);
+// Ctrl+S / File→Save from ANY tab kind: saves every dirty workspace tab
+// (embedded save-back via crossSaveSource, filesystem tabs via H5Store::save;
+// per-session view-state capture + rebaseline) plus all dirty experiments
+// (crossSaveExperiments), then shows the "Saved" toast. Throws H5Error on
+// failure. Defined in main.cpp.
+void saveEverything(AppState& s);
 // All workspace-discarding entry points route through this; the unsaved-changes
 // modal runs in the frame and dispatches the stashed action on resolution.
 void requestWorkspaceDiscard(AppState& s, PendingWorkspaceAction action, const std::string& path);
@@ -218,6 +224,15 @@ struct AppState {
     // data stays in its session — nothing to park under the live-object
     // model). Same last-wins semantics as the workspace/Session queues.
     int pendingEnvIdx = -1;
+    // One-shot follow-up redraw after a tab-KIND switch (bugfix 2026-08-14):
+    // dock tab bars skip windows that were not submitted the previous frame
+    // (DockNodeUpdateTabBar's LastFrameActive check), so the first frame of a
+    // kind switch cannot show the incoming panels. The loop renders one extra
+    // frame so the panels' tabs appear — without it the idle gate freezes the
+    // black first frame (e.g. close env tab → Session tab black until a mouse
+    // move wakes the loop). Set by executePendingSwap on kind change, cleared
+    // by AppLoop after present().
+    bool extraRedrawAfterKindSwitch = false;
 
     // ── Phase-3 environment instances (M3.2) ───────────────────────────────
     // LIVE objects, never folded (multiple instances of a type coexist; each

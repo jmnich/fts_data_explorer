@@ -1,6 +1,7 @@
 // Phase 4 (M4.4): per-tab-type dock-layout persistence (imgui.ini snapshots).
 #include "layout_persistence.h"
 
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <string>
@@ -50,4 +51,9 @@ void restoreTabLayout(const char* type) {
     ifs.seekg(0);
     if (!ifs.read(data.data(), n)) return;
     ImGui::LoadIniSettingsFromMemory(data.data(), static_cast<size_t>(n));
+}
+
+void resetTabLayout(const char* type) {
+    if (!ImGui::GetCurrentContext()) return;
+    std::remove(layoutFilePath(type).c_str());
 }

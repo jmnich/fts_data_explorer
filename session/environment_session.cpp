@@ -344,6 +344,10 @@ EnvironmentSession* createEnvironment(AppState& s, EnvType t) {
         env->yMode = s.configPtr->envWindowYMode;
     }
     EnvironmentSession* raw = env.get();
+    // Creation is an unsaved project change: without dirty, a fresh instance
+    // is invisible to every bulk save path (crossSaveExperiments, exit modal)
+    // and never reaches the .cross.h5.
+    env->dirty = true;
     s.environments.push_back(std::move(env));
     activateEnvironment(s, static_cast<int>(s.environments.size()) - 1);
     return raw;
@@ -351,6 +355,8 @@ EnvironmentSession* createEnvironment(AppState& s, EnvType t) {
 
 void activateEnvironment(AppState& s, int idx) {
     if (idx < 0 || idx >= static_cast<int>(s.environments.size())) return;
+    // Re-activation (Active Environments panel row) re-shows the tab.
+    s.environments[idx]->tabHidden = false;
     // QUEUED activation (bugfix 2026-08-13): never switch tab kind mid-frame.
     // executePendingSwap parks the active workspace tab first, so its data is
     // back in the mirror before the env tab takes over — without the park,
@@ -379,6 +385,15 @@ void removeEnvironment(AppState& s, int idx) {
 }
 
 void EnvironmentSession::closeRequest() {
+    // Tab-selector close: hide the tab + deactivate — the instance stays
+    // live and listed in the Active Environments panel (deletion is
+    // requestDelete's job, invoked from that panel). Without tabHidden the
+    // strip re-submits the tab every frame and it reappears immediately.
+    tabHidden = true;
+    focusSessionTab(appState);
+}
+
+void EnvironmentSession::requestDelete() {
     for (size_t i = 0; i < appState.environments.size(); ++i) {
         if (appState.environments[i].get() == this) {
             const int idx = static_cast<int>(i);
@@ -601,10 +616,12 @@ void EnvironmentSession::render() {
 
 // Config panel: pickers (absorbance) / artifact + dataset selectors
 // (comparator), plot config, inline name edit, comment, save, export. Docked
-// in the main dock space.
+// in the main dock space. Stable window identity ("Settings##envcfg", NOT the
+// instance name — bugfix 2026-08-14: renaming churned the window name and
+// reset the dock layout; the display title is fixed per Bug 2).
 void EnvironmentSession::renderConfigWindow() {
     ImGui::SetNextWindowDockID(mainDockSpaceId(), ImGuiCond_FirstUseEver);
-    if (ImGui::Begin(instanceName.c_str())) {
+    if (ImGui::Begin("Settings##envcfg")) {
         if (ImGui::IsWindowAppearing()) {
             // One extra frame so renderUI's pre-DockSpace forced selection
             // makes this window's dock tab visible (idle-render freeze).
@@ -613,7 +630,11 @@ void EnvironmentSession::renderConfigWindow() {
         forceDockSelection();
         // Inline rename (Phase 4): applies on Enter / focus loss only — a
         // mid-frame window-title change would churn the dock identity. The
-        // buffer resyncs from instanceName while not being edited.
+        // buffer resyncs from instanceName while not being edited. NOTE: on
+        // the Enter frame InputText returns true AND releases focus, so the
+        // resync must skip the committed frame — otherwise it clobbers the
+        // buffer back to the old name before rename() can compare (bugfix
+        // 2026-08-14: renames silently reverted).
         ImGui::TextUnformatted("Name");
         ImGui::SameLine(120.0f);
         ImGui::SetNextItemWidth(200.0f);
@@ -621,7 +642,7 @@ void EnvironmentSession::renderConfigWindow() {
             ImGui::InputText("##envName", nameBuf, sizeof(nameBuf),
                              ImGuiInputTextFlags_EnterReturnsTrue |
                              ImGuiInputTextFlags_AutoSelectAll);
-        if (!ImGui::IsItemActive() && nameBuf != instanceName)
+        if (!nameEdited && !ImGui::IsItemActive() && nameBuf != instanceName)
             std::snprintf(nameBuf, sizeof(nameBuf), "%s", instanceName.c_str());
         if (nameEdited && nameBuf != instanceName) rename(nameBuf);
         ImGui::Separator();
@@ -631,11 +652,11 @@ void EnvironmentSession::renderConfigWindow() {
     ImGui::End();
 }
 
-// View panel: the overlay plot with spectrum-view navigation.
+// View panel: the overlay plot with spectrum-view navigation. Stable window
+// identity ("Viewer##envview") — see renderConfigWindow.
 void EnvironmentSession::renderViewWindow() {
-    const std::string name = instanceName + " View";
     ImGui::SetNextWindowDockID(mainDockSpaceId(), ImGuiCond_FirstUseEver);
-    if (ImGui::Begin(name.c_str())) {
+    if (ImGui::Begin("Viewer##envview")) {
         forceDockSelection();
         std::vector<ComparatorCurve> curves;
         std::string xLabel, yLabel;
