@@ -1271,6 +1271,15 @@ void AppLoop::scheduleRedraws() {
                 appState.needsRedraw = true;
             }
         }
+
+        // Any open popup (e.g. a combo dropdown): keep frames rendering while
+        // it is open — the idle skip would otherwise freeze a just-opened
+        // dropdown until the next mouse move (popup stack survives into this
+        // pre-NewFrame point, so it reflects last frame's open popups).
+        if (!appState.needsRedraw &&
+            ImGui::IsPopupOpen(ImGuiID(0), ImGuiPopupFlags_AnyPopup)) {
+            appState.needsRedraw = true;
+        }
 }
 
 void AppLoop::handleInput() {

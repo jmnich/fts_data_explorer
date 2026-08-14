@@ -627,7 +627,9 @@ void EnvironmentSession::computeAbsorbance(AppState& s) {
         any = true;
     }
     applyYMode();
-    shouldAutoscale = true;
+    // Do NOT reset shouldAutoscale here: a selector change recomputes the data
+    // but must preserve the user's X-axis range. The flag is only armed on
+    // first load / ESC / X-unit reset (renderPlot consumes it).
     computed = any;
     stale = false;
     dirty = true;
@@ -801,7 +803,7 @@ void EnvironmentSession::renderAbsorbanceConfig() {
 
         // Dataset.
         ImGui::TextUnformatted("Dataset");
-        ImGui::SameLine(90.0f);
+        ImGui::SameLine();
         ImGui::SetNextItemWidth(-FLT_MIN);
         const std::string dsCur = key.empty() ? "" : sourceLabel(key);
         if (ImGui::BeginCombo((std::string("##ds") + id).c_str(),
@@ -820,7 +822,7 @@ void EnvironmentSession::renderAbsorbanceConfig() {
 
         // Artifact (Average / Raw spectrum only).
         ImGui::TextUnformatted("Artifact");
-        ImGui::SameLine(90.0f);
+        ImGui::SameLine();
         ImGui::SetNextItemWidth(-FLT_MIN);
         if (ImGui::BeginCombo((std::string("##art") + id).c_str(),
                               artifactLabel(static_cast<ComparatorArtifact>(artifact)))) {
@@ -854,7 +856,7 @@ void EnvironmentSession::renderAbsorbanceConfig() {
                                   : ids.empty()    ? "\xE2\x80\x94"          // "—"
                                                    : ids.front().c_str();
             ImGui::TextUnformatted("Member");
-            ImGui::SameLine(90.0f);
+            ImGui::SameLine();
             ImGui::SetNextItemWidth(-FLT_MIN);
             if (!available) ImGui::PushStyleColor(ImGuiCol_Text,
                 ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
@@ -891,12 +893,14 @@ void EnvironmentSession::renderAbsorbanceConfig() {
             const AccentColor ac = StringToAccentColor(appState.currentAccentColor);
             ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
             ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
+            // Extra left padding so the accent line doesn't touch the text.
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(20.0f, 6.0f));
             ImGui::PushStyleColor(ImGuiCol_Border, GetAccentSubtle(ac));
             const bool open = ImGui::BeginChild("curve", ImVec2(0.0f, 0.0f),
                                                 ImGuiChildFlags_Borders |
                                                     ImGuiChildFlags_AutoResizeY);
             ImGui::PopStyleColor();
-            ImGui::PopStyleVar(2);
+            ImGui::PopStyleVar(3);
             if (open) {
                 // Thick left accent line spanning the whole curve group, in
                 // the curve's tab20 color (matches the plot line + legend).
@@ -909,16 +913,27 @@ void EnvironmentSession::renderAbsorbanceConfig() {
                         ImVec2(wpos.x + 6.0f, wpos.y + wsize.y - 2.0f),
                         ImGui::GetColorU32(tab20Color(ci)));
                 }
+                // Header row: "Curve N" (+ status) left, "Delete" right.
                 ImGui::TextUnformatted(("Curve " + std::to_string(ci + 1)).c_str());
                 if (!c.status.empty()) {
                     ImGui::SameLine();
                     ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "(%s)", c.status.c_str());
                 }
-                ImGui::SameLine();
+                const char* delLabel = "Delete";
+                const float delW = ImGui::CalcTextSize(delLabel).x +
+                                   ImGui::GetStyle().FramePadding.x * 2.0f + 2.0f;
+                ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - delW);
+                // Transparent fill, white outline; subtle tint on hover/click.
                 ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-                if (ImGui::Button(("x##remove" + std::to_string(ci)).c_str()))
-                    removeIdx = static_cast<int>(ci);
-                ImGui::PopStyleColor();
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.0f, 1.0f, 1.0f, 0.14f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(1.0f, 1.0f, 1.0f, 0.28f));
+                ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(1.0f, 1.0f, 1.0f, 0.8f));
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+                ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+                ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 3.0f);
+                if (ImGui::Button(delLabel)) removeIdx = static_cast<int>(ci);
+                ImGui::PopStyleVar(2);
+                ImGui::PopStyleColor(5);
 
                 ImGui::TextUnformatted("Reference");
                 ImGui::Indent();
