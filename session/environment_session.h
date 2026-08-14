@@ -45,6 +45,12 @@ public:
     std::string id;                      // stable experiment id in the .cross.h5
                                          // ("" = transient, never saved)
     std::string instanceName;            // "Absorbance 1", ... (unique window title)
+    // RENAME-STABLE identity (bugfix 2026-08-14): generated once at
+    // construction, never changes. Tab-strip keys ("exp:<stripKey>") and the
+    // ImPlot plot id ("##envPlot<stripKey>") use it, so renaming neither
+    // shuffles the tab nor resets the plot's X range. Persisted experiments
+    // are matched to the manifest order via their saved id.
+    std::string stripKey;
     std::string comment;                 // free-text note (in-memory, Phase 3)
     char commentBuf[4096] = {};          // editor buffer, write-through to comment
     char nameBuf[256] = {};              // editor buffer for the inline rename

@@ -147,6 +147,24 @@ void wireSessionPanels(AppState& s, WorkspaceSession& ws);
 // write to (the app launches behind the welcome).
 void applySessionDefaults(AppState& s, WorkspaceSession& ws);
 
+// Session-level open tail (defined in workspace_session.cpp so the session
+// roundtrip harness links it without main.cpp): engine state, caches,
+// view-state restore, metadata buffers, panel seeding. finishWorkspaceLoad
+// delegates to it for the active tab; restoreOpenEmbeddedTabs uses it for
+// parked restored tabs (no active pointer needed).
+void finishSessionLoad(WorkspaceSession& ws, const std::string& displayName);
+
+// Reopen the .cross.h5's persisted open-source tabs (bugfix 2026-08-14):
+// creates loaded sessions for every source flagged "open" in the archive
+// manifest, WITHOUT activation — the Session tab keeps focus; the strip shows
+// the restored tabs. Dedupes by stable key; a failing source is skipped with
+// an error popup. No-op when no multi-workspace is open.
+void restoreOpenEmbeddedTabs(AppState& s);
+
+// Rebuild AppState::tabStripOrder from the loaded manifest "tabOrder" so the
+// strip's first submission renders the saved interleave (see definition).
+void restoreTabStripOrder(AppState& s);
+
 // Close flow: dirty tabs go through the unsaved modal (active tab:
 // immediately; parked tab: queued swap + modal at frame top); clean tabs are
 // removed right away.

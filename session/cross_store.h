@@ -54,6 +54,19 @@ Workspace crossLoadSource(const std::string& crossPath, const std::string& sourc
 // view-state persistence). Refreshes @summary + the manifest in the same save.
 void crossSaveSource(const std::string& crossPath, const std::string& sourceId,
                      const Workspace& ws, std::string& err);
+// Persist the tab-strip's EXACT visual order (bugfix 2026-08-14): manifest
+// "tabOrder" array of stable keys ("ws:<sourceId>" / "exp:<experimentId>" in
+// strip order, interleaved). Written on explicit saves only (Ctrl+S / exit
+// Save All / project-switch save) — every write is a full-file atomic copy.
+void crossSaveTabOrder(const std::string& path,
+                       const std::vector<std::string>& tabOrder,
+                       std::string& err);
+// AppState-level helper: the ids of the currently-open embedded source tabs,
+// IN sessions[] order.
+std::vector<std::string> openEmbeddedSourceIds(const AppState& s);
+// Reduce the captured strip order (AppState::tabStripOrder) to what a
+// .cross.h5 can restore: embedded workspaces + persisted experiments only.
+std::vector<std::string> persistableTabOrder(const AppState& s);
 
 // ── Phase 4: experiments (schema v2 layout, data_structures_audit.md §2.1) ──
 //

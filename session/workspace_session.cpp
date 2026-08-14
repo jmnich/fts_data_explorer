@@ -5,12 +5,15 @@
 // no field checklist (the drift class is gone by construction).
 #include "workspace_session.h"
 
+#include <cstdio>
 #include <filesystem>
 #include <cstring>
 
 #include "app_state.h"
+#include "cross_store.h"
 #include "ui/layout_persistence.h"
 #include "spectral_pool.h"
+#include "workspace_reader.h"
 
 WorkspaceSession::WorkspaceSession() {
     metadataCommentBuffer[0] = '\0';
@@ -37,6 +40,111 @@ void applySessionDefaults(AppState& s, WorkspaceSession& ws) {
     const std::string& wd = s.configPtr->lastWorkingDirectory;
     if (!wd.empty() && std::filesystem::is_directory(wd))
         ws.currentDirectory = wd;
+}
+
+// Session-level open tail (bugfix 2026-08-14): everything finishWorkspaceLoad
+// used to do that is session-scoped — extracted so RESTORED multi-workspace
+// tabs (reopened .cross.h5) get the same engine setup without an active
+// pointer. finishWorkspaceLoad delegates for the active tab; the AppState-level
+// bits (welcome flags, recent list) stay there.
+void finishSessionLoad(WorkspaceSession& ws, const std::string& displayName) {
+    // Populate engine state
+    ws.datasetInfo = workspaceDatasetInfo(ws.workspace);
+    ws.csvFiles = workspaceFileList(ws.workspace);
+
+    // Feature gate
+    if (ws.datasetInfo.axisIsCorrected)
+        ws.xAxisBase = 1; // Force OPD mode
+
+    // Clear all caches
+    clearSessionPanels(ws);
+    // Spectrum panel is not reset by the clears above; reset its zoom/param
+    // state too so a fresh workspace starts autoscaled (applyViewState below
+    // restores the saved subset when present).
+    ws.spectrum.resetSpectrumWindow();
+    ws.filesChanged = true;
+    ws.currentSortedFileIndex = 0;
+    ws.isFirstDataLoad = true;
+
+    // Dataset display name
+    ws.currentDatasetName = displayName;
+    ws.currentDirectory = "";
+
+    // Phase 3: restore saved view state (decision 3). Runs after the
+    // axisIsCorrected -> xAxisBase gate (a default for fresh files, not a hard
+    // constraint) and before seedPanelsFromWorkspace so the restored spectrum
+    // params match the saved member configs (no spurious staleness).
+    applyViewState(ws);
+
+    // Re-baseline the dirty latch: opening never dirties the workspace. The
+    // baseline is finalized at the end of the FIRST rendered frame (first-load
+    // autoscale finalizes zoom ranges mid-frame).
+    ws.viewStateBaseline = nlohmann::json::object();
+    ws.viewStateBaselinePending = true;
+    ws.workspaceDirtyRebaselinePending = true;
+
+    // Fill the editable comment/tags buffers from the loaded workspace.
+    snprintf(ws.metadataCommentBuffer, sizeof(ws.metadataCommentBuffer), "%s",
+             ws.workspace.measurementComment.c_str());
+    snprintf(ws.metadataTagsBuffer, sizeof(ws.metadataTagsBuffer), "%s",
+             ws.workspace.tags.c_str());
+
+    // Restore-on-open: fill panel caches from matching saved members.
+    seedPanelsFromWorkspace(ws);
+}
+
+// Reopen the .cross.h5's persisted open-source tabs (bugfix 2026-08-14):
+// creates loaded sessions for every source listed in openTabIds — IN THAT
+// ORDER, so the strip's tab order survives the reopen — without activation
+// (the Session tab keeps focus). Dedupes by stable key; a failing source is
+// skipped with an error popup. No-op when no multi-workspace is open.
+void restoreOpenEmbeddedTabs(AppState& s) {
+    if (!s.sessionTab.multiWorkspaceOpen || s.sessionTab.multiWorkspacePath.empty())
+        return;
+    const std::string crossPath = s.sessionTab.multiWorkspacePath;
+    for (const auto& id : s.sessionTab.openTabIds) {
+        const std::string key = crossPath + "#" + id;
+        bool have = false;
+        for (const auto& sess : s.sessions)
+            if (sess->key == key) { have = true; break; }
+        if (have) continue;
+        std::string name = id;
+        for (const auto& src : s.sessionTab.sources)
+            if (src.id == id) { name = src.name; break; }
+        auto sess = std::make_unique<WorkspaceSession>();
+        sess->key = key;
+        wireSessionPanels(s, *sess);
+        applySessionDefaults(s, *sess);
+        std::string err;
+        sess->workspace = crossLoadSource(crossPath, id, err);
+        if (!err.empty()) {
+            s.adapterErrorMsg = std::string("Failed to reopen source tab:\n") + err;
+            s.showAdapterErrorPopup = true;
+            continue;
+        }
+        finishSessionLoad(*sess, name);
+        s.sessions.push_back(std::move(sess));
+    }
+    if (!s.sessions.empty()) s.needsRedraw = true;
+}
+
+// Rebuild AppState::tabStripOrder from the loaded manifest (bugfix
+// 2026-08-14): the raw "tabOrder" entries are mapped back to strip keys
+// ("ws:<sourceId>" → "ws:<crossPath>#<sourceId>", "exp:<id>" passes through)
+// so the strip's FIRST submission renders the saved interleave. Without it
+// tabStripOrder starts empty and the strip falls back to workspaces-then-
+// experiments. Entries that cannot resolve (dropped standalone/unsaved tabs)
+// simply re-append at the end on the next capture.
+void restoreTabStripOrder(AppState& s) {
+    s.tabStripOrder.clear();
+    for (const auto& k : s.sessionTab.tabOrder) {
+        if (k.rfind("ws:", 0) == 0) {
+            s.tabStripOrder.push_back(
+                "ws:" + s.sessionTab.multiWorkspacePath + "#" + k.substr(3));
+        } else if (k.rfind("exp:", 0) == 0) {
+            s.tabStripOrder.push_back(k);
+        }
+    }
 }
 
 void WorkspaceSession::closeRequest() {

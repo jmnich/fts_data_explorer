@@ -117,12 +117,28 @@ struct SourceSummary {                  // mirrors @summary in the archive
     std::string originPath;             // informational only
     size_t memberCount = 0;
     std::string createdIso;             // ISO-8601 UTC
+    // Tab-strip visibility on project load (bugfix 2026-08-14): persisted in
+    // the archive manifest ("open" flag); restored tabs open WITHOUT focus.
+    bool open = false;
 };
 
 struct SessionTabState {
     bool multiWorkspaceOpen = false;    // mode: false = single-file, true = multi
     std::string multiWorkspacePath;     // open .cross.h5
     std::vector<SourceSummary> sources; // column (a); manifest-derived, no data loaded
+    // Open-source-tab set AND order (bugfix 2026-08-14): derived from the
+    // manifest "tabOrder" ("ws:<sourceId>" entries, in order);
+    // restoreOpenEmbeddedTabs rebuilds sessions in exactly this order.
+    std::vector<std::string> openTabIds;
+    // Experiment-tab order (bugfix 2026-08-14): "exp:<id>" entries from the
+    // manifest "tabOrder"; crossLoadExperiments reorders the vector so the
+    // strip matches the saved interleave (workspaces/experiments mixed).
+    std::vector<std::string> experimentTabOrder;
+    // The RAW manifest "tabOrder" entries (bugfix 2026-08-14): the FULL
+    // interleave, restored verbatim into AppState::tabStripOrder on load so
+    // the strip's first submission renders the saved order (the per-type
+    // lists above cannot reproduce the interleave).
+    std::vector<std::string> tabOrder;
     // Embedded-source workspaces not open in a tab (comparator reads raw
     // artifacts from these without opening a tab). Cleared on crossLoad.
     std::map<std::string, Workspace> sourceCache;   // sourceId -> workspace
@@ -233,6 +249,17 @@ struct AppState {
     // move wakes the loop). Set by executePendingSwap on kind change, cleared
     // by AppLoop after present().
     bool extraRedrawAfterKindSwitch = false;
+    // Tab-strip visual order (bugfix 2026-08-14): stable keys in the LAST
+    // rendered strip order — "ws:<sessionKey>" / "exp:<id-or-instanceName>".
+    // Captured from the ImGui tab bar every frame (drags included); persisted
+    // into the .cross.h5 manifest so reopening rebuilds the exact interleave.
+    std::vector<std::string> tabStripOrder;
+    // One-shot tab-bar rebuild request (bugfix 2026-08-14): set by
+    // EnvironmentSession::rename (the tab label is part of the ImGui tab ID,
+    // so a rename would be treated as a new tab and appended at the bar's
+    // end); consumed by renderTabStrip, which drops the pooled tab bar so it
+    // is rebuilt from tabStripOrder — restoring the renamed tab's position.
+    bool stripTabBarResetRequested = false;
 
     // ── Phase-3 experiment instances (M3.2) ───────────────────────────────
     // LIVE objects, never folded (multiple instances of a type coexist; each

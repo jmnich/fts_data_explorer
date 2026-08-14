@@ -2,6 +2,7 @@
 #include "cross_store.h"
 #include "app_state.h"
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <functional>
@@ -258,7 +259,36 @@ bool crossLoadInto(SessionTabState& st, const std::string& path, std::string& er
             sum.originPath = e.value("originPath", "");
             sum.memberCount = e.value("memberCount", 0u);
             sum.createdIso = e.value("createdIso", "");
+            sum.open = e.value("open", false);
             st.sources.push_back(std::move(sum));
+        }
+        // Tab-strip order (bugfix 2026-08-14): "tabOrder" lists stable keys
+        // in strip order — "ws:<sourceId>" → openTabIds, "exp:<id>" →
+        // experimentTabOrder; the RAW list is kept so the full interleave can
+        // be restored into AppState::tabStripOrder on load. Legacy files
+        // store "openTabs" (source ids) or per-source "open" booleans; fall
+        // back in sources order.
+        st.openTabIds.clear();
+        st.experimentTabOrder.clear();
+        st.tabOrder.clear();
+        auto to = manifest.find("tabOrder");
+        if (to != manifest.end() && to->is_array()) {
+            for (const auto& k : *to) {
+                if (!k.is_string()) continue;
+                const std::string s = k.get<std::string>();
+                st.tabOrder.push_back(s);
+                if (s.rfind("ws:", 0) == 0) st.openTabIds.push_back(s.substr(3));
+                else if (s.rfind("exp:", 0) == 0) st.experimentTabOrder.push_back(s.substr(4));
+            }
+        } else {
+            auto ot = manifest.find("openTabs");
+            if (ot != manifest.end() && ot->is_array()) {
+                for (const auto& id : *ot)
+                    if (id.is_string()) st.openTabIds.push_back(id.get<std::string>());
+            } else {
+                for (const auto& src : st.sources)
+                    if (src.open) st.openTabIds.push_back(src.id);
+            }
         }
         st.multiWorkspaceOpen = true;
         st.multiWorkspacePath = path;
@@ -303,6 +333,72 @@ void crossSaveSource(const std::string& crossPath, const std::string& sourceId,
         writeManifest(file.id, manifest);
     }, err);
     if (!ok) throw H5Error(err);
+}
+// Persist the tab-strip's EXACT visual order (bugfix 2026-08-14): the
+// manifest "tabOrder" array lists stable keys in strip order —
+// "ws:<sourceId>" for embedded workspace tabs, "exp:<experimentId>" for
+// experiments — interleaved exactly as shown, so reopening rebuilds the same
+// strip (including workspaces dragged to the right of experiment tabs).
+// Written on explicit saves (Ctrl+S / exit Save All / project-switch save) —
+// every write is a full-file copy.
+void crossSaveTabOrder(const std::string& path,
+                       const std::vector<std::string>& tabOrder,
+                       std::string& err) {
+    const bool ok = atomicMutate(path, [&](const std::string& tmp) {
+        H5FileGuard file(H5Fopen(tmp.c_str(), H5F_ACC_RDWR, H5P_DEFAULT));
+        if (file.id < 0) throw H5Error("crossSaveTabOrder: cannot open temp");
+        nlohmann::json manifest = readManifest(file.id);
+        manifest["tabOrder"] = tabOrder;
+        writeManifest(file.id, manifest);
+    }, err);
+    if (!ok) throw H5Error(err);
+}
+
+// AppState-level helper: the ids of the currently-open embedded source tabs,
+// IN sessions[] order (the order the strip shows them in).
+std::vector<std::string> openEmbeddedSourceIds(const AppState& s) {
+    std::vector<std::string> ids;
+    for (const auto& sess : s.sessions) {
+        const size_t hash = sess->key.find('#');
+        if (hash != std::string::npos)
+            ids.push_back(sess->key.substr(hash + 1));
+    }
+    return ids;
+}
+
+// Reduce the captured strip order to what a .cross.h5 can restore: embedded
+// workspace tabs ("ws:<sourceId>") + experiments with a persisted id
+// ("exp:<id>"). Standalone workspace tabs and unsaved experiments can't be
+// reopened — they are dropped (they re-append at the end after a reload).
+// Falls back to the sessions-only order when no strip has rendered yet.
+std::vector<std::string> persistableTabOrder(const AppState& s) {
+    std::vector<std::string> out;
+    const auto& order = s.tabStripOrder;
+    if (order.empty()) {
+        for (const auto& id : openEmbeddedSourceIds(s)) out.push_back("ws:" + id);
+        return out;
+    }
+    for (const auto& k : order) {
+        if (k.rfind("ws:", 0) == 0) {
+            const std::string key = k.substr(3);
+            const size_t hash = key.find('#');
+            if (hash != std::string::npos)
+                out.push_back("ws:" + key.substr(hash + 1));
+        } else if (k.rfind("exp:", 0) == 0) {
+            const std::string nameOrKey = k.substr(4);
+            for (const auto& e : s.experiments) {
+                // Match the rename-stable stripKey (live captures), the
+                // persisted id, or the instance name (legacy captures).
+                if (!e->id.empty() &&
+                    (e->id == nameOrKey || e->instanceName == nameOrKey ||
+                     e->stripKey == nameOrKey)) {
+                    out.push_back("exp:" + e->id);
+                    break;
+                }
+            }
+        }
+    }
+    return out;
 }
 
 // ── Phase 4: experiments ────────────────────────────────────────────────────

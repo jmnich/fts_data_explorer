@@ -76,6 +76,10 @@ void openWorkspaceInNewTab(AppState& s, const std::string& path) {
                 s.adapterErrorMsg = std::string("Failed to reload experiments:\n") + err;
                 s.showAdapterErrorPopup = true;
             }
+            // Same for the open-source tabs (go-home removed all sessions).
+            restoreOpenEmbeddedTabs(s);
+            // ... and the saved tab-strip order (bugfix 2026-08-14).
+            restoreTabStripOrder(s);
             s.showWelcomeScreen = false;
             s.welcomeScreenInitialized = true;
         } else if (s.sessionTab.multiWorkspaceOpen) {
@@ -169,57 +173,23 @@ void executePendingOpen(AppState& s) {
 // engine state, caches, view-state restore, metadata buffers, panel seeding.
 // `displayName` = currentDatasetName; `recentPath` = "" for embedded sources
 // (their home is the .cross.h5, not a recent-dataset entry).
+// Session-level tail of the open flow (bugfix 2026-08-14): everything
+// finishWorkspaceLoad does that is session-scoped, extracted so RESTORED
+// multi-workspace tabs (reopened .cross.h5) get the same engine setup
+// without an active pointer. Defined in workspace_session.cpp (the session
+// roundtrip harness links it without main.cpp). The AppState-level bits
+// (welcome flags, recent list) stay in finishWorkspaceLoad.
 void finishWorkspaceLoad(AppState& s, const std::string& displayName,
                          const std::string& recentPath) {
-    // Populate engine state
-    s.active->datasetInfo = workspaceDatasetInfo(s.active->workspace);
-    s.active->csvFiles = workspaceFileList(s.active->workspace);
+    finishSessionLoad(*s.active, displayName);
 
-    // Feature gate
-    if (s.active->datasetInfo.axisIsCorrected)
-        s.active->xAxisBase = 1; // Force OPD mode
-
-    // Clear all caches
-    clearWorkspacePanels(s);
-    // Spectrum panel is not reset by the clears above; reset its zoom/param
-    // state too so a fresh workspace starts autoscaled (applyViewState below
-    // restores the saved subset when present).
-    s.active->spectrum.resetSpectrumWindow();
-    s.active->filesChanged = true;
-    s.active->currentSortedFileIndex = 0;
-    s.active->isFirstDataLoad = true;
     s.showWelcomeScreen = false;
     s.welcomeScreenInitialized = true;
-
-    // Dataset display name
-    s.active->currentDatasetName = displayName;
-    s.active->currentDirectory = "";
 
     // Recent datasets (configPtr is set at startup; guard for robustness).
     // Embedded sources never enter the recent-dataset list.
     if (!recentPath.empty() && s.configPtr)
         addToRecentDatasets(*s.configPtr, s.configFilePath, recentPath);
-
-    // Phase 3: restore saved view state (decision 3). Runs after the
-    // axisIsCorrected -> xAxisBase gate (a default for fresh files, not a hard
-    // constraint) and before seedPanelsFromWorkspace so the restored spectrum
-    // params match the saved member configs (no spurious staleness).
-    applyViewState(s);
-
-    // Re-baseline the dirty latch: opening never dirties the workspace. The
-    // baseline is finalized at the end of the FIRST rendered frame (first-load
-    // autoscale finalizes zoom ranges mid-frame).
-    s.active->viewStateBaseline = nlohmann::json::object();
-    s.active->viewStateBaselinePending = true;
-
-    // Fill the editable comment/tags buffers from the loaded workspace.
-    snprintf(s.active->metadataCommentBuffer, sizeof(s.active->metadataCommentBuffer), "%s",
-             s.active->workspace.measurementComment.c_str());
-    snprintf(s.active->metadataTagsBuffer, sizeof(s.active->metadataTagsBuffer), "%s",
-             s.active->workspace.tags.c_str());
-
-    // Restore-on-open: fill panel caches from matching saved members.
-    seedPanelsFromWorkspace(s);
 }
 
 void openWorkspace(AppState& s, const std::string& path) {
@@ -366,6 +336,11 @@ void saveEverything(AppState& s) {
         std::string err;
         if (!crossSaveExperiments(s, s.sessionTab.multiWorkspacePath, err))
             throw H5Error(err);
+        // Persist the exact tab-strip order (bugfix 2026-08-14) — NOT
+        // dirty-gated: Ctrl+S means "save the project state", layout included.
+        crossSaveTabOrder(s.sessionTab.multiWorkspacePath,
+                          persistableTabOrder(s), err);
+        if (!err.empty()) throw H5Error(err);
     }
     s.needsRedraw = true;
     // Toast only when there is something that could hold state (launch welcome

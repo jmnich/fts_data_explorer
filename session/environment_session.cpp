@@ -257,6 +257,10 @@ const char* artifactLabel(ComparatorArtifact a) {
 EnvironmentSession::EnvironmentSession(EnvType t, const std::string& name)
     : type(t), instanceName(name), titleCache_(name) {
     std::snprintf(nameBuf, sizeof(nameBuf), "%s", name.c_str());
+    // Rename-stable identity: never changes, so the tab key and ImPlot plot
+    // id built from it survive renames (bugfix 2026-08-14).
+    static uint64_t stripCounter = 0;
+    stripKey = "inst" + std::to_string(++stripCounter);
 }
 
 std::string EnvironmentSession::tabLabel() const {
@@ -271,6 +275,12 @@ void EnvironmentSession::rename(const std::string& name) {
     instanceName = name;
     titleCache_ = name;
     dirty = true;
+    // The tab label (display text) is part of the ImGui tab ID — a rename
+    // would otherwise be treated as a NEW tab and appended at the bar's end.
+    // Request a tab-bar rebuild: the strip re-submits every tab in the saved
+    // tabStripOrder, restoring this tab to its previous position (bugfix
+    // 2026-08-14).
+    appState.stripTabBarResetRequested = true;
     appState.needsRedraw = true;
 }
 
@@ -355,8 +365,13 @@ EnvironmentSession* createExperiment(AppState& s, EnvType t) {
 
 void activateExperiment(AppState& s, int idx) {
     if (idx < 0 || idx >= static_cast<int>(s.experiments.size())) return;
-    // Re-activation (Active Experiments panel row) re-shows the tab.
-    s.experiments[idx]->tabHidden = false;
+    // Re-activation (Active Experiments panel row) re-shows the tab; the
+    // show is a saved change too (bugfix 2026-08-14 — mirrors closeRequest).
+    if (s.experiments[idx]->tabHidden) {
+        s.experiments[idx]->tabHidden = false;
+        s.experiments[idx]->dirty = true;
+        s.needsRedraw = true;
+    }
     // QUEUED activation (bugfix 2026-08-13): never switch tab kind mid-frame.
     // executePendingSwap parks the active workspace tab first, so its data is
     // back in the mirror before the env tab takes over — without the park,
@@ -389,7 +404,14 @@ void EnvironmentSession::closeRequest() {
     // live and listed in the Active Experiments panel (deletion is
     // requestDelete's job, invoked from that panel). Without tabHidden the
     // strip re-submits the tab every frame and it reappears immediately.
-    tabHidden = true;
+    // The hide is a SAVED change (bugfix 2026-08-14): dirty-gated saves skip
+    // clean experiments, so a closed-but-kept tab never reached config.json
+    // and reopened on every project load.
+    if (!tabHidden) {
+        tabHidden = true;
+        dirty = true;
+        appState.needsRedraw = true;
+    }
     focusSessionTab(appState);
 }
 
@@ -1145,7 +1167,11 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
     ImPlot::PushStyleColor(ImPlotCol_AxisGrid, gridCol);
     const ImPlotFlags flags = ImPlotFlags_NoTitle |
                               (showLegend ? 0 : ImPlotFlags_NoLegend);
-    if (ImPlot::BeginPlot(("##envPlot" + instanceName).c_str(), ImVec2(-1, -1),
+    // Stable plot id (bugfix 2026-08-14): keyed by the rename-stable stripKey
+    // — the ImPlot plot (and its axis limits) is retained per instance across
+    // renames; with instanceName in the id a rename recreated the plot and
+    // reset the X range to fit-all.
+    if (ImPlot::BeginPlot(("##envPlot" + stripKey).c_str(), ImVec2(-1, -1),
                           flags)) {
         ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoTickMarks;
         ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
@@ -1379,6 +1405,9 @@ static nlohmann::json experimentConfigJson(const EnvironmentSession& env) {
     // the saved xUnit; convertXInPlace keeps it in step with unit changes.
     j["manualXMin"] = env.manualXMin;
     j["manualXMax"] = env.manualXMax;
+    // Tab-strip visibility (bugfix 2026-08-14): the open-tab set persists, so
+    // a closed-but-kept experiment does not auto-reopen on project load.
+    j["tabHidden"] = env.tabHidden;
     if (env.type == EnvType::Absorbance) {
         j["refKey"] = env.refKey;
         j["refMember"] = env.refMember;
@@ -1416,6 +1445,8 @@ static void experimentApplyConfig(EnvironmentSession& env, const nlohmann::json&
         env.pendingNextXMax = env.manualXMax;
         env.shouldAutoscale = false;
     }
+    // Legacy configs without the key default to visible (today's behavior).
+    env.tabHidden = j.value("tabHidden", false);
     if (env.type == EnvType::Absorbance) {
         env.refKey = j.value("refKey", "");
         env.refMember = j.value("refMember", "");
@@ -1562,6 +1593,24 @@ bool crossLoadExperiments(AppState& s, const std::string& path, std::string& err
         // Auto-name counters must not collide with restored names.
         s.experimentAbsorbanceCounter = std::max(s.experimentAbsorbanceCounter, restoredAbsorbance);
         s.experimentComparatorCounter = std::max(s.experimentComparatorCounter, restoredComparator);
+        // Restore the saved experiment-tab ORDER (bugfix 2026-08-14): the
+        // strip submits experiments in vector order, so reorder the vector by
+        // the manifest's "exp:" entries. Unlisted instances keep their
+        // relative order (stable sort, unlisted = +inf).
+        if (!s.sessionTab.experimentTabOrder.empty()) {
+            std::map<std::string, size_t> pos;
+            for (size_t i = 0; i < s.sessionTab.experimentTabOrder.size(); ++i)
+                pos[s.sessionTab.experimentTabOrder[i]] = i;
+            std::stable_sort(s.experiments.begin(), s.experiments.end(),
+                             [&](const std::unique_ptr<EnvironmentSession>& a,
+                                 const std::unique_ptr<EnvironmentSession>& b) {
+                                 auto ia = pos.find(a->id);
+                                 auto ib = pos.find(b->id);
+                                 const size_t pa = ia == pos.end() ? SIZE_MAX : ia->second;
+                                 const size_t pb = ib == pos.end() ? SIZE_MAX : ib->second;
+                                 return pa < pb;
+                             });
+        }
         if (!entries.empty()) s.needsRedraw = true;
         return true;
     } catch (const std::exception& e) {
@@ -1573,5 +1622,13 @@ bool crossLoadExperiments(AppState& s, const std::string& path, std::string& err
 bool crossOpenProject(AppState& s, const std::string& path, std::string& err) {
     if (!crossLoad(s, path, err)) return false;
     clearExperiments(s);
-    return crossLoadExperiments(s, path, err);
+    if (!crossLoadExperiments(s, path, err)) return false;
+    // Reopen the persisted open-source tabs (bugfix 2026-08-14) — loaded but
+    // NOT activated: the caller focuses the Session tab.
+    restoreOpenEmbeddedTabs(s);
+    // Restore the saved tab-strip order so the first submission renders the
+    // exact interleave (bugfix 2026-08-14: without this the strip starts
+    // with workspaces left of all experiments regardless of what was saved).
+    restoreTabStripOrder(s);
+    return true;
 }

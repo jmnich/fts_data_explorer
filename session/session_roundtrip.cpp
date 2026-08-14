@@ -19,6 +19,7 @@
 #include "spectral_pool.h"
 #include "cross_store.h"
 #include "hdf/h5_store.h"
+#include "hdf/hdf5_util.h"
 #include "workspace_reader.h"
 
 #define CHECK_EQ(a, b)                                                        \
@@ -1019,13 +1020,16 @@ void test9_env() {
     ::appState.experiments.clear();
     EnvironmentSession* tEnv = createExperiment(::appState, EnvType::Absorbance);
     ::appState.pendingExperimentIdx = -1;             // no activation wanted
+    tEnv->dirty = false;                              // saved/clean
     const size_t globalCount = ::appState.experiments.size();
     tEnv->closeRequest();
     CHECK(::appState.experiments.size() == globalCount);   // instance kept
     CHECK(tEnv->tabHidden == true);                         // tab hidden
+    CHECK(tEnv->dirty == true);          // hide is a saved change (dirty-gated saves)
     CHECK(::appState.pendingSwapToSession == true);         // deactivated only
-    activateExperiment(::appState, 0);                     // panel row click
+    activateExperiment(::appState, 0);                      // panel row click
     CHECK(tEnv->tabHidden == false);                        // tab re-shown
+    CHECK(tEnv->dirty == true);          // re-show is a saved change too
     ::appState.experiments.clear();
     removeExperiment(s, 0);                         // remove parked (0 < active 1)
     CHECK(s.activeExperimentIdx == 0);
@@ -1399,7 +1403,12 @@ void test12_experimentPersistence() {
     env->samples = {{"/tmp/parity.h5", "specSmp"}};
     env->xUnitSelector = 0;
     env->comment = "my experiment";
+    // Bugfix 2026-08-14: the strip key and plot id are RENAME-STABLE —
+    // renaming neither shuffles the tab nor resets the plot's X range.
+    const std::string stripKey = env->stripKey;
+    CHECK(!stripKey.empty());
     env->rename("Absorbance Roundtrip");
+    CHECK(env->stripKey == stripKey);
     CHECK(env->dirty == true);
     env->startCompute(s);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -1508,6 +1517,9 @@ void test12_experimentPersistence() {
     // 2026-08-14: the comparator's zoom window was lost on relaunch).
     cmp->manualXMin = 1500.0;
     cmp->manualXMax = 2000.0;
+    // Tab-open state persists too (bugfix 2026-08-14): a closed-but-kept
+    // experiment must not auto-reopen on project load.
+    cmp->tabHidden = true;
     CHECK(crossSaveExperiments(s3, crossPath, err));
     CHECK(cmp->dirty == false);
     CHECK(abs->dirty == false);
@@ -1553,6 +1565,8 @@ void test12_experimentPersistence() {
     CHECK(c2->pendingNextXMin == 1500.0);
     CHECK(c2->pendingNextXMax == 2000.0);
     CHECK(c2->shouldAutoscale == false);
+    CHECK(c2->tabHidden == true);       // closed tab stays closed after reload
+    CHECK(a2b->tabHidden == false);     // legacy/default: visible
     // Save→reload→save: the range persists idempotently in config.json.
     CHECK(crossSaveExperiment(s4, *c2, crossPath, err));
     {
@@ -1670,6 +1684,148 @@ void test13_stalenessPersisted() {
     std::remove(crossPath.c_str());
 }
 
+// M4.6 (bugfix 2026-08-14): the tab-strip's EXACT visual order persists in
+// the archive manifest ("tabOrder": "ws:<sourceId>" / "exp:<id>" entries
+// interleaved in strip order). Reopening restores loaded-but-not-activated
+// tabs in that order (sessions AND experiments); legacy "openTabs"/boolean
+// formats still load (fallback, sources order).
+void test14_openTabPersistence() {
+    std::printf("test14: tab-strip order persistence...\n");
+    const std::string srcPath = "/tmp/fts_open_src.h5";
+    const std::string crossPath = "/tmp/fts_open_tabs.cross.h5";
+    std::remove(srcPath.c_str());
+    std::remove(crossPath.c_str());
+    std::string err;
+
+    H5Store::save(srcPath, makeFixtureWorkspace("open"));
+
+    AppState s;
+    CHECK(crossCreate(crossPath, err));
+    std::string idA, idB;
+    CHECK(crossAddSource(crossPath, srcPath, idA, err));
+    CHECK(crossAddSource(crossPath, srcPath, idB, err));
+    CHECK(!idA.empty() && idA != idB);
+    // A persisted experiment (its id comes from the first save).
+    EnvironmentSession* exp = createExperiment(s, EnvType::Absorbance);
+    s.pendingExperimentIdx = -1;
+    exp->refKey = srcPath;
+    exp->refMember = "specRef";
+    exp->samples = {{srcPath, "specSmp"}};
+    CHECK(crossSaveExperiment(s, *exp, crossPath, err));
+    const std::string expId = exp->id;
+    CHECK(!expId.empty());
+
+    // Save an interleaved order: experiment BETWEEN the two workspaces.
+    crossSaveTabOrder(crossPath,
+        {"ws:" + idA, "exp:" + expId, "ws:" + idB}, err);   // void: throws
+
+    // Reload: the ordered lists surface on SessionTabState.
+    SessionTabState st;
+    CHECK(crossLoadInto(st, crossPath, err));
+    CHECK(st.sources.size() == 2);
+    CHECK(st.openTabIds == std::vector<std::string>({idA, idB}));
+    CHECK(st.experimentTabOrder == std::vector<std::string>({expId}));
+    CHECK(st.tabOrder == std::vector<std::string>(
+        {"ws:" + idA, "exp:" + expId, "ws:" + idB}));
+
+    // Reopen: sessions in openTabIds order, experiments reordered per
+    // experimentTabOrder — the strip then rebuilds the exact interleave.
+    // (Same sequence as crossOpenProject: crossLoad → crossLoadExperiments →
+    // restoreOpenEmbeddedTabs → restoreTabStripOrder.)
+    AppState s2;
+    CHECK(crossLoad(s2, crossPath, err));
+    CHECK(crossLoadExperiments(s2, crossPath, err));
+    restoreOpenEmbeddedTabs(s2);
+    restoreTabStripOrder(s2);
+    CHECK(s2.sessions.size() == 2);
+    CHECK(s2.sessions[0]->key == crossPath + "#" + idA);
+    CHECK(s2.sessions[1]->key == crossPath + "#" + idB);
+    CHECK(s2.experiments.size() == 1);
+    CHECK(s2.experiments[0]->id == expId);
+    // The strip's FIRST submission order = the saved interleave (bugfix
+    // 2026-08-14: without restoreTabStripOrder this stays empty and the
+    // strip falls back to workspaces-left-of-experiments).
+    CHECK(s2.tabStripOrder == std::vector<std::string>(
+        {"ws:" + crossPath + "#" + idA, "exp:" + expId,
+         "ws:" + crossPath + "#" + idB}));
+    CHECK(!s2.sessions[0]->workspace.workspaceJson.empty());
+    CHECK(s2.sessions[0]->csvFiles.size() == 1);   // engine-level load ran
+    // Not activated: no swap queued, no active pointer.
+    CHECK(s2.active == nullptr);
+    CHECK(s2.pendingSwapIdx == -1 && s2.pendingSwapToSession == false);
+    CHECK(s2.pendingExperimentIdx == -1);
+
+    // Idempotent: a second restore adds nothing.
+    restoreOpenEmbeddedTabs(s2);
+    CHECK(s2.sessions.size() == 2);
+
+    // A per-source save-back leaves the tab order untouched.
+    s2.sessions[0]->workspace.workspaceJson["test"] = 1;
+    crossSaveSource(crossPath, idA, s2.sessions[0]->workspace, err);   // void
+    {
+        SessionTabState st2;
+        CHECK(crossLoadInto(st2, crossPath, err));
+        CHECK(st2.openTabIds == std::vector<std::string>({idA, idB}));
+        CHECK(st2.experimentTabOrder == std::vector<std::string>({expId}));
+    }
+
+    // Clearing the list closes every tab on the next load.
+    crossSaveTabOrder(crossPath, {}, err);   // void
+    {
+        SessionTabState st3;
+        CHECK(crossLoadInto(st3, crossPath, err));
+        CHECK(st3.openTabIds.empty());
+        CHECK(st3.experimentTabOrder.empty());
+    }
+
+    // persistableTabOrder reduces the captured strip order to restorable
+    // entries (embedded ws + persisted experiments; standalone/unsaved drop).
+    {
+        AppState s3;
+        createExperiment(s3, EnvType::Absorbance);   // "Absorbance 1"
+        s3.experiments[0]->id = expId;               // persisted
+        createExperiment(s3, EnvType::Absorbance);   // "Absorbance 2", unsaved
+        s3.tabStripOrder = {
+            "ws:/tmp/standalone.h5",              // no '#' → dropped
+            "ws:" + crossPath + "#" + idA,        // embedded → kept as idA
+            "exp:" + expId,                       // persisted → kept
+            "exp:Absorbance 2",                   // unsaved (id empty) → dropped
+        };
+        CHECK(persistableTabOrder(s3) ==
+              std::vector<std::string>({"ws:" + idA, "exp:" + expId}));
+        // Empty capture falls back to the sessions-only order.
+        AppState s4;
+        auto sess = std::make_unique<WorkspaceSession>();
+        sess->key = crossPath + "#" + idB;
+        s4.sessions.push_back(std::move(sess));
+        CHECK(persistableTabOrder(s4) ==
+              std::vector<std::string>({"ws:" + idB}));
+    }
+
+    // Legacy format (per-source "open" booleans, no tabOrder array) still
+    // loads — fallback in sources order.
+    {
+        H5FileGuard file(H5Fopen(crossPath.c_str(), H5F_ACC_RDWR, H5P_DEFAULT));
+        CHECK(file.id >= 0);
+        nlohmann::json manifest = {{"version", 2}, {"tabOrder", nullptr},
+            {"sources", nlohmann::json::array({
+                {{"id", idA}, {"name", "a"}, {"open", true}},
+                {{"id", idB}, {"name", "b"}, {"open", false}}})}};
+        if (H5Lexists(file.id, "archive.json", H5P_DEFAULT) > 0)
+            H5Ldelete(file.id, "archive.json", H5P_DEFAULT);
+        h5WriteVlenString(file.id, "archive.json", manifest.dump());
+    }
+    {
+        SessionTabState st4;
+        CHECK(crossLoadInto(st4, crossPath, err));
+        CHECK(st4.openTabIds == std::vector<std::string>({idA}));
+        CHECK(st4.experimentTabOrder.empty());
+    }
+
+    std::remove(srcPath.c_str());
+    std::remove(crossPath.c_str());
+}
+
 }  // namespace
 
 int main() {
@@ -1687,6 +1843,7 @@ int main() {
     test11_comparator();
     test12_experimentPersistence();
     test13_stalenessPersisted();
+    test14_openTabPersistence();
     std::printf("fts_session_roundtrip: all %d checks passed\n", g_checks);
     return 0;
 }

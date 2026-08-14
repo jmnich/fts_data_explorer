@@ -94,6 +94,9 @@ bool t100Outdated(const AppState& s);
 // Restore-on-open (§4.1): fill panel caches from matching workspace members.
 // Called at the end of openWorkspace; pure read, does not set dirty.
 void seedPanelsFromWorkspace(AppState& s);
+// Per-session variant (sessions are canonical — usable for parked/restored
+// tabs); the AppState form delegates to *s.active.
+void seedPanelsFromWorkspace(WorkspaceSession& ws);
 
 // §8.1 view-state subtree for the FTS Data Explorer app from current AppState.
 // Pure read; the single source of truth for capture, the dirty latch, and the
@@ -122,6 +125,8 @@ void captureViewState(WorkspaceSession& ws);
 // seedPanelsFromWorkspace in openWorkspace so restored spectrum params match the
 // saved member configs (no spurious staleness).
 void applyViewState(AppState& s);
+// Per-session variant (see seedPanelsFromWorkspace); AppState form delegates.
+void applyViewState(WorkspaceSession& ws);
 
 // Spectrum-panel params persisted in a workspace's view state
 // (workspace.json §8.1: spectrumView + plotDefaults, xMethod/prominence live

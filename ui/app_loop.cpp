@@ -29,6 +29,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <iostream>
+#include <map>
 #include <thread>
 #include <vector>
 
@@ -138,6 +139,17 @@ static void renderUnsavedPromptModal() {
                                 appState.adapterErrorMsg =
                                     std::string("Experiment save failed:\n") + err;
                                 appState.showAdapterErrorPopup = true;
+                            } else {
+                                // Persist the exact tab-strip order with the
+                                // same save (bugfix 2026-08-14).
+                                crossSaveTabOrder(
+                                    appState.sessionTab.multiWorkspacePath,
+                                    persistableTabOrder(appState), err);
+                                if (!err.empty()) {
+                                    appState.adapterErrorMsg =
+                                        std::string("Tab-order save failed:\n") + err;
+                                    appState.showAdapterErrorPopup = true;
+                                }
                             }
                         }
                         dispatchPendingAction(appState);
@@ -428,6 +440,10 @@ static void advanceExitSaveAll() {
                 }
                 env->dirty = false;
             }
+            // Persist the exact tab-strip order with the same Save All
+            // (bugfix 2026-08-14) — best-effort, mirrors the workspace saves.
+            std::string err;
+            crossSaveTabOrder(crossPath, persistableTabOrder(appState), err);
         }
         for (int idx : appState.exitDirtyExperiments) {
             if (idx >= 0 && idx < static_cast<int>(appState.experiments.size()))
@@ -481,6 +497,27 @@ static void drawTabHoverOutline() {
     ImGui::GetWindowDrawList()->AddRect(min, max,
         IM_COL32(255, 255, 255, 190), ImGui::GetStyle().TabRounding,
         ImDrawFlags_None, 1.5f);
+}
+
+// Status markers (" *" dirty / " ⚠" stale) drawn right after the tab's label
+// text. The markers must NOT be part of the tab label (bugfix 2026-08-14):
+// TabBarCalcTabID hashes the FULL label, so appending them would change the
+// tab ID — ImGui treats the tab as new and sorts it to the bar's end (the
+// tab visibly jumps right when the star appears). Drawn OUTSIDE the shown
+// gate: non-selected tabs return false from BeginTabItem but still render
+// their label, so the marker must draw for them too. extraOffset stacks a
+// second marker after the first.
+static void drawTabStatusMark(const char* labelText, const char* mark,
+                              float extraOffset = 0.0f) {
+    if (!mark || !*mark) return;
+    const ImVec2 rmin = ImGui::GetItemRectMin();
+    const ImVec2 rmax = ImGui::GetItemRectMax();
+    const float padX = ImGui::GetStyle().FramePadding.x;
+    const ImVec2 markSize = ImGui::CalcTextSize(mark);
+    ImGui::GetWindowDrawList()->AddText(
+        ImVec2(rmin.x + padX + ImGui::CalcTextSize(labelText).x + 2.0f + extraOffset,
+               rmin.y + (rmax.y - rmin.y - markSize.y) * 0.5f),
+        ImGui::GetColorU32(ImGuiCol_Text), mark);
 }
 
 // Tab strip (M2.2) — OUTSIDE the DockSpace window, between the menu bar and
@@ -553,6 +590,19 @@ static float renderTabStrip() {
                     ImGui::GetColorU32(ImGuiCol_Border));
     }
 
+    // Tab-bar rebuild request (bugfix 2026-08-14): a renamed experiment's
+    // label (display text) is part of the ImGui tab ID, so without this the
+    // rename would be treated as a NEW tab and appended at the bar's end.
+    // Dropping the pooled tab bar makes BeginTabBar rebuild it from
+    // tabStripOrder — the renamed tab is re-submitted at its saved position.
+    if (appState.stripTabBarResetRequested) {
+        appState.stripTabBarResetRequested = false;
+        ImGuiContext& g = *ImGui::GetCurrentContext();
+        const ImGuiID stripBarId = ImGui::GetID("##WorkspaceTabs");
+        if (ImGuiTabBar* bar = g.TabBars.GetByKey(stripBarId))
+            g.TabBars.Remove(stripBarId, bar);
+    }
+
     // Reorderable: the visual strip order may differ from sessions[] (session
     // order is fixed at creation); selection/click/close are bound to the
     // stable tab IDs, so no index remap is needed. NoReorder keeps the
@@ -583,22 +633,107 @@ static float renderTabStrip() {
                 bar->NextSelectedTabId = 0;
             }
         }
+        // ── Tab submission order (bugfix 2026-08-14) ─────────────────────────
+        // The strip renders in the LAST captured visual order (stable keys
+        // "ws:<sessionKey>" / "exp:<stripKey>"), then appends anything new —
+        // so a reopened project rebuilds the EXACT interleave (workspaces and
+        // experiments mixed, drags included). The capture below re-syncs
+        // tabStripOrder from the tab bar every completed frame.
+        struct StripTab { bool isWs; int idx; std::string key; };
+        std::vector<StripTab> stripTabs;
+        std::vector<std::string> seenKeys;
+        const auto wsKeyOf = [&](int i) { return "ws:" + appState.sessions[i]->key; };
+        const auto expKeyOf = [&](int i) {
+            return "exp:" + appState.experiments[i]->stripKey;
+        };
+        for (const auto& k : appState.tabStripOrder) {
+            if (k.rfind("ws:", 0) == 0) {
+                const std::string key = k.substr(3);
+                for (int i = 0; i < static_cast<int>(appState.sessions.size()); ++i)
+                    if (appState.sessions[i]->key == key) {
+                        stripTabs.push_back({true, i, k});
+                        seenKeys.push_back(k);
+                        break;
+                    }
+            } else if (k.rfind("exp:", 0) == 0) {
+                const std::string nameOrId = k.substr(4);
+                for (int i = 0; i < static_cast<int>(appState.experiments.size()); ++i) {
+                    const auto& e = *appState.experiments[i];
+                    if (e.tabHidden) continue;
+                    // Restored tabs carry the persisted id; live tabs the
+                    // rename-stable stripKey; legacy captures the name.
+                    if (nameOrId == e.id || nameOrId == e.instanceName ||
+                        nameOrId == e.stripKey) {
+                        // CANONICAL key in seenKeys (bugfix 2026-08-14): the
+                        // append pass dedupes by "exp:<stripKey>", so storing
+                        // the manifest key here ("exp:<id>") would never match
+                        // and every restored experiment got a second tab.
+                        const std::string canon = expKeyOf(i);
+                        stripTabs.push_back({false, i, canon});
+                        seenKeys.push_back(canon);
+                        break;
+                    }
+                }
+            }
+        }
         for (int i = 0; i < static_cast<int>(appState.sessions.size()); ++i) {
-            WorkspaceSession* sess = appState.sessions[i].get();
-            const bool isActive = (appState.activeTabKind == ActiveTabKind::Workspace &&
-                                   appState.activeSessionIdx == i);
-            const bool dirty = isActive ? appState.workspaceDirty() : sess->isDirty();
-            const std::string label = sess->label() + (dirty ? " *" : "") +
-                                      "##ws" + std::to_string(i);
+            const std::string k = wsKeyOf(i);
+            if (std::find(seenKeys.begin(), seenKeys.end(), k) == seenKeys.end())
+                stripTabs.push_back({true, i, k});
+        }
+        for (int i = 0; i < static_cast<int>(appState.experiments.size()); ++i) {
+            if (appState.experiments[i]->tabHidden) continue;
+            const std::string k = expKeyOf(i);
+            if (std::find(seenKeys.begin(), seenKeys.end(), k) == seenKeys.end())
+                stripTabs.push_back({false, i, k});
+        }
+        // label → stable key, for the visual-order capture after EndTabBar.
+        std::map<std::string, std::string> tabNameToKey;
+        bool stripComplete = true;
+        for (const auto& t : stripTabs) {
+            WorkspaceSession* sess = nullptr;
+            EnvironmentSession* env = nullptr;
+            if (t.isWs) sess = appState.sessions[t.idx].get();
+            else env = appState.experiments[t.idx].get();
+            const bool isActive = t.isWs
+                ? (appState.activeTabKind == ActiveTabKind::Workspace &&
+                   appState.activeSessionIdx == t.idx)
+                : (appState.activeTabKind == ActiveTabKind::Experiment &&
+                   appState.activeExperimentIdx == t.idx);
+            // Constant label (status markers drawn manually — see
+            // drawTabStatusMark): the label text is part of the tab ID, so a
+            // " *" suffix would change the ID and jump the tab to the end.
+            // The ID suffix is a STABLE per-tab key (not an index — index-
+            // based IDs remapped ImGui's remembered drag order onto different
+            // tabs whenever the vectors were recreated).
+            const std::string tabText = t.isWs ? sess->label() : env->instanceName;
+            const std::string label = tabText +
+                (t.isWs ? "##ws" : "##env") + t.key.substr(3);
             bool open = true;
             const bool shown = ImGui::BeginTabItem(label.c_str(), &open,
                 isActive ? ImGuiTabItemFlags_SetSelected : 0);
+            if (t.isWs) {
+                const bool dirty = isActive ? appState.workspaceDirty() : sess->isDirty();
+                if (dirty) drawTabStatusMark(tabText.c_str(), " *");
+            } else {
+                if (env->dirty) {
+                    drawTabStatusMark(tabText.c_str(), " *");
+                    if (env->stale)
+                        drawTabStatusMark(tabText.c_str(), " \xE2\x9A\xA0",
+                                          ImGui::CalcTextSize(" *").x + 4.0f);
+                } else if (env->stale) {
+                    drawTabStatusMark(tabText.c_str(), " \xE2\x9A\xA0");
+                }
+            }
             // Click detection runs OUTSIDE the shown gate: BeginTabItem
             // returns "contents visible", not "clicked" — a non-selected tab
             // (e.g. every workspace tab while the Session tab is focused)
             // returns false, yet ImGui's button hit-test still registered the
             // click (LastItemData), so IsItemClicked() is valid here.
-            if (ImGui::IsItemClicked() && !isActive) swapInSession(appState, i);
+            if (ImGui::IsItemClicked() && !isActive) {
+                if (t.isWs) swapInSession(appState, t.idx);
+                else activateExperiment(appState, t.idx);
+            }
             // EndTabItem must live INSIDE the BeginTabItem if-block: on the
             // tab's appearing frame (and when ItemAdd clips it) BeginTabItem
             // returns false WITHOUT pushing an ID — an unconditional
@@ -607,7 +742,7 @@ static float renderTabStrip() {
             if (shown) {
                 if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Middle))
                     open = false;
-                if (ImGui::BeginPopupContextItem("##tabClose")) {
+                if (ImGui::BeginPopupContextItem(t.isWs ? "##tabClose" : "##envClose")) {
                     if (ImGui::MenuItem("Close")) open = false;
                     ImGui::EndPopup();
                 }
@@ -615,44 +750,39 @@ static float renderTabStrip() {
                 ImGui::EndTabItem();
             }
             if (!open) {
-                closeTab(appState, i);
-                break;   // sessions vector changed — stop iterating
-            }
-        }
-        // Experiment instances (Phase 3): live tabs, same close affordances
-        // (hover [x] / middle-click / context). IDs ##env<i> resolve to the
-        // experiments vector — a reorder remaps only the strip order.
-        // tabHidden instances were closed in the strip: no tab item is
-        // submitted, so they stay hidden until re-activated via the Active
-        // Experiments panel.
-        for (int i = 0; i < static_cast<int>(appState.experiments.size()); ++i) {
-            auto* env = appState.experiments[i].get();
-            if (env->tabHidden) continue;
-            const bool isActive = (appState.activeTabKind == ActiveTabKind::Experiment &&
-                                   appState.activeExperimentIdx == i);
-            const std::string label =
-                env->tabLabel() + "##env" + std::to_string(i);
-            bool open = true;
-            const bool shown = ImGui::BeginTabItem(label.c_str(), &open,
-                isActive ? ImGuiTabItemFlags_SetSelected : 0);
-            if (ImGui::IsItemClicked() && !isActive) activateExperiment(appState, i);
-            if (shown) {
-                if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Middle))
-                    open = false;
-                if (ImGui::BeginPopupContextItem("##envClose")) {
-                    if (ImGui::MenuItem("Close")) open = false;
-                    ImGui::EndPopup();
+                if (t.isWs) {
+                    closeTab(appState, t.idx);
+                    stripComplete = false;   // sessions vector changed
+                    break;
                 }
-                drawTabHoverOutline();
-                ImGui::EndTabItem();
-            }
-            if (!open) {
-                // Close = deactivate only (never delete): the instance stays
-                // live and re-openable via the Active Experiments panel.
+                // Experiment: close = deactivate only (never delete); the
+                // instance stays live and re-openable via the Active
+                // Experiments panel.
                 env->closeRequest();
             }
+            tabNameToKey[label] = t.key;
         }
+        ImGuiTabBar* stripBar = ImGui::GetCurrentTabBar();
         ImGui::EndTabBar();
+
+        // Visual-order capture: the tab bar's Tabs array IS the display order
+        // (drags physically move entries — TabBarProcessReorder). Record the
+        // stable keys in that order for persistence and next-frame
+        // submission. Skipped on close frames (the loop broke early — the
+        // remaining tabs were not submitted; keeping the previous order is
+        // correct, the closed tab's key simply fails to resolve next frame).
+        if (ImGuiTabBar* bar = stripBar) {
+            if (stripComplete) {
+                appState.tabStripOrder.clear();
+                for (const auto& tab : bar->Tabs) {
+                    if (tab.NameOffset < 0) continue;   // docked tabs only
+                    const char* name = bar->TabsNames.c_str() + tab.NameOffset;
+                    auto it = tabNameToKey.find(name);
+                    if (it != tabNameToKey.end())
+                        appState.tabStripOrder.push_back(it->second);
+                }
+            }
+        }
     }
 
     ImGui::End();
