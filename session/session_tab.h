@@ -24,7 +24,7 @@ private:
     void renderMultiWorkspace();                 // Datasets / Active / Available panels
     void renderSingleFile();                     // info pane + create button (Datasets panel)
     void renderDatasetsPanel();                  // scrollable dataset list
-    void renderActiveEnvironmentsPanel();        // scrollable list (Phase 3)
-    void renderAvailableEnvironmentsPanel();     // scrollable type list
+    void renderActiveExperimentsPanel();        // scrollable list (Phase 3)
+    void renderAvailableExperimentsPanel();     // scrollable type list
     std::string titleCache_ = "Session";
 };

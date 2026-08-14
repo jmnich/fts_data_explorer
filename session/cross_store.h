@@ -85,7 +85,7 @@ bool crossExperimentRead(const std::string& path, const std::string& expId,
 
 // AppState-level wrappers (defined in environment_session.cpp — see above).
 // crossSaveExperiments saves every dirty instance (exit Save All). Loading
-// restores instances into AppState::environments (dedupe by id, results
+// restores instances into AppState::experiments (dedupe by id, results
 // loaded directly — no recompute) and computes the staleness flags.
 bool crossSaveExperiment(AppState& s, EnvironmentSession& env,
                          const std::string& path, std::string& err);

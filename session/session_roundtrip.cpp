@@ -959,33 +959,33 @@ void test8_pool() {
     }
 }
 
-// M3.2: environment instances — independent state, lifecycle fixups, async
+// M3.2: experiment instances — independent state, lifecycle fixups, async
 // compute via the pool. Activation is QUEUED (bugfix 2026-08-13: the park/
 // resume must run at frame top so the active workspace's data is parked
 // before the env tab takes over).
 void test9_env() {
-    std::printf("test9: environment instances (registry / async compute / close)...\n");
+    std::printf("test9: experiment instances (registry / async compute / close)...\n");
     AppState s;
 
     // Registry: auto-names per type, activation, independent picks.
-    EnvironmentSession* a1 = createEnvironment(s, EnvType::Absorbance);
-    EnvironmentSession* c1 = createEnvironment(s, EnvType::Comparator);
-    EnvironmentSession* a2 = createEnvironment(s, EnvType::Absorbance);
+    EnvironmentSession* a1 = createExperiment(s, EnvType::Absorbance);
+    EnvironmentSession* c1 = createExperiment(s, EnvType::Comparator);
+    EnvironmentSession* a2 = createExperiment(s, EnvType::Absorbance);
     CHECK(a1->instanceName == "Absorbance 1");
     CHECK(c1->instanceName == "Comparator 1");
     CHECK(a2->instanceName == "Absorbance 2");
-    CHECK(s.environments.size() == 3);
+    CHECK(s.experiments.size() == 3);
     // Bugfix 2026-08-14: creation marks the instance dirty (both types) so
     // bulk save paths persist it — a created-but-unmodified instance must not
     // vanish from the project.
     CHECK(a1->dirty == true);
     CHECK(c1->dirty == true);
     CHECK(a2->dirty == true);
-    CHECK(s.pendingEnvIdx == 2);                     // queued, not yet active
+    CHECK(s.pendingExperimentIdx == 2);                     // queued, not yet active
     executePendingSwap(s);                           // frame-top executor
-    CHECK(s.activeEnvIdx == 2);
-    CHECK(s.activeTabKind == ActiveTabKind::Environment);
-    // Kind change (Workspace → Environment): one-shot follow-up redraw armed
+    CHECK(s.activeExperimentIdx == 2);
+    CHECK(s.activeTabKind == ActiveTabKind::Experiment);
+    // Kind change (Workspace → Experiment): one-shot follow-up redraw armed
     // (black-first-frame fix) so the incoming dock panels become visible.
     CHECK(s.extraRedrawAfterKindSwitch == true);
     s.extraRedrawAfterKindSwitch = false;            // AppLoop consumes it
@@ -996,61 +996,61 @@ void test9_env() {
     CHECK(a2->samples.empty());
 
     // Activation + removal index fixups.
-    activateEnvironment(s, 0);
+    activateExperiment(s, 0);
     executePendingSwap(s);
-    CHECK(s.activeEnvIdx == 0);
+    CHECK(s.activeExperimentIdx == 0);
     CHECK(s.extraRedrawAfterKindSwitch == false);    // env → env: no kind change
-    removeEnvironment(s, 0);                         // remove active → Session
-    CHECK(s.environments.size() == 2);
-    CHECK(s.activeEnvIdx == -1);
+    removeExperiment(s, 0);                         // remove active → Session
+    CHECK(s.experiments.size() == 2);
+    CHECK(s.activeExperimentIdx == -1);
     CHECK(s.pendingSwapToSession == true);           // focus queued (frame top)
     executePendingSwap(s);                           // frame-top executor
     CHECK(s.activeTabKind == ActiveTabKind::Session);
     CHECK(s.extraRedrawAfterKindSwitch == true);     // env → session: re-armed
     s.extraRedrawAfterKindSwitch = false;
-    activateEnvironment(s, 1);
+    activateExperiment(s, 1);
     executePendingSwap(s);
-    CHECK(s.activeEnvIdx == 1);
+    CHECK(s.activeExperimentIdx == 1);
     // Bugfix 2026-08-14: closing an experiment tab HIDES the tab + deactivates
-    // — the instance stays live for the Active Environments panel (deletion is
+    // — the instance stays live for the Active Experiments panel (deletion is
     // a separate action, requestDelete). Re-activation re-shows the tab.
     // closeRequest talks to the global ::appState, so the check runs against a
     // throwaway instance there.
-    ::appState.environments.clear();
-    EnvironmentSession* tEnv = createEnvironment(::appState, EnvType::Absorbance);
-    ::appState.pendingEnvIdx = -1;             // no activation wanted
-    const size_t globalCount = ::appState.environments.size();
+    ::appState.experiments.clear();
+    EnvironmentSession* tEnv = createExperiment(::appState, EnvType::Absorbance);
+    ::appState.pendingExperimentIdx = -1;             // no activation wanted
+    const size_t globalCount = ::appState.experiments.size();
     tEnv->closeRequest();
-    CHECK(::appState.environments.size() == globalCount);   // instance kept
+    CHECK(::appState.experiments.size() == globalCount);   // instance kept
     CHECK(tEnv->tabHidden == true);                         // tab hidden
     CHECK(::appState.pendingSwapToSession == true);         // deactivated only
-    activateEnvironment(::appState, 0);                     // panel row click
+    activateExperiment(::appState, 0);                     // panel row click
     CHECK(tEnv->tabHidden == false);                        // tab re-shown
-    ::appState.environments.clear();
-    removeEnvironment(s, 0);                         // remove parked (0 < active 1)
-    CHECK(s.activeEnvIdx == 0);
-    CHECK(s.environments.size() == 1);
-    removeEnvironment(s, 0);                         // clean up
-    CHECK(s.environments.empty());
+    ::appState.experiments.clear();
+    removeExperiment(s, 0);                         // remove parked (0 < active 1)
+    CHECK(s.activeExperimentIdx == 0);
+    CHECK(s.experiments.size() == 1);
+    removeExperiment(s, 0);                         // clean up
+    CHECK(s.experiments.empty());
 
     // Queued-activation-of-removed-instance guard: a queue fired after the
     // instance is gone must not resurrect it as active.
-    EnvironmentSession* tmp = createEnvironment(s, EnvType::Absorbance);
+    EnvironmentSession* tmp = createExperiment(s, EnvType::Absorbance);
     CHECK(tmp != nullptr);
-    CHECK(s.pendingEnvIdx == 0);                     // queued
-    removeEnvironment(s, 0);                         // removed before frame top
-    CHECK(s.pendingEnvIdx == -1);                    // queue invalidated
+    CHECK(s.pendingExperimentIdx == 0);                     // queued
+    removeExperiment(s, 0);                         // removed before frame top
+    CHECK(s.pendingExperimentIdx == -1);                    // queue invalidated
     executePendingSwap(s);
-    CHECK(s.environments.empty());
-    CHECK(s.activeEnvIdx == -1);
+    CHECK(s.experiments.empty());
+    CHECK(s.activeExperimentIdx == -1);
 }
 
-// Bugfix regression (2026-08-13): switching to an environment tab must PARK
+// Bugfix regression (2026-08-13): switching to an experiment tab must PARK
 // the active workspace tab first. Before the fix the direct activation left
 // workspace data in the flat fields with an empty mirror; the next queued
 // swap resumed that empty mirror over the live fields — wiping the tab.
 // Bugfix regression (2026-08-13, preserved under M4.5): switching to an
-// environment tab must never touch the workspace tabs' data. Under the
+// experiment tab must never touch the workspace tabs' data. Under the
 // canonical model this holds by construction — sessions own their data and
 // env activation only nulls AppState::active — but the alternation sequence
 // that used to wipe tabs is still exercised end-to-end.
@@ -1064,10 +1064,10 @@ void test9b_envActivationParksWorkspace() {
     CHECK(a->csvFiles.size() == 1);
 
     // Click the env tab: queued; frame top nulls the active pointer.
-    createEnvironment(s, EnvType::Absorbance);
+    createExperiment(s, EnvType::Absorbance);
     executePendingSwap(s);
-    CHECK(s.activeTabKind == ActiveTabKind::Environment);
-    CHECK(s.activeEnvIdx == 0);
+    CHECK(s.activeTabKind == ActiveTabKind::Experiment);
+    CHECK(s.activeExperimentIdx == 0);
     CHECK(s.active == nullptr);
     CHECK(a->currentDatasetName == "A");             // A retained in its session
 
@@ -1080,7 +1080,7 @@ void test9b_envActivationParksWorkspace() {
     CHECK(a->currentDatasetName == "A");             // THE regression: no wipe
 
     // Env tab again, then back to A — A's data must survive the round trip.
-    activateEnvironment(s, 0);
+    activateExperiment(s, 0);
     executePendingSwap(s);
     swapInSession(s, 0);
     executePendingSwap(s);
@@ -1091,7 +1091,7 @@ void test9b_envActivationParksWorkspace() {
 
     // Alternate env <-> workspace several times: no tab may blank.
     for (int i = 0; i < 3; ++i) {
-        activateEnvironment(s, 0);
+        activateExperiment(s, 0);
         executePendingSwap(s);
         swapInSession(s, 0);
         executePendingSwap(s);
@@ -1117,11 +1117,11 @@ void test10_t100Parity() {
     AppState& s = ::appState;
     // Fresh global state (tests run sequentially; nothing else holds it).
     s.sessions.clear();
-    s.environments.clear();
+    s.experiments.clear();
     s.poolCache.clear();
     s.activeTabKind = ActiveTabKind::Session;
     s.activeSessionIdx = -1;
-    s.activeEnvIdx = -1;
+    s.activeExperimentIdx = -1;
     s.pendingSwapIdx = -1;
     s.pendingSwapToSession = false;
 
@@ -1155,8 +1155,8 @@ void test10_t100Parity() {
     CHECK(t100Y.size() == refX.size());              // overlap = full ref grid
     for (double v : t100Y) CHECK(std::fabs(v - 80.0) < 1e-12);   // 0.8*100
 
-    // Environment instance: same ref/sample pair through the pool.
-    EnvironmentSession* env = createEnvironment(s, EnvType::Absorbance);
+    // Experiment instance: same ref/sample pair through the pool.
+    EnvironmentSession* env = createExperiment(s, EnvType::Absorbance);
     s.activeTabKind = ActiveTabKind::Workspace;      // pool reads flat fields
     s.activeSessionIdx = 0;
     env->refKey = "/tmp/parity.h5";
@@ -1235,7 +1235,7 @@ void test10_t100Parity() {
     env->yMode = 1;
     env->applyYMode();
     for (double v : env->curveY[rkey]) CHECK(v == 0.0);
-    removeEnvironment(s, 0);
+    removeExperiment(s, 0);
 }
 
 // M3.4: Comparator data contract — average X converted per session's own
@@ -1361,14 +1361,14 @@ void test12_experimentPersistence() {
 
     AppState& s = ::appState;
     s.sessions.clear();
-    s.environments.clear();
+    s.experiments.clear();
     s.poolCache.clear();
     s.activeTabKind = ActiveTabKind::Session;
     s.activeSessionIdx = -1;
-    s.activeEnvIdx = -1;
+    s.activeExperimentIdx = -1;
     s.pendingSwapIdx = -1;
     s.pendingSwapToSession = false;
-    s.pendingEnvIdx = -1;
+    s.pendingExperimentIdx = -1;
 
     // Workspace with a panel-cache spectrum pair (test10 pattern).
     makeSession(s, "exp", "/tmp/parity.h5");
@@ -1390,10 +1390,10 @@ void test12_experimentPersistence() {
     s.active->spectrum.cachedSpectra["specSmp"] = smpY;
 
     // Absorbance instance: rename (dirty) + compute through the pool.
-    s.pendingEnvIdx = -1;   // the test drives compute directly; the queued env activation is not wanted
+    s.pendingExperimentIdx = -1;   // the test drives compute directly; the queued env activation is not wanted
     activateSession(s, 0);
-    EnvironmentSession* env = createEnvironment(s, EnvType::Absorbance);
-    s.pendingEnvIdx = -1;   // cancel the queued activation (compute is driven directly)
+    EnvironmentSession* env = createExperiment(s, EnvType::Absorbance);
+    s.pendingExperimentIdx = -1;   // cancel the queued activation (compute is driven directly)
     env->refKey = "/tmp/parity.h5";
     env->refMember = "specRef";
     env->samples = {{"/tmp/parity.h5", "specSmp"}};
@@ -1448,8 +1448,8 @@ void test12_experimentPersistence() {
     // (stored K=2 vs unreachable default).
     AppState s2;
     CHECK(crossLoadExperiments(s2, crossPath, err));
-    CHECK(s2.environments.size() == 1);
-    EnvironmentSession* e2 = s2.environments[0].get();
+    CHECK(s2.experiments.size() == 1);
+    EnvironmentSession* e2 = s2.experiments[0].get();
     CHECK(e2->id == expId);
     CHECK(e2->type == EnvType::Absorbance);
     CHECK(e2->instanceName == "Absorbance Roundtrip");
@@ -1488,9 +1488,9 @@ void test12_experimentPersistence() {
     // must not vanish from the project on save. Absorbance rides the same
     // path (both created dirty, both saved by one bulk call).
     AppState s3;
-    EnvironmentSession* cmp = createEnvironment(s3, EnvType::Comparator);
+    EnvironmentSession* cmp = createExperiment(s3, EnvType::Comparator);
     CHECK(cmp->dirty == true);
-    EnvironmentSession* abs = createEnvironment(s3, EnvType::Absorbance);
+    EnvironmentSession* abs = createExperiment(s3, EnvType::Absorbance);
     CHECK(abs->dirty == true);
     abs->refKey = "/tmp/parity.h5";
     abs->refMember = "specRef";
@@ -1504,6 +1504,10 @@ void test12_experimentPersistence() {
     cmp->forcedYMin = -1.0;
     cmp->forcedYMax = 5.0;
     cmp->comment = "comparator experiment";
+    // View X range persists like the workspace panels' view state (bugfix
+    // 2026-08-14: the comparator's zoom window was lost on relaunch).
+    cmp->manualXMin = 1500.0;
+    cmp->manualXMax = 2000.0;
     CHECK(crossSaveExperiments(s3, crossPath, err));
     CHECK(cmp->dirty == false);
     CHECK(abs->dirty == false);
@@ -1512,10 +1516,10 @@ void test12_experimentPersistence() {
     CHECK(entries2.size() == 3);   // absorbance + comparator + fresh absorbance
     AppState s4;
     CHECK(crossLoadExperiments(s4, crossPath, err));
-    CHECK(s4.environments.size() == 3);   // absorbance + comparator + fresh absorbance
+    CHECK(s4.experiments.size() == 3);   // absorbance + comparator + fresh absorbance
     // The fresh Absorbance (never computed) restores its config too.
     EnvironmentSession* a2b = nullptr;
-    for (auto& e : s4.environments)
+    for (auto& e : s4.experiments)
         if (e->type == EnvType::Absorbance && e->refKey == "/tmp/parity.h5")
             a2b = e.get();
     CHECK(a2b != nullptr);
@@ -1526,7 +1530,7 @@ void test12_experimentPersistence() {
     CHECK(a2b->computed == false);
     CHECK(a2b->dirty == false);
     EnvironmentSession* c2 = nullptr;
-    for (auto& e : s4.environments)
+    for (auto& e : s4.experiments)
         if (e->type == EnvType::Comparator) c2 = e.get();
     CHECK(c2 != nullptr);
     CHECK(c2->type == EnvType::Comparator);
@@ -1542,19 +1546,35 @@ void test12_experimentPersistence() {
     CHECK(c2->comment == "comparator experiment");
     CHECK(c2->computed == false);
     CHECK(c2->dirty == false);
+    // X range restored + latched for one-shot application on first render
+    // (renderPlot consumes pendingNextXMin/Max; autoscale suppressed).
+    CHECK(c2->manualXMin == 1500.0);
+    CHECK(c2->manualXMax == 2000.0);
+    CHECK(c2->pendingNextXMin == 1500.0);
+    CHECK(c2->pendingNextXMax == 2000.0);
+    CHECK(c2->shouldAutoscale == false);
+    // Save→reload→save: the range persists idempotently in config.json.
+    CHECK(crossSaveExperiment(s4, *c2, crossPath, err));
+    {
+        nlohmann::json cfg2, fps2, stats2;
+        std::map<std::string, std::vector<double>> res2;
+        CHECK(crossExperimentRead(crossPath, c2->id, cfg2, fps2, res2, stats2, err));
+        CHECK(cfg2["manualXMin"] == 1500.0);
+        CHECK(cfg2["manualXMax"] == 2000.0);
+    }
 
     // Dedupe: repeated loads add nothing.
     CHECK(crossLoadExperiments(s4, crossPath, err));
-    CHECK(s4.environments.size() == 3);
+    CHECK(s4.experiments.size() == 3);
 
-    // Bugfix 2026-08-14: Ctrl+H go-home clears environments while the session
+    // Bugfix 2026-08-14: Ctrl+H go-home clears experiments while the session
     // file stays open; re-entering it (welcome Recents click) must reload
     // them. crossLoadExperiments is idempotent by id.
-    clearEnvironments(s4);
-    CHECK(s4.environments.empty());
+    clearExperiments(s4);
+    CHECK(s4.experiments.empty());
     CHECK(crossLoadExperiments(s4, crossPath, err));
-    CHECK(s4.environments.size() == 3);
-    CHECK(s4.environments[0]->id == expId);   // restored with ids intact
+    CHECK(s4.experiments.size() == 3);
+    CHECK(s4.experiments[0]->id == expId);   // restored with ids intact
 
     std::remove(crossPath.c_str());
 }
@@ -1584,14 +1604,14 @@ void test13_stalenessPersisted() {
 
     AppState& s = ::appState;
     s.sessions.clear();
-    s.environments.clear();
+    s.experiments.clear();
     s.poolCache.clear();
     s.activeTabKind = ActiveTabKind::Session;
     s.activeSessionIdx = -1;
-    s.activeEnvIdx = -1;
+    s.activeExperimentIdx = -1;
     s.pendingSwapIdx = -1;
     s.pendingSwapToSession = false;
-    s.pendingEnvIdx = -1;
+    s.pendingExperimentIdx = -1;
     auto* sess = makeSession(s, "stale", srcPath);
     sess->workspace = ws;                 // fixture override
     activateSession(s, 0);
@@ -1610,10 +1630,10 @@ void test13_stalenessPersisted() {
     s.active->spectrum.cachedFrequencies["specSmp"] = smpX;
     s.active->spectrum.cachedSpectra["specSmp"] = smpY;
 
-    s.pendingEnvIdx = -1;   // the test drives compute directly; the queued env activation is not wanted
+    s.pendingExperimentIdx = -1;   // the test drives compute directly; the queued env activation is not wanted
     activateSession(s, 0);
-    EnvironmentSession* env = createEnvironment(s, EnvType::Absorbance);
-    s.pendingEnvIdx = -1;   // cancel the queued activation (compute is driven directly)
+    EnvironmentSession* env = createExperiment(s, EnvType::Absorbance);
+    s.pendingExperimentIdx = -1;   // cancel the queued activation (compute is driven directly)
     env->refKey = srcPath;
     env->refMember = "specRef";
     env->samples = {{srcPath, "specSmp"}};
@@ -1637,14 +1657,14 @@ void test13_stalenessPersisted() {
     // persisted workspace.json (K=4) → differs from the stored K=2 → stale.
     AppState s2;
     CHECK(crossLoadExperiments(s2, crossPath, err));
-    CHECK(s2.environments.size() == 1);
-    CHECK(s2.environments[0]->stale == true);
+    CHECK(s2.experiments.size() == 1);
+    CHECK(s2.experiments[0]->stale == true);
 
     // Restore the source params → the badge clears.
     ws.workspaceJson["applications"]["FTS Data Explorer"]["spectrumView"]["zeroPadK"] = 2;
     H5Store::save(srcPath, ws);
-    s2.environments[0]->updateStaleness(s2);
-    CHECK(s2.environments[0]->stale == false);
+    s2.experiments[0]->updateStaleness(s2);
+    CHECK(s2.experiments[0]->stale == false);
 
     std::remove(srcPath.c_str());
     std::remove(crossPath.c_str());

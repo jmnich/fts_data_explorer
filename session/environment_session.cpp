@@ -1,4 +1,4 @@
-// Phase-3 M3.2/M3.3/M3.4 — instantiable environment tabs (Absorbance /
+// Phase-3 M3.2/M3.3/M3.4 — instantiable experiment tabs (Absorbance /
 // Comparator). LIVE objects: state is the instance itself, never folded.
 // Compute runs poolComputeRaw on the shared pool (workers capture by value,
 // never touch AppState — average_spectrum.cpp:616 pattern); results apply on
@@ -237,8 +237,8 @@ void downsampleCurve(const std::vector<double>& x, const std::vector<double>& y,
 
 }  // namespace
 
-// Public label for an environment type ("Absorbance" / "Comparator").
-const char* envTypeName(EnvType t) {
+// Public label for an experiment type ("Absorbance" / "Comparator").
+const char* experimentTypeName(EnvType t) {
     return t == EnvType::Absorbance ? "Absorbance" : "Comparator";
 }
 
@@ -332,12 +332,12 @@ void EnvironmentSession::updateStaleness(AppState& s) {
 
 // ── registry ────────────────────────────────────────────────────────────────
 
-EnvironmentSession* createEnvironment(AppState& s, EnvType t) {
-    int& counter = (t == EnvType::Absorbance) ? s.envAbsorbanceCounter
-                                              : s.envComparatorCounter;
+EnvironmentSession* createExperiment(AppState& s, EnvType t) {
+    int& counter = (t == EnvType::Absorbance) ? s.experimentAbsorbanceCounter
+                                              : s.experimentComparatorCounter;
     ++counter;
     char name[64];
-    std::snprintf(name, sizeof(name), "%s %d", envTypeName(t), counter);
+    std::snprintf(name, sizeof(name), "%s %d", experimentTypeName(t), counter);
     auto env = std::make_unique<EnvironmentSession>(t, name);
     if (s.configPtr) {
         env->xUnitSelector = s.configPtr->envWindowXUnit;
@@ -348,45 +348,45 @@ EnvironmentSession* createEnvironment(AppState& s, EnvType t) {
     // is invisible to every bulk save path (crossSaveExperiments, exit modal)
     // and never reaches the .cross.h5.
     env->dirty = true;
-    s.environments.push_back(std::move(env));
-    activateEnvironment(s, static_cast<int>(s.environments.size()) - 1);
+    s.experiments.push_back(std::move(env));
+    activateExperiment(s, static_cast<int>(s.experiments.size()) - 1);
     return raw;
 }
 
-void activateEnvironment(AppState& s, int idx) {
-    if (idx < 0 || idx >= static_cast<int>(s.environments.size())) return;
-    // Re-activation (Active Environments panel row) re-shows the tab.
-    s.environments[idx]->tabHidden = false;
+void activateExperiment(AppState& s, int idx) {
+    if (idx < 0 || idx >= static_cast<int>(s.experiments.size())) return;
+    // Re-activation (Active Experiments panel row) re-shows the tab.
+    s.experiments[idx]->tabHidden = false;
     // QUEUED activation (bugfix 2026-08-13): never switch tab kind mid-frame.
     // executePendingSwap parks the active workspace tab first, so its data is
     // back in the mirror before the env tab takes over — without the park,
     // the flat fields keep the workspace's data while its mirror stays empty,
     // and the next swap resumes that empty mirror over the live fields
     // (silent data wipe of the workspace tab).
-    s.pendingEnvIdx = idx;
+    s.pendingExperimentIdx = idx;
     s.pendingSwapIdx = -1;
     s.pendingSwapToSession = false;
     s.needsRedraw = true;
 }
 
-void removeEnvironment(AppState& s, int idx) {
-    if (idx < 0 || idx >= static_cast<int>(s.environments.size())) return;
-    s.environments.erase(s.environments.begin() + idx);
-    if (s.activeTabKind == ActiveTabKind::Environment) {
-        if (idx < s.activeEnvIdx) --s.activeEnvIdx;
-        else if (idx == s.activeEnvIdx) s.activeEnvIdx = -1;
-        if (s.activeEnvIdx < 0) focusSessionTab(s);   // removed the focused tab
+void removeExperiment(AppState& s, int idx) {
+    if (idx < 0 || idx >= static_cast<int>(s.experiments.size())) return;
+    s.experiments.erase(s.experiments.begin() + idx);
+    if (s.activeTabKind == ActiveTabKind::Experiment) {
+        if (idx < s.activeExperimentIdx) --s.activeExperimentIdx;
+        else if (idx == s.activeExperimentIdx) s.activeExperimentIdx = -1;
+        if (s.activeExperimentIdx < 0) focusSessionTab(s);   // removed the focused tab
     }
     // A QUEUED activation of the removed instance must not fire after the
     // removal (executePendingSwap would resurrect it as the active env).
-    if (s.pendingEnvIdx > idx) --s.pendingEnvIdx;
-    else if (s.pendingEnvIdx == idx) s.pendingEnvIdx = -1;
+    if (s.pendingExperimentIdx > idx) --s.pendingExperimentIdx;
+    else if (s.pendingExperimentIdx == idx) s.pendingExperimentIdx = -1;
     s.needsRedraw = true;
 }
 
 void EnvironmentSession::closeRequest() {
     // Tab-selector close: hide the tab + deactivate — the instance stays
-    // live and listed in the Active Environments panel (deletion is
+    // live and listed in the Active Experiments panel (deletion is
     // requestDelete's job, invoked from that panel). Without tabHidden the
     // strip re-submits the tab every frame and it reappears immediately.
     tabHidden = true;
@@ -394,31 +394,31 @@ void EnvironmentSession::closeRequest() {
 }
 
 void EnvironmentSession::requestDelete() {
-    for (size_t i = 0; i < appState.environments.size(); ++i) {
-        if (appState.environments[i].get() == this) {
+    for (size_t i = 0; i < appState.experiments.size(); ++i) {
+        if (appState.experiments[i].get() == this) {
             const int idx = static_cast<int>(i);
             // Phase 4: dirty or persisted experiments confirm; transient
             // empty instances remove directly (Phase-3 behavior).
             if (dirty || !id.empty()) {
-                appState.pendingEnvDeleteIdx = idx;
-                appState.showEnvDeleteConfirm = true;
+                appState.pendingExperimentDeleteIdx = idx;
+                appState.showExperimentDeleteConfirm = true;
                 appState.needsRedraw = true;
                 return;
             }
-            removeEnvironment(appState, idx);
+            removeExperiment(appState, idx);
             return;
         }
     }
 }
 
-// Close ALL environment instances (project switch / go-home). RAM-only
+// Close ALL experiment instances (project switch / go-home). RAM-only
 // instances reference the closing project's sources; persisted experiments
 // reload with the new project via crossLoadExperiments.
-void clearEnvironments(AppState& s) {
-    s.environments.clear();
-    s.activeEnvIdx = -1;
-    s.pendingEnvIdx = -1;   // stale queued activation must not fire
-    if (s.activeTabKind == ActiveTabKind::Environment)
+void clearExperiments(AppState& s) {
+    s.experiments.clear();
+    s.activeExperimentIdx = -1;
+    s.pendingExperimentIdx = -1;   // stale queued activation must not fire
+    if (s.activeTabKind == ActiveTabKind::Experiment)
         s.activeTabKind = ActiveTabKind::Session;
     s.needsRedraw = true;
 }
@@ -850,7 +850,7 @@ void EnvironmentSession::renderAbsorbanceConfig() {
 }
 
 // Comment editor (multi-line), placed above the plot in both env types.
-// The comment is the same string shown grey in the Active Environments list.
+// The comment is the same string shown grey in the Active Experiments list.
 void EnvironmentSession::renderCommentEditor() {
     ImGui::TextUnformatted("Comment:");
     if (ImGui::InputTextMultiline("##envComment", commentBuf, sizeof(commentBuf),
@@ -1193,6 +1193,21 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
                 ImPlot::SetNextAxisLimits(ImAxis_X1, manualXMin + range * 0.1,
                                           manualXMax + range * 0.1, ImPlotCond_Always);
         }
+        // One-shot restored X range (bugfix 2026-08-14: comparator X range was
+        // lost on relaunch). SetupAxisLimits, NOT SetNextAxisLimits: the
+        // "next" API must be called before BeginPlot (its NextPlotData is
+        // consumed at BeginPlot start and wiped at EndPlot) — inside BeginPlot
+        // it silently never applies. Applied after the autoscale block so a
+        // saved manual range wins on the first frame even when the Absorbance
+        // results path re-armed shouldAutoscale on load.
+        if (pendingNextXMin < pendingNextXMax) {
+            ImPlot::SetupAxisLimits(ImAxis_X1, pendingNextXMin, pendingNextXMax,
+                                    ImPlotCond_Always);
+            manualXMin = pendingNextXMin;
+            manualXMax = pendingNextXMax;
+            pendingNextXMin = 0.0;
+            pendingNextXMax = -1.0;
+        }
 
         if (hasGuideline) ImPlot::PlotInfLines("##guideline", &guideline, 1);
 
@@ -1210,6 +1225,10 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
             manualXMin = manualXMax = 0.0;
             pendingNextXMin = 0.0;
             pendingNextXMax = -1.0;
+            // View change → unsaved change (bugfix 2026-08-14): without dirty
+            // a zoomed-then-reset view would never reach the saved config.
+            dirty = true;
+            appState.needsRedraw = true;
         }
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows)) {
             if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) && !leftArrowPressedLastFrame) {
@@ -1247,17 +1266,29 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
                 manualXMin = lo;
                 manualXMax = hi;
                 shouldAutoscale = false;
+                // View change → unsaved change (bugfix 2026-08-14): a zoom
+                // after the last save must re-dirty, or it is never persisted
+                // (dirty-gated saves) and the range is lost on relaunch.
+                dirty = true;
                 appState.needsRedraw = true;
             }
         }
         if (isSelectingXRange) {
+            const ImPlotRect lim = ImPlot::GetPlotLimits();
+            // Clamp the selection to the CURRENT axis limits (bugfix
+            // 2026-08-14): dragging past the plot edge extrapolates
+            // GetPlotMousePos beyond the range; without the clamp the zoomed
+            // area extends out of bounds. min/max order handles descending
+            // axes (um) — std::clamp would be UB there.
+            const double xLo = std::min(lim.X.Min, lim.X.Max);
+            const double xHi = std::max(lim.X.Min, lim.X.Max);
             ImPlotPoint mouse = ImPlot::GetPlotMousePos();
+            const double mx = std::min(std::max(mouse.x, xLo), xHi);
             if (selectionStartX == 0.0 && selectionEndX == 0.0)
-                selectionStartX = mouse.x;
-            selectionEndX = mouse.x;
+                selectionStartX = mx;
+            selectionEndX = mx;
             const double lo = std::min(selectionStartX, selectionEndX);
             const double hi = std::max(selectionStartX, selectionEndX);
-            const ImPlotRect lim = ImPlot::GetPlotLimits();
             double shade_x[2] = {lo, hi};
             double shade_y1[2] = {lim.Y.Min, lim.Y.Min};
             double shade_y2[2] = {lim.Y.Max, lim.Y.Max};
@@ -1280,7 +1311,7 @@ void EnvironmentSession::exportCsv() {
     if (appState.active && !appState.active->currentDirectory.empty())
         defaultFolder = appState.active->currentDirectory;
     std::string path = FileBrowser::showFileSaveDialog(
-        "Export Environment", instanceName + ".csv", "*.csv",
+        "Export Experiment", instanceName + ".csv", "*.csv",
         defaultFolder, glfwGetCurrentContext());
     if (path.empty()) return;
 
@@ -1332,9 +1363,9 @@ void EnvironmentSession::exportCsv() {
 // environment_session.cpp for the fts_cross_roundtrip CLI.
 
 // Full instance state minus transient plot flags (audit §3.3 → config.json).
-static nlohmann::json envConfigJson(const EnvironmentSession& env) {
+static nlohmann::json experimentConfigJson(const EnvironmentSession& env) {
     nlohmann::json j;
-    j["type"] = envTypeName(env.type);
+    j["type"] = experimentTypeName(env.type);
     j["name"] = env.instanceName;
     j["comment"] = env.comment;
     j["xUnit"] = env.xUnitSelector;
@@ -1343,6 +1374,11 @@ static nlohmann::json envConfigJson(const EnvironmentSession& env) {
     j["forcedYMin"] = env.forcedYMin;
     j["forcedYMax"] = env.forcedYMax;
     j["computed"] = env.computed;
+    // View X range (bugfix 2026-08-14): manual zoom window, same convention
+    // as the workspace panels' view state (§8.1 spectrumView etc.) — unit is
+    // the saved xUnit; convertXInPlace keeps it in step with unit changes.
+    j["manualXMin"] = env.manualXMin;
+    j["manualXMax"] = env.manualXMax;
     if (env.type == EnvType::Absorbance) {
         j["refKey"] = env.refKey;
         j["refMember"] = env.refMember;
@@ -1358,7 +1394,7 @@ static nlohmann::json envConfigJson(const EnvironmentSession& env) {
     return j;
 }
 
-static void envApplyConfig(EnvironmentSession& env, const nlohmann::json& j) {
+static void experimentApplyConfig(EnvironmentSession& env, const nlohmann::json& j) {
     env.comment = j.value("comment", "");
     std::snprintf(env.commentBuf, sizeof(env.commentBuf), "%s", env.comment.c_str());
     std::snprintf(env.nameBuf, sizeof(env.nameBuf), "%s", env.instanceName.c_str());
@@ -1370,6 +1406,16 @@ static void envApplyConfig(EnvironmentSession& env, const nlohmann::json& j) {
     env.forcedYMin = j.value("forcedYMin", 0.0);
     env.forcedYMax = j.value("forcedYMax", 1.0);
     env.computed = j.value("computed", false);
+    // Restored X range: latched for one-shot application on the first render
+    // (renderPlot consumes pendingNextXMin/Max); legacy configs without the
+    // keys keep the default autoscale (manualXMin/Max = 0.0).
+    env.manualXMin = j.value("manualXMin", 0.0);
+    env.manualXMax = j.value("manualXMax", 0.0);
+    if (env.manualXMin < env.manualXMax) {
+        env.pendingNextXMin = env.manualXMin;
+        env.pendingNextXMax = env.manualXMax;
+        env.shouldAutoscale = false;
+    }
     if (env.type == EnvType::Absorbance) {
         env.refKey = j.value("refKey", "");
         env.refMember = j.value("refMember", "");
@@ -1390,7 +1436,7 @@ static void envApplyConfig(EnvironmentSession& env, const nlohmann::json& j) {
 
 // Light per-curve stats (audit §2.1 stats.json) — no consumer yet beyond the
 // schema contract; ponytail: expand when a consumer appears.
-static nlohmann::json envStatsJson(const EnvironmentSession& env) {
+static nlohmann::json experimentStatsJson(const EnvironmentSession& env) {
     nlohmann::json stats = nlohmann::json::array();
     if (env.type != EnvType::Absorbance) return stats;
     for (const auto& [key, y] : env.curveY) {
@@ -1420,7 +1466,7 @@ bool crossSaveExperiment(AppState& s, EnvironmentSession& env,
         std::vector<std::string> ids;
         if (crossExperimentList(path, entries, err)) {
             for (const auto& e : entries) ids.push_back(e.value("id", ""));
-            for (const auto& other : s.environments)
+            for (const auto& other : s.experiments)
                 if (!other->id.empty()) ids.push_back(other->id);
         }
         env.id = makeUniqueId("exp", ids);
@@ -1440,12 +1486,12 @@ bool crossSaveExperiment(AppState& s, EnvironmentSession& env,
             ++k;
         }
     }
-    return crossExperimentWrite(path, env.id, envConfigJson(env), fps,
-                                results, envStatsJson(env), err);
+    return crossExperimentWrite(path, env.id, experimentConfigJson(env), fps,
+                                results, experimentStatsJson(env), err);
 }
 
 bool crossSaveExperiments(AppState& s, const std::string& path, std::string& err) {
-    for (auto& env : s.environments) {
+    for (auto& env : s.experiments) {
         if (!env->dirty) continue;
         if (!crossSaveExperiment(s, *env, path, err)) return false;
         env->dirty = false;
@@ -1461,7 +1507,7 @@ bool crossLoadExperiments(AppState& s, const std::string& path, std::string& err
             const std::string id = e.value("id", "");
             if (id.empty()) continue;
             bool have = false;
-            for (const auto& env : s.environments)
+            for (const auto& env : s.experiments)
                 if (env->id == id) { have = true; break; }
             if (have) continue;   // idempotent across repeated crossLoad calls
             nlohmann::json config, fps, stats;
@@ -1474,7 +1520,7 @@ bool crossLoadExperiments(AppState& s, const std::string& path, std::string& err
             const std::string name = config.value("name", e.value("name", "Experiment"));
             auto env = std::make_unique<EnvironmentSession>(t, name);
             env->id = id;
-            envApplyConfig(*env, config);
+            experimentApplyConfig(*env, config);
             for (auto it = fps.begin(); it != fps.end(); ++it)
                 if (it.value().is_object())
                     env->storedFingerprints[it.key()] = fingerprintFromJson(it.value());
@@ -1511,11 +1557,11 @@ bool crossLoadExperiments(AppState& s, const std::string& path, std::string& err
             env->updateStaleness(s);
             if (t == EnvType::Absorbance) ++restoredAbsorbance;
             else ++restoredComparator;
-            s.environments.push_back(std::move(env));
+            s.experiments.push_back(std::move(env));
         }
         // Auto-name counters must not collide with restored names.
-        s.envAbsorbanceCounter = std::max(s.envAbsorbanceCounter, restoredAbsorbance);
-        s.envComparatorCounter = std::max(s.envComparatorCounter, restoredComparator);
+        s.experimentAbsorbanceCounter = std::max(s.experimentAbsorbanceCounter, restoredAbsorbance);
+        s.experimentComparatorCounter = std::max(s.experimentComparatorCounter, restoredComparator);
         if (!entries.empty()) s.needsRedraw = true;
         return true;
     } catch (const std::exception& e) {
@@ -1526,6 +1572,6 @@ bool crossLoadExperiments(AppState& s, const std::string& path, std::string& err
 
 bool crossOpenProject(AppState& s, const std::string& path, std::string& err) {
     if (!crossLoad(s, path, err)) return false;
-    clearEnvironments(s);
+    clearExperiments(s);
     return crossLoadExperiments(s, path, err);
 }

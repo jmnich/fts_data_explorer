@@ -99,7 +99,7 @@ void requestGoHome(AppState& s);
 void finalizeGoHome(AppState& s);
 // Shared dirty-tab scan (Exit intercept + go-home): active tab first, then
 // parked tabs in sessions order, then dirty experiments (Phase 4 —
-// appState.exitDirtyEnvs filled; non-const because of that side output).
+// appState.exitDirtyExperiments filled; non-const because of that side output).
 void collectDirtyTabs(AppState& s, std::vector<int>& tabs,
                       std::vector<std::string>& labels);
 #endif
@@ -107,7 +107,7 @@ void collectDirtyTabs(AppState& s, std::vector<int>& tabs,
 // Active tab discriminator (Amendment 4): the active concept spans three tab
 // types, so activeSessionIdx alone is insufficient. AppLoop dispatches on this
 // — one switch, no ad-hoc -1 conventions.
-enum class ActiveTabKind { Session, Workspace, Environment };
+enum class ActiveTabKind { Session, Workspace, Experiment };
 
 // Session-tab browser state (data_structures_audit.md §1.4) — GLOBAL, never
 // folded: the Session tab is unique, so its state lives in AppState.
@@ -208,13 +208,13 @@ struct AppState {
     std::vector<std::unique_ptr<WorkspaceSession>> sessions;
     WorkspaceSession* active = nullptr;     // == sessions[activeSessionIdx] when a workspace tab is active, else nullptr
     int activeSessionIdx = -1;          // valid when activeTabKind == Workspace
-    int activeEnvIdx = -1;              // Phase 3: environment instances
+    int activeExperimentIdx = -1;              // Phase 3: experiment instances
     int lastActiveSessionIdx = -1;      // most-recent workspace tab (Ctrl+H target)
     ActiveTabKind activeTabKind = ActiveTabKind::Workspace;
     SessionTabState sessionTab;         // Session tab: GLOBAL, never folded
     bool sessionTabPresent = false;     // set by ensureSessionTab; never unset
     // Queued tab switch (Amendment 4): swapInSession/focusSessionTab/
-    // activateEnvironment only stash these; executePendingSwap runs at the
+    // activateExperiment only stash these; executePendingSwap runs at the
     // top of the next frame (never mid-frame — the active pointer must not
     // change while panels render or polls walk the fields).
     int pendingSwapIdx = -1;
@@ -223,7 +223,7 @@ struct AppState {
     // are live objects; switching to one just nulls `active` (the workspace
     // data stays in its session — nothing to park under the live-object
     // model). Same last-wins semantics as the workspace/Session queues.
-    int pendingEnvIdx = -1;
+    int pendingExperimentIdx = -1;
     // One-shot follow-up redraw after a tab-KIND switch (bugfix 2026-08-14):
     // dock tab bars skip windows that were not submitted the previous frame
     // (DockNodeUpdateTabBar's LastFrameActive check), so the first frame of a
@@ -234,17 +234,17 @@ struct AppState {
     // by AppLoop after present().
     bool extraRedrawAfterKindSwitch = false;
 
-    // ── Phase-3 environment instances (M3.2) ───────────────────────────────
+    // ── Phase-3 experiment instances (M3.2) ───────────────────────────────
     // LIVE objects, never folded (multiple instances of a type coexist; each
     // owns its state + futures). Column (b) lists them; column (c) creates.
-    std::vector<std::unique_ptr<EnvironmentSession>> environments;
+    std::vector<std::unique_ptr<EnvironmentSession>> experiments;
     // Monotonic auto-name counters per type ("Absorbance N" / "Comparator N").
     // Increment on create; never reused after an instance closes.
-    int envAbsorbanceCounter = 0;
-    int envComparatorCounter = 0;
+    int experimentAbsorbanceCounter = 0;
+    int experimentComparatorCounter = 0;
     // Spectral pool cache (M3.1): cm-1 canonical, keyed (workspaceKey,
     // memberId) + ParamFingerprint re-verified on every read. Global, shared
-    // by all environment instances. Evicted on workspace-tab close, source
+    // by all experiment instances. Evicted on workspace-tab close, source
     // removal, and clearWorkspacePanels.
     std::map<std::pair<std::string, std::string>, PoolEntry> poolCache;
 
@@ -270,7 +270,7 @@ struct AppState {
     std::vector<std::string> exitDirtyLabels;
     // Phase 4: dirty EXPERIMENTS ride the same modal (live objects — separate
     // index list, saved via crossSaveExperiment, no swap needed).
-    std::vector<int> exitDirtyEnvs;
+    std::vector<int> exitDirtyExperiments;
     bool exitSaveAllRunning = false;
     size_t exitSaveAllCursor = 0;
     // Close requested while a dirty-flow modal/state was pending: the close
@@ -288,8 +288,8 @@ struct AppState {
 
     // Phase 4: experiment delete confirmation (dirty or persisted experiments
     // confirm before removal; transient empty instances remove directly).
-    bool showEnvDeleteConfirm = false;
-    int pendingEnvDeleteIdx = -1;
+    bool showExperimentDeleteConfirm = false;
+    int pendingExperimentDeleteIdx = -1;
 
     // Thread pool for parallel computation
     std::unique_ptr<ThreadPool> computationPool;

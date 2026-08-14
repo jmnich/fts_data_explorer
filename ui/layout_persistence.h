@@ -7,7 +7,7 @@
 // (pre-existing layouts keep working). Snapshots are written on switch away
 // and reloaded on switch back — including across app restarts.
 
-// ActiveTabKind → "session" / "workspace" / "environment".
+// ActiveTabKind → "session" / "workspace" / "experiment".
 const char* tabTypeName(int activeTabKind);
 
 // Snapshot the CURRENT ImGui settings (docks + window layout) to the type's

@@ -56,7 +56,7 @@ struct AppConfig {
     // nodes as implicit floating windows at their stale positions).
     int sessionPanelLayoutVersion = 0;
 
-    // Environment-instance defaults (Phase-3 M3.3, [EnvWindow]): new-instance
+    // Experiment-instance defaults (Phase-3 M3.3, [EnvWindow]): new-instance
     // type (0 Absorbance, 1 Comparator), X unit (0 cm-1, 1 um, 2 THz), and
     // Y mode (Absorbance: 0 T%, 1 A).
     int envWindowMode = 0;

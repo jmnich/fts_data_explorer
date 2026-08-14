@@ -60,11 +60,11 @@ void collectDirtyTabs(AppState& s, std::vector<int>& tabs,
         }
     }
     // Phase 4: dirty experiments (live objects) ride the same modal.
-    s.exitDirtyEnvs.clear();
-    for (int i = 0; i < static_cast<int>(s.environments.size()); ++i) {
-        if (s.environments[i]->isDirty()) {
-            s.exitDirtyEnvs.push_back(i);
-            labels.push_back(s.environments[i]->tabLabel());
+    s.exitDirtyExperiments.clear();
+    for (int i = 0; i < static_cast<int>(s.experiments.size()); ++i) {
+        if (s.experiments[i]->isDirty()) {
+            s.exitDirtyExperiments.push_back(i);
+            labels.push_back(s.experiments[i]->tabLabel());
         }
     }
 }
@@ -82,7 +82,7 @@ void requestGoHome(AppState& s) {
     std::vector<int> dirtyTabs;
     std::vector<std::string> dirtyLabels;
     collectDirtyTabs(s, dirtyTabs, dirtyLabels);
-    if (!dirtyTabs.empty() || !s.exitDirtyEnvs.empty()) {
+    if (!dirtyTabs.empty() || !s.exitDirtyExperiments.empty()) {
         s.exitDirtyTabs = std::move(dirtyTabs);
         s.exitDirtyLabels = std::move(dirtyLabels);
         s.exitTargetIsGoHome = true;
@@ -102,12 +102,12 @@ void finalizeGoHome(AppState& s) {
     // have to process.
     for (int i = static_cast<int>(s.sessions.size()) - 1; i >= 0; --i)
         removeTab(s, i);
-    // Environment instances reference the closed workspaces — close them too
+    // Experiment instances reference the closed workspaces — close them too
     // (Phase 3); nothing to save here — dirty experiments routed through the
     // shared exit modal before this ran.
-    clearEnvironments(s);
+    clearExperiments(s);
     s.exitDirtyTabs.clear();
-    s.exitDirtyEnvs.clear();
+    s.exitDirtyExperiments.clear();
     s.exitDirtyLabels.clear();
     // Sessions are canonical: after the last removeTab the active pointer is
     // already null — the launch welcome renders against a pristine state.

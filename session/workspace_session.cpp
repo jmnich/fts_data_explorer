@@ -71,45 +71,45 @@ std::string WorkspaceSession::label() const {
 void swapInSession(AppState& s, int idx) {
     s.pendingSwapIdx = idx;
     s.pendingSwapToSession = false;
-    s.pendingEnvIdx = -1;      // last-wins across the three queue types
+    s.pendingExperimentIdx = -1;      // last-wins across the three queue types
     s.needsRedraw = true;
 }
 
 void focusSessionTab(AppState& s) {
     s.pendingSwapIdx = -1;
     s.pendingSwapToSession = true;
-    s.pendingEnvIdx = -1;      // last-wins across the three queue types
+    s.pendingExperimentIdx = -1;      // last-wins across the three queue types
     s.needsRedraw = true;
 }
 
 void executePendingSwap(AppState& s) {
-    if (!s.pendingSwapToSession && s.pendingSwapIdx < 0 && s.pendingEnvIdx < 0)
+    if (!s.pendingSwapToSession && s.pendingSwapIdx < 0 && s.pendingExperimentIdx < 0)
         return;
     // Phase 4 (M4.4): per-tab-type dock layouts. The OUTGOING type's layout
     // saves only when it actually has tabs — behind the launch welcome there
     // is none, and its layout must not clobber a real type's snapshot.
     const ActiveTabKind outKind = s.activeTabKind;
     const bool outHasTabs = s.active != nullptr ||
-        (outKind == ActiveTabKind::Environment && s.activeEnvIdx >= 0) ||
+        (outKind == ActiveTabKind::Experiment && s.activeExperimentIdx >= 0) ||
         (outKind == ActiveTabKind::Session && s.sessionTabPresent);
     // Sessions are canonical: no park step — the workspace data never leaves
     // its session; the active pointer is simply repointed.
     ActiveTabKind inKind = outKind;
-    if (s.pendingEnvIdx >= 0) {
-        // Environment activation (bugfix 2026-08-13, now by construction):
+    if (s.pendingExperimentIdx >= 0) {
+        // Experiment activation (bugfix 2026-08-13, now by construction):
         // leaving the workspace kind only nulls `active` — the workspace tab's
         // data stays in its session, so the old wipe class cannot recur.
-        const int idx = s.pendingEnvIdx;
-        s.pendingEnvIdx = -1;
+        const int idx = s.pendingExperimentIdx;
+        s.pendingExperimentIdx = -1;
         s.pendingSwapIdx = -1;
         s.pendingSwapToSession = false;
         s.active = nullptr;
-        if (idx >= 0 && idx < static_cast<int>(s.environments.size())) {
-            s.activeTabKind = ActiveTabKind::Environment;
-            s.activeEnvIdx = idx;
-            inKind = ActiveTabKind::Environment;
+        if (idx >= 0 && idx < static_cast<int>(s.experiments.size())) {
+            s.activeTabKind = ActiveTabKind::Experiment;
+            s.activeExperimentIdx = idx;
+            inKind = ActiveTabKind::Experiment;
         } else {
-            s.activeEnvIdx = -1;
+            s.activeExperimentIdx = -1;
             inKind = ActiveTabKind::Session;
         }
     } else if (s.pendingSwapToSession) {

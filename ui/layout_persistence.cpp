@@ -24,7 +24,7 @@ const char* tabTypeName(int activeTabKind) {
     switch (activeTabKind) {
         case 0: return "session";
         case 1: return "workspace";
-        case 2: return "environment";
+        case 2: return "experiment";
         default: return "workspace";
     }
 }

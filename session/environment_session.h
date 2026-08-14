@@ -29,7 +29,7 @@ enum class ComparatorArtifact {
     Interferogram,     // raw interferograms (primary detector vs sample index)
 };
 
-const char* envTypeName(EnvType t);              // "Absorbance" / "Comparator"
+const char* experimentTypeName(EnvType t);              // "Absorbance" / "Comparator"
 const char* artifactLabel(ComparatorArtifact a); // "Average spectrum" / "SNR" / …
 
 // One overlay curve: label + x/y already in the instance's display unit
@@ -54,8 +54,8 @@ public:
     bool dirty = false;
     bool stale = false;
     // Tab-strip visibility (bugfix 2026-08-14): closing the tab HIDES it from
-    // the strip — the instance stays live in environments[] and re-opens via
-    // the Active Environments panel row (activateEnvironment clears it).
+    // the strip — the instance stays live in experiments[] and re-opens via
+    // the Active Experiments panel row (activateExperiment clears it).
     bool tabHidden = false;
     // FFT-param fingerprints per referenced source at compute time (M4.1);
     // the staleness badge compares these to the current params (M4.3).
@@ -122,7 +122,7 @@ public:
     void tickAsync() override;
     void render() override;              // config window + view window (docked)
     // Tab-selector close: DEACTIVATES the tab only (focus the Session tab) —
-    // the instance stays live and listed in the Active Environments panel.
+    // the instance stays live and listed in the Active Experiments panel.
     // Deletion happens exclusively via requestDelete() from that panel.
     void closeRequest() override;
     // Delete the instance: dirty or persisted experiments confirm via the
@@ -173,15 +173,15 @@ private:
     void exportCsv();
 };
 
-// Registry ops (main thread). createEnvironment auto-names from the monotonic
-// counters and activates the new instance. removeEnvironment erases + fixes
-// activeEnvIdx (== removed → focus the Session tab).
-EnvironmentSession* createEnvironment(AppState& s, EnvType t);
-void activateEnvironment(AppState& s, int idx);
-void removeEnvironment(AppState& s, int idx);
+// Registry ops (main thread). createExperiment auto-names from the monotonic
+// counters and activates the new instance. removeExperiment erases + fixes
+// activeExperimentIdx (== removed → focus the Session tab).
+EnvironmentSession* createExperiment(AppState& s, EnvType t);
+void activateExperiment(AppState& s, int idx);
+void removeExperiment(AppState& s, int idx);
 // Close ALL instances (project switch / go-home); resets the env tab state.
-void clearEnvironments(AppState& s);
+void clearExperiments(AppState& s);
 // Project-open helper (main.cpp/session_tab/welcome open paths): load the
-// manifest, clear the current environments, then restore the persisted
+// manifest, clear the current experiments, then restore the persisted
 // experiments from the file. Returns false on failure (err set).
 bool crossOpenProject(AppState& s, const std::string& path, std::string& err);

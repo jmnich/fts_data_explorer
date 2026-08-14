@@ -3,7 +3,7 @@
 #include <string>
 
 // Tab-type contract (data_structures_audit.md §1.1). Methods only — no data
-// fields in the base: workspace vs session vs environment state share nothing;
+// fields in the base: workspace vs session vs experiment state share nothing;
 // the shared surface is lifecycle only. Implementations:
 //   WorkspaceSession — park/resume folding into AppState flat fields
 //   SessionTab       — unique browser hub, state global in AppState::sessionTab

@@ -356,9 +356,9 @@ void renderCreateMultiWorkspaceButton() {
 
 }  // namespace
 
-// One environment-type card (column c) — defined below (file scope, after
-// the anonymous namespace), used by renderAvailableEnvironmentsPanel.
-static void renderEnvTypeCard(const char* title, const char* desc, EnvType type);
+// One experiment-type card (column c) — defined below (file scope, after
+// the anonymous namespace), used by renderAvailableExperimentsPanel.
+static void renderExperimentTypeCard(const char* title, const char* desc, EnvType type);
 
 const std::string& SessionTab::title() const {
     return titleCache_;
@@ -403,20 +403,20 @@ void SessionTab::renderSingleFile() {
         }
         ImGui::EndChild();
     });
-    renderSessionPanel("Active Environments", [this]() { renderActiveEnvironmentsPanel(); });
-    renderSessionPanel("Available Environments", [this]() { renderAvailableEnvironmentsPanel(); });
+    renderSessionPanel("Active Experiments", [this]() { renderActiveExperimentsPanel(); });
+    renderSessionPanel("Available Experiments", [this]() { renderAvailableExperimentsPanel(); });
 }
 
 // Multi-workspace mode: three dockable panels docked DIRECTLY in the main
-// dock space — Datasets (left), Active Environments and Available
-// Environments (stacked right) per the default layout in rebuildDefaultLayout.
+// dock space — Datasets (left), Active Experiments and Available
+// Experiments (stacked right) per the default layout in rebuildDefaultLayout.
 void SessionTab::renderMultiWorkspace() {
     renderSessionPanel("Datasets", [this]() {
         renderMultiWorkspaceCard(appState.sessionTab.multiWorkspacePath);
         renderDatasetsPanel();
     });
-    renderSessionPanel("Active Environments", [this]() { renderActiveEnvironmentsPanel(); });
-    renderSessionPanel("Available Environments", [this]() { renderAvailableEnvironmentsPanel(); });
+    renderSessionPanel("Active Experiments", [this]() { renderActiveExperimentsPanel(); });
+    renderSessionPanel("Available Experiments", [this]() { renderAvailableExperimentsPanel(); });
 }
 
 // (a) embedded datasets: wrapped two-line rows (name + metadata) in a
@@ -462,24 +462,24 @@ void SessionTab::renderDatasetsPanel() {
     renderAddDatasetButton();
 }
 
-// (b) active environments: live instances (Phase 3). Rows match the Datasets
+// (b) active experiments: live instances (Phase 3). Rows match the Datasets
 // list style (× + wrapped title/metadata, accent dot when active). The
 // comment (if any) is shown grey below the name. Click → activate tab.
-void SessionTab::renderActiveEnvironmentsPanel() {
+void SessionTab::renderActiveExperimentsPanel() {
     ImGui::BeginChild("##activeEnvsList", ImVec2(0.0f, 0.0f), false,
                       ImGuiWindowFlags_AlwaysVerticalScrollbar);
-    if (appState.environments.empty()) {
-        renderCenteredEmptyLine("No environments open.", 0.45f);
+    if (appState.experiments.empty()) {
+        renderCenteredEmptyLine("No experiments open.", 0.45f);
     }
-    for (size_t i = 0; i < appState.environments.size(); ++i) {
-        auto* env = appState.environments[i].get();
-        const bool isActive = (appState.activeTabKind == ActiveTabKind::Environment &&
-                               appState.activeEnvIdx == static_cast<int>(i));
+    for (size_t i = 0; i < appState.experiments.size(); ++i) {
+        auto* env = appState.experiments[i].get();
+        const bool isActive = (appState.activeTabKind == ActiveTabKind::Experiment &&
+                               appState.activeExperimentIdx == static_cast<int>(i));
         if (renderRowRemoveButton(static_cast<int>(i))) {
             // Deletion happens HERE (the tab selector's close only
             // deactivates). Dirty/persisted instances confirm via the modal.
             env->requestDelete();
-            break;   // environments vector changed
+            break;   // experiments vector changed
         }
 
         const float availW = ImGui::GetContentRegionAvail().x - 10.0f;
@@ -487,7 +487,7 @@ void SessionTab::renderActiveEnvironmentsPanel() {
             wrapToLines(env->tabLabel(), availW, 2);
         const std::string meta =
             std::to_string(env->samples.size()) + " sample" +
-            (env->samples.size() == 1 ? "" : "s") + " · " + envTypeName(env->type);
+            (env->samples.size() == 1 ? "" : "s") + " · " + experimentTypeName(env->type);
         std::vector<std::string> lines = titleLines;
         for (auto& l : wrapToLines(meta, availW, 1)) lines.push_back(std::move(l));
         if (!env->comment.empty())
@@ -497,7 +497,7 @@ void SessionTab::renderActiveEnvironmentsPanel() {
             renderWrappedRow(static_cast<int>(i), lines,
                              static_cast<int>(titleLines.size()));
         if (row.clicked) {
-            activateEnvironment(appState, static_cast<int>(i));
+            activateExperiment(appState, static_cast<int>(i));
         }
         if (isActive) renderRowDot(row.min, row.max);
         if (row.hovered) {
@@ -509,21 +509,21 @@ void SessionTab::renderActiveEnvironmentsPanel() {
     ImGui::EndChild();
 }
 
-// (c) available environment types: clickable cards → create instance (Phase 3).
-void SessionTab::renderAvailableEnvironmentsPanel() {
+// (c) available experiment types: clickable cards → create instance (Phase 3).
+void SessionTab::renderAvailableExperimentsPanel() {
     ImGui::BeginChild("##availableEnvsList", ImVec2(0.0f, 0.0f), false,
                       ImGuiWindowFlags_AlwaysVerticalScrollbar);
-    renderEnvTypeCard("Absorbance",
+    renderExperimentTypeCard("Absorbance",
                       "Absorbance spectra against a stored background reference.",
                       EnvType::Absorbance);
-    renderEnvTypeCard("Comparator", "Pairwise comparison of two datasets.",
+    renderExperimentTypeCard("Comparator", "Pairwise comparison of two datasets.",
                       EnvType::Comparator);
     ImGui::EndChild();
 }
 
-// One environment-type card: accent-framed, clickable — creates a new
+// One experiment-type card: accent-framed, clickable — creates a new
 // instance (auto-name, activated).
-static void renderEnvTypeCard(const char* title, const char* desc, EnvType type) {
+static void renderExperimentTypeCard(const char* title, const char* desc, EnvType type) {
     const AccentColor ac = StringToAccentColor(appState.currentAccentColor);
     ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
@@ -538,7 +538,7 @@ static void renderEnvTypeCard(const char* title, const char* desc, EnvType type)
     ImGui::PopStyleColor();
     ImGui::PopStyleVar(3);
     if (open) {
-        // Hover highlight matching the Active Environments rows (Selectable
+        // Hover highlight matching the Active Experiments rows (Selectable
         // hover = ImGuiCol_HeaderHovered). Child windows share the parent's
         // draw list, so the fill lands under the text, inside the child rect.
         if (ImGui::IsWindowHovered()) {
@@ -570,9 +570,9 @@ static void renderEnvTypeCard(const char* title, const char* desc, EnvType type)
     }
     ImGui::EndChild();
     if (ImGui::IsItemClicked()) {
-        createEnvironment(appState, type);
+        createExperiment(appState, type);
     }
     if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Create a new %s instance.", title);
+        ImGui::SetTooltip("Create a new %s experiment.", title);
     ImGui::Spacing();
 }

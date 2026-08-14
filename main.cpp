@@ -67,9 +67,9 @@ void openWorkspaceInNewTab(AppState& s, const std::string& path) {
             // is also reachable from the launch welcome — dismissing it here
             // is what makes the welcome's recent-cross click work (bugfix
             // 2026-08-13: focusSessionTab alone left the welcome overlay up).
-            // Bugfix 2026-08-14: go-home clears the environments while the
+            // Bugfix 2026-08-14: go-home clears the experiments while the
             // session file stays open, so the welcome's recent-cross click
-            // would leave Active Environments empty; reload the experiments.
+            // would leave Active Experiments empty; reload the experiments.
             // crossLoadExperiments dedupes by id — safe to run on every visit.
             std::string err;
             if (!crossLoadExperiments(s, path, err)) {
@@ -370,7 +370,7 @@ void saveEverything(AppState& s) {
     s.needsRedraw = true;
     // Toast only when there is something that could hold state (launch welcome
     // has none — a "Saved" toast there would be a lie).
-    if (!s.sessions.empty() || !s.environments.empty() ||
+    if (!s.sessions.empty() || !s.experiments.empty() ||
         s.sessionTab.multiWorkspaceOpen)
         s.saveToastUntil = glfwGetTime() + 1.5;
 }
@@ -427,11 +427,11 @@ void requestWorkspaceDiscard(AppState& s, PendingWorkspaceAction action, const s
     }
     // OpenMultiWorkspace / Exit: prompt when the active workspace is dirty OR
     // any experiment has unsaved changes (Phase 4 — the project switch drops
-    // environments; dirty ones must confirm first).
-    bool envDirty = false;
-    for (const auto& env : s.environments)
-        if (env->dirty) { envDirty = true; break; }
-    if ((!s.hasWorkspace() || !s.active->workspace.dirty) && !envDirty) {
+    // experiments; dirty ones must confirm first).
+    bool experimentDirty = false;
+    for (const auto& env : s.experiments)
+        if (env->dirty) { experimentDirty = true; break; }
+    if ((!s.hasWorkspace() || !s.active->workspace.dirty) && !experimentDirty) {
         dispatchPendingAction(s);
         return;
     }
@@ -485,7 +485,7 @@ int main(int argc, char* argv[]) {
     if (parseHeadlessArgs(argc, argv, headlessCfg)) return 1;
     if (runHeadlessCommand(headlessCfg)) return 0;
 
-    // Set environment variables to prefer dedicated GPU on NVIDIA systems
+    // Set OS environment variables to prefer dedicated GPU on NVIDIA systems
     #ifdef _WIN32
     _putenv("D3D12_ENABLE_LAYERED_DRIVER_QUERY=1");
     _putenv("D3D12_ENABLE_EXPERIMENTAL_FEATURES=1");

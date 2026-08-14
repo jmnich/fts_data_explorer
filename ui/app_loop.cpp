@@ -27,6 +27,7 @@
 #include <cctype>
 #include <chrono>
 #include <cstdio>
+#include <filesystem>
 #include <iostream>
 #include <thread>
 #include <vector>
@@ -100,7 +101,7 @@ static void renderUnsavedPromptModal() {
         // Phase 4: unsaved experiments ride the replace-project prompt.
         if (!closingTab) {
             int dirtyEnvCount = 0;
-            for (const auto& env : appState.environments)
+            for (const auto& env : appState.experiments)
                 if (env->dirty) ++dirtyEnvCount;
             if (dirtyEnvCount > 0) {
                 ImGui::Bullet();
@@ -294,12 +295,12 @@ static void renderExitDirtyModal() {
                 }
             }
             // Phase 4: drop unsaved experiments with the same "Discard All".
-            for (int idx : appState.exitDirtyEnvs) {
-                if (idx >= 0 && idx < static_cast<int>(appState.environments.size()))
-                    appState.environments[idx]->dirty = false;
+            for (int idx : appState.exitDirtyExperiments) {
+                if (idx >= 0 && idx < static_cast<int>(appState.experiments.size()))
+                    appState.experiments[idx]->dirty = false;
             }
             appState.exitDirtyTabs.clear();
-            appState.exitDirtyEnvs.clear();
+            appState.exitDirtyExperiments.clear();
             appState.exitDirtyLabels.clear();
             appState.showExitDirtyModal = false;
             if (appState.exitTargetIsGoHome) {
@@ -311,7 +312,7 @@ static void renderExitDirtyModal() {
             ImGui::CloseCurrentPopup();
         } else if (pressed == 2 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
             appState.exitDirtyTabs.clear();
-            appState.exitDirtyEnvs.clear();
+            appState.exitDirtyExperiments.clear();
             appState.exitDirtyLabels.clear();
             appState.showExitDirtyModal = false;
             appState.exitDeferredClose = false;   // Cancel drops a deferred close
@@ -331,15 +332,15 @@ static void renderExitDirtyModal() {
 // confirm before removal (transient empty instances remove directly). On
 // Delete: remove the experiment group from the .cross.h5 (if persisted) and
 // drop the instance.
-static void renderEnvDeleteConfirmModal() {
+static void renderExperimentDeleteConfirmModal() {
     static int focus = 0;
     static bool wasOpen = false;
-    if (!appState.showEnvDeleteConfirm) {
+    if (!appState.showExperimentDeleteConfirm) {
         wasOpen = false;
         return;
     }
-    const int idx = appState.pendingEnvDeleteIdx;
-    const bool valid = idx >= 0 && idx < static_cast<int>(appState.environments.size());
+    const int idx = appState.pendingExperimentDeleteIdx;
+    const bool valid = idx >= 0 && idx < static_cast<int>(appState.experiments.size());
     ImGui::OpenPopup("Delete Experiment##confirm");
     beginModal(480.0f, modalAccent());
     if (ImGui::BeginPopupModal("Delete Experiment##confirm", nullptr,
@@ -347,7 +348,7 @@ static void renderEnvDeleteConfirmModal() {
         ImGui::Text("Delete Experiment");
         ImGui::Spacing();
         if (valid) {
-            auto* env = appState.environments[idx].get();
+            auto* env = appState.experiments[idx].get();
             ImGui::TextWrapped("Delete \"%s\"?", env->instanceName.c_str());
             if (env->dirty && !env->id.empty())
                 ImGui::TextWrapped("Unsaved changes will be lost and the saved experiment "
@@ -363,7 +364,7 @@ static void renderEnvDeleteConfirmModal() {
         int pressed = modalButtonRow({"Delete", "Cancel"}, focus, wasOpen, modalAccent());
         if (pressed == 0) {
             if (valid) {
-                auto* env = appState.environments[idx].get();
+                auto* env = appState.experiments[idx].get();
                 if (!env->id.empty() && appState.sessionTab.multiWorkspaceOpen) {
                     std::string err;
                     if (!crossExperimentRemove(appState.sessionTab.multiWorkspacePath,
@@ -372,15 +373,15 @@ static void renderEnvDeleteConfirmModal() {
                         appState.showAdapterErrorPopup = true;
                     }
                 }
-                removeEnvironment(appState, idx);
+                removeExperiment(appState, idx);
             }
-            appState.showEnvDeleteConfirm = false;
-            appState.pendingEnvDeleteIdx = -1;
+            appState.showExperimentDeleteConfirm = false;
+            appState.pendingExperimentDeleteIdx = -1;
             appState.needsRedraw = true;
             ImGui::CloseCurrentPopup();
         } else if (pressed == 1 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-            appState.showEnvDeleteConfirm = false;
-            appState.pendingEnvDeleteIdx = -1;
+            appState.showExperimentDeleteConfirm = false;
+            appState.pendingExperimentDeleteIdx = -1;
             ImGui::CloseCurrentPopup();
         }
         drawModalAccentFrame(modalAccent());
@@ -409,10 +410,10 @@ static void advanceExitSaveAll() {
         appState.exitSaveAllCursor++;   // run once
         const std::string& crossPath = appState.sessionTab.multiWorkspacePath;
         if (!crossPath.empty()) {
-            for (int idx : appState.exitDirtyEnvs) {
-                if (idx < 0 || idx >= static_cast<int>(appState.environments.size()))
+            for (int idx : appState.exitDirtyExperiments) {
+                if (idx < 0 || idx >= static_cast<int>(appState.experiments.size()))
                     continue;
-                auto& env = appState.environments[idx];
+                auto& env = appState.experiments[idx];
                 if (!env->dirty) continue;
                 std::string err;
                 if (!crossSaveExperiment(appState, *env, crossPath, err)) {
@@ -420,7 +421,7 @@ static void advanceExitSaveAll() {
                     appState.showAdapterErrorPopup = true;
                     appState.exitSaveAllRunning = false;
                     appState.exitDirtyTabs.clear();
-                    appState.exitDirtyEnvs.clear();
+                    appState.exitDirtyExperiments.clear();
                     appState.exitDirtyLabels.clear();
                     appState.exitTargetIsGoHome = false;
                     return;
@@ -428,13 +429,13 @@ static void advanceExitSaveAll() {
                 env->dirty = false;
             }
         }
-        for (int idx : appState.exitDirtyEnvs) {
-            if (idx >= 0 && idx < static_cast<int>(appState.environments.size()))
-                appState.environments[idx]->dirty = false;
+        for (int idx : appState.exitDirtyExperiments) {
+            if (idx >= 0 && idx < static_cast<int>(appState.experiments.size()))
+                appState.experiments[idx]->dirty = false;
         }
         appState.exitSaveAllRunning = false;
         appState.exitDirtyTabs.clear();
-        appState.exitDirtyEnvs.clear();
+        appState.exitDirtyExperiments.clear();
         appState.exitDirtyLabels.clear();
         if (appState.exitTargetIsGoHome) {
             appState.exitTargetIsGoHome = false;
@@ -455,7 +456,7 @@ static void advanceExitSaveAll() {
         appState.showAdapterErrorPopup = true;
         appState.exitSaveAllRunning = false;
         appState.exitDirtyTabs.clear();
-        appState.exitDirtyEnvs.clear();
+        appState.exitDirtyExperiments.clear();
         appState.exitDirtyLabels.clear();
         appState.exitTargetIsGoHome = false;
         return;
@@ -570,12 +571,12 @@ static float renderTabStrip() {
             ImGui::EndTabItem();
         }
 
-        // Environment tabs (Phase 3): after the workspace tabs, in the same
+        // Experiment tabs (Phase 3): after the workspace tabs, in the same
         // scrollable bar. LIVE instances (never folded); activation is direct
-        // (no park/resume) — click sets activeTabKind + activeEnvIdx.
+        // (no park/resume) — click sets activeTabKind + activeExperimentIdx.
         // With one focused, no workspace tab is active — clear the bar's stale
         // selection so no workspace tab stays highlighted.
-        if (appState.activeTabKind == ActiveTabKind::Environment) {
+        if (appState.activeTabKind == ActiveTabKind::Experiment) {
             ImGuiTabBar* bar = ImGui::GetCurrentTabBar();
             if (bar && bar->SelectedTabId != 0) {
                 bar->SelectedTabId = 0;
@@ -618,23 +619,23 @@ static float renderTabStrip() {
                 break;   // sessions vector changed — stop iterating
             }
         }
-        // Environment instances (Phase 3): live tabs, same close affordances
+        // Experiment instances (Phase 3): live tabs, same close affordances
         // (hover [x] / middle-click / context). IDs ##env<i> resolve to the
-        // environments vector — a reorder remaps only the strip order.
+        // experiments vector — a reorder remaps only the strip order.
         // tabHidden instances were closed in the strip: no tab item is
         // submitted, so they stay hidden until re-activated via the Active
-        // Environments panel.
-        for (int i = 0; i < static_cast<int>(appState.environments.size()); ++i) {
-            auto* env = appState.environments[i].get();
+        // Experiments panel.
+        for (int i = 0; i < static_cast<int>(appState.experiments.size()); ++i) {
+            auto* env = appState.experiments[i].get();
             if (env->tabHidden) continue;
-            const bool isActive = (appState.activeTabKind == ActiveTabKind::Environment &&
-                                   appState.activeEnvIdx == i);
+            const bool isActive = (appState.activeTabKind == ActiveTabKind::Experiment &&
+                                   appState.activeExperimentIdx == i);
             const std::string label =
                 env->tabLabel() + "##env" + std::to_string(i);
             bool open = true;
             const bool shown = ImGui::BeginTabItem(label.c_str(), &open,
                 isActive ? ImGuiTabItemFlags_SetSelected : 0);
-            if (ImGui::IsItemClicked() && !isActive) activateEnvironment(appState, i);
+            if (ImGui::IsItemClicked() && !isActive) activateExperiment(appState, i);
             if (shown) {
                 if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Middle))
                     open = false;
@@ -647,7 +648,7 @@ static float renderTabStrip() {
             }
             if (!open) {
                 // Close = deactivate only (never delete): the instance stays
-                // live and re-openable via the Active Environments panel.
+                // live and re-openable via the Active Experiments panel.
                 env->closeRequest();
             }
         }
@@ -777,7 +778,7 @@ void handleKeyboardNavigation(const std::vector<std::string>& csvFiles,
  * @param currentUiSize Current UI size setting
  * @param uiSizeChanged Reference to UI size changed flag
  */
-// Environment windows are docked dynamically (SetNextWindowDockID FirstUseEver
+// Experiment windows are docked dynamically (SetNextWindowDockID FirstUseEver
 // in EnvironmentSession::render) — no default-layout entry needed; per-tab-type
 // layout persistence arrives in Phase 4 (P16).
 static void rebuildDefaultLayout(ImGuiID dockspace_id, float topOffset) {
@@ -802,7 +803,7 @@ static void rebuildDefaultLayout(ImGuiID dockspace_id, float topOffset) {
     ImGuiID dock_right_top, dock_right_bottom;
     ImGui::DockBuilderSplitNode(dock_right_panel, ImGuiDir_Up, 0.50f, &dock_right_top, &dock_right_bottom);
 
-    // Environment panels (Bug 2, 2026-08-14): Settings docked left, Viewer
+    // Experiment panels (Bug 2, 2026-08-14): Settings docked left, Viewer
     // right, by default. The split keeps the workspace view windows in the
     // left node (which also gets Settings); Viewer lands in the new right
     // node. DockBuilderDockWindow writes the DockId into the windows'
@@ -817,7 +818,7 @@ static void rebuildDefaultLayout(ImGuiID dockspace_id, float topOffset) {
     ImGui::DockBuilderDockWindow("Files",              dock_left_top);
     // Session-tab panels dock directly in the main dock space (no
     // intermediate "Session" host window): Datasets shares the left-top node
-    // with Files, Active/Available Environments the right column — the
+    // with Files, Active/Available Experiments the right column — the
     // requested "Datasets left, other two stacked right". Each node shows the
     // session panel only while the Session tab is active (the workspace
     // panels are gated out); forceDockSelection keeps it the selected tab.
@@ -835,9 +836,9 @@ static void rebuildDefaultLayout(ImGuiID dockspace_id, float topOffset) {
     ImGui::DockBuilderDockWindow("Allan View",         dock_center);
     ImGui::DockBuilderDockWindow("SNR View",           dock_right_top);
     ImGui::DockBuilderDockWindow("Average View",       dock_right_top);
-    ImGui::DockBuilderDockWindow("Active Environments", dock_right_top);
+    ImGui::DockBuilderDockWindow("Active Experiments", dock_right_top);
     ImGui::DockBuilderDockWindow("Spectrum View",      dock_right_bottom);
-    ImGui::DockBuilderDockWindow("Available Environments", dock_right_bottom);
+    ImGui::DockBuilderDockWindow("Available Experiments", dock_right_bottom);
 
     ImGui::DockBuilderFinish(dockspace_id);
 }
@@ -1011,7 +1012,7 @@ void AppLoop::pollEvents() {
             std::vector<int> dirtyTabs;
             std::vector<std::string> dirtyLabels;
             collectDirtyTabs(appState, dirtyTabs, dirtyLabels);
-            if (!dirtyTabs.empty() || !appState.exitDirtyEnvs.empty()) {
+            if (!dirtyTabs.empty() || !appState.exitDirtyExperiments.empty()) {
                 glfwSetWindowShouldClose(window_, GLFW_FALSE);   // defer
                 appState.showExitDirtyModal = true;
                 appState.exitDirtyTabs = std::move(dirtyTabs);
@@ -1047,7 +1048,7 @@ void AppLoop::pollEvents() {
 
 void AppLoop::pollAsyncComputations() {
         // Workspace-tab polls run only while a workspace tab is active — the
-        // flat fields then hold THAT tab's data (M2.3). Session/environment
+        // flat fields then hold THAT tab's data (M2.3). Session/experiment
         // tabs poll via SessionBase::tickAsync() instead.
         // The active pointer is null while no workspace tab exists (launch
         // welcome / go-home) — the kind defaults to Workspace, so check both.
@@ -1088,16 +1089,16 @@ void AppLoop::pollAsyncComputations() {
 
 // Per-tab async polls (M2.3): workspace tabs are no-ops here — their
 // polling runs on the flat fields in pollAsyncComputations while active;
-// Session/environment tabs (M2.5/Phase 3) poll their own futures. The
-// ACTIVE environment instance polls only (audit §5.5): inactive instances
+// Session/experiment tabs (M2.5/Phase 3) poll their own futures. The
+// ACTIVE experiment instance polls only (audit §5.5): inactive instances
 // drain on re-activation.
 void AppLoop::tickSessions() {
     sessionTab_.tickAsync();
     for (auto& sess : appState.sessions) sess->tickAsync();
-    if (appState.activeTabKind == ActiveTabKind::Environment &&
-        appState.activeEnvIdx >= 0 &&
-        appState.activeEnvIdx < static_cast<int>(appState.environments.size())) {
-        appState.environments[appState.activeEnvIdx]->tickAsync();
+    if (appState.activeTabKind == ActiveTabKind::Experiment &&
+        appState.activeExperimentIdx >= 0 &&
+        appState.activeExperimentIdx < static_cast<int>(appState.experiments.size())) {
+        appState.experiments[appState.activeExperimentIdx]->tickAsync();
     }
 }
 
@@ -1251,7 +1252,7 @@ void AppLoop::handleInput() {
         }
 
         // 'Ctrl+S' - Save EVERYTHING (any tab kind: workspace, session,
-        // environment): all dirty workspace tabs + all dirty experiments, one
+        // experiment): all dirty workspace tabs + all dirty experiments, one
         // toast. Also 'Ctrl+Shift+S' - Save As (active workspace only).
         const bool sKeyPressed =
             glfwGetKey(window_, GLFW_KEY_S) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
@@ -1635,7 +1636,7 @@ void AppLoop::renderUI() {
         renderUnsavedPromptModal();
         renderStaleDropPromptModal();
         renderExitDirtyModal();
-        renderEnvDeleteConfirmModal();
+        renderExperimentDeleteConfirmModal();
 #endif
         
         // Only render main docking interface if welcome screen is not active
@@ -1694,8 +1695,8 @@ void AppLoop::renderUI() {
                 // session content stays invisible.
                 if (appState.activeTabKind == ActiveTabKind::Session) {
                     const char* sessionPanels[3] = {"Datasets",
-                                                    "Active Environments",
-                                                    "Available Environments"};
+                                                    "Active Experiments",
+                                                    "Available Experiments"};
                     for (const char* name : sessionPanels) {
                         if (ImGuiWindow* pw = ImGui::FindWindowByName(name)) {
                             if (pw->DockNode) {
@@ -1706,14 +1707,14 @@ void AppLoop::renderUI() {
                         }
                     }
                 }
-                // Phase 3: same forced selection for the active environment
+                // Phase 3: same forced selection for the active experiment
                 // instance's window (its dock tab must be visible after a
                 // strip click; the instance's render arms the next frame via
                 // IsWindowAppearing + needsRedraw). Stable window names —
                 // renaming the instance must not churn the dock identity.
-                if (appState.activeTabKind == ActiveTabKind::Environment &&
-                    appState.activeEnvIdx >= 0 &&
-                    appState.activeEnvIdx < static_cast<int>(appState.environments.size())) {
+                if (appState.activeTabKind == ActiveTabKind::Experiment &&
+                    appState.activeExperimentIdx >= 0 &&
+                    appState.activeExperimentIdx < static_cast<int>(appState.experiments.size())) {
                     for (const char* n : {"Settings##envcfg", "Viewer##envview"}) {
                         if (ImGuiWindow* pw = ImGui::FindWindowByName(n)) {
                             if (pw->DockNode) {
@@ -1745,16 +1746,34 @@ void AppLoop::renderUI() {
                 // positions. One rebuild re-docks them (DockBuilderDockWindow
                 // overwrites the DockIds); the persisted version fires this
                 // exactly once.
-                // v4 (bugfix 2026-08-14): environment windows got STABLE names
+                // v4 (bugfix 2026-08-14): experiment windows got STABLE names
                 // ("Settings##envcfg"/"Viewer##envview") and a default dock
                 // layout (Settings left, Viewer right). Old window names are
-                // gone — the stale environment layout snapshot (and its
+                // gone — the stale experiment layout snapshot (and its
                 // DockIds) must not survive, or the first env-tab switch
                 // restores the old naming and undocks the new windows.
+                // v5 (2026-08-14): "Environments" → "Experiments" rename of
+                // the Session panels (window names changed → one rebuild;
+                // stale session snapshot reset) and of the tab-type key
+                // ("environment" → "experiment" — the layout snapshot file is
+                // migrated by rename so saved experiment layouts survive).
                 if (config_.sessionPanelLayoutVersion < 4) {
                     config_.sessionPanelLayoutVersion = 4;
                     config_.saveToFile(configFilePath_);
-                    resetTabLayout(tabTypeName(static_cast<int>(ActiveTabKind::Environment)));
+                    resetTabLayout(tabTypeName(static_cast<int>(ActiveTabKind::Experiment)));
+                    rebuildDefaultLayout(dockspace_id, topOffset);
+                }
+                if (config_.sessionPanelLayoutVersion < 5) {
+                    config_.sessionPanelLayoutVersion = 5;
+                    config_.saveToFile(configFilePath_);
+                    resetTabLayout(tabTypeName(static_cast<int>(ActiveTabKind::Session)));
+                    const char* ini = ImGui::GetIO().IniFilename;
+                    if (ini) {
+                        const std::string oldPath = std::string(ini) + ".layout.environment";
+                        const std::string newPath = std::string(ini) + ".layout.experiment";
+                        if (std::filesystem::exists(oldPath))
+                            std::filesystem::rename(oldPath, newPath);
+                    }
                     rebuildDefaultLayout(dockspace_id, topOffset);
                 }
 
@@ -1842,13 +1861,13 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
         if (appState.activeTabKind == ActiveTabKind::Session) {
             sessionTab_.render();
         }
-        // Environment instance (Phase 3): the ACTIVE instance's window body.
+        // Experiment instance (Phase 3): the ACTIVE instance's window body.
         // Live object — no park/resume; the dock-node selection is forced
         // above (pre-DockSpace) so the window's tab is visible.
-        if (appState.activeTabKind == ActiveTabKind::Environment &&
-            appState.activeEnvIdx >= 0 &&
-            appState.activeEnvIdx < static_cast<int>(appState.environments.size())) {
-            appState.environments[appState.activeEnvIdx]->render();
+        if (appState.activeTabKind == ActiveTabKind::Experiment &&
+            appState.activeExperimentIdx >= 0 &&
+            appState.activeExperimentIdx < static_cast<int>(appState.experiments.size())) {
+            appState.experiments[appState.activeExperimentIdx]->render();
         }
         
         // Close the docking condition
