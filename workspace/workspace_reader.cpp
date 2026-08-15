@@ -143,11 +143,17 @@ bool configParamsMatch(const nlohmann::json& cfg, const WorkspaceSession& sess) 
     std::string xcm = sess.xCorrectionMethod == 0 ? "hilbert" : "peaks";
     auto it = cfg.find("xCorrectionMethod");
     if (it == cfg.end() || !it->is_string() || it->get<std::string>() != xcm) return false;
-    if (!cfgNumEq(cfg, "prominenceThreshold", sess.peakProminenceThreshold)) return false;
+    // prominence is a peaks-only parameter (B: window/parameter-aware compare).
+    if (xcm == "peaks" &&
+        !cfgNumEq(cfg, "prominenceThreshold", sess.peakProminenceThreshold)) return false;
     if (!cfgNumEq(cfg, "detectorSensitivityKVPerW", sess.spectrum.detectorSensitivity)) return false;
     auto a = cfg.find("apodization");
     if (a == cfg.end() || !a->is_object()) return false;
-    return *a == makeApodizationJson(sess.spectrum.apodizationSelector, sess.spectrum.apodizationParams);
+    // Window-aware compare: leftover params of inactive windows never flag
+    // staleness (the whole-object compare did — bugfix 2026-08-15).
+    return effectiveApodizationJson(*a) ==
+           effectiveApodizationJson(makeApodizationJson(
+               sess.spectrum.apodizationSelector, sess.spectrum.apodizationParams));
 }
 
 bool configParamsMatch(const nlohmann::json& cfg, const AppState& s) {
@@ -422,6 +428,32 @@ void applyPanelViewState(AppState& s, const nlohmann::json& vs) {
 }
 
 } // namespace
+
+// Window-aware apodization subset (see header): only the active window's
+// parameter(s) count. Equal window + equal effective params → equal output,
+// so plain == on the result is the comparison (used by configParamsMatch and
+// the experiment member snapshot). Global scope: cross-TU consumers
+// (spectral_pool.cpp) call it via the header declaration.
+nlohmann::json effectiveApodizationJson(const nlohmann::json& a) {
+    nlohmann::json out;
+    auto w = a.find("window");
+    if (w == a.end() || !w->is_string()) return out;
+    out["window"] = *w;
+    const std::string& win = w->get_ref<const std::string&>();
+    auto pick = [&](const char* key) {
+        auto it = a.find(key);
+        if (it != a.end()) out[key] = *it;
+    };
+    if (win == "rectangular")
+        { pick("rectWidth"); pick("rectAsymMode"); }
+    else if (win == "gauss")           pick("gaussSigma");
+    else if (win == "norton_beer")     pick("nortonBeerFwhm");
+    else if (win == "dolph_chebyshev") pick("dolphChebyshevAtDb");
+    else if (win == "hamming")         pick("hammingAlpha");
+    else if (win == "kaiser")          pick("kaiserBeta");
+    // triangular / blackman_harris / hann / happ_genzel: parameter-free
+    return out;
+}
 
 // ---- Phase 3: view-state persistence (workspace.json §8) ----
 

@@ -1430,9 +1430,18 @@ void test12_experimentPersistence() {
     CHECK(env->dirty == true);
     env->computeAbsorbance(s);
     CHECK(env->computed == true);
-    CHECK(env->storedFingerprints.count("/tmp/parity.h5") == 1);
-    CHECK(env->storedFingerprints["/tmp/parity.h5"].K == 2);
-    CHECK(std::fabs(env->storedFingerprints["/tmp/parity.h5"].refLaser - 1.55f) < 1e-6);
+    // Snapshot map is keyed by sourceKey \x1f artifact \x1f resolved memberId
+    // (data-grounded: member id + content hash + window-aware effective params).
+    const std::string refKey = "/tmp/parity.h5" "\x1f" "1" "\x1f" "specRef";
+    const std::string smpKey = "/tmp/parity.h5" "\x1f" "1" "\x1f" "specSmp";
+    CHECK(env->storedFingerprints.count(refKey) == 1);
+    CHECK(env->storedFingerprints.count(smpKey) == 1);
+    const MemberSnapshot& snap = env->storedFingerprints[refKey];
+    CHECK(snap.valid == true);
+    CHECK(snap.memberId == "specRef");
+    CHECK(snap.dataHash == memberDataHash(refX.data(), refX.size(),
+                                          refY.data(), refY.size()));
+    CHECK(snap.effectiveParams.empty());   // fixture members carry no config
 
     // Save into a fresh .cross.h5 (assigns the id; second save idempotent).
     std::string err;
@@ -1462,7 +1471,8 @@ void test12_experimentPersistence() {
     checkVecEq(results["curve_0_x"], refX, "persisted curve_0_x");
     CHECK(results.count("curve_0_ratio") == 1);
     checkVecEq(results["curve_0_ratio"], env->curves[0].ratioY, "persisted ratio");
-    CHECK(fps["/tmp/parity.h5"]["K"] == 2);
+    CHECK(fps[refKey]["memberId"] == "specRef");
+    CHECK(fps[refKey]["valid"] == true);
     CHECK(stats.is_array());
 
     // Reload into a fresh state with no source open → restored results,
@@ -1484,10 +1494,12 @@ void test12_experimentPersistence() {
     checkVecEq(e2->curves[0].gridX, env->curves[0].gridX, "restored gridX");
     checkVecEq(e2->curves[0].ratioY, env->curves[0].ratioY, "restored ratio");
     checkVecEq(e2->curves[0].curveY, env->curves[0].curveY, "restored curveY (applyYMode)");
-    CHECK(e2->storedFingerprints.count("/tmp/parity.h5") == 1);
-    CHECK(e2->stale == true);
+    CHECK(e2->storedFingerprints.count(refKey) == 1);
+    CHECK(e2->storedFingerprints.count(smpKey) == 1);
+    CHECK(e2->stale == true);   // /tmp/parity.h5 does not exist on disk
 
-    // Source OPEN with matching params → not stale; a param edit → stale.
+    // Source OPEN with the same members → not stale; a member data change →
+    // stale (data-grounded: params textboxes are NOT part of the comparison).
     auto sess2 = std::make_unique<WorkspaceSession>();
     sess2->key = "/tmp/parity.h5";
     sess2->path = "/tmp/parity.h5";
@@ -1495,13 +1507,50 @@ void test12_experimentPersistence() {
     sess2->workspacePath = sess2->path;
     sess2->spectrum.refLaserTextbox = 1.55f;
     sess2->spectrum.Kpadding = 2;
+    auto seedSame = [&](const std::string& id, const std::vector<double>& x,
+                        const std::vector<double>& y) {
+        TwoColumnMember m;
+        m.id = id;
+        m.kind = MemberKind::Original;
+        m.x = x;
+        m.y = y;
+        sess2->workspace.spectra.members.push_back(std::move(m));
+    };
+    seedSame("specRef", refX, refY);
+    seedSame("specSmp", smpX, smpY);
     s2.sessions.push_back(std::move(sess2));
     e2->updateStaleness(s2);
     CHECK(e2->stale == false);
+    // The spectrum-panel params are NOT a staleness input (the member is
+    // unchanged — the curves still match the source data).
     s2.sessions[0]->spectrum.Kpadding = 4;
     e2->updateStaleness(s2);
-    CHECK(e2->stale == true);
+    CHECK(e2->stale == false);
     s2.sessions[0]->spectrum.Kpadding = 2;
+    // Member data changed (the source spectrum was recomputed) → stale.
+    s2.sessions[0]->workspace.spectra.members[1].y = {1.0, 1.5, 1.0};
+    e2->updateStaleness(s2);
+    CHECK(e2->stale == true);
+    CHECK(!e2->staleDetails.empty());
+    CHECK(e2->staleDetails[0].reason.find("data") != std::string::npos);
+    s2.sessions[0]->workspace.spectra.members[1].y = refY;
+    e2->updateStaleness(s2);
+    CHECK(e2->stale == false);
+
+    // Migration: a legacy (valid=false, param-only) fingerprint has no member
+    // identity — updateStaleness re-baselines from the curves' current
+    // references, so staleness tracking survives an upgrade.
+    CHECK(memberSnapshotFromJson({{"K", 2}, {"apodSelector", 3}}).valid == false);
+    e2->storedFingerprints.clear();
+    e2->storedFingerprints["/tmp/parity.h5"] = MemberSnapshot{};
+    e2->updateStaleness(s2);
+    CHECK(e2->storedFingerprints.count(refKey) == 1);   // re-baselined composite key
+    CHECK(e2->storedFingerprints[refKey].valid == true);
+    CHECK(e2->stale == false);                          // baseline == current
+    s2.sessions[0]->workspace.spectra.members[1].y = {1.0, 1.5, 1.0};
+    e2->updateStaleness(s2);
+    CHECK(e2->stale == true);                           // tracking alive after migration
+    s2.sessions[0]->workspace.spectra.members[1].y = refY;
     e2->updateStaleness(s2);
     CHECK(e2->stale == false);
 
@@ -1615,27 +1664,43 @@ void test12_experimentPersistence() {
     std::remove(crossPath.c_str());
 }
 
-// M4.3: staleness vs PERSISTED source params (source not open in a tab).
-// Compute + save the experiment with K=2; change the source's K and persist
-// it; reload → the fingerprint derives from the source's workspace.json → ⚠
-// stale. Restoring the params clears the badge.
+// M4.3: staleness vs PERSISTED source state (source not open in a tab).
+// Data-grounded: the experiment is stale iff the source MEMBER it was computed
+// from changed (data or window-aware effective config), read from the .h5
+// itself when the source is not open. Leftover params of inactive apodization
+// windows are NOT a staleness condition.
 void test13_stalenessPersisted() {
-    std::printf("test13: staleness vs persisted source params...\n");
+    std::printf("test13: staleness vs persisted source members...\n");
     const std::string srcPath = "/tmp/fts_exp_src.h5";
     const std::string crossPath = "/tmp/fts_exp_stale.cross.h5";
     std::remove(srcPath.c_str());
     std::remove(crossPath.c_str());
     std::string err;
 
-    // Source workspace with the spectrum params persisted in the view state
-    // (matching the session state the pool uses: K=2, refLaser 1.55,
-    // rectangular apodization, defaults elsewhere).
+    const std::vector<double> refX = {1000.0, 1250.0, 1500.0, 1750.0, 2000.0};
+    const std::vector<double> refY = {1.0, 1.0, 1.0, 1.0, 1.0};
+    const std::vector<double> smpX = {1000.0, 1500.0, 2000.0};
+    const std::vector<double> smpY = {0.8, 0.8, 0.8};
+    // Rectangular window + a leftover Norton-Beer fwhm (written by
+    // makeApodizationJson regardless of the active window).
+    const std::string memberCfg =
+        R"({"apodization":{"window":"rectangular","rectWidth":1.0,"rectAsymMode":true,"nortonBeerFwhm":1.5,"gaussSigma":2.0},"zeroPadK":2,"refLaserUm":1.55,"xCorrectionMethod":"hilbert","prominenceThreshold":0.02,"xUnit":"cm-1"})";
+
     Workspace ws = makeFixtureWorkspace("stale");
-    ws.workspaceJson["applications"]["FTS Data Explorer"]["spectrumView"] = {
-        {"zeroPadK", 2}, {"refLaserUm", 1.55},
-        {"apodization", {{"window", "rectangular"}}}};
-    ws.workspaceJson["applications"]["FTS Data Explorer"]["plotDefaults"] = {
-        {"xCorrectionMethod", 0}, {"peakProminence", 0.02}};
+    auto seedSpectra = [&](Workspace& w, const std::string& id,
+                           const std::vector<double>& x,
+                           const std::vector<double>& y) {
+        TwoColumnMember m;
+        m.id = id;
+        m.kind = MemberKind::Derivative;   // savable: originals are write-protected
+        m.units = {"cm-1", "a.u."};
+        m.x = x;
+        m.y = y;
+        m.config = memberCfg;
+        w.spectra.members.push_back(std::move(m));
+    };
+    seedSpectra(ws, "specRef", refX, refY);
+    seedSpectra(ws, "specSmp", smpX, smpY);
     H5Store::save(srcPath, ws);
 
     AppState& s = ::appState;
@@ -1652,27 +1717,11 @@ void test13_stalenessPersisted() {
     sess->workspace = ws;                 // fixture override
     activateSession(s, 0);
     s.active->datasetInfo = workspaceDatasetInfo(s.active->workspace);
-    s.active->xCorrectionMethod = 0;               // default fingerprint params
-    s.active->peakProminenceThreshold = 0.02f;     // (match the persisted view state)
+    s.active->xCorrectionMethod = 0;
+    s.active->peakProminenceThreshold = 0.02f;
     s.active->spectrum.xUnitSelector = 0;
     s.active->spectrum.refLaserTextbox = 1.55f;
     s.active->spectrum.Kpadding = 2;
-    const std::vector<double> refX = {1000.0, 1250.0, 1500.0, 1750.0, 2000.0};
-    const std::vector<double> refY = {1.0, 1.0, 1.0, 1.0, 1.0};
-    const std::vector<double> smpX = {1000.0, 1500.0, 2000.0};
-    const std::vector<double> smpY = {0.8, 0.8, 0.8};
-    auto seedSpectra = [&](const std::string& id, const std::vector<double>& x,
-                           const std::vector<double>& y) {
-        TwoColumnMember m;
-        m.id = id;
-        m.kind = MemberKind::Original;
-        m.units = {"cm-1", "a.u."};
-        m.x = x;
-        m.y = y;
-        sess->workspace.spectra.members.push_back(std::move(m));
-    };
-    seedSpectra("specRef", refX, refY);
-    seedSpectra("specSmp", smpX, smpY);
 
     s.pendingExperimentIdx = -1;   // the test drives compute directly; the queued env activation is not wanted
     activateSession(s, 0);
@@ -1691,20 +1740,39 @@ void test13_stalenessPersisted() {
     CHECK(crossCreate(crossPath, err));
     CHECK(crossSaveExperiment(s, *env, crossPath, err));
 
-    // Change the source's K and persist it (the M4.3 flow: change a source's
-    // K → save source → reopen project).
-    ws.workspaceJson["applications"]["FTS Data Explorer"]["spectrumView"]["zeroPadK"] = 4;
+    // Change the source MEMBER's data and persist it (the M4.3 flow: change a
+    // source → save source → reopen project).
+    ws.spectra.members[1].y = {1.0, 1.5, 1.0, 1.5, 1.0};
     H5Store::save(srcPath, ws);
 
-    // Reload with the source NOT open: current fingerprint comes from the
-    // persisted workspace.json (K=4) → differs from the stored K=2 → stale.
+    // Reload with the source NOT open: the snapshot derives from the member
+    // in the .h5 → data hash differs → stale.
     AppState s2;
     CHECK(crossLoadExperiments(s2, crossPath, err));
     CHECK(s2.experiments.size() == 1);
     CHECK(s2.experiments[0]->stale == true);
+    CHECK(!s2.experiments[0]->staleDetails.empty());
+    CHECK(s2.experiments[0]->staleDetails[0].reason.find("data") != std::string::npos);
 
-    // Restore the source params → the badge clears.
-    ws.workspaceJson["applications"]["FTS Data Explorer"]["spectrumView"]["zeroPadK"] = 2;
+    // Leftover-param drift (inactive window's fwhm): NOT stale.
+    ws.spectra.members[1].y = refY;
+    ws.spectra.members[1].config =
+        R"({"apodization":{"window":"rectangular","rectWidth":1.0,"rectAsymMode":true,"nortonBeerFwhm":1.9,"gaussSigma":2.0},"zeroPadK":2,"refLaserUm":1.55,"xCorrectionMethod":"hilbert","prominenceThreshold":0.02,"xUnit":"cm-1"})";
+    H5Store::save(srcPath, ws);
+    s2.experiments[0]->updateStaleness(s2);
+    CHECK(s2.experiments[0]->stale == false);
+
+    // Effective-param change (rectangular width): stale.
+    ws.spectra.members[1].config =
+        R"({"apodization":{"window":"rectangular","rectWidth":0.5,"rectAsymMode":true,"nortonBeerFwhm":1.5,"gaussSigma":2.0},"zeroPadK":2,"refLaserUm":1.55,"xCorrectionMethod":"hilbert","prominenceThreshold":0.02,"xUnit":"cm-1"})";
+    H5Store::save(srcPath, ws);
+    s2.experiments[0]->updateStaleness(s2);
+    CHECK(s2.experiments[0]->stale == true);
+    CHECK(s2.experiments[0]->staleDetails[0].reason.find("rectangular") !=
+          std::string::npos);
+
+    // Restore the member → the badge clears.
+    ws.spectra.members[1].config = memberCfg;
     H5Store::save(srcPath, ws);
     s2.experiments[0]->updateStaleness(s2);
     CHECK(s2.experiments[0]->stale == false);

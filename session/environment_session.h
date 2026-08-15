@@ -55,7 +55,15 @@ struct ArtifactMember {
     std::string id;
     int xUnit = 0;
     std::vector<double> x, y;
+    std::string config;   // persisted member @config (params + inputs)
     bool stale = false;
+};
+
+// One stale-source diagnostic row (tooltip-only): friendly source label +
+// why the member no longer matches the compute-time snapshot.
+struct StaleDetail {
+    std::string label;
+    std::string reason;
 };
 
 struct ArtifactInfo {
@@ -73,6 +81,8 @@ struct AbsorbanceCurve {
     std::string sampleKey; int sampleArtifact = 0; std::string sampleMember;
     std::vector<double> gridX, ratioY, curveY;
     std::string status;
+    std::string name;          // "" = automatic "Curve N" (N = index+1)
+    char nameBuf[128] = {};    // rename editor buffer (write-through to name)
 };
 
 // Correction parameters used to derive the corrected-IFG OPD axis from a raw
@@ -102,17 +112,22 @@ public:
     char commentBuf[4096] = {};          // editor buffer, write-through to comment
     char nameBuf[256] = {};              // editor buffer for the inline rename
     // Phase 4: unsaved-changes flag (set by every mutating UI action, cleared
-    // by [Save]) + result-staleness flag (stored fingerprints vs current
-    // source params — advisory only; the pool cache re-verifies on every read).
+    // by [Save]) + result-staleness flag (member snapshots at compute time vs
+    // the sources' current member state — data-grounded, window-aware params).
     bool dirty = false;
     bool stale = false;
+    // Tooltip-only diagnostics for the current stale flag (rebuilt by
+    // updateStaleness): one row per mismatched source.
+    std::vector<StaleDetail> staleDetails;
     // Tab-strip visibility (bugfix 2026-08-14): closing the tab HIDES it from
     // the strip — the instance stays live in experiments[] and re-opens via
     // the Active Experiments panel row (activateExperiment clears it).
     bool tabHidden = false;
-    // FFT-param fingerprints per referenced source at compute time (M4.1);
-    // the staleness badge compares these to the current params (M4.3).
-    std::map<std::string, ParamFingerprint> storedFingerprints;
+    // Member snapshots per referenced source at compute time (M4.1); the
+    // staleness check compares these to the sources' current member state.
+    // Key: sourceKey + "\x1f" + artifact + "\x1f" + memberId (two curves may
+    // reference the same source with different members).
+    std::map<std::string, MemberSnapshot> storedFingerprints;
     int xUnitSelector = 0;               // 0 cm-1, 1 um, 2 THz
     int prevXUnitSelector = 0;
     int yMode = 0;                       // Absorbance only: 0 T%, 1 A
@@ -207,8 +222,9 @@ public:
     // Display label for a curve's source key (open-tab label, cross-source
     // name, or the raw key).
     std::string sourceLabel(const std::string& key) const;
-    // Legend/CSV label for one curve: "<sample>/<member> / <ref>/<member>".
-    std::string curveLabel(const AbsorbanceCurve& c) const;
+    // Legend/CSV label for one curve: the user-chosen name, or "Curve N"
+    // (N = index+1) when unnamed.
+    std::string curveLabel(const AbsorbanceCurve& c, size_t index) const;
 
     // Extract overlay curves for the selected artifact from the selected
     // datasets (public for the roundtrip test; pure data extraction).
@@ -234,13 +250,30 @@ private:
     std::vector<double> derivedOpdAxis(const std::string& sourceKey,
                                        const InterferogramMember& m,
                                        const IfgDeriveParams& p);
-    // Extract one artifact member (x/y/xUnit) for a source key; false when the
-    // source is absent or the artifact has no members (mirrors gatherCurves).
+    // Extract one artifact member (x/y/xUnit/config) for a source key; false
+    // when the source is absent or the artifact has no members (mirrors
+    // gatherCurves).
     bool extractArtifact(AppState& s, const std::string& key, ComparatorArtifact a,
                          const std::string& memberId, ArtifactMember& out);
+    // Compute-time member snapshot for a source (same resolution as
+    // extractArtifact); false when the member cannot be resolved.
+    bool memberSnapshotForKey(AppState& s, const std::string& key, ComparatorArtifact a,
+                              const std::string& memberId, MemberSnapshot& out);
+    // Rebuild storedFingerprints (composite keys) from every curve's current
+    // ref/sample members. Clears the map first. Called by computeAbsorbance
+    // and by updateStaleness as the legacy-format migration (re-baseline).
+    void captureSnapshots(AppState& s);
+    // Stale-warning overlay on the plot (message box + Recompute button +
+    // hover tooltip with staleDetails). Rendered after EndPlot in renderPlot
+    // and in the empty-data branch.
+    void renderStaleWarning(ImDrawList* dl, const ImVec2& rectMin,
+                            const ImVec2& rectMax);
     void renderConfigWindow();           // instanceName (pickers/selectors/comment)
     void renderViewWindow();             // instanceName + " View" (plot)
     void renderAbsorbanceConfig();
+    // Trim + commit a curve's nameBuf into its name ("" = back to the auto
+    // "Curve N" label); marks dirty. Called on Enter and on focus loss.
+    void applyCurveName(AbsorbanceCurve& c);
     void renderComparatorConfig();
     void renderDatasetSelector();        // comparator included-datasets checkbox list
     void renderXUnitButtons();

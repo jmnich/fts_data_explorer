@@ -1,5 +1,6 @@
 #include "spectral_pool.h"
 
+#include <cstring>
 #include <functional>
 
 #include "app_state.h"
@@ -182,66 +183,63 @@ bool poolTryCache(AppState& s, const SpectralRef& ref,
     return !cm1Out.spectrumX.empty() && !cm1Out.spectrumY.empty();
 }
 
-ParamFingerprint poolCurrentFingerprint(AppState& s, const std::string& workspaceKey) {
-    RefSession r;
-    if (!resolveRefSession(s, workspaceKey, r)) return {};
-    return fingerprintOf(r);
+uint64_t memberDataHash(const double* x, size_t nx, const double* y, size_t ny) {
+    // FNV-1a over the IEEE-754 bit patterns — deterministic across app
+    // versions (std::hash<double> is not guaranteed stable).
+    uint64_t h = 1469598103934665603ULL;
+    auto mix = [&h](const double* p, size_t n) {
+        for (size_t i = 0; i < n; ++i) {
+            uint64_t bits = 0;
+            static_assert(sizeof(bits) == sizeof(double), "double must be 64-bit");
+            std::memcpy(&bits, &p[i], sizeof(bits));
+            for (int b = 0; b < 8; ++b) {
+                h ^= (bits >> (b * 8)) & 0xFF;
+                h *= 1099511628211ULL;
+            }
+        }
+    };
+    mix(x, nx);
+    mix(y, ny);
+    return h;
 }
 
-ParamFingerprint fingerprintFromWorkspace(const Workspace& ws) {
-    ParamFingerprint fp;
-    Spectrum sp;
-    int xMethod = 0;
-    float prominence = 0.02f;
-    if (!persistedSpectrumParams(ws, sp, xMethod, prominence)) return fp;
-    fp.K = sp.Kpadding;
-    fp.refLaser = sp.refLaserTextbox;
-    fp.apodSelector = sp.apodizationSelector;
-    fp.apodParams = sp.apodizationParams;
-    fp.xMethod = xMethod;
-    fp.prominence = prominence;
-    DatasetInfo info = workspaceDatasetInfo(ws);
-    fp.axisIsCorrected = info.axisIsCorrected;
-    fp.hasPrecomputed = info.hasPrecomputedSpectra;
-    return fp;
+nlohmann::json effectiveConfigParams(const nlohmann::json& cfg) {
+    nlohmann::json out;
+    if (!cfg.is_object()) return out;
+    auto pickNum = [&](const char* key) {
+        auto it = cfg.find(key);
+        if (it != cfg.end() && it->is_number()) out[key] = *it;
+    };
+    pickNum("zeroPadK");
+    pickNum("refLaserUm");
+    auto xcm = cfg.find("xCorrectionMethod");
+    if (xcm != cfg.end() && xcm->is_string()) {
+        out["xCorrectionMethod"] = *xcm;
+        if (xcm->get<std::string>() == "peaks") pickNum("prominenceThreshold");
+    }
+    auto apod = cfg.find("apodization");
+    if (apod != cfg.end() && apod->is_object())
+        out["apodization"] = effectiveApodizationJson(*apod);
+    return out;
 }
 
-nlohmann::json fingerprintToJson(const ParamFingerprint& fp) {
+nlohmann::json memberSnapshotToJson(const MemberSnapshot& fp) {
     nlohmann::json j;
-    j["K"] = fp.K;
-    j["refLaser"] = fp.refLaser;
-    j["apodSelector"] = fp.apodSelector;
-    j["gaussSigma"] = fp.apodParams.gaussSigma;
-    j["rectWidth"] = fp.apodParams.rectWidth;
-    j["nortonBeerFwhm"] = fp.apodParams.nortonBeerFwhm;
-    j["dolphChebyshevAt"] = fp.apodParams.dolphChebyshevAt;
-    j["hammingAlpha"] = fp.apodParams.hammingAlpha;
-    j["kaiserBeta"] = fp.apodParams.kaiserBeta;
-    j["rectAsymMode"] = fp.apodParams.rectAsymMode;
-    j["xMethod"] = fp.xMethod;
-    j["prominence"] = fp.prominence;
-    j["axisIsCorrected"] = fp.axisIsCorrected;
-    j["hasPrecomputed"] = fp.hasPrecomputed;
+    j["memberId"] = fp.memberId;
+    j["dataHash"] = fp.dataHash;
+    j["effectiveParams"] = fp.effectiveParams;
+    j["valid"] = fp.valid;
     return j;
 }
 
-ParamFingerprint fingerprintFromJson(const nlohmann::json& j) {
-    ParamFingerprint fp;
+MemberSnapshot memberSnapshotFromJson(const nlohmann::json& j) {
+    MemberSnapshot fp;
     if (!j.is_object()) return fp;
-    fp.K = j.value("K", fp.K);
-    fp.refLaser = j.value("refLaser", fp.refLaser);
-    fp.apodSelector = j.value("apodSelector", fp.apodSelector);
-    fp.apodParams.gaussSigma = j.value("gaussSigma", fp.apodParams.gaussSigma);
-    fp.apodParams.rectWidth = j.value("rectWidth", fp.apodParams.rectWidth);
-    fp.apodParams.nortonBeerFwhm = j.value("nortonBeerFwhm", fp.apodParams.nortonBeerFwhm);
-    fp.apodParams.dolphChebyshevAt = j.value("dolphChebyshevAt", fp.apodParams.dolphChebyshevAt);
-    fp.apodParams.hammingAlpha = j.value("hammingAlpha", fp.apodParams.hammingAlpha);
-    fp.apodParams.kaiserBeta = j.value("kaiserBeta", fp.apodParams.kaiserBeta);
-    fp.apodParams.rectAsymMode = j.value("rectAsymMode", fp.apodParams.rectAsymMode);
-    fp.xMethod = j.value("xMethod", fp.xMethod);
-    fp.prominence = j.value("prominence", fp.prominence);
-    fp.axisIsCorrected = j.value("axisIsCorrected", fp.axisIsCorrected);
-    fp.hasPrecomputed = j.value("hasPrecomputed", fp.hasPrecomputed);
+    fp.memberId = j.value("memberId", fp.memberId);
+    fp.dataHash = j.value("dataHash", fp.dataHash);
+    if (auto it = j.find("effectiveParams"); it != j.end() && it->is_object())
+        fp.effectiveParams = *it;
+    fp.valid = j.value("valid", false);
     return fp;
 }
 

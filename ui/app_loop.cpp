@@ -715,15 +715,13 @@ static float renderTabStrip() {
             const std::string label = tabText +
                 (t.isWs ? "##ws" : "##env") + t.key.substr(3);
             // Permanent status-marker slot: ImGui reserves the close-button
-            // zone in the tab width, but a manually drawn " *"/" ⚠" after the
+            // zone in the tab width, but a manually drawn " *" after the
             // label would still land on the × (the gap between the label end
             // and the zone is only ItemInnerSpacing). Explicitly widen the
             // tab (SetNextItemWidth → RequestedWidth) by the marker width so
-            // the markers always fit between the label and the × — and the
+            // the marker always fits between the label and the × — and the
             // tab size never changes on hover or when a marker appears.
-            const float markerReserve = ImGui::CalcTextSize("*").x +
-                                        ImGui::CalcTextSize("\xE2\x9A\xA0").x +
-                                        4.0f;
+            const float markerReserve = ImGui::CalcTextSize("*").x + 4.0f;
             ImGui::SetNextItemWidth(
                 ImGui::CalcTextSize(tabText.c_str()).x +
                 2.0f * ImGui::GetStyle().FramePadding.x +
@@ -735,15 +733,8 @@ static float renderTabStrip() {
             if (t.isWs) {
                 const bool dirty = isActive ? appState.workspaceDirty() : sess->isDirty();
                 if (dirty) drawTabStatusMark(tabText.c_str(), "*");
-            } else {
-                if (env->dirty) {
-                    drawTabStatusMark(tabText.c_str(), "*");
-                    if (env->stale)
-                        drawTabStatusMark(tabText.c_str(), "\xE2\x9A\xA0",
-                                          ImGui::CalcTextSize("*").x);
-                } else if (env->stale) {
-                    drawTabStatusMark(tabText.c_str(), "\xE2\x9A\xA0");
-                }
+            } else if (env->dirty) {
+                drawTabStatusMark(tabText.c_str(), "*");
             }
             // Click detection runs OUTSIDE the shown gate: BeginTabItem
             // returns "contents visible", not "clicked" — a non-selected tab

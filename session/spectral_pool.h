@@ -97,20 +97,37 @@ void poolStore(AppState& s, const SpectralRef& ref,
 bool poolTryCache(AppState& s, const SpectralRef& ref,
                   SpectralToolbox::ProcessedSpectrum& cm1Out);
 
-// Main-thread: the session's CURRENT param fingerprint (for store-time keys
-// when no compute happened, e.g. a cache-hit enqueue). Default fingerprint
-// when the workspace is not open.
-ParamFingerprint poolCurrentFingerprint(AppState& s, const std::string& workspaceKey);
+// Experiment staleness snapshot (Phase 4, data-grounded): the member an
+// experiment curve was built FROM — its resolved id, a content hash of its
+// data, and the params that actually determine its content (window-aware;
+// leftover params of inactive windows excluded). `valid` is false for
+// unresolvable members and legacy persisted entries (dropped silently).
+struct MemberSnapshot {
+    std::string memberId;
+    uint64_t dataHash = 0;
+    nlohmann::json effectiveParams;   // normalized: only effective fields
+    bool valid = false;
 
-// Fingerprint derived from a PERSISTED workspace (workspace.json §8.1 view
-// state + workspaceDatasetInfo) — used by the Phase-4 staleness check for
-// referenced sources that are not open in a tab (their live params only exist
-// on disk). Returns default fingerprint when the workspace has no view state.
-ParamFingerprint fingerprintFromWorkspace(const Workspace& ws);
+    bool operator==(const MemberSnapshot& o) const {
+        return valid == o.valid && memberId == o.memberId &&
+               dataHash == o.dataHash && effectiveParams == o.effectiveParams;
+    }
+};
+
+// Deterministic content hash of a member's x/y data (FNV-1a over the IEEE-754
+// bit patterns — stable across app versions, unlike std::hash<double>).
+uint64_t memberDataHash(const double* x, size_t nx, const double* y, size_t ny);
+
+// Effective params from a persisted member config (window-aware: only the
+// active window's parameter(s), zeroPadK/refLaserUm/xCorrectionMethod, and
+// prominence when the x-correction method is peak-finding). xUnit and
+// detectorSensitivityKVPerW excluded — display-only, they do not change the
+// member data.
+nlohmann::json effectiveConfigParams(const nlohmann::json& cfg);
 
 // JSON (de)serialization for experiment fingerprint.json (Phase 4).
-nlohmann::json fingerprintToJson(const ParamFingerprint& fp);
-ParamFingerprint fingerprintFromJson(const nlohmann::json& j);
+nlohmann::json memberSnapshotToJson(const MemberSnapshot& fp);
+MemberSnapshot memberSnapshotFromJson(const nlohmann::json& j);
 
 // Aligned common-X matrix over many refs: gridX = first ref's spectrumX (in
 // the requested unit); every other spectrum resampled via resampleToGrid

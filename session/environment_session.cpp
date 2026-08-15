@@ -252,6 +252,7 @@ ArtifactInfo EnvironmentSession::artifactInfo(const Workspace& ws,
         am.xUnit = memberXUnit(m);
         am.x = m.x;
         am.y = m.y;
+        am.config = m.config;
         am.stale = m.stale;
         info.members.push_back(std::move(am));
     };
@@ -273,6 +274,7 @@ ArtifactInfo EnvironmentSession::artifactInfo(const Workspace& ws,
                 am.xUnit = memberXUnit(m.reference);
                 am.x = c.x;
                 am.y = c.y;
+                am.config = m.config;
                 am.stale = m.stale;
                 info.members.push_back(std::move(am));
             }
@@ -286,6 +288,7 @@ ArtifactInfo EnvironmentSession::artifactInfo(const Workspace& ws,
             am.xUnit = -1;   // OPD is a distance axis: no spectral conversion
             am.y = m.col0;
             am.x = m.col1;
+            am.config = m.config;
             am.stale = m.stale;
             info.members.push_back(std::move(am));
         }
@@ -298,6 +301,8 @@ ArtifactInfo EnvironmentSession::artifactInfo(const Workspace& ws,
                 am.y = m.col1;               // primary detector
                 am.x = derivedOpdAxis(sourceKey, m, p);
                 if (am.x.empty()) continue;  // axis computation failed
+                // Derived member: no persisted config — the derivation params
+                // are baked into the OPD axis itself.
                 am.stale = m.stale;
                 info.members.push_back(std::move(am));
             }
@@ -313,6 +318,7 @@ ArtifactInfo EnvironmentSession::artifactInfo(const Workspace& ws,
             am.y = m.col1;
             am.x.resize(am.y.size());
             for (size_t i = 0; i < am.x.size(); ++i) am.x[i] = static_cast<double>(i);
+            am.config = m.config;
             am.stale = m.stale;
             info.members.push_back(std::move(am));
         }
@@ -366,7 +372,6 @@ EnvironmentSession::EnvironmentSession(EnvType t, const std::string& name)
 std::string EnvironmentSession::tabLabel() const {
     std::string label = titleCache_;
     if (dirty) label += " *";
-    if (stale) label += " \xE2\x9A\xA0";   // ⚠ (UTF-8)
     return label;
 }
 
@@ -385,44 +390,153 @@ void EnvironmentSession::rename(const std::string& name) {
 }
 
 namespace {
-// Current FFT-param fingerprint for a referenced source. Open tab → the
-// (parked or active) session's spectrum state — the pool's source of truth.
-// Not-open embedded source → the params persisted in its workspace.json
-// (loaded via the sourceCache, which crossLoad already populates). Not-open
-// filesystem source → the params persisted in the .h5 itself. Unreachable →
-// default fingerprint (compare then reports stale only if the stored
-// fingerprint is non-default).
-ParamFingerprint currentFingerprintForKey(AppState& s, const std::string& key) {
-    for (const auto& sess : s.sessions)
-        if (sess->key == key) return poolCurrentFingerprint(s, key);
-    const size_t hash = key.find('#');
-    if (hash != std::string::npos) {
-        const std::string crossPath = key.substr(0, hash);
-        const std::string sourceId = key.substr(hash + 1);
-        auto it = s.sessionTab.sourceCache.find(sourceId);
-        if (it == s.sessionTab.sourceCache.end()) {
-            std::string err;
-            Workspace ws = crossLoadSource(crossPath, sourceId, err);
-            if (!err.empty()) return {};
-            it = s.sessionTab.sourceCache.emplace(sourceId, std::move(ws)).first;
+// Human-readable name for one effective-params key (tooltip diagnostics).
+const char* paramLabel(const std::string& key) {
+    if (key == "window")             return "apodization window";
+    if (key == "rectWidth")          return "rectangular window width";
+    if (key == "rectAsymMode")       return "rectangular window mode";
+    if (key == "gaussSigma")         return "Gauss sigma";
+    if (key == "nortonBeerFwhm")     return "Norton-Beer width";
+    if (key == "dolphChebyshevAtDb") return "Dolph-Chebyshev attenuation";
+    if (key == "hammingAlpha")       return "Hamming alpha";
+    if (key == "kaiserBeta")         return "Kaiser beta";
+    if (key == "zeroPadK")           return "zero-padding K";
+    if (key == "refLaserUm")         return "reference laser";
+    if (key == "xCorrectionMethod")  return "x-correction method";
+    if (key == "prominenceThreshold") return "peak prominence";
+    return key.c_str();
+}
+
+// Field-level "why" for a snapshot mismatch (tooltip row). Diff key-by-key,
+// recursing into the nested apodization object (window + its effective params).
+std::string staleReason(const MemberSnapshot& stored, const MemberSnapshot& cur) {
+    std::vector<std::string> parts;
+    if (stored.memberId != cur.memberId) parts.push_back("member selection changed");
+    if (stored.dataHash != cur.dataHash) parts.push_back("member data changed");
+    auto diffKeys = [&parts](const nlohmann::json& a, const nlohmann::json& b) {
+        std::vector<std::string> keys;
+        for (auto& it : a.items()) keys.push_back(it.key());
+        for (auto& it : b.items())
+            if (std::find(keys.begin(), keys.end(), it.key()) == keys.end())
+                keys.push_back(it.key());
+        for (const auto& k : keys) {
+            auto ai = a.find(k);
+            auto bi = b.find(k);
+            const bool same = (ai != a.end()) == (bi != b.end()) &&
+                              ai != a.end() && *ai == *bi;
+            if (!same) parts.push_back(paramLabel(k));
         }
-        return fingerprintFromWorkspace(it->second);
+    };
+    if (stored.effectiveParams != cur.effectiveParams) {
+        diffKeys(stored.effectiveParams, cur.effectiveParams);
+        auto apodA = stored.effectiveParams.find("apodization");
+        auto apodB = cur.effectiveParams.find("apodization");
+        if (apodA != stored.effectiveParams.end() &&
+            apodB != cur.effectiveParams.end())
+            diffKeys(*apodA, *apodB);
     }
-    try {
-        return fingerprintFromWorkspace(H5Store::load(key));
-    } catch (const std::exception&) {
-        return {};
+    std::string out;
+    for (size_t i = 0; i < parts.size(); ++i) {
+        if (i) out += ", ";
+        out += parts[i];
     }
+    return out.empty() ? "member changed" : out;
+}
+
+// Build the snapshot from a resolved member (config → window-aware effective
+// params; x/y → content hash).
+bool snapshotOfMember(const ArtifactMember& am, MemberSnapshot& out) {
+    out = MemberSnapshot{};
+    out.memberId = am.id;
+    out.dataHash = memberDataHash(am.x.data(), am.x.size(), am.y.data(), am.y.size());
+    nlohmann::json cfg = nlohmann::json::parse(am.config, nullptr, false);
+    if (cfg.is_discarded()) cfg = nlohmann::json::object();
+    out.effectiveParams = effectiveConfigParams(cfg);
+    out.valid = true;
+    return true;
 }
 }  // namespace
 
+// Compute-time member snapshot for a source. Open tab / embedded cross source
+// → the live/persisted workspace model (extractArtifact resolution); a
+// NON-open filesystem source → the member read from the .h5 itself (the old
+// fingerprint did the same via H5Store::load — the experiment's curves came
+// from that file, so the check must follow it).
+bool EnvironmentSession::memberSnapshotForKey(AppState& s, const std::string& key,
+                                              ComparatorArtifact a,
+                                              const std::string& memberId,
+                                              MemberSnapshot& out) {
+    ArtifactMember am;
+    if (extractArtifact(s, key, a, memberId, am)) return snapshotOfMember(am, out);
+    if (key.find('#') != std::string::npos) return false;   // embedded: no file fallback
+    try {
+        Workspace ws = H5Store::load(key);
+        ArtifactInfo info = artifactInfo(ws, a, key);
+        if (info.members.empty()) return false;
+        const ArtifactMember* pick = nullptr;
+        for (const auto& m : info.members)
+            if (m.id == memberId) { pick = &m; break; }
+        if (!pick) pick = &info.members.front();
+        return snapshotOfMember(*pick, out);
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
 void EnvironmentSession::updateStaleness(AppState& s) {
     stale = false;
-    for (const auto& [key, stored] : storedFingerprints) {
-        if (!(stored == currentFingerprintForKey(s, key))) {
-            stale = true;
-            break;
+    staleDetails.clear();
+    std::map<std::string, std::string> keyLabels;
+    for (const auto& src : comparatorSources(s))
+        keyLabels[src.key] = src.label;
+    const auto labelOf = [&](const std::string& key) {
+        auto it = keyLabels.find(key);
+        return it != keyLabels.end() ? it->second : key;
+    };
+
+    // Migration: legacy snapshots (valid=false — the old param-only format
+    // records panel state, not the member used) carry no member identity to
+    // compare against. Instead of dropping them (which left upgraded projects
+    // with NO baseline — staleness tracking silently dead), re-baseline from
+    // the curves' current member references. Baseline == current → fresh; the
+    // next source change is then detected normally.
+    bool hasValid = false;
+    for (const auto& [k, v] : storedFingerprints)
+        if (v.valid) { hasValid = true; break; }
+    if (!hasValid && !curves.empty()) captureSnapshots(s);
+
+    for (auto it = storedFingerprints.begin(); it != storedFingerprints.end();) {
+        const std::string& composite = it->first;
+        const MemberSnapshot& stored = it->second;
+        if (!stored.valid) {
+            // Stray legacy entry alongside a valid baseline: drop it (a full
+            // legacy map was already re-baselined above).
+            it = storedFingerprints.erase(it);
+            continue;
         }
+        // composite = sourceKey \x1f artifact \x1f memberId
+        const size_t a1 = composite.find('\x1f');
+        const size_t a2 = a1 == std::string::npos ? std::string::npos
+                                                  : composite.find('\x1f', a1 + 1);
+        if (a1 == std::string::npos || a2 == std::string::npos) {
+            it = storedFingerprints.erase(it);
+            continue;
+        }
+        const std::string key = composite.substr(0, a1);
+        const int artifact = std::atoi(composite.substr(a1 + 1, a2 - a1 - 1).c_str());
+        const std::string memberId = composite.substr(a2 + 1);
+
+        MemberSnapshot cur;
+        if (!memberSnapshotForKey(s, key, static_cast<ComparatorArtifact>(artifact),
+                                  memberId, cur)) {
+            stale = true;
+            staleDetails.push_back(
+                {labelOf(key), "Member \"" + memberId + "\" no longer exists"});
+        } else if (!(stored == cur)) {
+            stale = true;
+            staleDetails.push_back({labelOf(key), staleReason(stored, cur)});
+        }
+        ++it;
     }
     s.needsRedraw = true;
 }
@@ -459,6 +573,11 @@ void activateExperiment(AppState& s, int idx) {
         s.experiments[idx]->dirty = true;
         s.needsRedraw = true;
     }
+    // Live staleness re-eval (R1): changing a referenced source requires
+    // leaving the experiment tab, so re-checking on (re)activation keeps the
+    // flag truthful — discrete event, never per-frame (no CPU cost in the
+    // render loop).
+    s.experiments[idx]->updateStaleness(s);
     // QUEUED activation (bugfix 2026-08-13): never switch tab kind mid-frame.
     // executePendingSwap parks the active workspace tab first, so its data is
     // back in the mirror before the env tab takes over — without the park,
@@ -554,6 +673,30 @@ bool EnvironmentSession::extractArtifact(AppState& s, const std::string& key,
     return false;
 }
 
+// Compute-time member snapshot per referenced source (composite key
+// sourceKey \x1f artifact \x1f memberId: two curves may reference the same
+// source with different members). Stored only when the member resolves —
+// unresolvable curves never seed staleness. Clears the map first.
+void EnvironmentSession::captureSnapshots(AppState& s) {
+    storedFingerprints.clear();
+    const auto keyFor = [](const std::string& key, int artifact,
+                           const std::string& memberId) {
+        return key + "\x1f" + std::to_string(artifact) + "\x1f" + memberId;
+    };
+    for (const auto& c : curves) {
+        if (c.refKey.empty() || c.sampleKey.empty()) continue;
+        MemberSnapshot refSnap, smpSnap;
+        if (memberSnapshotForKey(s, c.refKey,
+                                 static_cast<ComparatorArtifact>(c.refArtifact),
+                                 c.refMember, refSnap))
+            storedFingerprints[keyFor(c.refKey, c.refArtifact, refSnap.memberId)] = refSnap;
+        if (memberSnapshotForKey(s, c.sampleKey,
+                                 static_cast<ComparatorArtifact>(c.sampleArtifact),
+                                 c.sampleMember, smpSnap))
+            storedFingerprints[keyFor(c.sampleKey, c.sampleArtifact, smpSnap.memberId)] = smpSnap;
+    }
+}
+
 // Synchronous artifact-based compute. Per curve: resolve the reference and
 // sample artifacts, convert both X axes to the display unit, build the grid
 // from the reference points inside the overlapping X region, resample the
@@ -563,7 +706,7 @@ void EnvironmentSession::computeAbsorbance(AppState& s) {
     using ST = SpectralToolbox::SpectrumXUnit;
     const auto dst = static_cast<ST>(xUnitSelector);
     bool any = false;
-    storedFingerprints.clear();
+    captureSnapshots(s);
     for (auto& c : curves) {
         c.gridX.clear();
         c.ratioY.clear();
@@ -573,9 +716,6 @@ void EnvironmentSession::computeAbsorbance(AppState& s) {
             c.status = c.refKey.empty() ? "No reference selected" : "No sample selected";
             continue;
         }
-        storedFingerprints[c.refKey] = currentFingerprintForKey(s, c.refKey);
-        storedFingerprints[c.sampleKey] = currentFingerprintForKey(s, c.sampleKey);
-
         ArtifactMember ref, smp;
         if (!extractArtifact(s, c.refKey, static_cast<ComparatorArtifact>(c.refArtifact),
                              c.refMember, ref)) {
@@ -633,6 +773,7 @@ void EnvironmentSession::computeAbsorbance(AppState& s) {
     // first load / ESC / X-unit reset (renderPlot consumes it).
     computed = any;
     stale = false;
+    staleDetails.clear();
     dirty = true;
     s.needsRedraw = true;
 }
@@ -679,9 +820,21 @@ std::string EnvironmentSession::sourceLabel(const std::string& key) const {
     return key;
 }
 
-std::string EnvironmentSession::curveLabel(const AbsorbanceCurve& c) const {
-    return sourceLabel(c.sampleKey) + "/" + c.sampleMember + "  /  " +
-           sourceLabel(c.refKey) + "/" + c.refMember;
+std::string EnvironmentSession::curveLabel(const AbsorbanceCurve& c,
+                                           size_t index) const {
+    return c.name.empty() ? "Curve " + std::to_string(index + 1) : c.name;
+}
+
+void EnvironmentSession::applyCurveName(AbsorbanceCurve& c) {
+    std::string s = c.nameBuf;
+    const size_t b = s.find_first_not_of(' ');
+    s = (b == std::string::npos) ? "" : s.substr(b);
+    while (!s.empty() && s.back() == ' ') s.pop_back();
+    if (s == c.name) return;
+    c.name = s;
+    std::snprintf(c.nameBuf, sizeof(c.nameBuf), "%s", s.c_str());
+    dirty = true;
+    appState.needsRedraw = true;
 }
 
 // ── render ──────────────────────────────────────────────────────────────────
@@ -750,7 +903,7 @@ void EnvironmentSession::renderViewWindow() {
                 const auto& c = this->curves[ci];
                 if (c.gridX.empty() || c.curveY.empty()) continue;
                 ComparatorCurve cc;
-                cc.label = curveLabel(c);
+                cc.label = curveLabel(c, ci);
                 cc.shortLabel = cc.label;
                 cc.x = c.gridX;
                 cc.y = c.curveY;
@@ -914,22 +1067,48 @@ void EnvironmentSession::renderAbsorbanceConfig() {
                         ImVec2(wpos.x + 6.0f, wpos.y + wsize.y - 2.0f),
                         ImGui::GetColorU32(tab20Color(ci)));
                 }
-                // Header row: "Curve N" (+ status) left, "Delete" right.
-                ImGui::TextUnformatted(("Curve " + std::to_string(ci + 1)).c_str());
+                // Header row: editable curve name (Enter or focus-loss commits,
+                // "" = auto "Curve N"), status, Delete right.
+                const char* delLabel = "Delete";
+                const float delW = ImGui::CalcTextSize(delLabel).x +
+                                   ImGui::GetStyle().FramePadding.x * 2.0f + 2.0f;
+                const std::string expected =
+                    c.name.empty() ? "Curve " + std::to_string(ci + 1) : c.name;
+                // Bounded width so a long name never overlaps the Delete button.
+                ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - delW - 8.0f);
+                const bool edited =
+                    ImGui::InputText("##curveName", c.nameBuf, sizeof(c.nameBuf),
+                                     ImGuiInputTextFlags_EnterReturnsTrue |
+                                         ImGuiInputTextFlags_AutoSelectAll);
+                // Commit on Enter or focus loss; resync while idle. The resync
+                // skips the committed frame — Enter returns true AND releases
+                // focus (bugfix 2026-08-14 pattern, see renderConfigWindow).
+                if (edited || (!ImGui::IsItemActive() && std::string(c.nameBuf) != expected))
+                    applyCurveName(c);
+                if (!edited && !ImGui::IsItemActive()) {
+                    const std::string cur =
+                        c.name.empty() ? "Curve " + std::to_string(ci + 1) : c.name;
+                    if (std::string(c.nameBuf) != cur)
+                        std::snprintf(c.nameBuf, sizeof(c.nameBuf), "%s", cur.c_str());
+                }
                 if (!c.status.empty()) {
                     ImGui::SameLine();
                     ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "(%s)", c.status.c_str());
                 }
-                const char* delLabel = "Delete";
-                const float delW = ImGui::CalcTextSize(delLabel).x +
-                                   ImGui::GetStyle().FramePadding.x * 2.0f + 2.0f;
                 ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - delW);
-                // Transparent fill, white outline; subtle tint on hover/click.
+                // Transparent fill, white outline; bright-red fill + black text
+                // on hover, darker red while clicked. Text color is decided
+                // before Button() by probing the exact rect.
+                const ImVec2 delMin = ImGui::GetCursorScreenPos();
+                const bool delHovered = ImGui::IsMouseHoveringRect(
+                    delMin, ImVec2(delMin.x + delW, delMin.y + ImGui::GetFrameHeight()));
                 ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.0f, 1.0f, 1.0f, 0.14f));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(1.0f, 1.0f, 1.0f, 0.28f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.0f, 0.2f, 0.2f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.75f, 0.1f, 0.1f, 1.0f));
                 ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(1.0f, 1.0f, 1.0f, 0.8f));
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_Text,
+                    delHovered ? ImVec4(0.0f, 0.0f, 0.0f, 1.0f)
+                               : ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
                 ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
                 ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 3.0f);
                 if (ImGui::Button(delLabel)) removeIdx = static_cast<int>(ci);
@@ -1449,6 +1628,56 @@ std::vector<ComparatorCurve> EnvironmentSession::gatherCurves(AppState& s) {
     return curves;
 }
 
+// Stale-data warning overlay (drawn, never layout): a dark rounded box in the
+// top-left corner of the plot with wrapped yellow text, a Recompute button to
+// its right, and a hover tooltip with per-source diagnostics. Draw-list only
+// for the box; the button is a real ImGui item (SetCursorScreenPos — the plot
+// already consumed the layout, so nothing shifts or clips). ASCII only: the
+// embedded font lacks U+26A0 (renders as '?').
+void EnvironmentSession::renderStaleWarning(ImDrawList* dl, const ImVec2& rectMin,
+                                            const ImVec2& rectMax) {
+    const char* msg = "Stale data: source changed.";
+    const float pad = 8.0f;
+    const float wrapW = std::max(120.0f, rectMax.x - rectMin.x - 2.0f * pad);
+    const ImVec2 ts = ImGui::CalcTextSize(msg, nullptr, false, wrapW);
+    const ImVec2 pos(rectMin.x + 8.0f, rectMin.y + 8.0f);
+    const ImVec2 boxMin = pos;
+    const ImVec2 boxMax(pos.x + ts.x + 2.0f * pad, pos.y + ts.y + 2.0f * pad);
+    dl->AddRectFilled(boxMin, boxMax, IM_COL32(0, 0, 0, 200), 4.0f);
+    dl->AddText(ImGui::GetFont(), ImGui::GetFontSize(),
+                ImVec2(pos.x + pad, pos.y + pad), IM_COL32(255, 214, 51, 255),
+                msg, nullptr, wrapW);
+
+    // Tooltip diagnostics (hover over the message box): per-source reason rows.
+    if (ImGui::IsMouseHoveringRect(boxMin, boxMax)) {
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted("Stale: the following sources changed since compute:");
+        for (size_t i = 0; i < staleDetails.size() && i < 4; ++i)
+            ImGui::TextWrapped("- %s: %s", staleDetails[i].label.c_str(),
+                               staleDetails[i].reason.c_str());
+        if (staleDetails.size() > 4)
+            ImGui::TextUnformatted("...");
+        ImGui::TextDisabled("Recompute to refresh the curves.");
+        ImGui::EndTooltip();
+    }
+
+    // Recompute button, right of the message box. Absorbance-only (Comparator
+    // has no compute path). Click recomputes synchronously (render()'s own
+    // pattern) — stale=false makes the overlay + button vanish next frame.
+    if (type == EnvType::Absorbance) {
+        const float btnH = boxMax.y - boxMin.y;
+        const ImVec2 btnPos(boxMax.x + 6.0f, boxMin.y);
+        ImGui::SetCursorScreenPos(btnPos);
+        ImGui::PushID(("##staleRecompute" + stripKey).c_str());
+        const bool clicked = ImGui::Button("Recompute", ImVec2(0.0f, btnH));
+        ImGui::PopID();
+        if (clicked) {
+            computeAbsorbance(appState);
+            appState.needsRedraw = true;
+        }
+    }
+}
+
 // Common overlay plot with spectrum-view navigation: all/tight/force Y,
 // shift+drag area zoom, ESC fit-all, arrows pan, wheel zoom, downsample.
 void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
@@ -1458,10 +1687,14 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
                                     bool showLegend) {
     if (curves.empty()) {
         ImVec2 avail = ImGui::GetContentRegionAvail();
+        const ImVec2 contentMin = ImGui::GetCursorScreenPos();
         const char* msg = "No data to display yet.";
         ImVec2 ts = ImGui::CalcTextSize(msg);
         ImGui::SetCursorPos(ImVec2((avail.x - ts.x) * 0.5f, (avail.y - ts.y) * 0.5f));
         ImGui::TextDisabled("%s", msg);
+        if (stale)
+            renderStaleWarning(ImGui::GetWindowDrawList(), contentMin,
+                               ImVec2(contentMin.x + avail.x, contentMin.y + avail.y));
         return;
     }
 
@@ -1483,6 +1716,11 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
     ImPlot::PushStyleColor(ImPlotCol_AxisGrid, gridCol);
     const ImPlotFlags flags = ImPlotFlags_NoTitle |
                               (showLegend ? 0 : ImPlotFlags_NoLegend);
+    // Plot rect for the stale-warning overlay. Captured at the END of the
+    // plot block: GetPlotPos/GetPlotSize internally call SetupLock(), which
+    // would invalidate every later Setup* call.
+    ImVec2 plotPos(0.0f, 0.0f), plotSize(0.0f, 0.0f);
+    bool plotShown = false;
     // Stable plot id (bugfix 2026-08-14): keyed by the rename-stable stripKey
     // — the ImPlot plot (and its axis limits) is retained per instance across
     // renames; with instanceName in the id a rename recreated the plot and
@@ -1736,7 +1974,7 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
                                     &mx, &yv, 1, cursorSpec);
                 char line[64];
                 std::snprintf(line, sizeof(line), "%.4e", yv);
-                lines.emplace_back(curveColors[k], line);
+                lines.emplace_back(curveColors[k], c.label + "  " + line);
             }
 
             // Info box on the plot draw list, clamped to the plot.
@@ -1784,9 +2022,17 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
             viewXMin = std::min(lim.X.Min, lim.X.Max);
             viewXMax = std::max(lim.X.Min, lim.X.Max);
         }
+        // Stale-warning rect: GetPlotPos/GetPlotSize lock the setup phase, so
+        // they must run AFTER every Setup* call (all PlotX already ran here).
+        plotShown = true;
+        plotPos = ImPlot::GetPlotPos();
+        plotSize = ImPlot::GetPlotSize();
         ImPlot::EndPlot();
     }
     ImPlot::PopStyleColor();
+    if (plotShown && stale)
+        renderStaleWarning(ImGui::GetWindowDrawList(), plotPos,
+                           ImVec2(plotPos.x + plotSize.x, plotPos.y + plotSize.y));
 }
 
 void EnvironmentSession::exportCsv() {
@@ -1811,10 +2057,11 @@ void EnvironmentSession::exportCsv() {
     if (type == EnvType::Comparator) {
         curves = gatherCurves(appState);
     } else {
-        for (const auto& c : this->curves) {
+        for (size_t k = 0; k < this->curves.size(); ++k) {
+            const auto& c = this->curves[k];
             if (c.gridX.empty() || c.curveY.empty()) continue;
             ComparatorCurve cc;
-            cc.label = curveLabel(c);
+            cc.label = curveLabel(c, k);
             cc.x = c.gridX;
             cc.y = c.curveY;
             curves.push_back(std::move(cc));
@@ -1901,7 +2148,8 @@ static nlohmann::json experimentConfigJson(const EnvironmentSession& env) {
                                    {"refMember", c.refMember},
                                    {"sampleKey", c.sampleKey},
                                    {"sampleArtifact", c.sampleArtifact},
-                                   {"sampleMember", c.sampleMember}});
+                                   {"sampleMember", c.sampleMember},
+                                   {"name", c.name}});
         }
     } else {
         j["artifactSelector"] = env.artifactSelector;
@@ -1950,6 +2198,8 @@ static void experimentApplyConfig(EnvironmentSession& env, const nlohmann::json&
             c.sampleKey = cc.value("sampleKey", "");
             c.sampleArtifact = cc.value("sampleArtifact", 0);
             c.sampleMember = cc.value("sampleMember", "");
+            c.name = cc.value("name", "");   // legacy configs: no key → auto name
+            std::snprintf(c.nameBuf, sizeof(c.nameBuf), "%s", c.name.c_str());
             env.curves.push_back(std::move(c));
         }
     } else {
@@ -1972,22 +2222,25 @@ static void experimentApplyConfig(EnvironmentSession& env, const nlohmann::json&
 static nlohmann::json experimentStatsJson(const EnvironmentSession& env) {
     nlohmann::json stats = nlohmann::json::array();
     if (env.type != EnvType::Absorbance) return stats;
+    size_t k = 0;
     for (const auto& c : env.curves) {
-        if (c.curveY.empty()) continue;
-        nlohmann::json s;
-        s["label"] = env.curveLabel(c);
-        const auto& y = c.curveY;
-        auto [mn, mx] = std::minmax_element(y.begin(), y.end());
-        double sum = 0.0;
-        for (double v : y) sum += v;
-        double mean = sum / static_cast<double>(y.size());
-        double sq = 0.0;
-        for (double v : y) sq += (v - mean) * (v - mean);
-        s["min"] = *mn;
-        s["max"] = *mx;
-        s["mean"] = mean;
-        s["std"] = std::sqrt(sq / static_cast<double>(y.size()));
-        stats.push_back(std::move(s));
+        if (!c.curveY.empty()) {
+            nlohmann::json s;
+            s["label"] = env.curveLabel(c, k);
+            const auto& y = c.curveY;
+            auto [mn, mx] = std::minmax_element(y.begin(), y.end());
+            double sum = 0.0;
+            for (double v : y) sum += v;
+            double mean = sum / static_cast<double>(y.size());
+            double sq = 0.0;
+            for (double v : y) sq += (v - mean) * (v - mean);
+            s["min"] = *mn;
+            s["max"] = *mx;
+            s["mean"] = mean;
+            s["std"] = std::sqrt(sq / static_cast<double>(y.size()));
+            stats.push_back(std::move(s));
+        }
+        ++k;
     }
     return stats;
 }
@@ -2006,7 +2259,7 @@ bool crossSaveExperiment(AppState& s, EnvironmentSession& env,
     }
     nlohmann::json fps;
     for (const auto& [key, fp] : env.storedFingerprints)
-        fps[key] = fingerprintToJson(fp);
+        fps[key] = memberSnapshotToJson(fp);
     std::map<std::string, std::vector<double>> results;
     if (env.type == EnvType::Absorbance && env.computed) {
         size_t k = 0;
@@ -2055,7 +2308,7 @@ bool crossLoadExperiments(AppState& s, const std::string& path, std::string& err
             experimentApplyConfig(*env, config);
             for (auto it = fps.begin(); it != fps.end(); ++it)
                 if (it.value().is_object())
-                    env->storedFingerprints[it.key()] = fingerprintFromJson(it.value());
+                    env->storedFingerprints[it.key()] = memberSnapshotFromJson(it.value());
             // Results loaded directly — same code path as computing (curveY
             // derived via applyYMode), so no secondary math exists in the
             // loader: what was plotted is what is stored (bitwise).

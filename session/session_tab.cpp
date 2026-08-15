@@ -275,11 +275,12 @@ WrappedRow renderWrappedRow(int id, const std::vector<std::string>& lines,
 }
 
 // "Delete"-labeled row button, styled like the absorbance curve Delete
-// (transparent fill, white outline, subtle tint on hover/click). Placed at
-// the record's right edge with a vertical accent line at the rightmost side
-// (white on hover over the record) — absorbance-curve-list look. Renders
-// AFTER the row so the button sits on top of the row rect. Returns the
-// button's width so callers can reserve the right zone in the wrap width.
+// (transparent fill, white outline; bright-red fill + black text on hover,
+// darker red while clicked). Placed at the record's right edge with a
+// vertical accent line at the rightmost side (white on hover over the record)
+// — absorbance-curve-list look. Renders AFTER the row so the button sits on
+// top of the row rect. Returns the button's width so callers can reserve the
+// right zone in the wrap width.
 float rowDeleteButtonWidth() {
     return ImGui::CalcTextSize("Delete").x +
            ImGui::GetStyle().FramePadding.x * 2.0f + 2.0f;
@@ -293,11 +294,17 @@ bool renderRowRemoveButton(int id, const ImVec2& rowMin, const ImVec2& rowMax,
     const ImVec2 saveCursor = ImGui::GetCursorScreenPos();   // below the row
     ImGui::PushID(id);
     ImGui::SetCursorScreenPos(ImVec2(rowMax.x - delW - padX, rowMin.y + padY));
+    // The text color must be known before Button() renders, so probe the
+    // exact rect directly (matches ImGui's own hover hit-test modulo rounding).
+    const ImVec2 delMin = ImGui::GetCursorScreenPos();
+    const bool delHovered = ImGui::IsMouseHoveringRect(
+        delMin, ImVec2(delMin.x + delW, delMin.y + delH));
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.0f, 1.0f, 1.0f, 0.14f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(1.0f, 1.0f, 1.0f, 0.28f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.0f, 0.2f, 0.2f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.75f, 0.1f, 0.1f, 1.0f));
     ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(1.0f, 1.0f, 1.0f, 0.8f));
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_Text,
+        delHovered ? ImVec4(0.0f, 0.0f, 0.0f, 1.0f) : ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 3.0f);
     const bool pressed = ImGui::Button("Delete", ImVec2(delW, delH));
@@ -525,21 +532,20 @@ void SessionTab::renderActiveExperimentsPanel() {
                              rowDeleteButtonWidth() - 14.0f;
         const std::vector<std::string> titleLines =
             wrapToLines(env->tabLabel(), availW, 2);
-        // Absorbance: picked samples. Comparator: included datasets (empty +
-        // not explicit = auto-all, i.e. every open workspace tab). Type
-        // first, then the count, then the persisted archive size (if any).
+        // Absorbance: picked samples. Comparator: the artifact type. Type
+        // first, then the count (Absorbance) or artifact (Comparator), then
+        // the persisted archive size (Absorbance only — comparator archives
+        // hold no per-experiment results).
         std::string meta = std::string(experimentTypeName(env->type)) + " · ";
         if (env->type == EnvType::Absorbance) {
             meta += std::to_string(env->curves.size()) + " curve" +
                     (env->curves.size() == 1 ? "" : "s");
         } else {
-            const size_t n = env->comparatorKeys.empty() && !env->comparatorKeysExplicit
-                                 ? appState.sessions.size()
-                                 : env->comparatorKeys.size();
-            meta += std::to_string(n) + " dataset" + (n == 1 ? "" : "s");
+            meta += artifactLabel(static_cast<ComparatorArtifact>(env->artifactSelector));
         }
         const std::string sizeMB = formatSizeMB(env->sizeBytes);
-        if (!sizeMB.empty()) meta += " · " + sizeMB;
+        if (!sizeMB.empty() && env->type == EnvType::Absorbance)
+            meta += " · " + sizeMB;
         std::vector<std::string> lines = titleLines;
         for (auto& l : wrapToLines(meta, availW, 1)) lines.push_back(std::move(l));
         if (!env->comment.empty())
