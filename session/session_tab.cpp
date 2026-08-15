@@ -236,10 +236,9 @@ struct WrappedRow {
 };
 
 WrappedRow renderWrappedRow(int id, const std::vector<std::string>& lines,
-                            int titleLines) {
+                            int titleLines, float indentX = 10.0f) {
     const float lineH = ImGui::GetTextLineHeightWithSpacing();
     const float padY = 4.0f;
-    const float padX = 10.0f;
     const float height = padY * 2.0f + static_cast<float>(lines.size()) * lineH;
     WrappedRow out;
     ImGui::PushID(id);
@@ -253,8 +252,12 @@ WrappedRow renderWrappedRow(int id, const std::vector<std::string>& lines,
     // Selectable trips ImGui's boundary guard (items never registered there).
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImU32 normal = ImGui::GetColorU32(ImGuiCol_Text);
-    const ImU32 dim = ImGui::GetColorU32(ImGuiCol_TextDisabled);
-    ImVec2 pos(rmin.x + padX, rmin.y + padY);
+    // Meta lines: dim gray, brightened on row hover — TextDisabled is nearly
+    // unreadable on the Selectable's HeaderHovered fill.
+    const ImU32 dim = out.hovered
+        ? ImGui::GetColorU32(ImVec4(0.80f, 0.80f, 0.80f, 1.0f))
+        : ImGui::GetColorU32(ImGuiCol_TextDisabled);
+    ImVec2 pos(rmin.x + indentX, rmin.y + padY);
     for (size_t l = 0; l < lines.size(); ++l) {
         dl->AddText(ImGui::GetFont(), ImGui::GetFontSize(), pos,
                     static_cast<int>(l) < titleLines ? normal : dim,
@@ -277,7 +280,7 @@ float rowDeleteButtonWidth() {
 }
 
 bool renderRowRemoveButton(int id, const ImVec2& rowMin, const ImVec2& rowMax,
-                           bool rowHovered) {
+                           bool rowHovered, float lineIndent) {
     const float delW = rowDeleteButtonWidth();
     const float delH = ImGui::GetFrameHeight();
     const float padX = 10.0f, padY = 4.0f;
@@ -294,14 +297,15 @@ bool renderRowRemoveButton(int id, const ImVec2& rowMin, const ImVec2& rowMax,
     const bool pressed = ImGui::Button("Delete", ImVec2(delW, delH));
     ImGui::PopStyleVar(2);
     ImGui::PopStyleColor(5);
-    // Vertical accent line at the left edge, inside the text indentation
-    // (white while hovered) — absorbance-curve-list look.
+    // Vertical accent line on the left, indented from the panel edge (white
+    // while hovered) — absorbance-curve-list look. Text must start past the
+    // line's right edge (callers pass a matching indentX to renderWrappedRow).
     const ImU32 lineCol = rowHovered
         ? ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, 1.0f))
         : ImGui::ColorConvertFloat4ToU32(modalAccent());
     ImGui::GetWindowDrawList()->AddRectFilled(
-        ImVec2(rowMin.x + 2.0f, rowMin.y + 2.0f),
-        ImVec2(rowMin.x + 6.0f, rowMax.y - 2.0f), lineCol);
+        ImVec2(rowMin.x + lineIndent, rowMin.y + 2.0f),
+        ImVec2(rowMin.x + lineIndent + 4.0f, rowMax.y - 2.0f), lineCol);
     // Restore the cursor below the row (in-bounds) and submit a zero-size
     // Dummy: it clears the SetCursorScreenPos flag (implicitly set above),
     // which otherwise trips ImGui's "extend window/parent boundaries" assert
@@ -481,9 +485,9 @@ void SessionTab::renderDatasetsPanel() {
         for (auto& l : wrapToLines(meta, availW, 2)) lines.push_back(std::move(l));
         const WrappedRow row =
             renderWrappedRow(static_cast<int>(i), lines,
-                             static_cast<int>(nameLines.size()));
+                             static_cast<int>(nameLines.size()), 24.0f);
         if (renderRowRemoveButton(static_cast<int>(i), row.min, row.max,
-                                  row.hovered)) {
+                                  row.hovered, 16.0f)) {
             g_removeSourceId = src.id;
             g_showRemoveConfirm = true;
             appState.needsRedraw = true;
@@ -492,9 +496,6 @@ void SessionTab::renderDatasetsPanel() {
             openEmbeddedInNewTab(appState, appState.sessionTab.multiWorkspacePath,
                                  src.id);
         }
-        if (row.hovered)
-            ImGui::SetTooltip("%s (%zu measurement%s)", src.originPath.c_str(),
-                              src.memberCount, src.memberCount == 1 ? "" : "s");
     }
     ImGui::EndChild();
     renderAddDatasetButton();
@@ -519,18 +520,20 @@ void SessionTab::renderActiveExperimentsPanel() {
         const std::vector<std::string> titleLines =
             wrapToLines(env->tabLabel(), availW, 2);
         // Absorbance: picked samples. Comparator: included datasets (empty +
-        // not explicit = auto-all, i.e. every open workspace tab).
-        std::string meta;
+        // not explicit = auto-all, i.e. every open workspace tab). Type
+        // first, then the count, then the persisted archive size (if any).
+        std::string meta = std::string(experimentTypeName(env->type)) + " · ";
         if (env->type == EnvType::Absorbance) {
-            meta = std::to_string(env->curves.size()) + " curve" +
-                   (env->curves.size() == 1 ? "" : "s");
+            meta += std::to_string(env->curves.size()) + " curve" +
+                    (env->curves.size() == 1 ? "" : "s");
         } else {
             const size_t n = env->comparatorKeys.empty() && !env->comparatorKeysExplicit
                                  ? appState.sessions.size()
                                  : env->comparatorKeys.size();
-            meta = std::to_string(n) + " dataset" + (n == 1 ? "" : "s");
+            meta += std::to_string(n) + " dataset" + (n == 1 ? "" : "s");
         }
-        meta += " · " + std::string(experimentTypeName(env->type));
+        const std::string sizeMB = formatSizeMB(env->sizeBytes);
+        if (!sizeMB.empty()) meta += " · " + sizeMB;
         std::vector<std::string> lines = titleLines;
         for (auto& l : wrapToLines(meta, availW, 1)) lines.push_back(std::move(l));
         if (!env->comment.empty())
@@ -540,7 +543,7 @@ void SessionTab::renderActiveExperimentsPanel() {
             renderWrappedRow(static_cast<int>(i), lines,
                              static_cast<int>(titleLines.size()));
         if (renderRowRemoveButton(static_cast<int>(i), row.min, row.max,
-                                  row.hovered)) {
+                                  row.hovered, 2.0f)) {
             // Deletion happens HERE (the tab selector's close only
             // deactivates). Dirty/persisted instances confirm via the modal.
             env->requestDelete();
@@ -548,11 +551,6 @@ void SessionTab::renderActiveExperimentsPanel() {
         }
         if (row.clicked) {
             activateExperiment(appState, static_cast<int>(i));
-        }
-        if (row.hovered) {
-            ImGui::SetTooltip("%s",
-                env->type == EnvType::Absorbance ? "Absorbance against a stored reference."
-                                                 : "Average-spectrum comparison overlay.");
         }
     }
     ImGui::EndChild();
@@ -563,9 +561,9 @@ void SessionTab::renderAvailableExperimentsPanel() {
     ImGui::BeginChild("##availableEnvsList", ImVec2(0.0f, 0.0f), false,
                       ImGuiWindowFlags_AlwaysVerticalScrollbar);
     renderExperimentTypeCard("Absorbance",
-                      "Absorbance spectra against a stored background reference.",
+                      "Calculate absorbance and transmission spectra.",
                       EnvType::Absorbance);
-    renderExperimentTypeCard("Comparator", "Pairwise comparison of two datasets.",
+    renderExperimentTypeCard("Comparator", "Compare information from multiple datasets",
                       EnvType::Comparator);
     ImGui::EndChild();
 }
@@ -590,12 +588,26 @@ static void renderExperimentTypeCard(const char* title, const char* desc, EnvTyp
         // Hover highlight matching the Active Experiments rows (Selectable
         // hover = ImGuiCol_HeaderHovered). Child windows share the parent's
         // draw list, so the fill lands under the text, inside the child rect.
-        if (ImGui::IsWindowHovered()) {
+        const bool hovered = ImGui::IsWindowHovered();
+        if (hovered) {
             const ImVec2 wpos = ImGui::GetWindowPos();
             const ImVec2 wsize = ImGui::GetWindowSize();
             ImGui::GetWindowDrawList()->AddRectFilled(
                 wpos, ImVec2(wpos.x + wsize.x, wpos.y + wsize.y),
                 ImGui::ColorConvertFloat4ToU32(GetAccentHovered(ac)), 6.0f);
+        }
+        // Vertical accent line at the left edge (white on hover) — matches
+        // the Active Experiments rows; text starts at WindowPadding.x (10),
+        // clear of the line (2..6).
+        {
+            const ImVec2 wpos = ImGui::GetWindowPos();
+            const ImVec2 wsize = ImGui::GetWindowSize();
+            const ImU32 lineCol = hovered
+                ? ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, 1.0f))
+                : ImGui::ColorConvertFloat4ToU32(modalAccent());
+            ImGui::GetWindowDrawList()->AddRectFilled(
+                ImVec2(wpos.x + 2.0f, wpos.y + 2.0f),
+                ImVec2(wpos.x + 6.0f, wpos.y + wsize.y - 2.0f), lineCol);
         }
         ImGui::TextUnformatted(title);
         {
@@ -610,8 +622,11 @@ static void renderExperimentTypeCard(const char* title, const char* desc, EnvTyp
                         ImGui::ColorConvertFloat4ToU32(modalAccent()), newLabel);
         }
         ImGui::SetCursorPosY(8.0f + bigH + 6.0f);
-        ImGui::PushStyleColor(ImGuiCol_Text,
-                              ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        // Description: dim gray, brightened on hover (TextDisabled is nearly
+        // unreadable on the accent hover fill).
+        ImGui::PushStyleColor(ImGuiCol_Text, hovered
+            ? ImVec4(0.80f, 0.80f, 0.80f, 1.0f)
+            : ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
         ImGui::PushTextWrapPos(ImGui::GetContentRegionMax().x);
         ImGui::TextWrapped("%s", desc);
         ImGui::PopTextWrapPos();

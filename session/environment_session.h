@@ -88,6 +88,9 @@ public:
     EnvType type = EnvType::Absorbance;
     std::string id;                      // stable experiment id in the .cross.h5
                                          // ("" = transient, never saved)
+    // HDF5 storage footprint of the persisted experiments/<id> group,
+    // recomputed on every project load and save (in-memory only).
+    uint64_t sizeBytes = 0;
     std::string instanceName;            // "Absorbance 1", ... (unique window title)
     // RENAME-STABLE identity (bugfix 2026-08-14): generated once at
     // construction, never changes. Tab-strip keys ("exp:<stripKey>") and the

@@ -115,15 +115,16 @@ void writeManifest(hid_t file, const nlohmann::json& manifest) {
     h5WriteVlenString(file, "archive.json", manifest.dump());
 }
 
-// Rewrite the @summary attribute of a source group.
+// Rewrite the @summary attribute of a source group. The original file path
+// is deliberately NOT stored (nothing in the archive should reference the
+// pre-embedding location).
 void writeSourceSummary(hid_t file, const std::string& id, const Workspace& ws,
-                        const std::string& name, const std::string& originPath) {
+                        const std::string& name) {
     H5GroupGuard g(H5Gopen2(file, sourcePrefix(id).c_str(), H5P_DEFAULT));
     if (g.id < 0) throw H5Error("cross: source group '" + id + "' missing");
     nlohmann::json summary = {
         {"id", id},
         {"name", name},
-        {"originPath", originPath},
         {"memberCount", sourceMemberCount(ws)},
         {"createdIso", h5UtcNowIso()},
     };
@@ -248,9 +249,8 @@ bool crossAddSource(const std::string& path, const std::string& srcPath,
             H5Store::saveGroup(tmp, prefix, ws);            // embed the content
             H5FileGuard file(H5Fopen(tmp.c_str(), H5F_ACC_RDWR, H5P_DEFAULT));
             if (file.id < 0) throw H5Error("crossAddSource: reopen failed");
-            writeSourceSummary(file.id, id, ws, name, srcPath);
+            writeSourceSummary(file.id, id, ws, name);
             appendSourceToManifest(file.id, {{"id", id}, {"name", name},
-                                             {"originPath", srcPath},
                                              {"memberCount", sourceMemberCount(ws)},
                                              {"createdIso", h5UtcNowIso()}});
         }, err, slowSave)) {
@@ -298,6 +298,21 @@ void crossRefreshSourceSizes(SessionTabState& st, const std::string& path) {
     }
 }
 
+// Same for persisted experiments — sizes shown in Active Experiments follow
+// the on-disk state (transient instances have no group: sizeBytes stays 0).
+void crossRefreshExperimentSizes(AppState& s, const std::string& path) {
+    try {
+        H5FileGuard file(H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT));
+        if (file.id < 0) return;
+        for (auto& env : s.experiments) {
+            if (env->id.empty()) { env->sizeBytes = 0; continue; }
+            env->sizeBytes = h5GroupStorage(file.id, experimentPrefix(env->id));
+        }
+    } catch (...) {
+        // Best-effort: leave stale cached sizes on failure.
+    }
+}
+
 bool crossLoadInto(SessionTabState& st, const std::string& path, std::string& err) {
     try {
         H5FileGuard file(H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT));
@@ -309,7 +324,6 @@ bool crossLoadInto(SessionTabState& st, const std::string& path, std::string& er
             SourceSummary sum;
             sum.id = e.value("id", "");
             sum.name = e.value("name", sum.id);
-            sum.originPath = e.value("originPath", "");
             sum.memberCount = e.value("memberCount", 0u);
             sum.createdIso = e.value("createdIso", "");
             sum.open = e.value("open", false);
@@ -375,7 +389,7 @@ void crossSaveSource(const std::string& crossPath, const std::string& sourceId,
         H5Store::saveGroup(tmp, prefix, ws);
         H5FileGuard file(H5Fopen(tmp.c_str(), H5F_ACC_RDWR, H5P_DEFAULT));
         if (file.id < 0) throw H5Error("crossSaveSource: reopen failed");
-        writeSourceSummary(file.id, sourceId, ws, name, "");
+        writeSourceSummary(file.id, sourceId, ws, name);
         // Refresh the manifest entry in the same save (member count etc.).
         nlohmann::json manifest = readManifest(file.id);
         for (auto& e : manifest["sources"]) {

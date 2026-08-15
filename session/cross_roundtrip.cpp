@@ -12,6 +12,7 @@
 //   fts_cross_roundtrip save-source <cross.h5> <id> <src.h5>
 // Exit 0 = success, 1 = failure (message on stderr).
 
+#include <cinttypes>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -63,8 +64,8 @@ int cmdList(const std::string& crossPath) {
     std::string err;
     if (!crossLoadInto(st, crossPath, err)) return fail(err);
     for (const auto& src : st.sources)
-        std::printf("%s\t%s\t%zu\t%s\n", src.id.c_str(), src.name.c_str(),
-                    src.memberCount, src.originPath.c_str());
+        std::printf("%s\t%s\t%zu\t%" PRIu64 "\n", src.id.c_str(), src.name.c_str(),
+                    src.memberCount, src.sizeBytes);
     return 0;
 }
 

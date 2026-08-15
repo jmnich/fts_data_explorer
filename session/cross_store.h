@@ -12,7 +12,7 @@ struct AppState;
 //
 //   archive.json                     # manifest — SOURCE OF TRUTH
 //     { "version": 2,
-//       "sources": [ {"id","name","originPath","memberCount","createdIso"}, … ] }
+//       "sources": [ {"id","name","memberCount","createdIso"}, … ] }
 //   sources/<id>/                    # embedded workspace content (@format on
 //     @summary                       #   the group; workspace.json preserved
 //     <workspace content>            #   verbatim; no @path references)
@@ -50,6 +50,9 @@ bool crossLoad(AppState& s, const std::string& path, std::string& err);
 // sizeBytes (called after archive saves; the Session-tab sizes must follow
 // the on-disk state).
 void crossRefreshSourceSizes(SessionTabState& st, const std::string& path);
+// Same for persisted experiments (experiments/<id> groups; transient
+// instances with an empty id keep sizeBytes == 0).
+void crossRefreshExperimentSizes(AppState& s, const std::string& path);
 // Embedded source → in-memory Workspace (no temp files, no extraction:
 // workspaceRead operates on the in-memory Workspace).
 Workspace crossLoadSource(const std::string& crossPath, const std::string& sourceId,

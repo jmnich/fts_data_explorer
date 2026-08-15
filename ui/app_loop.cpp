@@ -515,8 +515,12 @@ static void drawTabStatusMark(const char* labelText, const char* mark,
     const ImVec2 rmax = ImGui::GetItemRectMax();
     const float padX = ImGui::GetStyle().FramePadding.x;
     const ImVec2 markSize = ImGui::CalcTextSize(mark);
+    // Drawn right after the label text, flush (no gap). A permanent marker
+    // slot is reserved in the tab width (renderTabStrip's SetNextItemWidth),
+    // so the marker always fits between the label and the close × — no
+    // overlap, no clamp.
     ImGui::GetWindowDrawList()->AddText(
-        ImVec2(rmin.x + padX + ImGui::CalcTextSize(labelText).x + 2.0f + extraOffset,
+        ImVec2(rmin.x + padX + ImGui::CalcTextSize(labelText).x + extraOffset,
                rmin.y + (rmax.y - rmin.y - markSize.y) * 0.5f),
         ImGui::GetColorU32(ImGuiCol_Text), mark);
 }
@@ -710,20 +714,35 @@ static float renderTabStrip() {
             const std::string tabText = t.isWs ? sess->label() : env->instanceName;
             const std::string label = tabText +
                 (t.isWs ? "##ws" : "##env") + t.key.substr(3);
+            // Permanent status-marker slot: ImGui reserves the close-button
+            // zone in the tab width, but a manually drawn " *"/" ⚠" after the
+            // label would still land on the × (the gap between the label end
+            // and the zone is only ItemInnerSpacing). Explicitly widen the
+            // tab (SetNextItemWidth → RequestedWidth) by the marker width so
+            // the markers always fit between the label and the × — and the
+            // tab size never changes on hover or when a marker appears.
+            const float markerReserve = ImGui::CalcTextSize("*").x +
+                                        ImGui::CalcTextSize("\xE2\x9A\xA0").x +
+                                        4.0f;
+            ImGui::SetNextItemWidth(
+                ImGui::CalcTextSize(tabText.c_str()).x +
+                2.0f * ImGui::GetStyle().FramePadding.x +
+                ImGui::GetStyle().ItemInnerSpacing.x + ImGui::GetFontSize() +
+                markerReserve);
             bool open = true;
             const bool shown = ImGui::BeginTabItem(label.c_str(), &open,
                 isActive ? ImGuiTabItemFlags_SetSelected : 0);
             if (t.isWs) {
                 const bool dirty = isActive ? appState.workspaceDirty() : sess->isDirty();
-                if (dirty) drawTabStatusMark(tabText.c_str(), " *");
+                if (dirty) drawTabStatusMark(tabText.c_str(), "*");
             } else {
                 if (env->dirty) {
-                    drawTabStatusMark(tabText.c_str(), " *");
+                    drawTabStatusMark(tabText.c_str(), "*");
                     if (env->stale)
-                        drawTabStatusMark(tabText.c_str(), " \xE2\x9A\xA0",
-                                          ImGui::CalcTextSize(" *").x + 4.0f);
+                        drawTabStatusMark(tabText.c_str(), "\xE2\x9A\xA0",
+                                          ImGui::CalcTextSize("*").x);
                 } else if (env->stale) {
-                    drawTabStatusMark(tabText.c_str(), " \xE2\x9A\xA0");
+                    drawTabStatusMark(tabText.c_str(), "\xE2\x9A\xA0");
                 }
             }
             // Click detection runs OUTSIDE the shown gate: BeginTabItem

@@ -2108,6 +2108,7 @@ bool crossLoadExperiments(AppState& s, const std::string& path, std::string& err
                              });
         }
         if (!entries.empty()) s.needsRedraw = true;
+        crossRefreshExperimentSizes(s, path);   // sizes follow the archive
         return true;
     } catch (const std::exception& e) {
         err = e.what();

@@ -114,7 +114,6 @@ enum class ActiveTabKind { Session, Workspace, Experiment };
 struct SourceSummary {                  // mirrors @summary in the archive
     std::string id;                     // sources/<id>/ group name
     std::string name;                   // display name (file stem)
-    std::string originPath;             // informational only
     size_t memberCount = 0;
     std::string createdIso;             // ISO-8601 UTC
     // HDF5 storage footprint of the embedded sources/<id> group, computed

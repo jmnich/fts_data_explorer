@@ -344,6 +344,7 @@ void saveEverything(AppState& s) {
         // The archive was rewritten — refresh the cached per-source sizes so
         // the Session tab reflects the new on-disk state.
         crossRefreshSourceSizes(s.sessionTab, s.sessionTab.multiWorkspacePath);
+        crossRefreshExperimentSizes(s, s.sessionTab.multiWorkspacePath);
     }
     s.needsRedraw = true;
     // Toast only when there is something that could hold state (launch welcome
