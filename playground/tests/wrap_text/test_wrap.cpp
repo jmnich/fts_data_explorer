@@ -32,6 +32,18 @@ int main() {
     l = wrapToLinesCore("ab", 15.0f, 5, w10, 10.0f);   // 15px fits one char
     assert(l.size() == 2 && l[0] == "a" && l[1] == "b");
 
+    // 7. '\n' is a hard break: never embedded in a line, text resumes after.
+    l = wrapToLinesCore("abc\ndef", 35.0f, 5, w10, 10.0f);   // 35px = 3 chars
+    assert(l.size() == 2 && l[0] == "abc" && l[1] == "def");
+
+    // 8. Multiline text that overflows clamps + ellipsizes the last line.
+    l = wrapToLinesCore("abc\ndefghijk", 35.0f, 2, w10, 10.0f);
+    assert(l.size() == 2 && l[0] == "abc" && l[1] == "de…");
+
+    // 9. Leading / doubled newlines are skipped, not empty lines.
+    l = wrapToLinesCore("\nabc\n\n", 35.0f, 5, w10, 10.0f);
+    assert(l.size() == 1 && l[0] == "abc");
+
     std::printf("wrap_text: all checks passed\n");
     return 0;
 }

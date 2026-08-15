@@ -21,6 +21,7 @@
 #include "theme.h"
 #include "workspace_reader.h"
 #include "workspace_session.h"
+#include "wrap_text.h"
 
 #include <GLFW/glfw3.h>
 #include <imgui.h>
@@ -881,7 +882,7 @@ void EnvironmentSession::renderAbsorbanceConfig() {
     const float lineH = ImGui::GetTextLineHeightWithSpacing();
     const float addButtonH =
         ImGui::GetFrameHeight() + ImGui::GetStyle().FramePadding.y * 2.0f + 8.0f;
-    const float bottomReserve = addButtonH + 7.0f * lineH;
+    const float bottomReserve = addButtonH + commentBoxHeight() + 3.0f * lineH;
     ImGui::BeginChild("##absorbanceCurves", ImVec2(0.0f, -bottomReserve), true,
                       ImGuiWindowFlags_AlwaysVerticalScrollbar);
 
@@ -984,10 +985,30 @@ void EnvironmentSession::renderAbsorbanceConfig() {
 
 // Comment editor (multi-line), placed above the plot in both env types.
 // The comment is the same string shown grey in the Active Experiments list.
+// Height auto-sizes to the wrapped content (never below 10 lines, never more
+// than half the panel height — beyond the cap the box scrolls internally).
+float EnvironmentSession::commentBoxHeight() const {
+    const float lineH = ImGui::GetFontSize();
+    // Match InputTextMultiline's wrap width (content region minus scrollbar,
+    // plus a small fudge so the box is never shorter than the content).
+    const float wrapW = ImGui::GetContentRegionAvail().x -
+                        ImGui::GetStyle().ScrollbarSize - 2.0f;
+    int n = static_cast<int>(wrapToLines(commentBuf, wrapW, 4096).size());
+    const size_t len = std::strlen(commentBuf);
+    if (len > 0 && commentBuf[len - 1] == '\n') ++n;   // trailing blank line
+    const float framePad = 2.0f * ImGui::GetStyle().FramePadding.y;
+    const float minH = 10.0f * lineH + framePad;
+    const float contentH = static_cast<float>(n) * lineH + framePad;
+    const float maxH = 0.5f * (ImGui::GetWindowContentRegionMax().y -
+                               ImGui::GetWindowContentRegionMin().y);
+    return std::clamp(contentH, minH, maxH);
+}
+
 void EnvironmentSession::renderCommentEditor() {
     ImGui::TextUnformatted("Comment:");
     if (ImGui::InputTextMultiline("##envComment", commentBuf, sizeof(commentBuf),
-                                  ImVec2(-FLT_MIN, 3.0f * ImGui::GetTextLineHeightWithSpacing()))) {
+                                  ImVec2(-FLT_MIN, commentBoxHeight()),
+                                  ImGuiInputTextFlags_WordWrap)) {
         comment = commentBuf;
         dirty = true;
         appState.needsRedraw = true;
@@ -1023,7 +1044,15 @@ void EnvironmentSession::renderComparatorConfig() {
     }
 
     ImGui::Separator();
+    // Dataset list: scrollable child taking the remaining panel height (the
+    // list scrolls itself when too many datasets to fit); the comment stays
+    // pinned at the bottom — same scheme as the absorbance curve list.
+    const float reserve = commentBoxHeight() +
+                          3.0f * ImGui::GetTextLineHeightWithSpacing();
+    ImGui::BeginChild("##comparatorDatasets", ImVec2(0.0f, -reserve), true,
+                      ImGuiWindowFlags_AlwaysVerticalScrollbar);
     renderDatasetSelector();
+    ImGui::EndChild();
 
     ImGui::Separator();
     renderCommentEditor();

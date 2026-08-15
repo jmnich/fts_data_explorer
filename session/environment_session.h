@@ -251,6 +251,10 @@ private:
     // Docked "Export" panel (comparator): X-range mode + manual min/max.
     void renderExportWindow();
     void renderCommentEditor();
+    // Comment box height in px: auto-sizes to the wrapped content, never
+    // below 10 lines (recomputed every frame, so typing and dock resizes
+    // reflow the box automatically).
+    float commentBoxHeight() const;
     // Common overlay plot with spectrum-view navigation (locked/tight/all Y,
     // shift+drag range, ESC fit-all, arrows pan, wheel zoom).
     void renderPlot(const std::vector<ComparatorCurve>& curves,

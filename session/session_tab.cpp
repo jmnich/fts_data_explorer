@@ -173,8 +173,6 @@ void renderAddDatasetButton() {
 // Accent-framed identity card: filename, shortened path (tooltip = full),
 // dataset count + on-disk size in MB. Path wraps (clamped to 2 lines) instead
 // of the old manual "…" truncation.
-std::vector<std::string> wrapToLines(const std::string& text, float maxWidth,
-                                     int maxLines);   // defined below
 void renderMultiWorkspaceCard(const std::string& path) {
     const AccentColor ac = StringToAccentColor(appState.currentAccentColor);
     const float cardW =
@@ -223,18 +221,6 @@ void renderCenteredEmptyLine(const char* line, float offsetFrac) {
     ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
         (ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(line).x) * 0.5f);
     ImGui::TextDisabled("%s", line);
-}
-
-// Word-wrap `text` to fit `maxWidth` px, at most `maxLines` lines. When
-// clamped, the last line is trimmed and suffixed with "…". Char-based wrap
-// via CalcTextSize (no dependency on ImGui's internal wrap code).
-std::vector<std::string> wrapToLines(const std::string& text, float maxWidth,
-                                     int maxLines) {
-    return wrapToLinesCore(text, maxWidth, maxLines,
-                           [](char c) {
-                               return ImGui::CalcTextSize(&c, &c + 1).x;
-                           },
-                           ImGui::CalcTextSize("…").x);
 }
 
 // One clickable row whose content is pre-wrapped lines drawn manually inside
