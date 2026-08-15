@@ -273,7 +273,7 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
         avgGridCol.w *= appState->gridAlpha;
         ImPlot::PushStyleColor(ImPlotCol_AxisGrid, avgGridCol);
     }
-    if (ImPlot::BeginPlot("AverageViewPlot", ImVec2(-1, -1), plot_flags)) {
+    if (ImPlot::BeginPlot(workspacePlotId("AverageViewPlot").c_str(), ImVec2(-1, -1), plot_flags)) {
 
         ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoTickMarks;
         ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;

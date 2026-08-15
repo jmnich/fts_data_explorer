@@ -1086,7 +1086,7 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
     ImPlotFlags plot_flags = ImPlotFlags_NoLegend;
     if (largeData)
         plot_flags |= ImPlotFlags_NoInputs;
-    if (ImPlot::BeginPlot("100% transmission line", ImVec2(-1, -1), plot_flags)) {
+    if (ImPlot::BeginPlot(workspacePlotId("100% transmission line").c_str(), ImVec2(-1, -1), plot_flags)) {
 
         // Lazy-compute: recompute all if stale, then fill missing per-file caches
         if (needsRecompute) {
@@ -1519,7 +1519,7 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
             t100SdGridCol.w *= appState->gridAlpha;
             ImPlot::PushStyleColor(ImPlotCol_AxisGrid, t100SdGridCol);
         }
-        if (ImPlot::BeginPlot("100% transmission line standard deviation", ImVec2(-1, stdPlotHeight),
+        if (ImPlot::BeginPlot(workspacePlotId("100% transmission line standard deviation").c_str(), ImVec2(-1, stdPlotHeight),
                               ImPlotFlags_NoLegend)) {
             ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoTickMarks;
             ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks | ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_RangeFit;

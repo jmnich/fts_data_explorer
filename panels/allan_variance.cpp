@@ -182,7 +182,7 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
             allan3dGridCol.w *= appState->gridAlpha;
             ImPlot3D::PushStyleColor(ImPlot3DCol_AxisGrid, allan3dGridCol);
         }
-        if (ImPlot3D::BeginPlot("Allan3DSurface", ImVec2(-1, surfaceHeight), plot3dFlags)) {
+        if (ImPlot3D::BeginPlot(workspacePlotId("Allan3DSurface").c_str(), ImVec2(-1, surfaceHeight), plot3dFlags)) {
             const int M = numSurfaceWavelengths;
             const int N = numSurfaceTaus;
             const int total = M * N;
@@ -403,7 +403,7 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
             allan2dGridCol.w *= appState->gridAlpha;
             ImPlot::PushStyleColor(ImPlotCol_AxisGrid, allan2dGridCol);
         }
-        if (ImPlot::BeginPlot("AllanViewPlot", ImVec2(-1, plot2dHeight), plot_flags)) {
+        if (ImPlot::BeginPlot(workspacePlotId("AllanViewPlot").c_str(), ImVec2(-1, plot2dHeight), plot_flags)) {
 
             ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
             ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Log10);

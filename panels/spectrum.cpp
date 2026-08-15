@@ -583,7 +583,7 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
             specGridCol.w *= appState->gridAlpha;
             ImPlot::PushStyleColor(ImPlotCol_AxisGrid, specGridCol);
         }
-        if (ImPlot::BeginPlot("Spectrum", ImVec2(-1, -1), plot_flags)) {
+        if (ImPlot::BeginPlot(workspacePlotId("Spectrum").c_str(), ImVec2(-1, -1), plot_flags)) {
             plotRendered = true;
 
             // Setup axes with conditional auto-fit behavior (no labels to match Interferogram panel style)

@@ -1924,6 +1924,45 @@ void AppLoop::renderUI() {
                     }
                 }
 
+                // Workspace kind: re-apply the per-node selected windows
+                // captured in the layout snapshot's sidecar (see
+                // layout_persistence.h). ImGui's ini restore skips nodes that
+                // already exist (DockContextBuildNodesFromSettings), so the
+                // saved selection must be re-asserted here, BEFORE DockSpace
+                // lays out the tab bars. Nodes are looked up by ID — the
+                // workspace panels may not be attached to their nodes yet at
+                // this point (window->DockNode is NULL after the other kind
+                // detached them), so the seed goes to the node itself, which
+                // DockNodeAddTabBar inherits when the windows attach later.
+                if (appState.activeTabKind == ActiveTabKind::Workspace) {
+                    static std::map<ImGuiID, std::string> pendingSel;
+                    static int pendingSelFrames = 0;
+                    auto fresh = takeRestoredNodeSelection();
+                    if (!fresh.empty()) {
+                        for (auto& [id, name] : fresh) pendingSel[id] = std::move(name);
+                        pendingSelFrames = 0;
+                    }
+                    if (!pendingSel.empty()) {
+                        ImGuiDockContext* dc =
+                            &ImGui::GetCurrentContext()->DockContext;
+                        for (auto it = pendingSel.begin(); it != pendingSel.end();) {
+                            ImGuiDockNode* node =
+                                (ImGuiDockNode*)dc->Nodes.GetVoidPtr(it->first);
+                            ImGuiWindow* w =
+                                ImGui::FindWindowByName(it->second.c_str());
+                            if (node && w) {
+                                node->SelectedTabId = w->TabId;
+                                if (node->TabBar)
+                                    node->TabBar->NextSelectedTabId = w->TabId;
+                                it = pendingSel.erase(it);
+                            } else {
+                                ++it;   // retry next frame (windows attach mid-frame)
+                            }
+                        }
+                        if (++pendingSelFrames > 120) pendingSel.clear();
+                    }
+                }
+
                 // Handle manual layout restore request (from Settings menu)
                 if (appState.restoreLayoutRequested) {
                     appState.restoreLayoutRequested = false;
@@ -2083,7 +2122,29 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             appState.activeExperimentIdx < static_cast<int>(appState.experiments.size())) {
             appState.experiments[appState.activeExperimentIdx]->render();
         }
-        
+
+        // Workaround (bug 2026-08-15): ImGui's DockNodeUpdateTabBar "Apply
+        // NavWindow focus back to the tab bar" (imgui.cpp:19791) forces each
+        // node's selected tab to the NavWindow every frame. The NavWindow
+        // persists across kind switches / layout restores while the visible
+        // window changes, so a stale NavWindow (the previously focused window
+        // of the node) reverts the restored selection on the next frame.
+        // Re-sync NavWindow to each node's visible window when the NavWindow
+        // is a stale member of that same node — the visible window is final
+        // now that all panels have rendered.
+        {
+            ImGuiContext* g = ImGui::GetCurrentContext();
+            ImGuiDockContext* dc = &g->DockContext;
+            for (int n = 0; n < dc->Nodes.Data.Size; ++n) {
+                ImGuiDockNode* node = (ImGuiDockNode*)dc->Nodes.Data[n].val_p;
+                if (!node || !node->IsLeafNode() || !node->VisibleWindow)
+                    continue;
+                if (g->NavWindow && g->NavWindow->RootWindow->DockNode == node &&
+                    g->NavWindow != node->VisibleWindow)
+                    ImGui::FocusWindow(node->VisibleWindow);
+            }
+        }
+
         // Close the docking condition
         }
 

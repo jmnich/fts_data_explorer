@@ -242,6 +242,12 @@ WrappedRow renderWrappedRow(int id, const std::vector<std::string>& lines,
     const float height = padY * 2.0f + static_cast<float>(lines.size()) * lineH;
     WrappedRow out;
     ImGui::PushID(id);
+    // The Selectable spans the full row (including the Delete button's right
+    // zone) and is submitted BEFORE the button. Without AllowOverlap, its
+    // ButtonBehavior captures the mouse-down first and the Delete button is
+    // never clickable (clicking it opens the record instead). AllowOverlap
+    // makes the later-submitted button win the hit-test.
+    ImGui::SetNextItemAllowOverlap();
     out.clicked = ImGui::Selectable("##row", false, 0, ImVec2(0.0f, height));
     out.hovered = ImGui::IsItemHovered();
     const ImVec2 rmin = ImGui::GetItemRectMin();

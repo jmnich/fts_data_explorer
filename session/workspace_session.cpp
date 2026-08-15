@@ -200,6 +200,9 @@ void executePendingSwap(AppState& s) {
     const bool outHasTabs = s.active != nullptr ||
         (outKind == ActiveTabKind::Experiment && s.activeExperimentIdx >= 0) ||
         (outKind == ActiveTabKind::Session && s.sessionTabPresent);
+    // Outgoing workspace identity (per-workspace layouts — bugfix 2026-08-15).
+    const std::string outWsKey =
+        (outKind == ActiveTabKind::Workspace && s.active) ? s.active->key : "";
     // Sessions are canonical: no park step — the workspace data never leaves
     // its session; the active pointer is simply repointed.
     ActiveTabKind inKind = outKind;
@@ -240,17 +243,39 @@ void executePendingSwap(AppState& s) {
     }
     s.pendingSwapIdx = -1;
     s.pendingSwapToSession = false;
-    // Phase 4 (M4.4): layout snapshot per tab type — save the outgoing type
-    // (if it had tabs), restore the incoming type's snapshot (if any).
-    if (outHasTabs && inKind != outKind) saveTabLayout(tabTypeName(static_cast<int>(outKind)));
-    if (inKind != outKind) {
-        restoreTabLayout(tabTypeName(static_cast<int>(inKind)));
+    // Phase 4 (M4.4): layout snapshot — per-tab-type for session/experiment,
+    // PER-WORKSPACE (keyed by the session's stable key) for workspaces, so
+    // every dataset keeps its own docking arrangement. A workspace→workspace
+    // switch is a save+restore too (bugfix 2026-08-15): both tabs share the
+    // dock tree, so without it the outgoing dataset's active panel / tab
+    // selection leaks straight into the incoming one.
+    const bool outIsWs = (outKind == ActiveTabKind::Workspace);
+    const bool inIsWs = (inKind == ActiveTabKind::Workspace);
+    const bool kindChanged = (inKind != outKind);
+    const bool wsChanged = outIsWs && inIsWs && s.active &&
+                           s.active->key != outWsKey;
+    const bool layoutChanged = kindChanged || wsChanged;
+
+    if (outHasTabs && layoutChanged) {
+        if (outIsWs && !outWsKey.empty())
+            saveWorkspaceLayout(outWsKey);
+        else if (kindChanged)
+            saveTabLayout(tabTypeName(static_cast<int>(outKind)));
+    }
+    if (layoutChanged) {
+        if (inIsWs && s.active)
+            restoreWorkspaceLayout(s.active->key);
+        else
+            restoreTabLayout(tabTypeName(static_cast<int>(inKind)));
         // Black-first-frame fix (2026-08-14): the incoming kind's dock panels
         // were not submitted last frame, so DockNodeUpdateTabBar skips them
         // (LastFrameActive + 1 < FrameCount) and the node stays empty; one
         // follow-up frame makes them visible. Consumed by AppLoop after
-        // present().
-        s.extraRedrawAfterKindSwitch = true;
+        // present(). (Only a real kind switch changes the panel set — a
+        // workspace→workspace switch renders the same panels, so no extra
+        // frame is needed there.)
+        if (kindChanged)
+            s.extraRedrawAfterKindSwitch = true;
     }
     s.needsRedraw = true;
 }

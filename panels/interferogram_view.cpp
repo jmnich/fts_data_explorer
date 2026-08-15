@@ -241,7 +241,7 @@ void renderInterferogramPanel() {
                 }
             }
 
-            if (ImPlot::BeginSubplots("Detector Plots", numRows, 1, ImVec2(-1, -1), ImPlotSubplotFlags_NoTitle | ImPlotSubplotFlags_LinkAllX | ImPlotSubplotFlags_NoLegend, hasRef ? row_ratios : row_ratios1)) {
+            if (ImPlot::BeginSubplots(workspacePlotId("Detector Plots").c_str(), numRows, 1, ImVec2(-1, -1), ImPlotSubplotFlags_NoTitle | ImPlotSubplotFlags_LinkAllX | ImPlotSubplotFlags_NoLegend, hasRef ? row_ratios : row_ratios1)) {
 
                 if (hasRef) {
                 // Reference detector plot (top)
@@ -255,7 +255,7 @@ void renderInterferogramPanel() {
                     refGridCol.w *= appState.gridAlpha;
                     ImPlot::PushStyleColor(ImPlotCol_AxisGrid, refGridCol);
                 }
-                if (ImPlot::BeginPlot("Reference", ImVec2(-1, -1), ref_flags)) {
+                if (ImPlot::BeginPlot(workspacePlotId("Reference").c_str(), ImVec2(-1, -1), ref_flags)) {
                     // Set up axes with auto-fit flag for Y-axis when enabled
                     ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
                     if (appState.active->autoFitYAxis) {
@@ -506,7 +506,7 @@ void renderInterferogramPanel() {
                     primGridCol.w *= appState.gridAlpha;
                     ImPlot::PushStyleColor(ImPlotCol_AxisGrid, primGridCol);
                 }
-                if (ImPlot::BeginPlot("Primary", ImVec2(-1, -1), prim_flags)) {
+                if (ImPlot::BeginPlot(workspacePlotId("Primary").c_str(), ImVec2(-1, -1), prim_flags)) {
                     // Set up axes with auto-fit flag for Y-axis when enabled
                     ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
                     if (appState.active->autoFitYAxis) {

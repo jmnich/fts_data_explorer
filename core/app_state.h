@@ -346,3 +346,15 @@ struct AppState {
 
 // Global application state instance
 extern AppState appState;
+
+// Per-workspace plot-id suffix. ImPlot caches per-plot state (axis limits,
+// zoom, flags) by plot ID, and every workspace panel used the same literal
+// plot IDs — so a zoom in one workspace leaked into every other (bugfix
+// 2026-08-15). Keying each plot by the session's stable identity makes the
+// plots' cached state per-workspace. The "##" keeps the displayed title
+// unchanged while changing the ID hash.
+inline std::string workspacePlotId(const char* base) {
+    return appState.active
+        ? std::string(base) + "##" + appState.active->key
+        : std::string(base);
+}

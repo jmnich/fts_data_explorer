@@ -17,6 +17,7 @@
 // Include config header
 #include "config.h"
 #include "app_state.h"
+#include "layout_persistence.h"
 #include "spectrum.h"
 #include "average_spectrum.h"
 #include "snr_spectrum.h"
@@ -524,6 +525,29 @@ int main(int argc, char* argv[]) {
     // Main loop — encapsulated frame pipeline (Phase-1 M1.2b)
     AppLoop loop(config, configFilePath, window);
     while (loop.runFrame()) {}
+
+    // Per-tab-type layout snapshots must follow the app's LAST state. They are
+    // refreshed on kind switches only, so without this an exit in the middle
+    // of a session would leave the snapshot stale — the next launch restores
+    // it over the freshly written imgui.ini and the dock selection reverts to
+    // what it was at the last kind switch instead of what was on top when the
+    // app closed (bugfix 2026-08-15). Saved BEFORE ImGui shutdown (the
+    // snapshot is a live-context capture).
+    {
+        const bool hasTabs = appState.active != nullptr ||
+            (appState.activeTabKind == ActiveTabKind::Experiment &&
+             appState.activeExperimentIdx >= 0) ||
+            (appState.activeTabKind == ActiveTabKind::Session &&
+             appState.sessionTabPresent);
+        if (hasTabs) {
+            if (appState.activeTabKind == ActiveTabKind::Workspace &&
+                appState.active)
+                saveWorkspaceLayout(appState.active->key);
+            else
+                saveTabLayout(
+                    tabTypeName(static_cast<int>(appState.activeTabKind)));
+        }
+    }
 
     // Cleanup
     destroyWelcomeBackground();

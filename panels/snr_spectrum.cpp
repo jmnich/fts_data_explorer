@@ -243,7 +243,7 @@ void SnrSpectrum::renderSnrContents(bool showTrackingCursor) {
         snrGridCol.w *= appState->gridAlpha;
         ImPlot::PushStyleColor(ImPlotCol_AxisGrid, snrGridCol);
     }
-    if (ImPlot::BeginPlot("SnrViewPlot", ImVec2(-1, -1), plot_flags)) {
+    if (ImPlot::BeginPlot(workspacePlotId("SnrViewPlot").c_str(), ImVec2(-1, -1), plot_flags)) {
 
         ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoTickMarks;
         ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
