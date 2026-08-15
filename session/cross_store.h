@@ -46,6 +46,10 @@ bool crossRemoveSource(const std::string& path, const std::string& id, std::stri
 // CLI round-trip harness free of app_state linkage.
 bool crossLoadInto(SessionTabState& st, const std::string& path, std::string& err);
 bool crossLoad(AppState& s, const std::string& path, std::string& err);
+// Best-effort re-walk of every embedded source group to refresh the cached
+// sizeBytes (called after archive saves; the Session-tab sizes must follow
+// the on-disk state).
+void crossRefreshSourceSizes(SessionTabState& st, const std::string& path);
 // Embedded source → in-memory Workspace (no temp files, no extraction:
 // workspaceRead operates on the in-memory Workspace).
 Workspace crossLoadSource(const std::string& crossPath, const std::string& sourceId,

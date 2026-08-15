@@ -42,6 +42,46 @@ std::string sourcePrefix(const std::string& id) {
     return "sources/" + id;
 }
 
+// H5Ovisit3 callback: accumulate an object's storage footprint — object
+// header (hdr.space.total) + B-tree/heap metadata (meta_size) + the dataset
+// data itself (H5Dget_storage_size). H5O_info2_t carries no sizes in
+// HDF5 1.14, so native info is fetched per object via the root-relative name.
+struct VisitAccum {
+    hid_t root;
+    uint64_t total = 0;
+};
+
+herr_t h5VisitAccumSize(hid_t, const char* name, const H5O_info2_t* info,
+                        void* opData) {
+    auto* accum = static_cast<VisitAccum*>(opData);
+    H5O_native_info_t ni;
+    if (H5Oget_native_info_by_name(accum->root, name, &ni, H5O_NATIVE_INFO_ALL,
+                                   H5P_DEFAULT) >= 0) {
+        accum->total += static_cast<uint64_t>(ni.hdr.space.total) +
+                        ni.meta_size.obj.index_size + ni.meta_size.obj.heap_size +
+                        ni.meta_size.attr.index_size + ni.meta_size.attr.heap_size;
+    }
+    if (info->type == H5O_TYPE_DATASET) {
+        H5DatasetGuard ds(H5Dopen2(accum->root, name, H5P_DEFAULT));
+        if (ds.id >= 0) accum->total += static_cast<uint64_t>(H5Dget_storage_size(ds.id));
+    }
+    return 0;
+}
+
+// HDF5 storage footprint of a group subtree. HDF5 has no direct per-group
+// size API — this is the standard approximation (within a few % of the true
+// on-disk delta, excluding shared-metadata/free-space bookkeeping). Returns 0
+// on any failure (missing group, walk error).
+uint64_t h5GroupStorage(hid_t file, const std::string& groupPath) {
+    H5GroupGuard g(H5Gopen2(file, groupPath.c_str(), H5P_DEFAULT));
+    if (g.id < 0) return 0;
+    VisitAccum accum{g.id, 0};
+    if (H5Ovisit3(g.id, H5_INDEX_NAME, H5_ITER_NATIVE, h5VisitAccumSize, &accum,
+                  H5O_INFO_ALL) < 0)
+        return 0;
+    return accum.total;
+}
+
 std::string experimentPrefix(const std::string& id) {
     return "experiments/" + id;
 }
@@ -245,6 +285,19 @@ bool crossRemoveSource(const std::string& path, const std::string& id, std::stri
     }, err);
 }
 
+// Best-effort re-walk of every embedded source group after an archive save,
+// so the Session-tab sizes follow the on-disk state.
+void crossRefreshSourceSizes(SessionTabState& st, const std::string& path) {
+    try {
+        H5FileGuard file(H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT));
+        if (file.id < 0) return;
+        for (auto& sum : st.sources)
+            sum.sizeBytes = h5GroupStorage(file.id, sourcePrefix(sum.id));
+    } catch (...) {
+        // Best-effort: leave stale cached sizes on failure.
+    }
+}
+
 bool crossLoadInto(SessionTabState& st, const std::string& path, std::string& err) {
     try {
         H5FileGuard file(H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT));
@@ -260,6 +313,7 @@ bool crossLoadInto(SessionTabState& st, const std::string& path, std::string& er
             sum.memberCount = e.value("memberCount", 0u);
             sum.createdIso = e.value("createdIso", "");
             sum.open = e.value("open", false);
+            sum.sizeBytes = h5GroupStorage(file.id, sourcePrefix(sum.id));
             st.sources.push_back(std::move(sum));
         }
         // Tab-strip order (bugfix 2026-08-14): "tabOrder" lists stable keys

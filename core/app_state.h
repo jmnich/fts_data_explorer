@@ -117,6 +117,9 @@ struct SourceSummary {                  // mirrors @summary in the archive
     std::string originPath;             // informational only
     size_t memberCount = 0;
     std::string createdIso;             // ISO-8601 UTC
+    // HDF5 storage footprint of the embedded sources/<id> group, computed
+    // on load (in-memory only — never persisted to the archive manifest).
+    uint64_t sizeBytes = 0;
     // Tab-strip visibility on project load (bugfix 2026-08-14): persisted in
     // the archive manifest ("open" flag); restored tabs open WITHOUT focus.
     bool open = false;

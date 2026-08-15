@@ -341,6 +341,9 @@ void saveEverything(AppState& s) {
         crossSaveTabOrder(s.sessionTab.multiWorkspacePath,
                           persistableTabOrder(s), err);
         if (!err.empty()) throw H5Error(err);
+        // The archive was rewritten — refresh the cached per-source sizes so
+        // the Session tab reflects the new on-disk state.
+        crossRefreshSourceSizes(s.sessionTab, s.sessionTab.multiWorkspacePath);
     }
     s.needsRedraw = true;
     // Toast only when there is something that could hold state (launch welcome

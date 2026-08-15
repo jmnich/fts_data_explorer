@@ -1,6 +1,7 @@
 // Session tab — the unique browser hub (M2.5).
 #include "session_tab.h"
 
+#include <cstdio>
 #include <filesystem>
 #include <functional>
 
@@ -264,25 +265,70 @@ WrappedRow renderWrappedRow(int id, const std::vector<std::string>& lines,
     return out;
 }
 
-// Small square row-leader button (dim, brightens on hover — no layout jump).
-bool renderRowRemoveButton(int id) {
-    const float rowH = ImGui::GetFrameHeight();
+// "Delete"-labeled row button, styled like the absorbance curve Delete
+// (transparent fill, white outline, subtle tint on hover/click). Placed at
+// the record's right edge with a vertical accent line at the rightmost side
+// (white on hover over the record) — absorbance-curve-list look. Renders
+// AFTER the row so the button sits on top of the row rect. Returns the
+// button's width so callers can reserve the right zone in the wrap width.
+float rowDeleteButtonWidth() {
+    return ImGui::CalcTextSize("Delete").x +
+           ImGui::GetStyle().FramePadding.x * 2.0f + 2.0f;
+}
+
+bool renderRowRemoveButton(int id, const ImVec2& rowMin, const ImVec2& rowMax,
+                           bool rowHovered) {
+    const float delW = rowDeleteButtonWidth();
+    const float delH = ImGui::GetFrameHeight();
+    const float padX = 10.0f, padY = 4.0f;
+    const ImVec2 saveCursor = ImGui::GetCursorScreenPos();   // below the row
     ImGui::PushID(id);
+    ImGui::SetCursorScreenPos(ImVec2(rowMax.x - delW - padX, rowMin.y + padY));
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-    ImGui::PushStyleColor(ImGuiCol_Text,
-                          ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-    const bool pressed = ImGui::Button("×", ImVec2(rowH, rowH));
-    ImGui::PopStyleColor(2);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.0f, 1.0f, 1.0f, 0.14f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(1.0f, 1.0f, 1.0f, 0.28f));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(1.0f, 1.0f, 1.0f, 0.8f));
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 3.0f);
+    const bool pressed = ImGui::Button("Delete", ImVec2(delW, delH));
+    ImGui::PopStyleVar(2);
+    ImGui::PopStyleColor(5);
+    // Vertical accent line at the left edge, inside the text indentation
+    // (white while hovered) — absorbance-curve-list look.
+    const ImU32 lineCol = rowHovered
+        ? ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, 1.0f))
+        : ImGui::ColorConvertFloat4ToU32(modalAccent());
+    ImGui::GetWindowDrawList()->AddRectFilled(
+        ImVec2(rowMin.x + 2.0f, rowMin.y + 2.0f),
+        ImVec2(rowMin.x + 6.0f, rowMax.y - 2.0f), lineCol);
+    // Restore the cursor below the row (in-bounds) and submit a zero-size
+    // Dummy: it clears the SetCursorScreenPos flag (implicitly set above),
+    // which otherwise trips ImGui's "extend window/parent boundaries" assert
+    // at EndChild when this is the last row (no item follows the restore).
+    // The Dummy's ItemSize also yields the original one-ItemSpacing gap.
+    ImGui::SetCursorScreenPos(ImVec2(saveCursor.x, rowMax.y));
+    ImGui::Dummy(ImVec2(0.0f, 0.0f));
     ImGui::PopID();
-    ImGui::SameLine();
     return pressed;
 }
 
-// Accent dot at the row's left edge (open-in-tab / active indicator).
-void renderRowDot(const ImVec2& min, const ImVec2& max) {
-    ImGui::GetWindowDrawList()->AddCircleFilled(
-        ImVec2(min.x + 2.5f, (min.y + max.y) * 0.5f), 2.0f,
-        ImGui::ColorConvertFloat4ToU32(modalAccent()));
+// "2026-08-15T12:30:45Z" (or any "YYYY-MM-DD hh:mm…" / short form) →
+// "2026-08-15 12:30". Display-only; stored archives keep ISO-8601.
+std::string prettyTimestamp(const std::string& iso) {
+    if (iso.size() < 16) return iso;
+    std::string out = iso;
+    if (out[10] == 'T') out[10] = ' ';
+    return out.substr(0, 16);
+}
+
+// "12.3 MB" from bytes; "" when sizeBytes is 0 (unknown).
+std::string formatSizeMB(uint64_t sizeBytes) {
+    if (sizeBytes == 0) return "";
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%.1f MB",
+                  static_cast<double>(sizeBytes) / (1024.0 * 1024.0));
+    return buf;
 }
 
 // Create Multi-Workspace button (single-file mode): accent-tinted, with the
@@ -419,28 +465,33 @@ void SessionTab::renderDatasetsPanel() {
     }
     for (size_t i = 0; i < appState.sessionTab.sources.size(); ++i) {
         const auto& src = appState.sessionTab.sources[i];
-        if (renderRowRemoveButton(static_cast<int>(i))) {
-            g_removeSourceId = src.id;
-            g_showRemoveConfirm = true;
-            appState.needsRedraw = true;
-        }
 
-        const float availW = ImGui::GetContentRegionAvail().x - 10.0f;
+        // Right zone: Delete button + accent line; wrap text must stop short.
+        const float availW = ImGui::GetContentRegionAvail().x - 10.0f -
+                             rowDeleteButtonWidth() - 14.0f;
         const std::vector<std::string> nameLines =
             wrapToLines(src.name, availW, 2);
-        const std::string meta =
+        std::string meta =
             std::to_string(src.memberCount) + " measurement" +
-            (src.memberCount == 1 ? "" : "s") + " · created " + src.createdIso;
+            (src.memberCount == 1 ? "" : "s") + " · created " +
+            prettyTimestamp(src.createdIso);
+        const std::string sizeMB = formatSizeMB(src.sizeBytes);
+        if (!sizeMB.empty()) meta += " · " + sizeMB;
         std::vector<std::string> lines = nameLines;
         for (auto& l : wrapToLines(meta, availW, 2)) lines.push_back(std::move(l));
         const WrappedRow row =
             renderWrappedRow(static_cast<int>(i), lines,
                              static_cast<int>(nameLines.size()));
+        if (renderRowRemoveButton(static_cast<int>(i), row.min, row.max,
+                                  row.hovered)) {
+            g_removeSourceId = src.id;
+            g_showRemoveConfirm = true;
+            appState.needsRedraw = true;
+        }
         if (row.clicked) {
             openEmbeddedInNewTab(appState, appState.sessionTab.multiWorkspacePath,
                                  src.id);
         }
-        if (sourceOpenInTab(src.id)) renderRowDot(row.min, row.max);
         if (row.hovered)
             ImGui::SetTooltip("%s (%zu measurement%s)", src.originPath.c_str(),
                               src.memberCount, src.memberCount == 1 ? "" : "s");
@@ -450,8 +501,9 @@ void SessionTab::renderDatasetsPanel() {
 }
 
 // (b) active experiments: live instances (Phase 3). Rows match the Datasets
-// list style (× + wrapped title/metadata, accent dot when active). The
-// comment (if any) is shown grey below the name. Click → activate tab.
+// list style (right-aligned Delete + wrapped title/metadata, accent dot when
+// active). The comment (if any) is shown grey below the name. Click →
+// activate tab.
 void SessionTab::renderActiveExperimentsPanel() {
     ImGui::BeginChild("##activeEnvsList", ImVec2(0.0f, 0.0f), false,
                       ImGuiWindowFlags_AlwaysVerticalScrollbar);
@@ -460,16 +512,10 @@ void SessionTab::renderActiveExperimentsPanel() {
     }
     for (size_t i = 0; i < appState.experiments.size(); ++i) {
         auto* env = appState.experiments[i].get();
-        const bool isActive = (appState.activeTabKind == ActiveTabKind::Experiment &&
-                               appState.activeExperimentIdx == static_cast<int>(i));
-        if (renderRowRemoveButton(static_cast<int>(i))) {
-            // Deletion happens HERE (the tab selector's close only
-            // deactivates). Dirty/persisted instances confirm via the modal.
-            env->requestDelete();
-            break;   // experiments vector changed
-        }
 
-        const float availW = ImGui::GetContentRegionAvail().x - 10.0f;
+        // Right zone: Delete button + accent line; wrap text must stop short.
+        const float availW = ImGui::GetContentRegionAvail().x - 10.0f -
+                             rowDeleteButtonWidth() - 14.0f;
         const std::vector<std::string> titleLines =
             wrapToLines(env->tabLabel(), availW, 2);
         // Absorbance: picked samples. Comparator: included datasets (empty +
@@ -493,10 +539,16 @@ void SessionTab::renderActiveExperimentsPanel() {
         const WrappedRow row =
             renderWrappedRow(static_cast<int>(i), lines,
                              static_cast<int>(titleLines.size()));
+        if (renderRowRemoveButton(static_cast<int>(i), row.min, row.max,
+                                  row.hovered)) {
+            // Deletion happens HERE (the tab selector's close only
+            // deactivates). Dirty/persisted instances confirm via the modal.
+            env->requestDelete();
+            break;   // experiments vector changed
+        }
         if (row.clicked) {
             activateExperiment(appState, static_cast<int>(i));
         }
-        if (isActive) renderRowDot(row.min, row.max);
         if (row.hovered) {
             ImGui::SetTooltip("%s",
                 env->type == EnvType::Absorbance ? "Absorbance against a stored reference."
