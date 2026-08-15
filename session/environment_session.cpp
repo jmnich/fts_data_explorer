@@ -1959,8 +1959,9 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
                               cm1, um, thz);
 
             // White value lines: header + one per curve, each preceded by a
-            // small color patch matching the curve's line (no labels/dataset
-            // names — the patch ties the value to its legend entry).
+            // small color patch matching the curve's line (the patch ties the
+            // value to its legend entry). Comparator: badge + value only (no
+            // dataset names); Absorbance keeps label + value.
             std::vector<std::pair<ImVec4, std::string>> lines;
             lines.emplace_back(ImVec4(0, 0, 0, 0), header);   // w==0 → no patch
             for (size_t k = 0; k < curves.size(); ++k) {
@@ -1974,7 +1975,10 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
                                     &mx, &yv, 1, cursorSpec);
                 char line[64];
                 std::snprintf(line, sizeof(line), "%.4e", yv);
-                lines.emplace_back(curveColors[k], c.label + "  " + line);
+                if (type == EnvType::Comparator)
+                    lines.emplace_back(curveColors[k], line);
+                else
+                    lines.emplace_back(curveColors[k], c.label + "  " + line);
             }
 
             // Info box on the plot draw list, clamped to the plot.

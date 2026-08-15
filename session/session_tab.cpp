@@ -233,15 +233,28 @@ struct WrappedRow {
     bool hovered = false;
     ImVec2 min = {0.0f, 0.0f};
     ImVec2 max = {0.0f, 0.0f};
+    ImVec2 content = {0.0f, 0.0f};   // list child's content origin (bar/text anchor)
 };
 
+// Shared left-accent layout for every session-tab list (rows AND the
+// experiment-type cards), anchored to each list child's CONTENT ORIGIN.
+// Borderless row children have zero padding, so their content origin is the
+// child edge; the Selectable's item rect sits FramePadding.x (4px) LEFT of
+// it — these offsets preserve the pre-existing row pixels exactly.
+// The gap between the bar's right edge and the text is 4px.
+constexpr float kRowAccentIndent = 12.0f;
+constexpr float kRowTextIndent = 20.0f;
+
 WrappedRow renderWrappedRow(int id, const std::vector<std::string>& lines,
-                            int titleLines, float indentX = 10.0f) {
+                            int titleLines, float indentX = kRowTextIndent) {
     const float lineH = ImGui::GetTextLineHeightWithSpacing();
     const float padY = 4.0f;
     const float height = padY * 2.0f + static_cast<float>(lines.size()) * lineH;
     WrappedRow out;
     ImGui::PushID(id);
+    // Content origin: the bar/text anchor (the Selectable's item rect sits
+    // FramePadding.x left of it, so it must NOT be the reference).
+    out.content = ImGui::GetCursorScreenPos();
     // The Selectable spans the full row (including the Delete button's right
     // zone) and is submitted BEFORE the button. Without AllowOverlap, its
     // ButtonBehavior captures the mouse-down first and the Delete button is
@@ -263,7 +276,7 @@ WrappedRow renderWrappedRow(int id, const std::vector<std::string>& lines,
     const ImU32 dim = out.hovered
         ? ImGui::GetColorU32(ImVec4(0.80f, 0.80f, 0.80f, 1.0f))
         : ImGui::GetColorU32(ImGuiCol_TextDisabled);
-    ImVec2 pos(rmin.x + indentX, rmin.y + padY);
+    ImVec2 pos(out.content.x + indentX, rmin.y + padY);
     for (size_t l = 0; l < lines.size(); ++l) {
         dl->AddText(ImGui::GetFont(), ImGui::GetFontSize(), pos,
                     static_cast<int>(l) < titleLines ? normal : dim,
@@ -276,8 +289,8 @@ WrappedRow renderWrappedRow(int id, const std::vector<std::string>& lines,
 
 // "Delete"-labeled row button, styled like the absorbance curve Delete
 // (transparent fill, white outline; bright-red fill + black text on hover,
-// darker red while clicked). Placed at the record's right edge with a
-// vertical accent line at the rightmost side (white on hover over the record)
+// darker red while clicked). Placed at the record's right edge, with the
+// left accent line (shared kRowAccentIndent; white on hover over the record)
 // — absorbance-curve-list look. Renders AFTER the row so the button sits on
 // top of the row rect. Returns the button's width so callers can reserve the
 // right zone in the wrap width.
@@ -286,8 +299,9 @@ float rowDeleteButtonWidth() {
            ImGui::GetStyle().FramePadding.x * 2.0f + 2.0f;
 }
 
-bool renderRowRemoveButton(int id, const ImVec2& rowMin, const ImVec2& rowMax,
-                           bool rowHovered, float lineIndent) {
+bool renderRowRemoveButton(int id, const WrappedRow& row, bool rowHovered) {
+    const ImVec2& rowMin = row.min;
+    const ImVec2& rowMax = row.max;
     const float delW = rowDeleteButtonWidth();
     const float delH = ImGui::GetFrameHeight();
     const float padX = 10.0f, padY = 4.0f;
@@ -310,15 +324,16 @@ bool renderRowRemoveButton(int id, const ImVec2& rowMin, const ImVec2& rowMax,
     const bool pressed = ImGui::Button("Delete", ImVec2(delW, delH));
     ImGui::PopStyleVar(2);
     ImGui::PopStyleColor(5);
-    // Vertical accent line on the left, indented from the panel edge (white
-    // while hovered) — absorbance-curve-list look. Text must start past the
-    // line's right edge (callers pass a matching indentX to renderWrappedRow).
+    // Vertical accent line on the left, anchored to the row's content origin
+    // at the shared kRowAccentIndent (white while hovered) — the same inset
+    // every session-tab list uses, so all accent bars look identical.
     const ImU32 lineCol = rowHovered
         ? ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, 1.0f))
         : ImGui::ColorConvertFloat4ToU32(modalAccent());
     ImGui::GetWindowDrawList()->AddRectFilled(
-        ImVec2(rowMin.x + lineIndent, rowMin.y + 2.0f),
-        ImVec2(rowMin.x + lineIndent + 4.0f, rowMax.y - 2.0f), lineCol);
+        ImVec2(row.content.x + kRowAccentIndent, rowMin.y + 2.0f),
+        ImVec2(row.content.x + kRowAccentIndent + 4.0f, rowMax.y - 2.0f),
+        lineCol);
     // Restore the cursor below the row (in-bounds) and submit a zero-size
     // Dummy: it clears the SetCursorScreenPos flag (implicitly set above),
     // which otherwise trips ImGui's "extend window/parent boundaries" assert
@@ -498,9 +513,8 @@ void SessionTab::renderDatasetsPanel() {
         for (auto& l : wrapToLines(meta, availW, 2)) lines.push_back(std::move(l));
         const WrappedRow row =
             renderWrappedRow(static_cast<int>(i), lines,
-                             static_cast<int>(nameLines.size()), 24.0f);
-        if (renderRowRemoveButton(static_cast<int>(i), row.min, row.max,
-                                  row.hovered, 16.0f)) {
+                             static_cast<int>(nameLines.size()), kRowTextIndent);
+        if (renderRowRemoveButton(static_cast<int>(i), row, row.hovered)) {
             g_removeSourceId = src.id;
             g_showRemoveConfirm = true;
             appState.needsRedraw = true;
@@ -553,9 +567,8 @@ void SessionTab::renderActiveExperimentsPanel() {
                 lines.push_back(std::move(l));
         const WrappedRow row =
             renderWrappedRow(static_cast<int>(i), lines,
-                             static_cast<int>(titleLines.size()));
-        if (renderRowRemoveButton(static_cast<int>(i), row.min, row.max,
-                                  row.hovered, 2.0f)) {
+                             static_cast<int>(titleLines.size()), kRowTextIndent);
+        if (renderRowRemoveButton(static_cast<int>(i), row, row.hovered)) {
             // Deletion happens HERE (the tab selector's close only
             // deactivates). Dirty/persisted instances confirm via the modal.
             env->requestDelete();
@@ -586,7 +599,10 @@ static void renderExperimentTypeCard(const char* title, const char* desc, EnvTyp
     const AccentColor ac = StringToAccentColor(appState.currentAccentColor);
     ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, 8.0f));
+    // Zero X padding: the row lists' children are borderless (padding 0), so
+    // this child's content origin must coincide with theirs for the shared
+    // content-anchored accent offsets to land on the same pixels.
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 8.0f));
     ImGui::PushStyleColor(ImGuiCol_Border, GetAccentSubtle(ac));
     // First row: title + 2x-size "+ New" (drawn via the draw list — no second
     // font is loaded; AddText scales the default font's glyphs). The band is
@@ -597,34 +613,40 @@ static void renderExperimentTypeCard(const char* title, const char* desc, EnvTyp
     ImGui::PopStyleColor();
     ImGui::PopStyleVar(3);
     if (open) {
+        const ImVec2 wpos = ImGui::GetWindowPos();
+        const ImVec2 wsize = ImGui::GetWindowSize();
+        // Content origin (zero X padding → == child edge): the shared anchor
+        // for the accent line and text offsets.
+        const ImVec2 contentMin = ImGui::GetCursorScreenPos();
         // Hover highlight matching the Active Experiments rows (Selectable
         // hover = ImGuiCol_HeaderHovered). Child windows share the parent's
         // draw list, so the fill lands under the text, inside the child rect.
         const bool hovered = ImGui::IsWindowHovered();
         if (hovered) {
-            const ImVec2 wpos = ImGui::GetWindowPos();
-            const ImVec2 wsize = ImGui::GetWindowSize();
             ImGui::GetWindowDrawList()->AddRectFilled(
                 wpos, ImVec2(wpos.x + wsize.x, wpos.y + wsize.y),
                 ImGui::ColorConvertFloat4ToU32(GetAccentHovered(ac)), 6.0f);
         }
-        // Vertical accent line at the left edge (white on hover) — matches
-        // the Active Experiments rows; text starts at WindowPadding.x (10),
-        // clear of the line (2..6).
+        // Vertical accent line (white on hover) at the shared content-origin
+        // inset (kRowAccentIndent) — same position as every row list.
         {
-            const ImVec2 wpos = ImGui::GetWindowPos();
-            const ImVec2 wsize = ImGui::GetWindowSize();
             const ImU32 lineCol = hovered
                 ? ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, 1.0f))
                 : ImGui::ColorConvertFloat4ToU32(modalAccent());
             ImGui::GetWindowDrawList()->AddRectFilled(
-                ImVec2(wpos.x + 2.0f, wpos.y + 2.0f),
-                ImVec2(wpos.x + 6.0f, wpos.y + wsize.y - 2.0f), lineCol);
+                ImVec2(contentMin.x + kRowAccentIndent, wpos.y + 2.0f),
+                ImVec2(contentMin.x + kRowAccentIndent + 4.0f,
+                       wpos.y + wsize.y - 2.0f),
+                lineCol);
         }
+        // Title (and description below) start at the shared text indent,
+        // matching the row lists. Indent() (not SetCursorPosX): ItemSize
+        // resets the cursor X to the window's line start after every item,
+        // which would throw the description back to the left edge.
+        ImGui::Indent(kRowTextIndent);
         ImGui::TextUnformatted(title);
         {
             ImDrawList* dl = ImGui::GetWindowDrawList();
-            const ImVec2 wpos = ImGui::GetWindowPos();
             const char* newLabel = "+ New";
             const float newW = ImGui::CalcTextSize(newLabel).x * 1.5f;
             dl->AddText(ImGui::GetFont(), bigH,
@@ -643,6 +665,7 @@ static void renderExperimentTypeCard(const char* title, const char* desc, EnvTyp
         ImGui::TextWrapped("%s", desc);
         ImGui::PopTextWrapPos();
         ImGui::PopStyleColor();
+        ImGui::Unindent(kRowTextIndent);
     }
     ImGui::EndChild();
     if (ImGui::IsItemClicked()) {
