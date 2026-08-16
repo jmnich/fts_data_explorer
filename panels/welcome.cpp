@@ -173,16 +173,22 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
     // single-dataset workspaces + converter, right = recent multi-workspace
     // files + New Multi-Workspace. Not a modal: the Session tab takes over
     // after the first open/create and is never closable afterwards.
-    // Size is clamped to the viewport (minus a margin) so no element is ever
-    // pushed off-screen on small displays.
+    // Size tracks the app window the same way the Convert modal does
+    // (conversion_screen.cpp): a proportional share of the work viewport with
+    // clamped bounds, re-applied every frame so it scales with the viewport
+    // and the UI size setting instead of hitting fixed pixel caps. The height
+    // is 1/4 shorter than the Convert modal.
     const char* title = "Welcome to FTS Data Explorer";
-    ImVec2 vp = ImGui::GetMainViewport()->Size;
-    const float winW = std::min(1200.0f, vp.x - 40.0f);
-    const float winH = std::min(760.0f, vp.y - 40.0f);
+    const ImVec2 work = ImGui::GetMainViewport()->WorkSize;
+    const float winW = std::clamp(work.x * 0.85f, 720.0f, 2000.0f);
+    const float winH = std::clamp(work.y * 0.85f, 700.0f, 1600.0f) * 0.75f;
     const float listChildH = std::max(100.0f, winH - 340.0f);
     const float crossChildH = std::max(100.0f, winH - 160.0f);
-    ImGui::SetNextWindowPos(ImVec2((vp.x - winW) * 0.5f, (vp.y - winH) * 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(winW, winH));
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(),
+                            ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(winW, winH), ImGuiCond_Always);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(720.0f, 525.0f),
+                                        ImVec2(2000.0f, 1200.0f));
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.09f, 0.09f, 0.12f, 0.96f));
     ImGui::Begin(title, nullptr,
                  ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
