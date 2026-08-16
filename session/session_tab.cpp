@@ -97,6 +97,7 @@ void renderRemoveConfirm() {
             ImGui::CloseCurrentPopup();
         } else if (pressed == 1 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
             g_showRemoveConfirm = false;
+            appState.needsRedraw = true;
             ImGui::CloseCurrentPopup();
         }
         drawModalAccentFrame(modalAccent());
@@ -934,6 +935,7 @@ void SessionTab::renderBatchConfirmModal() {
             ImGui::CloseCurrentPopup();
         } else if (pressed == 1 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
             b.showConfirm = false;
+            appState.needsRedraw = true;
             ImGui::CloseCurrentPopup();
         }
         drawModalAccentFrame(modalAccent());
@@ -978,15 +980,18 @@ void SessionTab::renderBatchDeleteModal() {
         int pressed = modalButtonRow({"Cancel", "Delete"}, focus, wasOpen, modalAccent());
         if (pressed == 0 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
             b.showDeleteConfirm = false;
+            appState.needsRedraw = true;
             ImGui::CloseCurrentPopup();
         } else if (pressed == 1) {
             std::string err;
             if (crossRecipeRemove(appState.sessionTab.multiWorkspacePath, name, err)) {
                 refreshBatchRecipes(appState);
                 b.showDeleteConfirm = false;
+                appState.needsRedraw = true;
                 ImGui::CloseCurrentPopup();
             } else {
                 error = err;
+                appState.needsRedraw = true;
             }
         }
         drawModalAccentFrame(modalAccent());
@@ -1070,6 +1075,7 @@ void SessionTab::renderBatchProgressModal() {
             int pressed = modalButtonRow({"OK"}, focus, wasOpen, modalAccent());
             if (pressed == 0) {
                 b.phase = BatchPhase::Idle;
+                appState.needsRedraw = true;
                 ImGui::CloseCurrentPopup();
             }
         }
@@ -1121,6 +1127,7 @@ void SessionTab::renderNewFromDatasetModals() {
             ImGui::Spacing();
             if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
                 b.showNewFromDataset = false;
+                appState.needsRedraw = true;
                 ImGui::CloseCurrentPopup();
             }
             drawModalAccentFrame(modalAccent());
@@ -1211,6 +1218,7 @@ void SessionTab::renderNewFromDatasetModals() {
             b.showNewFromDatasetForm = false;
             b.pickedDatasetId.clear();
             b.importError.clear();
+            appState.needsRedraw = true;
             ImGui::CloseCurrentPopup();
         }
         drawModalAccentFrame(modalAccent());
@@ -1238,12 +1246,14 @@ void SessionTab::renderBatchImportExport() {
             if (j.is_discarded()) {
                 b.importError = "Not valid JSON: " + path;
                 b.showImportError = true;
+                appState.needsRedraw = true;
             } else {
                 std::string err;
                 Recipe r = recipeFromJson(j, err);
                 if (!err.empty()) {
                     b.importError = err;
                     b.showImportError = true;
+                    appState.needsRedraw = true;
                 } else {
                     bool collision = false;
                     for (const auto& e : b.recipes)
@@ -1252,10 +1262,12 @@ void SessionTab::renderBatchImportExport() {
                         b.importError = "A recipe named \"" + r.name +
                                         "\" already exists.";
                         b.showImportError = true;
+                        appState.needsRedraw = true;
                     } else if (!crossRecipeWrite(appState.sessionTab.multiWorkspacePath,
                                                  r.name, recipeToJson(r), err)) {
                         b.importError = "save failed: " + err;
                         b.showImportError = true;
+                        appState.needsRedraw = true;
                     } else {
                         refreshBatchRecipes(appState);
                         appState.needsRedraw = true;
@@ -1278,6 +1290,7 @@ void SessionTab::renderBatchImportExport() {
                 if (!ofs.good()) {
                     b.exportError = "Could not write: " + path;
                     b.showExportError = true;
+                    appState.needsRedraw = true;
                 }
             }
         }
@@ -1305,6 +1318,7 @@ void SessionTab::renderBatchImportExport() {
             if (pressed == 0 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
                 show = false;
                 msg.clear();
+                appState.needsRedraw = true;
                 ImGui::CloseCurrentPopup();
             }
             drawModalAccentFrame(modalAccent());
