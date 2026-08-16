@@ -1127,7 +1127,7 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
             }
             // HITRAN gas-band markers (drawn before the cursor so the
             // tracking-cursor info box stays on top).
-            renderHitranMarkers(appState->active->hitranSelectedGas, xUnitSelector,
+            renderHitranMarkers(appState->active->hitranGasEnabled, xUnitSelector,
                                 appState->active->hitranThresholdLevel,
                                 appState->active->hitranSmoothLevel);
 

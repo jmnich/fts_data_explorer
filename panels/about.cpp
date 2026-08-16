@@ -92,6 +92,13 @@ void renderAboutPopup() {
     ImGui::Text("    https://github.com/HDFGroup/hdf5, DOI: 10.5281/zenodo.17808614");
     ImGui::Text(" ");
 
+    ImGui::BulletText("HITRAN database (gas absorption markers):");
+    ImGui::Text("    I. E. Gordon, L. S. Rothman, R. J. Hargreaves, F. M. Gomez, T. Bertin, C. Hill,");
+    ImGui::Text("    et al., \"The HITRAN2024 molecular spectroscopic database\",");
+    ImGui::Text("    J. Quant. Spectrosc. Radiat. Transfer 353, 109807 (2026).");
+    ImGui::Text("    DOI: 10.1016/j.jqsrt.2026.109807");
+    ImGui::Text(" ");
+
     // ── Disclosure ────────────────────────────
     ImGui::Separator();
     ImGui::Text("AI disclosure:");

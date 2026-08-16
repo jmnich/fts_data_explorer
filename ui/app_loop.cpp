@@ -2115,7 +2115,7 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
         // HITRAN gas-marker settings (docked panel; markers drawn in the
         // Spectrum and Average plots).
         renderHitranPanel("HITRAN Gas Markers",
-                          appState.active->hitranSelectedGas,
+                          appState.active->hitranGasEnabled,
                           appState.active->hitranThresholdLevel,
                           appState.active->hitranSmoothLevel);
 

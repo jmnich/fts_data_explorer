@@ -852,7 +852,7 @@ void EnvironmentSession::render() {
     // HITRAN gas-marker settings: own docked panel; a change is a config
     // change (dirty-gated saves).
     if (renderHitranPanel("HITRAN Gas Markers##envhitran",
-                          hitranSelectedGas, hitranThresholdLevel, hitranSmoothLevel))
+                          hitranGasEnabled, hitranThresholdLevel, hitranSmoothLevel))
         dirty = true;
     renderExportWindow();
     renderViewWindow();
@@ -1853,7 +1853,7 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
         // have an OPD/sample X axis). Drawn before the interaction/cursor
         // blocks so the tracking-cursor info box stays on top.
         if (type == EnvType::Absorbance || artifactSelector < 4)
-            renderHitranMarkers(hitranSelectedGas, xUnitSelector,
+            renderHitranMarkers(hitranGasEnabled, xUnitSelector,
                                 hitranThresholdLevel, hitranSmoothLevel);
 
         // Interaction: ESC autoscale, arrows pan 10%, shift+drag range.
@@ -2183,7 +2183,9 @@ static nlohmann::json experimentConfigJson(const EnvironmentSession& env) {
     j["forcedYMax"] = env.forcedYMax;
     j["yScale"] = env.yScaleSelector;
     j["showCursor"] = env.showTrackingCursor;
-    j["hitranSelectedGas"] = env.hitranSelectedGas;
+    nlohmann::json hitranGases = nlohmann::json::array();
+    for (bool b : env.hitranGasEnabled) hitranGases.push_back(b);
+    j["hitranGases"] = std::move(hitranGases);
     j["hitranThreshold"] = env.hitranThresholdLevel;
     j["hitranSmooth"] = env.hitranSmoothLevel;
     j["downsampleDisplay"] = env.downsampleDisplay;
@@ -2230,7 +2232,12 @@ static void experimentApplyConfig(EnvironmentSession& env, const nlohmann::json&
     env.yScaleSelector = j.value("yScale", 0);
     env.prevYScaleSelector = env.yScaleSelector;
     env.showTrackingCursor = j.value("showCursor", false);
-    env.hitranSelectedGas = std::clamp(j.value("hitranSelectedGas", -1), -1, 7);
+    auto hg = j.find("hitranGases");
+    if (hg != j.end() && hg->is_array()) {
+        for (size_t i = 0; i < env.hitranGasEnabled.size() && i < hg->size(); ++i)
+            if ((*hg)[i].is_boolean())
+                env.hitranGasEnabled[i] = (*hg)[i].get<bool>();
+    }
     env.hitranThresholdLevel = std::clamp(j.value("hitranThreshold", 2), 0, 3);
     env.hitranSmoothLevel = std::clamp(j.value("hitranSmooth", 3), 0, 3);
     env.downsampleDisplay = j.value("downsampleDisplay", false);

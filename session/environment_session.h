@@ -1,6 +1,7 @@
 #pragma once
 
 #include "pthread_compat.h"   // GCC 16+: must precede <mutex> (_GNU_SOURCE undefined)
+#include <array>
 #include <map>
 #include <string>
 #include <utility>
@@ -141,11 +142,11 @@ public:
     int prevYScaleSelector = -1;
     // Tracking cursor (spectrum-view scheme): marks ALL displayed curves.
     bool showTrackingCursor = false;
-    // HITRAN gas-marker settings (spectral artifacts only). selectedGas: index
-    // into kHitranGases, -1 = none. thresholdLevel/smoothLevel index
+    // HITRAN gas-marker settings (spectral artifacts only). enabled[i] <->
+    // kHitranGases[i] (multi-select). thresholdLevel/smoothLevel index
     // kHitranThresholds / kHitranSmoothOptions. Persisted in the experiment
-    // config.json.
-    int hitranSelectedGas = -1;
+    // config.json. Display-only — never part of any export artifact.
+    std::array<bool, 8> hitranGasEnabled{};
     int hitranThresholdLevel = 2;   // 2%
     int hitranSmoothLevel = 3;      // 10 cm-1
     // Display-only stride downsampling to maxPointsBeforeDownsampling (the

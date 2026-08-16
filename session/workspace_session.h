@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <map>
 #include <memory>
 #include <string>
@@ -84,10 +85,11 @@ public:
     bool enableDownsampling = true;
 
     // HITRAN gas-marker settings (shared by the Spectrum and Average plots in
-    // this workspace tab). selectedGas: index into kHitranGases, -1 = none.
+    // this workspace tab). enabled[i] <-> kHitranGases[i] (multi-select).
     // thresholdLevel/smoothLevel index kHitranThresholds / kHitranSmoothOptions.
-    // Persisted in workspace.json ("hitranSelectedGas"/"hitranThreshold"/"hitranSmooth").
-    int hitranSelectedGas = -1;
+    // Persisted in workspace.json ("hitranGases"/"hitranThreshold"/"hitranSmooth").
+    // Display-only — never part of any export artifact.
+    std::array<bool, 8> hitranGasEnabled{};
     int hitranThresholdLevel = 2;   // 2%
     int hitranSmoothLevel = 3;      // 10 cm-1
 

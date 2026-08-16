@@ -65,12 +65,12 @@ bool selectorRow(const char* label, const char* const* labels, int count, int& l
 
 } // namespace
 
-bool renderHitranPanel(const char* title, int& selectedGas,
+bool renderHitranPanel(const char* title, std::array<bool, 8>& enabled,
                        int& thresholdLevel, int& smoothLevel) {
     bool changed = false;
     ImGui::SetNextWindowDockID(mainDockSpaceId(), ImGuiCond_FirstUseEver);
     if (ImGui::Begin(title)) {
-        ImGui::TextDisabled("Gas markers on the Spectrum, Average, and experiment plots");
+        ImGui::TextDisabled("Show HITRAN-based gas absorption markers in spectra");
         ImGui::Separator();
         const float swatch = 12.0f;
         for (int i = 0; i < kHitranGasCount; ++i) {
@@ -80,10 +80,7 @@ bool renderHitranPanel(const char* title, int& selectedGas,
                 pos, ImVec2(pos.x + swatch, pos.y + swatch), kHitranGases[i].color);
             ImGui::Dummy(ImVec2(swatch + 4.0f, swatch));
             ImGui::SameLine();
-            bool sel = (selectedGas == i);
-            if (ImGui::Checkbox(kHitranGases[i].name, &sel)) {
-                if (sel) selectedGas = i;          // select (deselects previous)
-                else if (selectedGas == i) selectedGas = -1;  // re-click: none
+            if (ImGui::Checkbox(kHitranGases[i].name, &enabled[i])) {
                 changed = true;
                 appState.needsRedraw = true;
             }
@@ -104,6 +101,13 @@ bool renderHitranPanel(const char* title, int& selectedGas,
             }
             ImGui::PopID();
         }
+        if (std::any_of(enabled.begin(), enabled.end(), [](bool b) { return b; })) {
+            if (ImGui::Button("HITRAN Off")) {
+                for (bool& b : enabled) b = false;
+                changed = true;
+                appState.needsRedraw = true;
+            }
+        }
         ImGui::Separator();
         const char* const thrLabels[kHitranLevelCount] = { "0.1%", "1%", "2%", "10%" };
         if (selectorRow("Strength threshold", thrLabels, kHitranLevelCount, thresholdLevel)) {
@@ -121,41 +125,48 @@ bool renderHitranPanel(const char* title, int& selectedGas,
     return changed;
 }
 
-void renderHitranMarkers(int selectedGas, int xUnit,
+void renderHitranMarkers(const std::array<bool, 8>& enabled, int xUnit,
                          int thresholdLevel, int smoothLevel) {
-    if (selectedGas < 0 || selectedGas >= kHitranGasCount) return;
-    const HitranGas& gas = kHitranGases[selectedGas];
-    std::vector<HitranBand> bands;
-    std::vector<double> peaks;
-    hitranBandsForLevel(gas,
-                        kHitranThresholds[clampLevel(thresholdLevel, kHitranLevelCount)],
-                        kHitranSmoothOptions[clampLevel(smoothLevel, kHitranSmoothLevelCount)],
-                        bands, peaks);
-    if (bands.empty()) return;
+    const float thr = kHitranThresholds[clampLevel(thresholdLevel, kHitranLevelCount)];
+    const int smoothCm = kHitranSmoothOptions[clampLevel(smoothLevel, kHitranSmoothLevelCount)];
+    const auto unit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnit);
+
+    std::vector<const HitranGas*> active;
+    for (int i = 0; i < kHitranGasCount; ++i)
+        if (enabled[i]) active.push_back(&kHitranGases[i]);
+    if (active.empty()) return;
 
     const ImVec2 plotPos = ImPlot::GetPlotPos();
     ImDrawList* dl = ImPlot::GetPlotDrawList();
     const float barH = 8.0f;
-    const float y0 = plotPos.y + 4.0f;
-    const ImU32 color = static_cast<ImU32>(gas.color);
-    const ImU32 dimColor = (color & 0x00FFFFFFu) | (0x59u << 24);  // ~35% alpha
-    const auto unit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnit);
+    const float pitch = barH + 2.0f;
     const auto toPixelX = [&](double cm1) {
         const double x = SpectralToolbox::convertXValue(
             cm1, SpectralToolbox::SpectrumXUnit::CmInv, unit);
         return ImPlot::PlotToPixels(x, 0.0).x;
     };
-    // Full band at reduced alpha.
-    for (const auto& b : bands) {
-        const float left = std::min(toPixelX(b.cmMin), toPixelX(b.cmMax));
-        const float right = std::max(toPixelX(b.cmMin), toPixelX(b.cmMax));
-        if (right - left >= 1.0f)
-            dl->AddRectFilled(ImVec2(left, y0), ImVec2(right, y0 + barH), dimColor);
-    }
     // Peak-location ticks: fixed width everywhere, full color.
     const float tickHalfW = 3.0f;   // 6 px
-    for (double peak : peaks) {
-        const float cx = toPixelX(peak);
-        dl->AddRectFilled(ImVec2(cx - tickHalfW, y0), ImVec2(cx + tickHalfW, y0 + barH), color);
+
+    for (size_t row = 0; row < active.size(); ++row) {
+        const HitranGas& gas = *active[row];
+        const float y0 = plotPos.y + 4.0f + static_cast<float>(row) * pitch;
+        const ImU32 color = static_cast<ImU32>(gas.color);
+        const ImU32 dimColor = (color & 0x00FFFFFFu) | (0x59u << 24);  // ~35% alpha
+        std::vector<HitranBand> bands;
+        std::vector<double> peaks;
+        hitranBandsForLevel(gas, thr, smoothCm, bands, peaks);
+        if (bands.empty()) continue;
+        // Full band at reduced alpha.
+        for (const auto& b : bands) {
+            const float left = std::min(toPixelX(b.cmMin), toPixelX(b.cmMax));
+            const float right = std::max(toPixelX(b.cmMin), toPixelX(b.cmMax));
+            if (right - left >= 1.0f)
+                dl->AddRectFilled(ImVec2(left, y0), ImVec2(right, y0 + barH), dimColor);
+        }
+        for (double peak : peaks) {
+            const float cx = toPixelX(peak);
+            dl->AddRectFilled(ImVec2(cx - tickHalfW, y0), ImVec2(cx + tickHalfW, y0 + barH), color);
+        }
     }
 }
