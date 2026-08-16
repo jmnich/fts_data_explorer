@@ -17,6 +17,7 @@
 #include "file_browser.h"
 #include "session/cross_store.h"
 #include "environment_session.h"
+#include "hitran_panel.h"
 #include "layout_persistence.h"
 #include <imgui.h>
 #include "imgui_internal.h" // DockBuilder API
@@ -968,6 +969,7 @@ static void rebuildDefaultLayout(ImGuiID dockspace_id, float topOffset) {
     ImGui::DockBuilderSplitNode(dock_env_below, ImGuiDir_Up, 0.5f,
                                 &dock_env_range, &dock_env_export);
     ImGui::DockBuilderDockWindow("Settings##envcfg", dock_env_settings);
+    ImGui::DockBuilderDockWindow("HITRAN Gas Markers##envhitran", dock_env_settings);
     ImGui::DockBuilderDockWindow("Plot Ranging##envrange", dock_env_range);
     ImGui::DockBuilderDockWindow("Export##envexp", dock_env_export);
     ImGui::DockBuilderDockWindow("Viewer##envview", dock_env_viewer);
@@ -996,6 +998,7 @@ static void rebuildDefaultLayout(ImGuiID dockspace_id, float topOffset) {
     ImGui::DockBuilderDockWindow("Active Experiments", dock_right_top);
     ImGui::DockBuilderDockWindow("Batch Processing",   dock_right_top);
     ImGui::DockBuilderDockWindow("Spectrum View",      dock_right_bottom);
+    ImGui::DockBuilderDockWindow("HITRAN Gas Markers", dock_right_bottom);
     ImGui::DockBuilderDockWindow("Available Experiments", dock_right_bottom);
 
     ImGui::DockBuilderFinish(dockspace_id);
@@ -2108,6 +2111,10 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
 
         // 100% T View panel (docked)
         renderT100ViewPanel();
+
+        // HITRAN gas-marker toggles (docked panel; markers drawn in the
+        // Spectrum and Average plots).
+        renderHitranPanel("HITRAN Gas Markers", appState.active->hitranGasEnabled);
 
         // Close the panel condition (welcome screen)
         }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "pthread_compat.h"   // GCC 16+: must precede <mutex> (_GNU_SOURCE undefined)
+#include <array>
 #include <map>
 #include <string>
 #include <utility>
@@ -141,6 +142,9 @@ public:
     int prevYScaleSelector = -1;
     // Tracking cursor (spectrum-view scheme): marks ALL displayed curves.
     bool showTrackingCursor = false;
+    // HITRAN gas-marker toggles (spectral artifacts only; index i <->
+    // kHitranGases[i]). Persisted in the experiment config.json.
+    std::array<bool, 8> hitranGasEnabled{};
     // Display-only stride downsampling to maxPointsBeforeDownsampling (the
     // interferogram-view scheme). OFF by default: full-resolution display;
     // the cursor reads full-res data and CSV export never downsamples.

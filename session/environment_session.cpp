@@ -18,6 +18,7 @@
 #include "cross_store.h"
 #include "file_browser.h"
 #include "hdf/h5_store.h"
+#include "hitran_panel.h"
 #include "layout_persistence.h"
 #include "theme.h"
 #include "workspace_reader.h"
@@ -345,7 +346,8 @@ bool isExperimentPanelName(const char* name) {
            (std::strcmp(name, "Settings##envcfg") == 0 ||
             std::strcmp(name, "Viewer##envview") == 0 ||
             std::strcmp(name, "Plot Ranging##envrange") == 0 ||
-            std::strcmp(name, "Export##envexp") == 0);
+            std::strcmp(name, "Export##envexp") == 0 ||
+            std::strcmp(name, "HITRAN Gas Markers##envhitran") == 0);
 }
 
 // Public label for a comparator artifact type.
@@ -847,6 +849,10 @@ void EnvironmentSession::render() {
     }
     renderConfigWindow();
     renderRangingWindow();
+    // HITRAN gas-marker toggles: own docked panel; a toggle is a config
+    // change (dirty-gated saves).
+    if (renderHitranPanel("HITRAN Gas Markers##envhitran", hitranGasEnabled))
+        dirty = true;
     renderExportWindow();
     renderViewWindow();
 }
@@ -1842,6 +1848,12 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
         }
         if (showLegend) ImPlot::PopColormap();
 
+        // HITRAN gas-band markers (spectral artifacts only — interferograms
+        // have an OPD/sample X axis). Drawn before the interaction/cursor
+        // blocks so the tracking-cursor info box stays on top.
+        if (type == EnvType::Absorbance || artifactSelector < 4)
+            renderHitranMarkers(hitranGasEnabled, xUnitSelector);
+
         // Interaction: ESC autoscale, arrows pan 10%, shift+drag range.
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) &&
             ImGui::IsKeyPressed(ImGuiKey_Escape)) {
@@ -2169,6 +2181,9 @@ static nlohmann::json experimentConfigJson(const EnvironmentSession& env) {
     j["forcedYMax"] = env.forcedYMax;
     j["yScale"] = env.yScaleSelector;
     j["showCursor"] = env.showTrackingCursor;
+    nlohmann::json hitranGases = nlohmann::json::array();
+    for (bool b : env.hitranGasEnabled) hitranGases.push_back(b);
+    j["hitranGases"] = std::move(hitranGases);
     j["downsampleDisplay"] = env.downsampleDisplay;
     j["computed"] = env.computed;
     // View X range (bugfix 2026-08-14): manual zoom window, same convention
@@ -2213,6 +2228,12 @@ static void experimentApplyConfig(EnvironmentSession& env, const nlohmann::json&
     env.yScaleSelector = j.value("yScale", 0);
     env.prevYScaleSelector = env.yScaleSelector;
     env.showTrackingCursor = j.value("showCursor", false);
+    auto hg = j.find("hitranGases");
+    if (hg != j.end() && hg->is_array()) {
+        for (size_t i = 0; i < env.hitranGasEnabled.size() && i < hg->size(); ++i)
+            if ((*hg)[i].is_boolean())
+                env.hitranGasEnabled[i] = (*hg)[i].get<bool>();
+    }
     env.downsampleDisplay = j.value("downsampleDisplay", false);
     env.computed = j.value("computed", false);
     // Restored X range: latched for one-shot application on the first render

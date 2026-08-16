@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <map>
 #include <memory>
 #include <string>
@@ -82,6 +83,11 @@ public:
     bool rightArrowHandleFlag = false;
     bool isFirstDataLoad = true;
     bool enableDownsampling = true;
+
+    // HITRAN gas-marker toggles (shared by the Spectrum and Average plots in
+    // this workspace tab; index i <-> kHitranGases[i]). Persisted in
+    // workspace.json ("hitranGases").
+    std::array<bool, 8> hitranGasEnabled{};
 
     // ── spectrum params (MUST NOT be missed: part of the param fingerprint) ─
     int xAxisBase = 0;

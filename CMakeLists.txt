@@ -244,6 +244,7 @@ include_directories(
     ${CMAKE_SOURCE_DIR}/panels
     ${CMAKE_SOURCE_DIR}/session
     ${CMAKE_SOURCE_DIR}/workspace
+    ${CMAKE_SOURCE_DIR}/hitran
     ${CMAKE_SOURCE_DIR}/io
     ${CMAKE_SOURCE_DIR}/headless
     ${imgui_SOURCE_DIR}
@@ -270,6 +271,7 @@ add_executable(fts_data_explorer
     headless/headless.cpp
     panels/spectrum.cpp
     panels/average_spectrum.cpp
+    panels/hitran_panel.cpp
     panels/snr_spectrum.cpp
     panels/allan_variance.cpp
     panels/t100.cpp
@@ -396,6 +398,7 @@ add_executable(fts_session_roundtrip
     ui/layout_persistence.cpp
     panels/spectrum.cpp
     panels/average_spectrum.cpp
+    panels/hitran_panel.cpp
     panels/snr_spectrum.cpp
     panels/allan_variance.cpp
     panels/t100.cpp
@@ -431,6 +434,7 @@ target_include_directories(fts_session_roundtrip PRIVATE
     ${CMAKE_SOURCE_DIR}/panels
     ${CMAKE_SOURCE_DIR}/session
     ${CMAKE_SOURCE_DIR}/workspace
+    ${CMAKE_SOURCE_DIR}/hitran
     ${CMAKE_SOURCE_DIR}/io
     ${CMAKE_SOURCE_DIR}/headless
     ${imgui_SOURCE_DIR}

@@ -1,6 +1,7 @@
 #include "spectrum.h"
 #include "spectral_toolbox.h"
 #include "interferogram_data.h"
+#include "hitran_panel.h"
 #if FTS_BUILD_HDF5
 #include "workspace_reader.h"
 #endif
@@ -1124,6 +1125,9 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                 // Draw vertical line at end position
                 ImPlot::PlotLine("##SelectionEnd", end_x, end_y, 2);
             }
+            // HITRAN gas-band markers (drawn before the cursor so the
+            // tracking-cursor info box stays on top).
+            renderHitranMarkers(appState->active->hitranGasEnabled, xUnitSelector);
 
              // Tracking cursor
              if (showTrackingCursor && ImPlot::IsPlotHovered()) {
