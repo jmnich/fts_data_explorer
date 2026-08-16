@@ -1,6 +1,7 @@
 #include "snr_spectrum.h"
 #include "spectral_toolbox.h"
 #include "interferogram_data.h"
+#include "cursor_overlay.h"
 #if FTS_BUILD_HDF5
 #include "workspace_reader.h"
 #endif
@@ -392,61 +393,35 @@ void SnrSpectrum::renderSnrContents(bool showTrackingCursor) {
             ImPlot::PlotLine("##SnrSelectionEnd", end_x, end_y, 2);
         }
 
+        // Tracking cursor (shared overlay)
         if (showTrackingCursor && ImPlot::IsPlotHovered()) {
             ImPlotPoint mousePos = ImPlot::GetPlotMousePos();
-            double signalY = mousePos.y;
-            if (!cachedSnrX.empty() && !cachedSnrY.empty()) {
-                const auto& freqs = cachedSnrX;
-                const auto& specs = cachedSnrY;
-                size_t idx = 0;
-                if (freqs.front() < freqs.back()) {
-                    auto it = std::lower_bound(freqs.begin(), freqs.end(), mousePos.x);
-                    if (it == freqs.begin()) idx = 0;
-                    else if (it == freqs.end()) idx = freqs.size() - 1;
-                    else {
-                        size_t hi = it - freqs.begin();
-                        size_t lo = hi - 1;
-                        idx = (mousePos.x - freqs[lo] <= freqs[hi] - mousePos.x) ? lo : hi;
-                    }
-                } else {
-                    auto it = std::lower_bound(freqs.begin(), freqs.end(), mousePos.x,
-                                                std::greater<double>());
-                    if (it == freqs.begin()) idx = 0;
-                    else if (it == freqs.end()) idx = freqs.size() - 1;
-                    else {
-                        size_t hi = it - freqs.begin();
-                        size_t lo = hi - 1;
-                        idx = (std::abs(mousePos.x - freqs[lo]) <=
-                               std::abs(freqs[hi] - mousePos.x)) ? lo : hi;
-                    }
-                }
-                signalY = specs[idx];
-            }
-
-            double yAxisMin = ImPlot::GetPlotLimits().Y.Min;
-            double lineX[2] = { mousePos.x, mousePos.x };
-            double lineY[2] = { yAxisMin, signalY };
-            ImPlot::PlotLine("##SnrCursorLine", lineX, lineY, 2);
-
-            ImPlotSpec cursorSpec;
-            cursorSpec.Marker = ImPlotMarker_Circle;
-            cursorSpec.MarkerSize = 4.0f;
-            cursorSpec.MarkerFillColor = ImVec4(1, 1, 1, 1);
-            ImPlot::PlotScatter("##SnrCursorPoint", &mousePos.x, &signalY, 1, cursorSpec);
+            const ImPlotRect lim = ImPlot::GetPlotLimits();
+            const double xLo = std::min(lim.X.Min, lim.X.Max);
+            const double xHi = std::max(lim.X.Min, lim.X.Max);
+            const double mx = std::min(std::max(mousePos.x, xLo), xHi);
 
             using ST = SpectralToolbox::SpectrumXUnit;
             auto unit = static_cast<ST>(xUnitSelector);
-            double cm1 = (unit == ST::CmInv) ? mousePos.x :
-                         SpectralToolbox::convertXValue(mousePos.x, unit, ST::CmInv);
-            double um  = (unit == ST::Um) ? mousePos.x :
-                         SpectralToolbox::convertXValue(mousePos.x, unit, ST::Um);
-            double thz = (unit == ST::THz) ? mousePos.x :
-                           SpectralToolbox::convertXValue(mousePos.x, unit, ST::THz);
-            char txt[512];
-            std::snprintf(txt, sizeof(txt), "SNR\n%.2f cm-1\n%.4f um\n%.4f THz\nSNR: %.4e",
-                          cm1, um, thz, signalY);
-            ImPlot::Annotation(mousePos.x, signalY, ImVec4(1, 1, 1, 1),
-                               ImVec2(10, -10), true, "%s", txt);
+            double cm1 = (unit == ST::CmInv) ? mx :
+                         SpectralToolbox::convertXValue(mx, unit, ST::CmInv);
+            double um  = (unit == ST::Um) ? mx :
+                         SpectralToolbox::convertXValue(mx, unit, ST::Um);
+            double thz = (unit == ST::THz) ? mx :
+                           SpectralToolbox::convertXValue(mx, unit, ST::THz);
+            char header[128];
+            std::snprintf(header, sizeof(header), "X: %.2f cm-1 / %.4f um / %.4f THz",
+                          cm1, um, thz);
+
+            std::vector<CursorCurve> cursorCurves;
+            if (!cachedSnrX.empty() && !cachedSnrY.empty()) {
+                CursorCurve cc;
+                cc.x = &cachedSnrX;
+                cc.y = &cachedSnrY;
+                cc.color = ImVec4(0.75f, 0.25f, 0.15f, 1.0f);
+                cursorCurves.push_back(std::move(cc));
+            }
+            renderCursorOverlay(header, cursorCurves);
         }
 
         {

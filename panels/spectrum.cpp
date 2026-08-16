@@ -2,6 +2,7 @@
 #include "spectral_toolbox.h"
 #include "interferogram_data.h"
 #include "hitran_panel.h"
+#include "cursor_overlay.h"
 #if FTS_BUILD_HDF5
 #include "workspace_reader.h"
 #endif
@@ -1131,82 +1132,46 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                                 appState->active->hitranThresholdLevel,
                                 appState->active->hitranSmoothLevel);
 
-             // Tracking cursor
+             // Tracking cursor (shared overlay): full-height line (never
+             // affects Y autofit/range-fit) + per-spectrum markers + info box
+             // with color badges.
              if (showTrackingCursor && ImPlot::IsPlotHovered()) {
                  ImPlotPoint mousePos = ImPlot::GetPlotMousePos();
-                 double signalY = mousePos.y;
-                 std::string displayName = "Series";
-
-                 if (!primaryDetectors.empty() && !primaryDetectors[0].first.empty()) {
-                     const std::string& filePath = primaryDetectors[0].first;
-                     size_t last_slash = filePath.find_last_of("/\\");
-                     displayName = (last_slash != std::string::npos) ? filePath.substr(last_slash + 1) : filePath;
-
-                     auto freqIt = cachedFrequencies.find(filePath);
-                     auto specIt = cachedSpectra.find(filePath);
-                     if (freqIt != cachedFrequencies.end() && specIt != cachedSpectra.end() &&
-                         !freqIt->second.empty() && !specIt->second.empty()) {
-                         const auto& freqs = freqIt->second;
-                         const auto& specs = specIt->second;
-                         size_t idx = 0;
-                         if (freqs.front() < freqs.back()) {
-                             auto it = std::lower_bound(freqs.begin(), freqs.end(), mousePos.x);
-                             if (it == freqs.begin()) {
-                                 idx = 0;
-                             } else if (it == freqs.end()) {
-                                 idx = freqs.size() - 1;
-                             } else {
-                                 size_t hi = it - freqs.begin();
-                                 size_t lo = hi - 1;
-                                 idx = (mousePos.x - freqs[lo] <= freqs[hi] - mousePos.x) ? lo : hi;
-                             }
-                         } else {
-                             auto it = std::lower_bound(freqs.begin(), freqs.end(), mousePos.x, std::greater<double>());
-                             if (it == freqs.begin()) {
-                                 idx = 0;
-                             } else if (it == freqs.end()) {
-                                 idx = freqs.size() - 1;
-                             } else {
-                                 size_t hi = it - freqs.begin();
-                                 size_t lo = hi - 1;
-                                 idx = (std::abs(mousePos.x - freqs[lo]) <= std::abs(freqs[hi] - mousePos.x)) ? lo : hi;
-                             }
-                         }
-                          signalY = specs[idx];
-                          if (detectorSensitivity > 0.0f) {
-                              signalY = toDisplay(signalY);
-                          } else {
-                              double maxVal = *std::max_element(specs.begin(), specs.end());
-                              signalY = normalizeValue(signalY, maxVal, yScaleSelector);
-                          }
-                     }
-                 }
-
-                 double yAxisMin = ImPlot::GetPlotLimits().Y.Min;
-
-                 double lineX[2] = { mousePos.x, mousePos.x };
-                 double lineY[2] = { yAxisMin, signalY };
-                 ImPlot::PlotLine("##CursorLine", lineX, lineY, 2);
-
-                 ImPlotSpec cursorSpec;
-                 cursorSpec.Marker = ImPlotMarker_Circle;
-                 cursorSpec.MarkerSize = 4.0f;
-                 cursorSpec.MarkerFillColor = ImVec4(1, 1, 1, 1);
-                 ImPlot::PlotScatter("##CursorPoint", &mousePos.x, &signalY, 1, cursorSpec);
+                 const ImPlotRect lim = ImPlot::GetPlotLimits();
+                 const double xLo = std::min(lim.X.Min, lim.X.Max);
+                 const double xHi = std::max(lim.X.Min, lim.X.Max);
+                 const double mx = std::min(std::max(mousePos.x, xLo), xHi);
 
                  using ST = SpectralToolbox::SpectrumXUnit;
                  auto unit = static_cast<ST>(xUnitSelector);
-                 double cm1 = (unit == ST::CmInv) ? mousePos.x : SpectralToolbox::convertXValue(mousePos.x, unit, ST::CmInv);
-                 double um  = (unit == ST::Um)    ? mousePos.x : SpectralToolbox::convertXValue(mousePos.x, unit, ST::Um);
-                 double thz = (unit == ST::THz)   ? mousePos.x : SpectralToolbox::convertXValue(mousePos.x, unit, ST::THz);
+                 double cm1 = (unit == ST::CmInv) ? mx : SpectralToolbox::convertXValue(mx, unit, ST::CmInv);
+                 double um  = (unit == ST::Um)    ? mx : SpectralToolbox::convertXValue(mx, unit, ST::Um);
+                 double thz = (unit == ST::THz)   ? mx : SpectralToolbox::convertXValue(mx, unit, ST::THz);
+                 char header[128];
+                 std::snprintf(header, sizeof(header), "X: %.2f cm-1 / %.4f um / %.4f THz",
+                               cm1, um, thz);
 
-                 char txt[512];
-                  const char* yUnit = "";
-                  if (yScaleSelector == 2)
-                      yUnit = (detectorSensitivity > 0.0f) ? " dBm" : " dB";
-                 std::snprintf(txt, sizeof(txt), "%s\n%.2f cm-1\n%.4f um\n%.4f THz\nY: %.4e%s", 
-                               displayName.c_str(), cm1, um, thz, signalY, yUnit);
-                 ImPlot::Annotation(mousePos.x, signalY, ImVec4(1, 1, 1, 1), ImVec2(10, -10), true, "%s", txt);
+                 const int ys = yScaleSelector;
+                 std::vector<CursorCurve> cursorCurves;
+                 for (size_t i = 0; i < primaryDetectors.size(); ++i) {
+                     const std::string& fileId = primaryDetectors[i].first;
+                     auto freqIt = cachedFrequencies.find(fileId);
+                     auto specIt = cachedSpectra.find(fileId);
+                     if (freqIt == cachedFrequencies.end() || specIt == cachedSpectra.end()) continue;
+                     if (freqIt->second.empty() || specIt->second.empty()) continue;
+                     CursorCurve cc;
+                     cc.x = &freqIt->second;
+                     cc.y = &specIt->second;
+                     cc.color = plotSpecs[i].LineColor;
+                     if (detectorSensitivity > 0.0f) {
+                         cc.transform = [toDisplay](double v) { return toDisplay(v); };
+                     } else {
+                         double maxVal = *std::max_element(specIt->second.begin(), specIt->second.end());
+                         cc.transform = [maxVal, ys](double v) { return normalizeValue(v, maxVal, ys); };
+                     }
+                     cursorCurves.push_back(std::move(cc));
+                 }
+                 renderCursorOverlay(header, cursorCurves);
              }
 
             if (plotRendered) {

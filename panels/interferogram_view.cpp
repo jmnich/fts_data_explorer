@@ -5,10 +5,12 @@
 #include "spectral_toolbox.h"
 #include "apodization.h"
 #include "workspace_reader.h"
+#include "cursor_overlay.h"
 #include "hdf/workspace.h"
 #include <imgui.h>
 #include "implot.h"
 #include <algorithm>
+#include <cstdio>
 #include <iostream>
 #include <limits>
 #include <vector>
@@ -241,6 +243,12 @@ void renderInterferogramPanel() {
                 }
             }
 
+            // Shared tracking cursor: reuse the workspace cursor flag (Ctrl+Q /
+            // the Spectrum panel toggle). Plotted X arrays are captured below.
+            const bool cursorOn = appState.active->spectrum.showTrackingCursor;
+            std::vector<std::vector<double>> refCursorX(appState.active->loadedData.size());
+            std::vector<std::vector<double>> primCursorX(appState.active->loadedData.size());
+
             if (ImPlot::BeginSubplots(workspacePlotId("Detector Plots").c_str(), numRows, 1, ImVec2(-1, -1), ImPlotSubplotFlags_NoTitle | ImPlotSubplotFlags_LinkAllX | ImPlotSubplotFlags_NoLegend, hasRef ? row_ratios : row_ratios1)) {
 
                 if (hasRef) {
@@ -381,11 +389,13 @@ void renderInterferogramPanel() {
                                                 for (size_t j = 0; j < actual_count; j++)
                                                     shiftedX[j] = mapX(j) - peakHilbX;
                                                 ImPlot::PlotLine("", shiftedX.data(), &refData[ref_start], static_cast<int>(actual_count), plotSpecs[i]);
+                                                if (cursorOn) refCursorX[i] = std::move(shiftedX);
                                             } else {
                                                 std::vector<double> mappedX(actual_count);
                                                 for (size_t j = 0; j < actual_count; j++)
                                                     mappedX[j] = mapX(j);
                                                 ImPlot::PlotLine("", mappedX.data(), &refData[ref_start], static_cast<int>(actual_count), plotSpecs[i]);
+                                                if (cursorOn) refCursorX[i] = std::move(mappedX);
                                             }
                                         }
                                     } else if (appState.active->maxAtZero && !peakPositions.empty()) {
@@ -394,10 +404,16 @@ void renderInterferogramPanel() {
                                         for (size_t j = 0; j < actual_count; j++)
                                             shiftedX[j] = static_cast<double>(static_cast<int>(ref_start + j) - peak);
                                         ImPlot::PlotLine("", shiftedX.data(), &refData[ref_start], static_cast<int>(actual_count), plotSpecs[i]);
+                                        if (cursorOn) refCursorX[i] = std::move(shiftedX);
                                     } else {
                                         ImPlot::PlotLine("", 
                                                        &refData[ref_start], 
                                                        actual_count, 1.0, 0.0, plotSpecs[i]);
+                                        if (cursorOn) {
+                                            refCursorX[i].resize(actual_count);
+                                            for (size_t j = 0; j < actual_count; j++)
+                                                refCursorX[i][j] = static_cast<double>(ref_start + j);
+                                        }
                                     }
                                 }
                             }
@@ -481,6 +497,33 @@ void renderInterferogramPanel() {
                         // Draw vertical line at end position
                                                 
                         ImPlot::PlotLine("##SelectionEnd", end_x, end_y, 2);
+                    }
+                    
+                    // Tracking cursor (shared overlay): tracks all displayed
+                    // reference detectors. Uses the workspace cursor flag.
+                    if (cursorOn && ImPlot::IsPlotHovered()) {
+                        ImPlotPoint mouse = ImPlot::GetPlotMousePos();
+                        const ImPlotRect lim = ImPlot::GetPlotLimits();
+                        const double xLo = std::min(lim.X.Min, lim.X.Max);
+                        const double xHi = std::max(lim.X.Min, lim.X.Max);
+                        const double mx = std::min(std::max(mouse.x, xLo), xHi);
+                        char header[128];
+                        if (appState.active->xAxisBase == 1)
+                            std::snprintf(header, sizeof(header), "OPD: %.4f um", mx);
+                        else
+                            std::snprintf(header, sizeof(header), "Index: %lld",
+                                          static_cast<long long>(mx));
+                        std::vector<CursorCurve> cursorCurves;
+                        for (size_t i = 0; i < appState.active->loadedData.size(); ++i) {
+                            const auto& refData = appState.active->loadedData[i].referenceDetector;
+                            if (refData.empty() || refCursorX[i].empty()) continue;
+                            CursorCurve cc;
+                            cc.x = &refCursorX[i];
+                            cc.y = &refData;
+                            cc.color = plotSpecs[i].LineColor;
+                            cursorCurves.push_back(std::move(cc));
+                        }
+                        renderCursorOverlay(header, cursorCurves);
                     }
                     
                     appState.active->last_ref_y_min = static_cast<float>(ImPlot::GetPlotLimits().Y.Min);
@@ -644,11 +687,13 @@ void renderInterferogramPanel() {
                                                 for (size_t j = 0; j < actual_count; j++)
                                                     shiftedX[j] = mapX(j) - peakHilbX;
                                                 ImPlot::PlotLine("", shiftedX.data(), &primData[ref_start], static_cast<int>(actual_count), plotSpecs[i]);
+                                                if (cursorOn) primCursorX[i] = std::move(shiftedX);
                                             } else {
                                                 std::vector<double> mappedX(actual_count);
                                                 for (size_t j = 0; j < actual_count; j++)
                                                     mappedX[j] = mapX(j);
                                                 ImPlot::PlotLine("", mappedX.data(), &primData[ref_start], static_cast<int>(actual_count), plotSpecs[i]);
+                                                if (cursorOn) primCursorX[i] = std::move(mappedX);
                                             }
                                         }
                                     } else if (appState.active->maxAtZero && !peakPositions.empty()) {
@@ -657,10 +702,16 @@ void renderInterferogramPanel() {
                                         for (size_t j = 0; j < actual_count; j++)
                                             shiftedX[j] = static_cast<double>(static_cast<int>(ref_start + j) - peak);
                                         ImPlot::PlotLine("", shiftedX.data(), &primData[ref_start], static_cast<int>(actual_count), plotSpecs[i]);
+                                        if (cursorOn) primCursorX[i] = std::move(shiftedX);
                                     } else {
                                         ImPlot::PlotLine("", 
                                                        &primData[ref_start], 
                                                          actual_count, 1.0, 0.0, plotSpecs[i]);
+                                        if (cursorOn) {
+                                            primCursorX[i].resize(actual_count);
+                                            for (size_t j = 0; j < actual_count; j++)
+                                                primCursorX[i][j] = static_cast<double>(ref_start + j);
+                                        }
                                     }
                                 }
                             }
@@ -759,6 +810,33 @@ void renderInterferogramPanel() {
                         
                         // Draw vertical line at end position
                         ImPlot::PlotLine("##SelectionEnd", end_x, end_y, 2);
+                    }
+                    
+                    // Tracking cursor (shared overlay): tracks all displayed
+                    // primary detectors. Uses the workspace cursor flag.
+                    if (cursorOn && ImPlot::IsPlotHovered()) {
+                        ImPlotPoint mouse = ImPlot::GetPlotMousePos();
+                        const ImPlotRect lim = ImPlot::GetPlotLimits();
+                        const double xLo = std::min(lim.X.Min, lim.X.Max);
+                        const double xHi = std::max(lim.X.Min, lim.X.Max);
+                        const double mx = std::min(std::max(mouse.x, xLo), xHi);
+                        char header[128];
+                        if (appState.active->xAxisBase == 1)
+                            std::snprintf(header, sizeof(header), "OPD: %.4f um", mx);
+                        else
+                            std::snprintf(header, sizeof(header), "Index: %lld",
+                                          static_cast<long long>(mx));
+                        std::vector<CursorCurve> cursorCurves;
+                        for (size_t i = 0; i < appState.active->loadedData.size(); ++i) {
+                            const auto& primData = appState.active->loadedData[i].primaryDetector;
+                            if (primData.empty() || primCursorX[i].empty()) continue;
+                            CursorCurve cc;
+                            cc.x = &primCursorX[i];
+                            cc.y = &primData;
+                            cc.color = plotSpecs[i].LineColor;
+                            cursorCurves.push_back(std::move(cc));
+                        }
+                        renderCursorOverlay(header, cursorCurves);
                     }
                     
                     // Add "LARGE DATA" indicator for large datasets (>50k points)
@@ -907,6 +985,36 @@ void renderInterferogramConfigPanel() {
                         appState.active->prim_y_min = *prim_min_max.first;
                         appState.active->prim_y_max = *prim_min_max.second;
                     }
+                    appState.needsRedraw = true;
+                }
+            }
+            ImGui::PopStyleColor(3);
+
+            // Row 4b: Tracking cursor (off / on) — shares the workspace cursor
+            // flag (Ctrl+Q / Spectrum panel toggle).
+            ImGui::Text("Cursor");
+            ImGui::SameLine();
+            const bool cursorOff = !appState.active->spectrum.showTrackingCursor;
+            const bool cursorOn  =  appState.active->spectrum.showTrackingCursor;
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[cursorOff ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cursorOff ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+            if (ImGui::Button("off##IfgCursorOff")) {
+                if (appState.active->spectrum.showTrackingCursor) {
+                    appState.active->spectrum.showTrackingCursor = false;
+                    appState.needsRedraw = true;
+                }
+            }
+            ImGui::PopStyleColor(3);
+            ImGui::SameLine(0.0f, 0.0f);
+
+            ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[cursorOn ? 1 : 0]);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cursorOn ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
+            if (ImGui::Button("on##IfgCursorOn")) {
+                if (!appState.active->spectrum.showTrackingCursor) {
+                    appState.active->spectrum.showTrackingCursor = true;
                     appState.needsRedraw = true;
                 }
             }

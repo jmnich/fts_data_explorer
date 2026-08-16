@@ -16,6 +16,7 @@
 #include "app_state.h"
 #include "config.h"
 #include "cross_store.h"
+#include "cursor_overlay.h"
 #include "file_browser.h"
 #include "hdf/h5_store.h"
 #include "hitran_panel.h"
@@ -162,25 +163,6 @@ ImPlotColormap tab20Colormap() {
         return ImPlot::AddColormap("Tab20", cols, 20, true);
     }();
     return cmap;
-}
-
-// Index of the sample nearest to xv (ascending or descending x).
-size_t nearestIndex(const std::vector<double>& x, double xv) {
-    if (x.size() <= 1) return 0;
-    if (x.front() < x.back()) {
-        auto it = std::lower_bound(x.begin(), x.end(), xv);
-        if (it == x.begin()) return 0;
-        if (it == x.end()) return x.size() - 1;
-        const size_t hi = it - x.begin();
-        const size_t lo = hi - 1;
-        return (xv - x[lo] <= x[hi] - xv) ? lo : hi;
-    }
-    auto it = std::lower_bound(x.begin(), x.end(), xv, std::greater<double>());
-    if (it == x.begin()) return 0;
-    if (it == x.end()) return x.size() - 1;
-    const size_t hi = it - x.begin();
-    const size_t lo = hi - 1;
-    return (std::fabs(xv - x[lo]) <= std::fabs(x[hi] - xv)) ? lo : hi;
 }
 
 }  // namespace
@@ -1940,23 +1922,16 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
             ImPlot::PlotLine("##SelEnd", ex, sy, 2);
         }
 
-        // Tracking cursor (spectrum-view scheme): marks and annotates ALL
-        // displayed curves. Markers + info-box text are color-coded to match
-        // each curve's line; labels are the short form (no dataset names).
+        // Tracking cursor (shared overlay): full-height vertical line (never
+        // affects Y autofit/range-fit), per-curve colored markers and an info
+        // box with color badges. Absorbance keeps badge + label + value;
+        // Comparator shows badge + value only.
         if (showTrackingCursor && ImPlot::IsPlotHovered()) {
             const ImPlotRect lim = ImPlot::GetPlotLimits();
             ImPlotPoint mouse = ImPlot::GetPlotMousePos();
             const double xLo = std::min(lim.X.Min, lim.X.Max);
             const double xHi = std::max(lim.X.Min, lim.X.Max);
             const double mx = std::min(std::max(mouse.x, xLo), xHi);
-            double lineY[2] = {lim.Y.Min, lim.Y.Max};
-            double lineX[2] = {mx, mx};
-            ImPlot::PlotLine("##EnvCursorLine", lineX, lineY, 2);
-
-            ImPlotSpec cursorSpec;
-            cursorSpec.Marker = ImPlotMarker_Circle;
-            cursorSpec.MarkerSize = 4.0f;
-            cursorSpec.MarkerLineColor = ImVec4(1, 1, 1, 1);   // white edge keeps the dot visible on its own line
 
             using ST = SpectralToolbox::SpectrumXUnit;
             const auto unit = static_cast<ST>(xUnitSelector);
@@ -1973,65 +1948,19 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
                 std::snprintf(header, sizeof(header), "X: %.2f cm-1 / %.4f um / %.4f THz",
                               cm1, um, thz);
 
-            // White value lines: header + one per curve, each preceded by a
-            // small color patch matching the curve's line (the patch ties the
-            // value to its legend entry). Comparator: badge + value only (no
-            // dataset names); Absorbance keeps label + value.
-            std::vector<std::pair<ImVec4, std::string>> lines;
-            lines.emplace_back(ImVec4(0, 0, 0, 0), header);   // w==0 → no patch
+            std::vector<CursorCurve> cursorCurves;
+            cursorCurves.reserve(curves.size());
             for (size_t k = 0; k < curves.size(); ++k) {
-                const auto& c = curves[k];
-                if (c.x.empty() || c.y.empty()) continue;
-                const size_t idx = nearestIndex(c.x, mx);
-                double yv = c.y[idx];
-                if (yScaleSelector == 2) yv = 10.0 * std::log10(std::max(yv, 1e-300));
-                cursorSpec.MarkerFillColor = curveColors[k];
-                ImPlot::PlotScatter(("##EnvCursorPt" + c.label).c_str(),
-                                    &mx, &yv, 1, cursorSpec);
-                char line[64];
-                std::snprintf(line, sizeof(line), "%.4e", yv);
-                if (type == EnvType::Comparator)
-                    lines.emplace_back(curveColors[k], line);
-                else
-                    lines.emplace_back(curveColors[k], c.label + "  " + line);
+                CursorCurve cc;
+                cc.x = &curves[k].x;
+                cc.y = &curves[k].y;
+                cc.color = curveColors[k];
+                if (type != EnvType::Comparator) cc.label = curves[k].label;
+                if (yScaleSelector == 2)
+                    cc.transform = [](double v) { return 10.0 * std::log10(std::max(v, 1e-300)); };
+                cursorCurves.push_back(std::move(cc));
             }
-
-            // Info box on the plot draw list, clamped to the plot.
-            const float lineH = ImGui::GetTextLineHeightWithSpacing();
-            const float patchW = 14.0f;
-            const float patchH = std::max(4.0f, lineH - 6.0f);
-            float boxW = 0.0f;
-            for (const auto& [col, text] : lines) {
-                float w = ImGui::CalcTextSize(text.c_str()).x;
-                if (col.w > 0.0f) w += patchW + 6.0f;   // color patch + gap
-                boxW = std::max(boxW, w);
-            }
-            boxW += 16.0f;
-            const float boxH = lines.size() * lineH + 8.0f;
-            ImVec2 pos = ImPlot::PlotToPixels(mx, mouse.y);
-            pos.x += 10.0f;
-            pos.y += 10.0f;
-            const ImVec2 plotPos = ImPlot::GetPlotPos();
-            const ImVec2 plotSize = ImPlot::GetPlotSize();
-            pos.x = std::min(std::max(pos.x, plotPos.x + 4.0f), plotPos.x + plotSize.x - boxW - 4.0f);
-            pos.y = std::min(std::max(pos.y, plotPos.y + 4.0f), plotPos.y + plotSize.y - boxH - 4.0f);
-            ImDrawList* dl = ImPlot::GetPlotDrawList();
-            dl->AddRectFilled(pos, ImVec2(pos.x + boxW, pos.y + boxH), IM_COL32(0, 0, 0, 200), 4.0f);
-            float ty = pos.y + 4.0f;
-            for (const auto& [col, text] : lines) {
-                if (col.w > 0.0f) {
-                    dl->AddRectFilled(ImVec2(pos.x + 8.0f, ty + (lineH - patchH) * 0.5f),
-                                      ImVec2(pos.x + 8.0f + patchW,
-                                             ty + (lineH - patchH) * 0.5f + patchH),
-                                      ImGui::GetColorU32(col));
-                    dl->AddText(ImVec2(pos.x + 8.0f + patchW + 6.0f, ty),
-                                IM_COL32(255, 255, 255, 255), text.c_str());
-                } else {
-                    dl->AddText(ImVec2(pos.x + 8.0f, ty),
-                                IM_COL32(255, 255, 255, 255), text.c_str());
-                }
-                ty += lineH;
-            }
+            renderCursorOverlay(header, cursorCurves);
         }
 
         // Capture the current X limits every frame (the export "current plot

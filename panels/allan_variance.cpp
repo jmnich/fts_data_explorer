@@ -1,6 +1,7 @@
 #include "allan_variance.h"
 #include "spectral_toolbox.h"
 #include "interferogram_data.h"
+#include "cursor_overlay.h"
 #if FTS_BUILD_HDF5
 #include "workspace_reader.h"
 #endif
@@ -510,53 +511,25 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
                 ImPlot::PlotLine("##AllanSelectionEnd", end_x, end_y, 2);
             }
 
+            // Tracking cursor (shared overlay)
             if (showTrackingCursor && ImPlot::IsPlotHovered()) {
                 ImPlotPoint mousePos = ImPlot::GetPlotMousePos();
-                double signalY = mousePos.y;
+                const ImPlotRect lim = ImPlot::GetPlotLimits();
+                const double xLo = std::min(lim.X.Min, lim.X.Max);
+                const double xHi = std::max(lim.X.Min, lim.X.Max);
+                const double mx = std::min(std::max(mousePos.x, xLo), xHi);
+                char header[128];
+                std::snprintf(header, sizeof(header), "tau: %.4e", mx);
+
+                std::vector<CursorCurve> cursorCurves;
                 if (!cachedSurfaceTaus.empty() && !sliceY.empty()) {
-                    const auto& taus = cachedSurfaceTaus;
-                    const auto& vars = sliceY;
-                    size_t idx = 0;
-                    if (taus.front() < taus.back()) {
-                        auto it = std::lower_bound(taus.begin(), taus.end(), mousePos.x);
-                        if (it == taus.begin()) idx = 0;
-                        else if (it == taus.end()) idx = taus.size() - 1;
-                        else {
-                            size_t hi = it - taus.begin();
-                            size_t lo = hi - 1;
-                            idx = (mousePos.x - taus[lo] <= taus[hi] - mousePos.x) ? lo : hi;
-                        }
-                    } else {
-                        auto it = std::lower_bound(taus.begin(), taus.end(), mousePos.x,
-                                                    std::greater<double>());
-                        if (it == taus.begin()) idx = 0;
-                        else if (it == taus.end()) idx = taus.size() - 1;
-                        else {
-                            size_t hi = it - taus.begin();
-                            size_t lo = hi - 1;
-                            idx = (std::abs(mousePos.x - taus[lo]) <=
-                                   std::abs(taus[hi] - mousePos.x)) ? lo : hi;
-                        }
-                    }
-                    signalY = vars[idx];
+                    CursorCurve cc;
+                    cc.x = &cachedSurfaceTaus;
+                    cc.y = &sliceY;
+                    cc.color = ImVec4(0.2f, 0.6f, 0.5f, 1.0f);
+                    cursorCurves.push_back(std::move(cc));
                 }
-
-                double yAxisMin = ImPlot::GetPlotLimits().Y.Min;
-                double lineX[2] = { mousePos.x, mousePos.x };
-                double lineY[2] = { yAxisMin, signalY };
-                ImPlot::PlotLine("##AllanCursorLine", lineX, lineY, 2);
-
-                ImPlotSpec cursorSpec;
-                cursorSpec.Marker = ImPlotMarker_Circle;
-                cursorSpec.MarkerSize = 4.0f;
-                cursorSpec.MarkerFillColor = ImVec4(1, 1, 1, 1);
-                ImPlot::PlotScatter("##AllanCursorPoint", &mousePos.x, &signalY, 1, cursorSpec);
-
-                char txt[256];
-                std::snprintf(txt, sizeof(txt), "tau: %.4e\nvar: %.4e",
-                              mousePos.x, signalY);
-                ImPlot::Annotation(mousePos.x, signalY, ImVec4(1, 1, 1, 1),
-                                   ImVec2(10, -10), true, "%s", txt);
+                renderCursorOverlay(header, cursorCurves);
             }
 
             {
