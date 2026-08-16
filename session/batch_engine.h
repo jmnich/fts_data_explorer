@@ -175,6 +175,7 @@ struct BatchPanelState {
     int datasetFocus = 0;                // keyboard focus row (Up/Down move, Space toggles)
     // modals
     bool showConfirm = false;
+    bool showDeleteConfirm = false;
     bool showNewFromDataset = false;     // step 1: dataset picker
     bool showNewFromDatasetForm = false; // step 2: name/comment/override checkboxes
     std::string pickedDatasetId;         // chosen source id

@@ -33,6 +33,7 @@ private:
     void renderAvailableExperimentsPanel();     // scrollable type list
     void renderBatchProcessingPanel();          // NEW: 4th dockable panel (M-batch)
     void renderBatchConfirmModal();             // NEW
+    void renderBatchDeleteModal();              // NEW: recipe removal confirm
     void renderBatchProgressModal();            // NEW (blocking)
     void renderNewFromDatasetModals();          // NEW (steps 1+2)
     void renderBatchImportExport();             // NEW

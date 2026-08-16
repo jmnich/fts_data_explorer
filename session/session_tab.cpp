@@ -459,6 +459,7 @@ const std::string& SessionTab::title() const {
 void SessionTab::render() {
     renderRemoveConfirm();
     renderBatchConfirmModal();
+    renderBatchDeleteModal();
     renderBatchProgressModal();
     renderNewFromDatasetModals();
     renderBatchImportExport();
@@ -723,9 +724,10 @@ void SessionTab::renderBatchProcessingPanel() {
     BatchPanelState& b = appState.sessionTab.batch;
     const float avail = ImGui::GetContentRegionAvail().x;
     const float leftW = avail * 0.45f;
-    // Bottom area holds 3 small buttons + the double-height "Batch process"
-    // button below the columns.
-    const float bottomH = 5.0f * ImGui::GetFrameHeight() + 5.0f * ImGui::GetStyle().ItemSpacing.y;
+    // Bottom area below the columns holds the 4 small recipe buttons
+    // (New from dataset / Import / Export / Delete) — "Batch process" lives
+    // pinned inside the right column.
+    const float bottomH = 4.0f * ImGui::GetFrameHeight() + 5.0f * ImGui::GetStyle().ItemSpacing.y;
     const AccentColor ac = StringToAccentColor(appState.currentAccentColor);
 
     // ── dataset list state + keyboard nav (panel level: current window is the
@@ -762,7 +764,8 @@ void SessionTab::renderBatchProcessingPanel() {
         const Recipe& r = b.recipes[i];
         const bool builtin = i < builtinRecipes().size();
         const float availW = ImGui::GetContentRegionAvail().x - 10.0f;
-        std::vector<std::string> lines = wrapToLines(r.name, availW, 1);
+        std::vector<std::string> lines =
+            wrapToLines(builtin ? r.name + " (built-in)" : r.name, availW, 1);
         std::string meta = builtin ? "Built-in" : "In workspace";
         if (!r.comment.empty()) meta += "  " + r.comment;
         for (auto& l : wrapToLines(meta, availW, 2)) lines.push_back(std::move(l));
@@ -777,47 +780,85 @@ void SessionTab::renderBatchProcessingPanel() {
     ImGui::EndChild();
     ImGui::SameLine();
 
-    // ── right column: datasets + Batch process ──────────────────────────────
-    ImGui::BeginChild("##batchDatasets", ImVec2(0.0f, -bottomH), false,
-                      ImGuiWindowFlags_AlwaysVerticalScrollbar);
-    if (n == 0) {
-        renderCenteredEmptyLine("No datasets embedded yet.", 0.25f);
-    }
-    for (size_t i = 0; i < n; ++i) {
-        ImGui::PushID(static_cast<int>(i));
-        bool checked = b.datasetChecks[i];
-        // Checkbox first, then a labelled selectable filling the rest of the
-        // row. An empty-label selectable's hit rect spans the full row width
-        // and swallows the checkbox clicks (only its bottom 4px worked).
-        if (ImGui::Checkbox("", &checked)) {
-            b.datasetFocus = static_cast<int>(i);
+    // ── right column: Select header, scrollable dataset list, pinned
+    // "Batch process" button at the bottom (header and button never scroll) ──
+    ImGui::BeginChild("##batchDatasets", ImVec2(0.0f, -bottomH), false);
+    {
+        ImGui::TextUnformatted("Select:");
+        ImGui::SameLine();
+        if (ImGui::Button("All##batchSelect")) {
+            for (size_t i = 0; i < b.datasetChecks.size(); ++i) b.datasetChecks[i] = true;
             appState.needsRedraw = true;
         }
         ImGui::SameLine();
-        if (ImGui::Selectable(appState.sessionTab.sources[i].name.c_str(),
-                              b.datasetFocus == static_cast<int>(i))) {
-            b.datasetFocus = static_cast<int>(i);
+        if (ImGui::Button("None##batchSelect")) {
+            for (size_t i = 0; i < b.datasetChecks.size(); ++i) b.datasetChecks[i] = false;
             appState.needsRedraw = true;
         }
-        b.datasetChecks[i] = checked;
-        ImGui::PopID();
+        const float listH = ImGui::GetContentRegionAvail().y
+                          - ImGui::GetFrameHeight() * 2.0f
+                          - ImGui::GetStyle().ItemSpacing.y * 2.0f;
+        ImGui::BeginChild("##batchDatasetList", ImVec2(0.0f, listH), false,
+                          ImGuiWindowFlags_AlwaysVerticalScrollbar);
+        if (n == 0) {
+            renderCenteredEmptyLine("No datasets embedded yet.", 0.25f);
+        }
+        for (size_t i = 0; i < n; ++i) {
+            ImGui::PushID(static_cast<int>(i));
+            bool checked = b.datasetChecks[i];
+            // Checkbox first, then a labelled selectable filling the rest of the
+            // row. An empty-label selectable's hit rect spans the full row width
+            // and swallows the checkbox clicks (only its bottom 4px worked).
+            if (ImGui::Checkbox("", &checked)) {
+                b.datasetFocus = static_cast<int>(i);
+                appState.needsRedraw = true;
+            }
+            ImGui::SameLine();
+            if (ImGui::Selectable(appState.sessionTab.sources[i].name.c_str(),
+                                  b.datasetFocus == static_cast<int>(i))) {
+                b.datasetFocus = static_cast<int>(i);
+                appState.needsRedraw = true;
+            }
+            b.datasetChecks[i] = checked;
+            ImGui::PopID();
+        }
+        ImGui::EndChild();
+
+        // Pinned "Batch process" button → confirm modal. Disabled while
+        // nothing is selected or a batch runs.
+        bool anyChecked = false;
+        for (bool c : b.datasetChecks)
+            if (c) { anyChecked = true; break; }
+        const bool enabled = b.selectedRecipe >= 0 && anyChecked && b.phase == BatchPhase::Idle;
+        if (!enabled) ImGui::BeginDisabled();
+        ImGui::PushStyleColor(ImGuiCol_Button, GetAccentMuted(ac));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, GetAccentHovered(ac));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, GetAccentActive(ac));
+        if (ImGui::Button("Batch process", ImVec2(-FLT_MIN, ImGui::GetFrameHeight() * 2.0f))) {
+            b.showConfirm = true;
+            appState.needsRedraw = true;
+        }
+        ImGui::PopStyleColor(3);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Apply the selected recipe to all checked datasets.");
+        if (!enabled) ImGui::EndDisabled();
     }
     ImGui::EndChild();
 
     // three bottom buttons (bottom-left, under the recipes column):
-    // New from dataset… / Import… / Export…
+    // New from dataset / Import / Export
     ImGui::PushStyleColor(ImGuiCol_Button, GetAccentMuted(ac));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, GetAccentHovered(ac));
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, GetAccentActive(ac));
-    if (ImGui::Button("New from dataset...", ImVec2(leftW, 0)))
+    if (ImGui::Button("New from dataset", ImVec2(leftW, 0)))
         b.showNewFromDataset = true;
-    if (ImGui::Button("Import...", ImVec2(leftW, 0))) {
+    if (ImGui::Button("Import", ImVec2(leftW, 0))) {
         g_batchImportRequested = true;
         appState.needsRedraw = true;
     }
     ImGui::PopStyleColor(3);
     if (b.selectedRecipe < 0) ImGui::BeginDisabled();
-    if (ImGui::Button("Export...", ImVec2(leftW, 0))) {
+    if (ImGui::Button("Export", ImVec2(leftW, 0))) {
         g_batchExportRequested = true;
         appState.needsRedraw = true;
     }
@@ -827,24 +868,28 @@ void SessionTab::renderBatchProcessingPanel() {
             ImGui::SetTooltip("Select a recipe to export.");
     }
 
-    // full-width accent-tinted "Batch process" button (renderAddDatasetButton
-    // style) → confirm modal. Disabled while nothing is selected or a batch runs.
-    bool anyChecked = false;
-    for (bool c : b.datasetChecks)
-        if (c) { anyChecked = true; break; }
-    const bool enabled = b.selectedRecipe >= 0 && anyChecked && b.phase == BatchPhase::Idle;
-    if (!enabled) ImGui::BeginDisabled();
+    // Delete (very bottom of the left column): disabled for built-ins — they
+    // cannot be removed. Same base style, bright-red fill on hover (the
+    // session-tab delete look, renderRowRemoveButton).
+    const bool delEnabled = b.selectedRecipe >= 0 &&
+                            b.selectedRecipe >= static_cast<int>(builtinRecipes().size());
+    if (!delEnabled) ImGui::BeginDisabled();
     ImGui::PushStyleColor(ImGuiCol_Button, GetAccentMuted(ac));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, GetAccentHovered(ac));
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive, GetAccentActive(ac));
-    if (ImGui::Button("Batch process", ImVec2(-FLT_MIN, ImGui::GetFrameHeight() * 2.0f))) {
-        b.showConfirm = true;
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.0f, 0.2f, 0.2f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.75f, 0.1f, 0.1f, 1.0f));
+    if (ImGui::Button("Delete", ImVec2(leftW, 0))) {
+        b.showDeleteConfirm = true;
         appState.needsRedraw = true;
     }
     ImGui::PopStyleColor(3);
     if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Apply the selected recipe to all checked datasets.");
-    if (!enabled) ImGui::EndDisabled();
+        ImGui::SetTooltip("Delete the selected recipe from this workspace.");
+    if (!delEnabled) {
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Select a workspace recipe to delete — built-in "
+                              "recipes cannot be removed.");
+    }
 }
 
 void SessionTab::renderBatchConfirmModal() {
@@ -876,8 +921,7 @@ void SessionTab::renderBatchConfirmModal() {
                               ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
         ImGui::PushTextWrapPos(ImGui::GetContentRegionMax().x);
         ImGui::TextWrapped("Open dataset tabs are updated immediately: their results "
-                           "and settings match the recipe, and their next Save "
-                           "writes them back unchanged.");
+                           "and settings match the recipe.");
         ImGui::PopTextWrapPos();
         ImGui::PopStyleColor();
         ImGui::Spacing();
@@ -891,6 +935,59 @@ void SessionTab::renderBatchConfirmModal() {
         } else if (pressed == 1 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
             b.showConfirm = false;
             ImGui::CloseCurrentPopup();
+        }
+        drawModalAccentFrame(modalAccent());
+        ImGui::EndPopup();
+        wasOpen = true;
+    } else {
+        wasOpen = false;
+    }
+    endModal();
+}
+
+void SessionTab::renderBatchDeleteModal() {
+    BatchPanelState& b = appState.sessionTab.batch;
+    static int focus = 0;
+    static bool wasOpen = false;
+    static std::string error;
+    if (!b.showDeleteConfirm) {
+        wasOpen = false;
+        error.clear();
+        return;
+    }
+    ImGui::OpenPopup("Batch Delete Recipe##session");
+    beginModal(460.0f, modalAccent());
+    if (ImGui::BeginPopupModal("Batch Delete Recipe##session", nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
+        ImGui::Text("Delete recipe");
+        ImGui::Spacing();
+        const std::string name =
+            (b.selectedRecipe >= 0 && b.selectedRecipe < static_cast<int>(b.recipes.size()))
+                ? b.recipes[b.selectedRecipe].name
+                : "";
+        ImGui::TextWrapped("Delete \"%s\" from this workspace?", name.c_str());
+        ImGui::Spacing();
+        if (!error.empty()) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.5f, 0.4f, 1.0f));
+            ImGui::TextWrapped("%s", error.c_str());
+            ImGui::PopStyleColor();
+            ImGui::Spacing();
+        }
+        ImGui::Separator();
+        ImGui::Spacing();
+        int pressed = modalButtonRow({"Cancel", "Delete"}, focus, wasOpen, modalAccent());
+        if (pressed == 0 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            b.showDeleteConfirm = false;
+            ImGui::CloseCurrentPopup();
+        } else if (pressed == 1) {
+            std::string err;
+            if (crossRecipeRemove(appState.sessionTab.multiWorkspacePath, name, err)) {
+                refreshBatchRecipes(appState);
+                b.showDeleteConfirm = false;
+                ImGui::CloseCurrentPopup();
+            } else {
+                error = err;
+            }
         }
         drawModalAccentFrame(modalAccent());
         ImGui::EndPopup();

@@ -280,10 +280,12 @@ void finalizeDataset(AppState& s) {
 
     // The T% reference is ALWAYS the dataset's average spectrum. Compute it
     // whether or not "average" is persisted, so a t100-only recipe still has
-    // a reference; persist only when requested.
+    // a reference; persist it whenever t100 is requested too — t100MemberFresh
+    // requires the /average_spectra/average member to EXIST, so a t100-only
+    // recipe would otherwise reopen with a stale banner.
     std::vector<double> avgY(n);
     for (size_t k = 0; k < n; ++k) avgY[k] = j.avgSum[k] / static_cast<double>(nf);
-    if (recipeHas(j.recipe, "average"))
+    if (recipeHas(j.recipe, "average") || recipeHas(j.recipe, "t100"))
         wsUpsertAverage(j.ws, inputs, static_cast<int>(nf), j.commonX, avgY,
                         batchArtifactCfg(j.recipe, inputs, "average", static_cast<int>(nf),
                                          j.datasetRefLaser, j.datasetSensitivity));
@@ -370,6 +372,22 @@ void finalizeDataset(AppState& s) {
         vs["spectrumView"]["apodization"] = batchApodizationJson(j.recipe);
         vs["plotDefaults"]["xCorrectionMethod"] = j.recipe.xCorrectionMethod;
         vs["plotDefaults"]["peakProminence"] = j.recipe.prominenceThreshold;
+        // Panel-side state must match the batch-written members:
+        // - selection: the batch computed over ALL files, so the checkbox set
+        //   is all-true. A saved partial selection would make checkedInputPaths
+        //   differ from the members' inputs → average/SNR/t100/allan stale.
+        vs["selection"]["sortedFiles"] = j.fileIds;
+        vs["selection"]["filesSelectedForAveraging"] =
+            std::vector<bool>(j.fileIds.size(), true);
+        // - the batch's T% reference is ALWAYS the dataset's average spectrum
+        //   (t100MemberFresh requires cfg.reference.source == the panel's
+        //   t100View.referenceSource).
+        vs["t100View"]["referenceSource"] = 2;
+        // - the Allan panel's settings mirror the recipe's (display-only).
+        vs["allanView"]["wavelengthDecimation"] = j.recipe.allanDecimation;
+        vs["allanView"]["xRangeMin"] = j.recipe.allanXMinUm;
+        vs["allanView"]["xRangeMax"] = j.recipe.allanXMaxUm;
+        vs["allanView"]["calcBase"] = j.recipe.allanCalcBase;
     }
 
     std::string err;
