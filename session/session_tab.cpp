@@ -386,8 +386,8 @@ void renderCreateMultiWorkspaceButton() {
                 defaultFolder = std::filesystem::path(
                     appState.configPtr->lastMultiWorkspacePath).parent_path().string();
             std::string path = FileBrowser::showFileSaveDialog(
-                "New Multi-Workspace", "workspace.cross.h5", "*.h5",
-                defaultFolder, glfwGetCurrentContext());
+                "New Multi-Workspace", "HDF5 files", "*.h5",
+                defaultFolder, "workspace.cross.h5", glfwGetCurrentContext());
             if (!path.empty()) {
                 // Embed a copy of the most relevant open dataset from disk.
                 const std::string srcPath = appState.sessions[src]->path;

@@ -373,7 +373,7 @@ void saveWorkspaceAs(AppState& s, GLFWwindow* window) {
     std::string displayName = s.active->workspacePath.empty()
         ? "workspace.h5" : std::filesystem::path(s.active->workspacePath).filename().string();
     std::string path = FileBrowser::showFileSaveDialog(
-        "Save Workspace As", displayName, "*.h5", defaultFolder, window);
+        "Save Workspace As", "HDF5 files", "*.h5", defaultFolder, displayName, window);
     if (path.empty()) return;
     requestSaveWorkspace(s, path);
 }

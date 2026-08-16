@@ -2020,11 +2020,23 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
         }
 
         // Capture the current X limits every frame (the export "current plot
-        // area" source; spectrum.cpp:1206 pattern).
+        // area" source; spectrum.cpp:1206 pattern) and mirror them into the
+        // persisted manual range (spectrum.cpp:1206-1211 pattern) so wheel
+        // zoom / native pan / arrow pan survive save+reopen. Skipped while a
+        // pending range (restore latch) is armed. A changed range dirties the
+        // experiment: every save path is dirty-gated (Ctrl+S / exit Save All /
+        // project switch), so without dirty a zoomed view never reaches the
+        // saved config (ESC / shift+drag precedent).
         {
             const ImPlotRect lim = ImPlot::GetPlotLimits();
             viewXMin = std::min(lim.X.Min, lim.X.Max);
             viewXMax = std::max(lim.X.Min, lim.X.Max);
+            if (lim.X.Min < lim.X.Max && pendingNextXMin >= pendingNextXMax) {
+                if (manualXMin != lim.X.Min || manualXMax != lim.X.Max)
+                    dirty = true;
+                manualXMin = lim.X.Min;
+                manualXMax = lim.X.Max;
+            }
         }
         // Stale-warning rect: GetPlotPos/GetPlotSize lock the setup phase, so
         // they must run AFTER every Setup* call (all PlotX already ran here).
@@ -2044,8 +2056,8 @@ void EnvironmentSession::exportCsv() {
     if (appState.active && !appState.active->currentDirectory.empty())
         defaultFolder = appState.active->currentDirectory;
     std::string path = FileBrowser::showFileSaveDialog(
-        "Export Experiment", instanceName + ".csv", "*.csv",
-        defaultFolder, glfwGetCurrentContext());
+        "Export Experiment", "CSV files", "*.csv",
+        defaultFolder, instanceName + ".csv", glfwGetCurrentContext());
     if (path.empty()) return;
 
     std::ofstream ofs(path);
@@ -2097,8 +2109,30 @@ void EnvironmentSession::exportCsv() {
         }
         n = std::max(n, fx[k].size());
     }
-    for (const auto& c : curves)
-        ofs << ",\"" << c.label << " x\",\"" << c.label << " y\"";
+    // Header with units: "<label> x [cm-1]", "<label> y [T%]" (no leading
+    // empty cell — the previous header shifted one column right of the data).
+    std::string xUnit, yUnit;
+    if (type == EnvType::Absorbance) {
+        yUnit = (yMode == 0) ? "T%" : "A";
+    } else if (static_cast<ComparatorArtifact>(artifactSelector) ==
+               ComparatorArtifact::T100) {
+        yUnit = "%";
+    }
+    if (type == EnvType::Comparator) {
+        const auto art = static_cast<ComparatorArtifact>(artifactSelector);
+        if (art == ComparatorArtifact::CorrectedInterferogram) xUnit = "um";
+        else if (art == ComparatorArtifact::RawInterferogram) xUnit = "index";
+    }
+    if (xUnit.empty())
+        xUnit = (xUnitSelector == 0) ? "cm-1"
+                                     : (xUnitSelector == 1) ? "\xC2\xB5" "m" : "THz";
+    size_t hc = 0;
+    for (const auto& c : curves) {
+        ofs << (hc++ ? "," : "") << "\"" << c.label << " x [" << xUnit << "]\",\""
+            << c.label << " y";
+        if (!yUnit.empty()) ofs << " [" << yUnit << "]";
+        ofs << "\"";
+    }
     ofs << "\n";
     for (size_t i = 0; i < n; ++i) {
         bool first = true;

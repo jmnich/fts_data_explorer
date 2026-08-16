@@ -459,8 +459,8 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
         else if (!config.lastMultiWorkspacePath.empty())
             defaultFolder = std::filesystem::path(config.lastMultiWorkspacePath).parent_path().string();
         std::string path = FileBrowser::showFileSaveDialog(
-            "New Multi-Workspace", "workspace.cross.h5", "*.h5",
-            defaultFolder, glfwGetCurrentContext());
+            "New Multi-Workspace", "HDF5 files", "*.h5",
+            defaultFolder, "workspace.cross.h5", glfwGetCurrentContext());
         if (!path.empty()) {
             ensureSessionTab(appState);
             std::string err;

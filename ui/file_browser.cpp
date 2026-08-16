@@ -55,9 +55,12 @@ std::string FileBrowser::showFileSaveDialog(const std::string& title,
                                             const std::string& displayName,
                                             const std::string& globPattern,
                                             const std::string& defaultFolder,
+                                            const std::string& defaultFileName,
                                             GLFWwindow* /*window*/) {
     const char* filterPatterns[] = {globPattern.c_str()};
-    const char* path = tinyfd_saveFileDialog(title.c_str(), defaultFolder.c_str(),
+    const std::string defaultPath = defaultFolder.empty()
+        ? defaultFileName : defaultFolder + "/" + defaultFileName;
+    const char* path = tinyfd_saveFileDialog(title.c_str(), defaultPath.c_str(),
                                              1, filterPatterns, displayName.c_str());
     return path ? std::string(path) : "";
 }
@@ -194,23 +197,27 @@ std::string FileBrowser::showFileSaveDialog(const std::string& title,
                                             const std::string& displayName,
                                             const std::string& globPattern,
                                             const std::string& defaultFolder,
+                                            const std::string& defaultFileName,
                                             GLFWwindow* window) {
     if (window && glfwWindowShouldClose(window))
         return "";
+
+    std::string defaultPath = defaultFolder.empty()
+        ? defaultFileName : defaultFolder + "/" + defaultFileName;
 
     std::string zenityFilter = displayName + " | " + globPattern;
     std::vector<std::string> zenityArgs = {"zenity", "--file-selection", "--save",
                                            "--confirm-overwrite",
                                            "--title", title, "--file-filter", zenityFilter};
-    if (!defaultFolder.empty())
-        zenityArgs.insert(zenityArgs.end(), {"--filename", defaultFolder + "/"});
+    if (!defaultPath.empty())
+        zenityArgs.insert(zenityArgs.end(), {"--filename", defaultPath});
     std::vector<const char*> argv_zenity;
     for (const auto& a : zenityArgs) argv_zenity.push_back(a.c_str());
     argv_zenity.push_back(nullptr);
 
     std::string kdialogFilter = displayName + " (" + globPattern + ")";
     const char* argv_kdialog[] = {"kdialog", "--getsavefilename",
-                                   defaultFolder.c_str(), kdialogFilter.c_str(),
+                                   defaultPath.c_str(), kdialogFilter.c_str(),
                                    "--title", title.c_str(), nullptr};
 
     return runForkedDialog(window, argv_zenity.data(), argv_kdialog);

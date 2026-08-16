@@ -18,9 +18,13 @@ public:
                                           GLFWwindow* window = nullptr,
                                           const std::string& defaultFolder = "");
     // Save dialog: same no-embedded-NUL discipline as showFileOpenDialog.
+    // displayName is the filter dropdown label ("CSV files"); defaultFileName
+    // pre-fills the name field (the dialog's initial path is
+    // defaultFolder + "/" + defaultFileName).
     static std::string showFileSaveDialog(const std::string& title,
                                           const std::string& displayName,
                                           const std::string& globPattern,
                                           const std::string& defaultFolder,
+                                          const std::string& defaultFileName,
                                           GLFWwindow* window = nullptr);
 };
