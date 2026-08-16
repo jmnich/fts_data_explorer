@@ -296,6 +296,7 @@ add_executable(fts_data_explorer
     session/spectral_pool.cpp
     session/environment_session.cpp
     session/wrap_text.cpp
+    session/batch_engine.cpp
     ${PLATFORM_SOURCES}
     ${EXTRA_SOURCES}
 )
@@ -391,6 +392,7 @@ add_executable(fts_session_roundtrip
     session/environment_session.cpp
     session/wrap_text.cpp
     session/cross_store.cpp
+    session/batch_engine.cpp
     ui/layout_persistence.cpp
     panels/spectrum.cpp
     panels/average_spectrum.cpp

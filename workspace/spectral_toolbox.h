@@ -7,6 +7,22 @@
 #include <fftw3.h>
 #include "apodization.h"
 
+// ASTM E1421-style energy ratios: energy at `num` / energy at `den` (each a
+// wavenumber string, or "max" for the global maximum). Moved verbatim from the
+// 100% T panel (t100.cpp); shared by the panel and the batch engine.
+struct EnergyRatios { double a, b, c; bool validA, validB, validC; };
+
+// Compute the three energy ratios from a spectrum in any X unit. A band
+// string is a wavenumber in cm-1, or "max"/"MAX"/"Max" for the global max.
+// Per-band validity flags: false when the band string is unparseable, the
+// spectrum is empty, or the denominator energy is ~0.
+EnergyRatios computeEnergyRatiosDirect(const char* numA, const char* denA,
+                                       const char* numB, const char* denB,
+                                       const char* numC, const char* denC,
+                                       int spectrumXUnit,
+                                       const std::vector<double>& freqs,
+                                       const std::vector<double>& spec);
+
 // Interpolate (srcX, srcY) onto targetX. Handles ascending and descending srcX.
 // Linear, endpoint-clamped. Empty input -> empty output; degenerate (size 1)
 // srcX -> srcY copy. The ONLY linear-interp path in the codebase (Phase-1 M1.3).

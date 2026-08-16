@@ -17,6 +17,7 @@
 #include "session/workspace_session.h"
 #include "session/environment_session.h"
 #include "session/spectral_pool.h"
+#include "session/batch_engine.h"
 #if FTS_BUILD_HDF5
 #include "hdf/workspace.h"
 #endif
@@ -144,6 +145,9 @@ struct SessionTabState {
     // Embedded-source workspaces not open in a tab (comparator reads raw
     // artifacts from these without opening a tab). Cleared on crossLoad.
     std::map<std::string, Workspace> sourceCache;   // sourceId -> workspace
+    // Batch-processing panel state (M-batch): global like the rest of this
+    // struct — the Session tab is unique and never folded.
+    BatchPanelState batch;
 };
 
 // Application state structure

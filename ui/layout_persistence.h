@@ -21,8 +21,18 @@
 
 #include <imgui.h>
 
+struct ImGuiDockNode;
+struct ImGuiWindow;
+
 // ActiveTabKind → "session" / "workspace" / "experiment".
 const char* tabTypeName(int activeTabKind);
+
+// The window of `node` whose TabId == node->SelectedTabId (nullptr when
+// none). SelectedTabId is a TAB id (ImHashStr("#TAB", window-id)) — NOT the
+// window's own ID — so ImGui::FindWindowByID(SelectedTabId) never matches and
+// cannot resolve the selected tab. Shared by the per-panel dock-selection
+// guards (session/experiment panels must never steal a stacked sibling's tab).
+ImGuiWindow* nodeSelectedWindow(ImGuiDockNode* node);
 
 // Snapshot the CURRENT ImGui settings (docks + window layout) to the type's
 // file. Safe to call mid-frame (SaveIniSettingsToMemory is read-only); the

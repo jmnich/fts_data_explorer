@@ -594,3 +594,96 @@ bool crossExperimentRead(const std::string& path, const std::string& expId,
         return false;
     }
 }
+
+// ── Batch-processing recipes (M-batch) ──────────────────────────────────────
+// Root group "recipes/", one vlen-string dataset per recipe (content = the
+// recipe JSON). Additive to the cross file: the manifest is untouched, and
+// H5Store::validate is never invoked on cross files.
+
+bool crossRecipeWrite(const std::string& path, const std::string& name,
+                      const nlohmann::json& recipe, std::string& err) {
+    if (name.empty() || name.find('/') != std::string::npos) {
+        err = "recipes: invalid recipe name";
+        return false;
+    }
+    const std::string payload = recipe.dump();
+    return atomicMutate(path, [&](const std::string& tmp) {
+        H5FileGuard f(H5Fopen(tmp.c_str(), H5F_ACC_RDWR, H5P_DEFAULT));
+        if (f.id < 0) throw H5Error("recipes: open failed");
+        // atomicMutate copies the WHOLE file to tmp, so an existing recipes/
+        // group survives the copy — open it instead of recreating
+        // (H5Gcreate2 would fail "name already exists" on every write after
+        // the first).
+        const bool exists = H5Lexists(f.id, "recipes", H5P_DEFAULT) > 0;
+        hid_t gid = exists ? H5Gopen2(f.id, "recipes", H5P_DEFAULT)
+                           : H5Gcreate2(f.id, "recipes", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        if (gid < 0) throw H5Error("recipes: group open/create failed");
+        H5GroupGuard g(gid);
+        if (H5Lexists(g.id, name.c_str(), H5P_DEFAULT))
+            H5Ldelete(g.id, name.c_str(), H5P_DEFAULT);
+        h5WriteVlenString(g.id, name.c_str(), payload);
+    }, err);
+}
+
+bool crossRecipeList(const std::string& path, std::vector<std::string>& names,
+                     std::string& err) {
+    try {
+        H5FileGuard f(H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT));
+        if (f.id < 0) { err = "recipes: open failed"; return false; }
+        names.clear();
+        if (!H5Lexists(f.id, "recipes", H5P_DEFAULT)) return true;   // absent group = no recipes
+        H5GroupGuard g(H5Gopen2(f.id, "recipes", H5P_DEFAULT));
+        if (g.id < 0) { err = "recipes: group open failed"; return false; }
+        struct Ctx { std::vector<std::string>* names; };
+        Ctx ctx{&names};
+        auto visit = [](hid_t g, const char* n, const H5L_info_t*, void* op) -> herr_t {
+            auto* c = static_cast<Ctx*>(op);
+            c->names->emplace_back(n);
+            return 0;
+        };
+        if (H5Literate(g.id, H5_INDEX_NAME, H5_ITER_INC, nullptr, visit, &ctx) < 0) {
+            err = "recipes: iterate failed";
+            return false;
+        }
+        return true;
+    } catch (const std::exception& e) {
+        err = e.what();
+        return false;
+    }
+}
+
+bool crossRecipeRead(const std::string& path, const std::string& name,
+                     nlohmann::json& out, std::string& err) {
+    try {
+        H5FileGuard f(H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT));
+        if (f.id < 0) { err = "recipes: open failed"; return false; }
+        H5GroupGuard g(H5Gopen2(f.id, "recipes", H5P_DEFAULT));
+        if (g.id < 0) { err = "recipes: group open failed"; return false; }
+        if (!H5Lexists(g.id, name.c_str(), H5P_DEFAULT)) {
+            err = "recipes: '" + name + "' not found";
+            return false;
+        }
+        out = nlohmann::json::parse(h5ReadVlenString(g.id, name.c_str()), nullptr, false);
+        if (out.is_discarded() || !out.is_object()) {
+            err = "recipes: '" + name + "' is not a JSON object";
+            return false;
+        }
+        return true;
+    } catch (const std::exception& e) {
+        err = e.what();
+        return false;
+    }
+}
+
+bool crossRecipeRemove(const std::string& path, const std::string& name,
+                       std::string& err) {
+    return atomicMutate(path, [&](const std::string& tmp) {
+        H5FileGuard f(H5Fopen(tmp.c_str(), H5F_ACC_RDWR, H5P_DEFAULT));
+        if (f.id < 0) throw H5Error("recipes: open failed");
+        if (H5Lexists(f.id, "recipes", H5P_DEFAULT) > 0) {
+            H5GroupGuard g(H5Gopen2(f.id, "recipes", H5P_DEFAULT));
+            if (g.id >= 0 && H5Lexists(g.id, name.c_str(), H5P_DEFAULT))
+                H5Ldelete(g.id, name.c_str(), H5P_DEFAULT);
+        }
+    }, err);
+}

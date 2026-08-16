@@ -1,4 +1,5 @@
 #include "spectral_toolbox.h"
+#include "interferogram_data.h"
 #include "fftw3.h"
 #include <algorithm>
 #include <cmath>
@@ -467,4 +468,90 @@ SpectralToolbox::ProcessedSpectrum SpectralToolbox::processSpectrumFromCorrected
     fftw_free(out);
 
     return result;
+}
+// ============================================================================
+// Energy ratios (ASTM E1421) — ported verbatim from t100.cpp (shared with the
+// batch engine). parseDoubleFromChars (not std::stod) keeps the per-file main-
+// thread loop lock-free on Windows (AGENTS.md pitfall).
+// ============================================================================
+
+namespace {
+
+bool parseEnergyWavenumber(const char* str, bool& isMax, double& wavenumber) {
+    if (!str || str[0] == '\0') return false;
+    std::string s(str);
+    while (!s.empty() && (s.back() == ' ' || s.back() == '\t')) s.pop_back();
+    while (!s.empty() && (s.front() == ' ' || s.front() == '\t')) s = s.substr(1);
+    if (s.empty()) return false;
+    if (s == "max" || s == "MAX" || s == "Max") {
+        isMax = true;
+        return true;
+    }
+    if (!parseDoubleFromChars(s, wavenumber)) return false;
+    isMax = false;
+    return true;
+}
+
+double getEnergyAtWavenumber(const std::vector<double>& freqs,
+                             const std::vector<double>& spec,
+                             bool isMax, double wavenumberCm1,
+                             int spectrumXUnit) {
+    if (freqs.empty() || spec.empty()) return 0.0;
+
+    if (isMax) {
+        auto it = std::max_element(spec.begin(), spec.end());
+        return (it != spec.end()) ? *it : 0.0;
+    }
+
+    using ST = SpectralToolbox::SpectrumXUnit;
+    double targetX = SpectralToolbox::convertXValue(wavenumberCm1, ST::CmInv,
+                                                     static_cast<ST>(spectrumXUnit));
+
+    bool ascending = freqs.front() < freqs.back();
+    if (ascending) {
+        auto it = std::lower_bound(freqs.begin(), freqs.end(), targetX);
+        if (it == freqs.begin()) return spec[0];
+        if (it == freqs.end()) return spec.back();
+        size_t hi = it - freqs.begin();
+        size_t lo = hi - 1;
+        double frac = (targetX - freqs[lo]) / (freqs[hi] - freqs[lo]);
+        return spec[lo] * (1.0 - frac) + spec[hi] * frac;
+    } else {
+        auto it = std::lower_bound(freqs.begin(), freqs.end(), targetX, std::greater<double>());
+        if (it == freqs.begin()) return spec[0];
+        if (it == freqs.end()) return spec.back();
+        size_t hi = it - freqs.begin();
+        size_t lo = hi - 1;
+        double frac = (targetX - freqs[lo]) / (freqs[hi] - freqs[lo]);
+        return spec[lo] * (1.0 - frac) + spec[hi] * frac;
+    }
+}
+
+} // namespace
+
+EnergyRatios computeEnergyRatiosDirect(const char* numA, const char* denA,
+                                       const char* numB, const char* denB,
+                                       const char* numC, const char* denC,
+                                       int spectrumXUnit,
+                                       const std::vector<double>& freqs,
+                                       const std::vector<double>& spec) {
+    EnergyRatios r = {0, 0, 0, false, false, false};
+    if (freqs.empty() || spec.empty()) return r;
+
+    auto computePair = [&](const char* numStr, const char* denStr, double& outRatio) -> bool {
+        bool numMax, denMax;
+        double numWn, denWn;
+        if (!parseEnergyWavenumber(numStr, numMax, numWn)) return false;
+        if (!parseEnergyWavenumber(denStr, denMax, denWn)) return false;
+        double eNum = getEnergyAtWavenumber(freqs, spec, numMax, numWn, spectrumXUnit);
+        double eDen = getEnergyAtWavenumber(freqs, spec, denMax, denWn, spectrumXUnit);
+        if (eDen <= 1e-15) return false;
+        outRatio = eNum / eDen;
+        return true;
+    };
+
+    r.validA = computePair(numA, denA, r.a);
+    r.validB = computePair(numB, denB, r.b);
+    r.validC = computePair(numC, denC, r.c);
+    return r;
 }

@@ -18,6 +18,7 @@
 #include "cross_store.h"
 #include "file_browser.h"
 #include "hdf/h5_store.h"
+#include "layout_persistence.h"
 #include "theme.h"
 #include "workspace_reader.h"
 #include "workspace_session.h"
@@ -49,7 +50,7 @@ ImGuiID mainDockSpaceId() {
 void forceDockSelection() {
     ImGuiWindow* w = ImGui::GetCurrentWindow();
     if (!(w->DockNode && w->DockNode->SelectedTabId != w->TabId)) return;
-    if (ImGuiWindow* sel = ImGui::FindWindowByID(w->DockNode->SelectedTabId))
+    if (ImGuiWindow* sel = nodeSelectedWindow(w->DockNode))
         if (isExperimentPanelName(sel->Name)) return;
     w->DockNode->SelectedTabId = w->TabId;
     if (w->DockNode->TabBar)
@@ -2418,5 +2419,8 @@ bool crossOpenProject(AppState& s, const std::string& path, std::string& err) {
     // exact interleave (bugfix 2026-08-14: without this the strip starts
     // with workspaces left of all experiments regardless of what was saved).
     restoreTabStripOrder(s);
+    // Batch panel: rebuild the recipe list (builtins + stored .h5 recipes) and
+    // reset any finished batch state (M-batch).
+    refreshBatchRecipes(s);
     return true;
 }

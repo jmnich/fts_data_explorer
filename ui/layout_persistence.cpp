@@ -36,13 +36,25 @@ std::string workspaceLayoutName(const std::string& key) {
     return std::string("workspace.") + hex;
 }
 
-// Resolve the selected window of a leaf node (replicates ImGui's internal
-// DockNodeFindWindowByID). Returns nullptr when none/unknown.
-const char* nodeSelectedWindowName(ImGuiDockNode* node) {
+}  // namespace
+
+// The window of `node` whose TabId == node->SelectedTabId (nullptr when
+// none/unknown). SelectedTabId is a TAB id (ImHashStr("#TAB", window-id)),
+// NOT the window's own ID — so FindWindowByID(SelectedTabId) never matches.
+// This TabId-based resolution is the correct inverse of DockNodeAddTabBar.
+ImGuiWindow* nodeSelectedWindow(ImGuiDockNode* node) {
     if (!node || !node->SelectedTabId) return nullptr;
     for (int n = 0; n < node->Windows.Size; ++n)
         if (node->Windows[n]->TabId == node->SelectedTabId)
-            return node->Windows[n]->Name;
+            return node->Windows[n];
+    return nullptr;
+}
+
+// Resolve the selected window of a leaf node (replicates ImGui's internal
+// DockNodeFindWindowByID). Returns nullptr when none/unknown.
+const char* nodeSelectedWindowName(ImGuiDockNode* node) {
+    if (ImGuiWindow* w = nodeSelectedWindow(node))
+        return w->Name;
     return nullptr;
 }
 
@@ -94,8 +106,6 @@ void restoreLayoutFrom(const std::string& name) {
         if (id != 0) g_restoredNodeSelection[static_cast<ImGuiID>(id)] = name;
     }
 }
-
-}  // namespace
 
 const char* tabTypeName(int activeTabKind) {
     switch (activeTabKind) {

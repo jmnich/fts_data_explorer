@@ -994,6 +994,7 @@ static void rebuildDefaultLayout(ImGuiID dockspace_id, float topOffset) {
     ImGui::DockBuilderDockWindow("SNR View",           dock_right_top);
     ImGui::DockBuilderDockWindow("Average View",       dock_right_top);
     ImGui::DockBuilderDockWindow("Active Experiments", dock_right_top);
+    ImGui::DockBuilderDockWindow("Batch Processing",   dock_right_top);
     ImGui::DockBuilderDockWindow("Spectrum View",      dock_right_bottom);
     ImGui::DockBuilderDockWindow("Available Experiments", dock_right_bottom);
 
@@ -1290,7 +1291,16 @@ void AppLoop::scheduleRedraws() {
             ImGui::IsPopupOpen(ImGuiID(0), ImGuiPopupFlags_AnyPopup)) {
             appState.needsRedraw = true;
         }
+
+        // Batch processing: keep frames rendering while the progress modal is
+        // up (M-batch — batchTick also sets needsRedraw each step; this covers
+        // the frames where a step completes nothing but the modal must animate).
+        if (!appState.needsRedraw &&
+            appState.sessionTab.batch.phase == BatchPhase::Running) {
+            appState.needsRedraw = true;
+        }
 }
+
 
 void AppLoop::handleInput() {
     ImGuiIO& io = ImGui::GetIO();
@@ -1875,12 +1885,20 @@ void AppLoop::renderUI() {
                 // with idle rendering that next frame may never happen, so the
                 // session content stays invisible.
                 if (appState.activeTabKind == ActiveTabKind::Session) {
-                    const char* sessionPanels[3] = {"Datasets",
+                    const char* sessionPanels[4] = {"Datasets",
                                                     "Active Experiments",
-                                                    "Available Experiments"};
+                                                    "Available Experiments",
+                                                    "Batch Processing"};
                     for (const char* name : sessionPanels) {
                         if (ImGuiWindow* pw = ImGui::FindWindowByName(name)) {
                             if (pw->DockNode) {
+                                // Never override the user's tab choice among
+                                // stacked session panels (Available Experiments
+                                // / Batch Processing share a node when stacked)
+                                // — only force when the node's current tab is a
+                                // non-session window.
+                                if (ImGuiWindow* sel = nodeSelectedWindow(pw->DockNode))
+                                    if (isSessionPanelName(sel->Name)) continue;
                                 pw->DockNode->SelectedTabId = pw->TabId;
                                 if (pw->DockNode->TabBar)
                                     pw->DockNode->TabBar->NextSelectedTabId = pw->TabId;
@@ -1905,7 +1923,7 @@ void AppLoop::renderUI() {
                                 // Export share a node when stacked) — only
                                 // force when the node's current tab is a
                                 // non-experiment window.
-                                if (ImGuiWindow* sel = ImGui::FindWindowByID(pw->DockNode->SelectedTabId))
+                                if (ImGuiWindow* sel = nodeSelectedWindow(pw->DockNode))
                                     if (isExperimentPanelName(sel->Name)) continue;
                                 pw->DockNode->SelectedTabId = pw->TabId;
                                 if (pw->DockNode->TabBar)

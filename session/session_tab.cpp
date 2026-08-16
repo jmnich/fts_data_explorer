@@ -2,14 +2,18 @@
 #include "session_tab.h"
 
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <functional>
+#include <sstream>
 
 #include "app_state.h"
 #include "config.h"
 #include "cross_store.h"
 #include "environment_session.h"
 #include "file_browser.h"
+#include "layout_persistence.h"
 #include "popup_utils.h"
 #include "theme.h"
 #include "workspace_session.h"
@@ -18,6 +22,17 @@
 #include <GLFW/glfw3.h>
 #include <imgui.h>
 #include "imgui_internal.h"   // DockBuilder + ImGuiWindow::DockNode
+
+// Stable window names of the Session tab's docked panels. These MUST stay in
+// sync with the renderSessionPanel call sites and app_loop.cpp's pre-DockSpace
+// forced-selection list.
+bool isSessionPanelName(const char* name) {
+    return name &&
+           (std::strcmp(name, "Datasets") == 0 ||
+            std::strcmp(name, "Active Experiments") == 0 ||
+            std::strcmp(name, "Available Experiments") == 0 ||
+            std::strcmp(name, "Batch Processing") == 0);
+}
 
 namespace {
 
@@ -28,6 +43,11 @@ ImVec4 modalAccent() {
 // Confirm-before-remove modal for the Datasets panel rows.
 bool g_showRemoveConfirm = false;
 std::string g_removeSourceId;
+
+// Batch panel: edge-triggered Import/Export requests (the FileBrowser dialogs
+// run inside renderBatchImportExport, once per flag).
+bool g_batchImportRequested = false;
+bool g_batchExportRequested = false;
 
 void renderRemoveConfirm() {
     static int focus = 0;
@@ -67,6 +87,7 @@ void renderRemoveConfirm() {
                 }
                 std::string err2;
                 crossLoad(appState, appState.sessionTab.multiWorkspacePath, err2);
+                refreshBatchRecipes(appState);
             } else {
                 appState.adapterErrorMsg = "Remove failed:\n" + err;
                 appState.showAdapterErrorPopup = true;
@@ -89,15 +110,19 @@ void renderRemoveConfirm() {
 
 // Dock-selection fallback: if the window is docked but its node's tab bar is
 // showing another tab (background-tab render), force this window's tab to the
-// front. Needed per window — see renderUI's pre-DockSpace force.
+// front. Only fires when the node's current tab is a NON-session window —
+// never overrides the user's tab choice among stacked session panels
+// (Available Experiments / Batch Processing share a node when stacked, and
+// the unconditional force made the tab selector unclickable).
 void forceDockSelection() {
     ImGuiWindow* w = ImGui::GetCurrentWindow();
-    if (w->DockNode && w->DockNode->SelectedTabId != w->TabId) {
-        w->DockNode->SelectedTabId = w->TabId;
-        if (w->DockNode->TabBar)
-            w->DockNode->TabBar->NextSelectedTabId = w->TabId;
-        appState.needsRedraw = true;
-    }
+    if (!(w->DockNode && w->DockNode->SelectedTabId != w->TabId)) return;
+    if (ImGuiWindow* sel = nodeSelectedWindow(w->DockNode))
+        if (isSessionPanelName(sel->Name)) return;
+    w->DockNode->SelectedTabId = w->TabId;
+    if (w->DockNode->TabBar)
+        w->DockNode->TabBar->NextSelectedTabId = w->TabId;
+    appState.needsRedraw = true;
 }
 
 // Resolve the MAIN dock space id. Must be computed from the "DockSpace"
@@ -148,6 +173,7 @@ void addDatasetFromFileDialog() {
         if (crossAddSource(appState.sessionTab.multiWorkspacePath, path, newId, err)) {
             std::string err2;
             crossLoad(appState, appState.sessionTab.multiWorkspacePath, err2);
+            refreshBatchRecipes(appState);
             appState.needsRedraw = true;
         } else {
             appState.adapterErrorMsg = "Add failed:\n" + err;
@@ -246,7 +272,8 @@ constexpr float kRowAccentIndent = 12.0f;
 constexpr float kRowTextIndent = 20.0f;
 
 WrappedRow renderWrappedRow(int id, const std::vector<std::string>& lines,
-                            int titleLines, float indentX = kRowTextIndent) {
+                            int titleLines, float indentX = kRowTextIndent,
+                            bool selected = false) {
     const float lineH = ImGui::GetTextLineHeightWithSpacing();
     const float padY = 4.0f;
     const float height = padY * 2.0f + static_cast<float>(lines.size()) * lineH;
@@ -261,7 +288,7 @@ WrappedRow renderWrappedRow(int id, const std::vector<std::string>& lines,
     // never clickable (clicking it opens the record instead). AllowOverlap
     // makes the later-submitted button win the hit-test.
     ImGui::SetNextItemAllowOverlap();
-    out.clicked = ImGui::Selectable("##row", false, 0, ImVec2(0.0f, height));
+    out.clicked = ImGui::Selectable("##row", selected, 0, ImVec2(0.0f, height));
     out.hovered = ImGui::IsItemHovered();
     const ImVec2 rmin = ImGui::GetItemRectMin();
     const ImVec2 rmax = ImGui::GetItemRectMax();
@@ -431,11 +458,19 @@ const std::string& SessionTab::title() const {
 
 void SessionTab::render() {
     renderRemoveConfirm();
+    renderBatchConfirmModal();
+    renderBatchProgressModal();
+    renderNewFromDatasetModals();
+    renderBatchImportExport();
     if (appState.sessionTab.multiWorkspaceOpen) {
         renderMultiWorkspace();
     } else {
         renderSingleFile();
     }
+}
+
+void SessionTab::tickAsync() {
+    batchTick(appState);   // no-op unless a batch is Running
 }
 
 // Single-file mode: hero card + [Create Multi-Workspace…] (HL §3.5), hosted in
@@ -472,9 +507,10 @@ void SessionTab::renderSingleFile() {
     renderSessionPanel("Available Experiments", [this]() { renderAvailableExperimentsPanel(); });
 }
 
-// Multi-workspace mode: three dockable panels docked DIRECTLY in the main
-// dock space — Datasets (left), Active Experiments and Available
-// Experiments (stacked right) per the default layout in rebuildDefaultLayout.
+// Multi-workspace mode: four dockable panels docked DIRECTLY in the main
+// dock space — Datasets (left), Active Experiments, Available Experiments and
+// Batch Processing (stacked right) per the default layout in
+// rebuildDefaultLayout.
 void SessionTab::renderMultiWorkspace() {
     renderSessionPanel("Datasets", [this]() {
         renderMultiWorkspaceCard(appState.sessionTab.multiWorkspacePath);
@@ -482,6 +518,7 @@ void SessionTab::renderMultiWorkspace() {
     });
     renderSessionPanel("Active Experiments", [this]() { renderActiveExperimentsPanel(); });
     renderSessionPanel("Available Experiments", [this]() { renderAvailableExperimentsPanel(); });
+    renderSessionPanel("Batch Processing", [this]() { renderBatchProcessingPanel(); });
 }
 
 // (a) embedded datasets: wrapped two-line rows (name + metadata) in a
@@ -674,4 +711,515 @@ static void renderExperimentTypeCard(const char* title, const char* desc, EnvTyp
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Create a new %s experiment.", title);
     ImGui::Spacing();
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Batch Processing panel (M-batch) — recipes left, datasets right, modals
+// below. All modals use the shared beginModal/endModal/modalButtonRow/
+// drawModalAccentFrame styling.
+// ══════════════════════════════════════════════════════════════════════════
+
+void SessionTab::renderBatchProcessingPanel() {
+    BatchPanelState& b = appState.sessionTab.batch;
+    const float avail = ImGui::GetContentRegionAvail().x;
+    const float leftW = avail * 0.45f;
+    // Bottom area holds 3 small buttons + the double-height "Batch process"
+    // button below the columns.
+    const float bottomH = 5.0f * ImGui::GetFrameHeight() + 5.0f * ImGui::GetStyle().ItemSpacing.y;
+    const AccentColor ac = StringToAccentColor(appState.currentAccentColor);
+
+    // ── dataset list state + keyboard nav (panel level: current window is the
+    // panel root, so ChildWindows covers the root AND both columns — arrows
+    // work without first clicking a dataset row). Manual per app convention
+    // (SetKeyboardFocusHere is banned).
+    const size_t n = appState.sessionTab.sources.size();
+    if (b.datasetChecks.size() != n) {   // defensive: refreshBatchRecipes keeps these in sync
+        b.datasetChecks.assign(n, false);
+        b.datasetFocus = 0;
+    }
+    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) && n > 0) {
+        if (ImGui::IsKeyPressed(ImGuiKey_UpArrow) && b.datasetFocus > 0) {
+            b.datasetFocus--;
+            appState.needsRedraw = true;
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_DownArrow) && b.datasetFocus < static_cast<int>(n) - 1) {
+            b.datasetFocus++;
+            appState.needsRedraw = true;
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_Space)) {
+            b.datasetChecks[b.datasetFocus] = !b.datasetChecks[b.datasetFocus];
+            appState.needsRedraw = true;
+        }
+    }
+
+    // ── left column: recipes ────────────────────────────────────────────────
+    ImGui::BeginChild("##batchRecipes", ImVec2(leftW, -bottomH), false,
+                      ImGuiWindowFlags_AlwaysVerticalScrollbar);
+    if (b.recipes.empty()) {
+        renderCenteredEmptyLine("No recipes available.", 0.25f);
+    }
+    for (size_t i = 0; i < b.recipes.size(); ++i) {
+        const Recipe& r = b.recipes[i];
+        const bool builtin = i < builtinRecipes().size();
+        const float availW = ImGui::GetContentRegionAvail().x - 10.0f;
+        std::vector<std::string> lines = wrapToLines(r.name, availW, 1);
+        std::string meta = builtin ? "Built-in" : "In workspace";
+        if (!r.comment.empty()) meta += "  " + r.comment;
+        for (auto& l : wrapToLines(meta, availW, 2)) lines.push_back(std::move(l));
+        const WrappedRow row = renderWrappedRow(
+            static_cast<int>(i), lines, 1, kRowTextIndent,
+            b.selectedRecipe == static_cast<int>(i));
+        if (row.clicked) {
+            b.selectedRecipe = static_cast<int>(i);
+            appState.needsRedraw = true;
+        }
+    }
+    ImGui::EndChild();
+    ImGui::SameLine();
+
+    // ── right column: datasets + Batch process ──────────────────────────────
+    ImGui::BeginChild("##batchDatasets", ImVec2(0.0f, -bottomH), false,
+                      ImGuiWindowFlags_AlwaysVerticalScrollbar);
+    if (n == 0) {
+        renderCenteredEmptyLine("No datasets embedded yet.", 0.25f);
+    }
+    for (size_t i = 0; i < n; ++i) {
+        ImGui::PushID(static_cast<int>(i));
+        bool checked = b.datasetChecks[i];
+        // Checkbox first, then a labelled selectable filling the rest of the
+        // row. An empty-label selectable's hit rect spans the full row width
+        // and swallows the checkbox clicks (only its bottom 4px worked).
+        if (ImGui::Checkbox("", &checked)) {
+            b.datasetFocus = static_cast<int>(i);
+            appState.needsRedraw = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::Selectable(appState.sessionTab.sources[i].name.c_str(),
+                              b.datasetFocus == static_cast<int>(i))) {
+            b.datasetFocus = static_cast<int>(i);
+            appState.needsRedraw = true;
+        }
+        b.datasetChecks[i] = checked;
+        ImGui::PopID();
+    }
+    ImGui::EndChild();
+
+    // three bottom buttons (bottom-left, under the recipes column):
+    // New from dataset… / Import… / Export…
+    ImGui::PushStyleColor(ImGuiCol_Button, GetAccentMuted(ac));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, GetAccentHovered(ac));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, GetAccentActive(ac));
+    if (ImGui::Button("New from dataset...", ImVec2(leftW, 0)))
+        b.showNewFromDataset = true;
+    if (ImGui::Button("Import...", ImVec2(leftW, 0))) {
+        g_batchImportRequested = true;
+        appState.needsRedraw = true;
+    }
+    ImGui::PopStyleColor(3);
+    if (b.selectedRecipe < 0) ImGui::BeginDisabled();
+    if (ImGui::Button("Export...", ImVec2(leftW, 0))) {
+        g_batchExportRequested = true;
+        appState.needsRedraw = true;
+    }
+    if (b.selectedRecipe < 0) {
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Select a recipe to export.");
+    }
+
+    // full-width accent-tinted "Batch process" button (renderAddDatasetButton
+    // style) → confirm modal. Disabled while nothing is selected or a batch runs.
+    bool anyChecked = false;
+    for (bool c : b.datasetChecks)
+        if (c) { anyChecked = true; break; }
+    const bool enabled = b.selectedRecipe >= 0 && anyChecked && b.phase == BatchPhase::Idle;
+    if (!enabled) ImGui::BeginDisabled();
+    ImGui::PushStyleColor(ImGuiCol_Button, GetAccentMuted(ac));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, GetAccentHovered(ac));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, GetAccentActive(ac));
+    if (ImGui::Button("Batch process", ImVec2(-FLT_MIN, ImGui::GetFrameHeight() * 2.0f))) {
+        b.showConfirm = true;
+        appState.needsRedraw = true;
+    }
+    ImGui::PopStyleColor(3);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Apply the selected recipe to all checked datasets.");
+    if (!enabled) ImGui::EndDisabled();
+}
+
+void SessionTab::renderBatchConfirmModal() {
+    BatchPanelState& b = appState.sessionTab.batch;
+    static int focus = 0;
+    static bool wasOpen = false;
+    if (!b.showConfirm) {
+        wasOpen = false;
+        return;
+    }
+    ImGui::OpenPopup("Batch Confirm##session");
+    beginModal(460.0f, modalAccent());
+    if (ImGui::BeginPopupModal("Batch Confirm##session", nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
+        ImGui::Text("Apply recipe");
+        ImGui::Spacing();
+        int count = 0;
+        for (bool c : b.datasetChecks)
+            if (c) count++;
+        const std::string name =
+            (b.selectedRecipe >= 0 && b.selectedRecipe < static_cast<int>(b.recipes.size()))
+                ? b.recipes[b.selectedRecipe].name
+                : "";
+        ImGui::TextWrapped("Apply \"%s\" to %d dataset%s? All existing derivatives "
+                           "will be stripped before calculation.",
+                           name.c_str(), count, count == 1 ? "" : "s");
+        ImGui::Spacing();
+        ImGui::PushStyleColor(ImGuiCol_Text,
+                              ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::PushTextWrapPos(ImGui::GetContentRegionMax().x);
+        ImGui::TextWrapped("Open dataset tabs are updated immediately: their results "
+                           "and settings match the recipe, and their next Save "
+                           "writes them back unchanged.");
+        ImGui::PopTextWrapPos();
+        ImGui::PopStyleColor();
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+        int pressed = modalButtonRow({"Run", "Cancel"}, focus, wasOpen, modalAccent());
+        if (pressed == 0) {
+            beginBatch(appState);
+            b.showConfirm = false;
+            ImGui::CloseCurrentPopup();
+        } else if (pressed == 1 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            b.showConfirm = false;
+            ImGui::CloseCurrentPopup();
+        }
+        drawModalAccentFrame(modalAccent());
+        ImGui::EndPopup();
+        wasOpen = true;
+    } else {
+        wasOpen = false;
+    }
+    endModal();
+}
+
+void SessionTab::renderBatchProgressModal() {
+    BatchPanelState& b = appState.sessionTab.batch;
+    if (b.phase == BatchPhase::Idle) return;
+    static int focus = 0;
+    static bool wasOpen = false;
+    ImGui::OpenPopup("Batch Progress##session");
+    beginModal(480.0f, modalAccent());
+    if (ImGui::BeginPopupModal("Batch Progress##session", nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
+        ImGui::Text("Batch Processing");
+        ImGui::Spacing();
+        const BatchJob& j = b.job;
+        const float barW = ImGui::GetContentRegionAvail().x;
+        const int total = j.totalDatasets();
+        if (b.phase == BatchPhase::Running) {
+            // top bar — datasets
+            char topBuf[48];
+            const float topPct = total > 0 ? static_cast<float>(j.completedDatasets) / total : 0.0f;
+            std::snprintf(topBuf, sizeof(topBuf), "%d/%d datasets",
+                          j.completedDatasets, total);
+            ImGui::ProgressBar(topPct, ImVec2(barW, 0.0f), topBuf);
+            // bottom bar — granular work of the current dataset (files + allan)
+            float granPct = 0.0f;
+            char granBuf[64];
+            if (j.submitted > 0) {
+                double done = j.completed;
+                double units = j.submitted;
+                if (j.allanTotal > 0) {
+                    done += static_cast<double>(j.allanCompleted) / j.allanTotal;
+                    units += 1.0;
+                }
+                granPct = static_cast<float>(done / units);
+            }
+            std::snprintf(granBuf, sizeof(granBuf), "Dataset %d/%d (%d/%d files)",
+                          j.currentIdx + 1, total, j.completed, j.submitted);
+            ImGui::ProgressBar(granPct, ImVec2(barW, 0.0f), granBuf);
+            // dim error lines (last 5)
+            if (!j.errors.empty()) {
+                ImGui::Spacing();
+                ImGui::PushStyleColor(ImGuiCol_Text,
+                                      ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+                const size_t start = j.errors.size() > 5 ? j.errors.size() - 5 : 0;
+                for (size_t i = start; i < j.errors.size(); ++i) {
+                    ImGui::PushTextWrapPos(ImGui::GetContentRegionMax().x);
+                    ImGui::TextWrapped("%s", j.errors[i].c_str());
+                    ImGui::PopTextWrapPos();
+                }
+                ImGui::PopStyleColor();
+            }
+        } else {   // Done: OK button (modal blocks tab switching, so it stays up)
+            ImGui::TextWrapped("%d/%d dataset%s processed.", j.completedDatasets,
+                               total, total == 1 ? "" : "s");
+            if (!j.errors.empty()) {
+                ImGui::Spacing();
+                ImGui::PushStyleColor(ImGuiCol_Text,
+                                      ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+                ImGui::TextWrapped("%zu dataset(s) with warnings or errors.",
+                                   j.errors.size());
+                const size_t start = j.errors.size() > 5 ? j.errors.size() - 5 : 0;
+                for (size_t i = start; i < j.errors.size(); ++i) {
+                    ImGui::PushTextWrapPos(ImGui::GetContentRegionMax().x);
+                    ImGui::TextWrapped("%s", j.errors[i].c_str());
+                    ImGui::PopTextWrapPos();
+                }
+                ImGui::PopStyleColor();
+            }
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            int pressed = modalButtonRow({"OK"}, focus, wasOpen, modalAccent());
+            if (pressed == 0) {
+                b.phase = BatchPhase::Idle;
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        drawModalAccentFrame(modalAccent());
+        ImGui::EndPopup();
+        wasOpen = true;
+    } else {
+        wasOpen = false;
+    }
+    endModal();
+}
+
+void SessionTab::renderNewFromDatasetModals() {
+    BatchPanelState& b = appState.sessionTab.batch;
+    // ── step 1: dataset picker ───────────────────────────────────────────────
+    if (b.showNewFromDataset) {
+        ImGui::OpenPopup("New Recipe from Dataset##batch");
+        beginModal(520.0f, modalAccent(), false);
+        if (ImGui::BeginPopupModal("New Recipe from Dataset##batch", nullptr,
+                                   ImGuiWindowFlags_NoTitleBar)) {
+            ImGui::Text("New recipe from dataset");
+            ImGui::Spacing();
+            ImGui::PushTextWrapPos(ImGui::GetContentRegionMax().x);
+            ImGui::TextWrapped("Mirror the selected dataset's derivative artifacts "
+                               "and processing settings into a new recipe.");
+            ImGui::PopTextWrapPos();
+            ImGui::Spacing();
+            ImGui::BeginChild("##newRecipePick", ImVec2(0.0f, 180.0f), false,
+                              ImGuiWindowFlags_AlwaysVerticalScrollbar);
+            for (size_t i = 0; i < appState.sessionTab.sources.size(); ++i) {
+                const auto& src = appState.sessionTab.sources[i];
+                ImGui::PushID(static_cast<int>(i));
+                if (ImGui::Selectable(src.name.c_str(), false, 0,
+                                      ImVec2(ImGui::GetContentRegionAvail().x, 0.0f))) {
+                    b.pickedDatasetId = src.id;
+                    b.showNewFromDataset = false;
+                    b.showNewFromDatasetForm = true;
+                    b.importError.clear();
+                    b.nameBuffer[0] = '\0';
+                    b.commentBuffer[0] = '\0';
+                    b.overrideRefLaser = false;
+                    b.overrideSensitivity = false;
+                    ImGui::CloseCurrentPopup();
+                    appState.needsRedraw = true;
+                }
+                ImGui::PopID();
+            }
+            ImGui::EndChild();
+            ImGui::Spacing();
+            if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+                b.showNewFromDataset = false;
+                ImGui::CloseCurrentPopup();
+            }
+            drawModalAccentFrame(modalAccent());
+            ImGui::EndPopup();
+        }
+        endModal();
+    }
+    // ── step 2: name / comment / override checkboxes ─────────────────────────
+    if (!b.showNewFromDatasetForm) return;
+    static int formFocus = 0;
+    static bool formWasOpen = false;
+    ImGui::OpenPopup("New Recipe Settings##batch");
+    beginModal(520.0f, modalAccent(), false);
+    if (ImGui::BeginPopupModal("New Recipe Settings##batch", nullptr,
+                               ImGuiWindowFlags_NoTitleBar)) {
+        std::string srcName = b.pickedDatasetId;
+        for (const auto& src : appState.sessionTab.sources)
+            if (src.id == b.pickedDatasetId) { srcName = src.name; break; }
+        ImGui::Text("Recipe from \"%s\"", srcName.c_str());
+        ImGui::Spacing();
+        ImGui::InputText("Name", b.nameBuffer, sizeof(b.nameBuffer));
+        ImGui::InputText("Comment", b.commentBuffer, sizeof(b.commentBuffer));
+        ImGui::Spacing();
+        ImGui::Checkbox("Override reference laser wavelength", &b.overrideRefLaser);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Pin the captured dataset's ref-laser value into the "
+                              "recipe; otherwise every target dataset uses its own.");
+        ImGui::Checkbox("Override detector sensitivity", &b.overrideSensitivity);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Pin the captured dataset's sensitivity into the "
+                              "recipe; otherwise every target dataset uses its own.");
+        if (!b.importError.empty()) {
+            ImGui::Spacing();
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.5f, 0.4f, 1.0f));
+            ImGui::PushTextWrapPos(ImGui::GetContentRegionMax().x);
+            ImGui::TextWrapped("%s", b.importError.c_str());
+            ImGui::PopTextWrapPos();
+            ImGui::PopStyleColor();
+        }
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+        int pressed = modalButtonRow({"Create", "Cancel"}, formFocus, formWasOpen,
+                                     modalAccent());
+        if (pressed == 0) {
+            std::string name(b.nameBuffer);
+            while (!name.empty() && name.back() == ' ') name.pop_back();
+            while (!name.empty() && name.front() == ' ') name.erase(0, 1);
+            if (name.empty()) {
+                b.importError = "Recipe name is required.";
+            } else {
+                bool collision = false;
+                for (const auto& r : b.recipes)
+                    if (r.name == name) { collision = true; break; }
+                if (collision) {
+                    b.importError = "A recipe named \"" + name + "\" already exists.";
+                } else {
+                    std::string err;
+                    Workspace ws = crossLoadSource(appState.sessionTab.multiWorkspacePath,
+                                                   b.pickedDatasetId, err);
+                    if (!err.empty() || ws.format.empty()) {
+                        b.importError = "load failed: " + err;
+                    } else {
+                        Recipe r = recipeFromWorkspace(ws, b.overrideRefLaser,
+                                                       b.overrideSensitivity, err);
+                        if (!err.empty()) {
+                            b.importError = err;
+                        } else {
+                            r.name = name;
+                            r.comment = b.commentBuffer;
+                            if (crossRecipeWrite(appState.sessionTab.multiWorkspacePath,
+                                                 name, recipeToJson(r), err)) {
+                                refreshBatchRecipes(appState);
+                                b.showNewFromDatasetForm = false;
+                                b.pickedDatasetId.clear();
+                                b.importError.clear();
+                                ImGui::CloseCurrentPopup();
+                                appState.needsRedraw = true;
+                            } else {
+                                b.importError = "save failed: " + err;
+                            }
+                        }
+                    }
+                }
+            }
+            appState.needsRedraw = true;
+        } else if (pressed == 1 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            b.showNewFromDatasetForm = false;
+            b.pickedDatasetId.clear();
+            b.importError.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        drawModalAccentFrame(modalAccent());
+        ImGui::EndPopup();
+        formWasOpen = true;
+    } else {
+        formWasOpen = false;
+    }
+    endModal();
+}
+
+void SessionTab::renderBatchImportExport() {
+    BatchPanelState& b = appState.sessionTab.batch;
+
+    // Import: FileBrowser → recipeFromJson → crossRecipeWrite (no overwrite).
+    if (g_batchImportRequested) {
+        g_batchImportRequested = false;
+        std::string path = FileBrowser::showFileOpenDialog(
+            "Import Recipe", "JSON files", "*.json", glfwGetCurrentContext());
+        if (!path.empty()) {
+            std::ifstream ifs(path);
+            std::stringstream ss;
+            ss << ifs.rdbuf();
+            nlohmann::json j = nlohmann::json::parse(ss.str(), nullptr, false);
+            if (j.is_discarded()) {
+                b.importError = "Not valid JSON: " + path;
+                b.showImportError = true;
+            } else {
+                std::string err;
+                Recipe r = recipeFromJson(j, err);
+                if (!err.empty()) {
+                    b.importError = err;
+                    b.showImportError = true;
+                } else {
+                    bool collision = false;
+                    for (const auto& e : b.recipes)
+                        if (e.name == r.name) { collision = true; break; }
+                    if (collision) {
+                        b.importError = "A recipe named \"" + r.name +
+                                        "\" already exists.";
+                        b.showImportError = true;
+                    } else if (!crossRecipeWrite(appState.sessionTab.multiWorkspacePath,
+                                                 r.name, recipeToJson(r), err)) {
+                        b.importError = "save failed: " + err;
+                        b.showImportError = true;
+                    } else {
+                        refreshBatchRecipes(appState);
+                        appState.needsRedraw = true;
+                    }
+                }
+            }
+        }
+    }
+    // Export: recipeToJson → .json file.
+    if (g_batchExportRequested) {
+        g_batchExportRequested = false;
+        if (b.selectedRecipe >= 0 && b.selectedRecipe < static_cast<int>(b.recipes.size())) {
+            const Recipe& r = b.recipes[b.selectedRecipe];
+            std::string path = FileBrowser::showFileSaveDialog(
+                "Export Recipe", "JSON files", "*.json", "", "recipe.json",
+                glfwGetCurrentContext());
+            if (!path.empty()) {
+                std::ofstream ofs(path);
+                ofs << recipeToJson(r).dump(2);
+                if (!ofs.good()) {
+                    b.exportError = "Could not write: " + path;
+                    b.showExportError = true;
+                }
+            }
+        }
+    }
+
+    // ── error modals ─────────────────────────────────────────────────────────
+    auto renderErrorModal = [](const char* id, const char* title, bool& show,
+                               std::string& msg) {
+        static int focus = 0;
+        static bool wasOpen = false;
+        if (!show) { wasOpen = false; return; }
+        ImGui::OpenPopup(id);
+        beginModal(440.0f, modalAccent());
+        if (ImGui::BeginPopupModal(id, nullptr,
+                                   ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
+            ImGui::Text("%s", title);
+            ImGui::Spacing();
+            ImGui::PushTextWrapPos(ImGui::GetContentRegionMax().x);
+            ImGui::TextWrapped("%s", msg.c_str());
+            ImGui::PopTextWrapPos();
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            int pressed = modalButtonRow({"OK"}, focus, wasOpen, modalAccent());
+            if (pressed == 0 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+                show = false;
+                msg.clear();
+                ImGui::CloseCurrentPopup();
+            }
+            drawModalAccentFrame(modalAccent());
+            ImGui::EndPopup();
+            wasOpen = true;
+        } else {
+            wasOpen = false;
+        }
+        endModal();
+    };
+    renderErrorModal("Import Failed##batch", "Import Failed",
+                     b.showImportError, b.importError);
+    renderErrorModal("Export Failed##batch", "Export Failed",
+                     b.showExportError, b.exportError);
 }

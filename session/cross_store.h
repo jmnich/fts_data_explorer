@@ -111,3 +111,17 @@ bool crossSaveExperiment(AppState& s, EnvironmentSession& env,
                          const std::string& path, std::string& err);
 bool crossSaveExperiments(AppState& s, const std::string& path, std::string& err);
 bool crossLoadExperiments(AppState& s, const std::string& path, std::string& err);
+
+// ── Batch-processing recipes (M-batch) ─────────────────────────────────────
+// Root group "recipes/", one vlen-string dataset per recipe named by the
+// recipe name; dataset content = the recipe JSON (recipeToJson shape).
+// All mutations are atomic (atomicMutate temp-copy + rename, cross-store
+// invariant). File-level primitives — no AppState linkage.
+bool crossRecipeWrite(const std::string& path, const std::string& name,
+                      const nlohmann::json& recipe, std::string& err);
+bool crossRecipeList(const std::string& path, std::vector<std::string>& names,
+                     std::string& err);
+bool crossRecipeRead(const std::string& path, const std::string& name,
+                     nlohmann::json& out, std::string& err);
+bool crossRecipeRemove(const std::string& path, const std::string& name,
+                       std::string& err);
