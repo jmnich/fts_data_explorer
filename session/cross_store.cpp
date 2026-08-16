@@ -141,10 +141,39 @@ bool atomicMutate(const std::string& path,
     const std::string tmp = path + ".tmp";
     std::error_code ec;
     std::filesystem::remove(tmp, ec);   // stale temp from a crash
-    std::filesystem::copy_file(path, tmp, std::filesystem::copy_options::overwrite_existing, ec);
-    if (ec) {
-        err = "cross: copy to temp failed: " + ec.message();
-        return false;
+
+    // Compacting copy: H5Fcopy was removed from the HDF5 1.14 public API, so
+    // copy object-by-object (what the h5copy tool does internally). Only LIVE
+    // objects are copied — the untracked dead space that delete-and-recreate
+    // saves leave behind (HDF5's free-space manager does not track it by
+    // default, so H5Ldelete'd bytes are never reclaimed) is dropped, and the
+    // archive self-compacts to ~its live size on every mutation instead of
+    // growing monotonically.
+    {
+        H5FileGuard src(H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT));
+        if (src.id < 0) {
+            err = "cross: copy to temp failed: open '" + path + "'";
+            return false;
+        }
+        H5FileGuard dst(H5Fcreate(tmp.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT));
+        if (dst.id < 0) {
+            err = "cross: copy to temp failed: create '" + tmp + "'";
+            return false;
+        }
+        struct Ctx { hid_t dst; herr_t firstErr = 0; };
+        Ctx ctx{dst.id};
+        auto visit = [](hid_t g, const char* name, const H5L_info_t*, void* op) -> herr_t {
+            auto* c = static_cast<Ctx*>(op);
+            const herr_t r = H5Ocopy(g, name, c->dst, name, H5P_DEFAULT, H5P_DEFAULT);
+            if (r < 0 && c->firstErr == 0) c->firstErr = r;
+            return r;
+        };
+        if (H5Literate(src.id, H5_INDEX_NAME, H5_ITER_INC, nullptr, visit, &ctx) < 0 ||
+            ctx.firstErr < 0) {
+            std::filesystem::remove(tmp);
+            err = "cross: copy to temp failed: H5Ocopy";
+            return false;
+        }
     }
     if (slowSave) std::this_thread::sleep_for(std::chrono::seconds(2));  // kill-test window
     try {

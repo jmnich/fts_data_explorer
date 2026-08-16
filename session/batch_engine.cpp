@@ -412,6 +412,13 @@ void finalizeDataset(AppState& s) {
             sess->workspace = j.ws;
             finishSessionLoad(*sess, sess->currentDatasetName);
         }
+        // Closed-source counterpart of the open-tab propagation: the
+        // comparator's sourceCache may hold a PRE-batch workspace (populated
+        // on its first render, before the batch ran), which would grey out
+        // the freshly created artifacts. Serve the exact workspace that was
+        // just saved — no reload needed, and the spectral fingerprints for
+        // not-open sources stay consistent with the archive.
+        s.sessionTab.sourceCache[j.sourceIds[j.currentIdx]] = j.ws;   // copy
     }
     if (!err.empty())
         j.errors.push_back(j.sourceIds[j.currentIdx] + ": save failed: " + err);
@@ -437,8 +444,12 @@ void finishDatasetFor(AppState& s, bool ok) {
     j.allanCompleted = j.allanTotal = 0;
     j.futures.clear(); j.fileResults.clear(); j.allanFutures.clear();
     j.sourceSubmitted = j.allanSubmitted = false;
-    if (j.currentIdx >= j.totalDatasets())
+    if (j.currentIdx >= j.totalDatasets()) {
         s.sessionTab.batch.phase = BatchPhase::Done;   // progress modal flips to OK
+        // The batch rewrote every processed source in the archive — refresh
+        // the Datasets-panel size cache so the "12.3 MB" figures are current.
+        crossRefreshSourceSizes(s.sessionTab, s.sessionTab.multiWorkspacePath);
+    }
 }
 
 }  // namespace
