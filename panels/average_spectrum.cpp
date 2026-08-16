@@ -486,7 +486,9 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
 
         // HITRAN gas-band markers (drawn before the cursor so the tracking
         // cursor info box stays on top).
-        renderHitranMarkers(appState->active->hitranGasEnabled, xUnitSelector);
+        renderHitranMarkers(appState->active->hitranSelectedGas, xUnitSelector,
+                            appState->active->hitranThresholdLevel,
+                            appState->active->hitranSmoothLevel);
 
         // ---- 13. Tracking cursor ----
         if (showTrackingCursor && ImPlot::IsPlotHovered()) {

@@ -326,12 +326,13 @@ void restorePanelZoom(const nlohmann::json& vs, const char* sub,
 }
 
 void applyPanelViewState(WorkspaceSession& ws, const nlohmann::json& vs) {
-    auto hg = vs.find("hitranGases");
-    if (hg != vs.end() && hg->is_array()) {
-        for (size_t i = 0; i < ws.hitranGasEnabled.size() && i < hg->size(); ++i)
-            if ((*hg)[i].is_boolean())
-                ws.hitranGasEnabled[i] = (*hg)[i].get<bool>();
-    }
+    auto topInt = [&vs](const char* key, int def) {
+        auto it = vs.find(key);
+        return it != vs.end() && it->is_number() ? it->get<int>() : def;
+    };
+    ws.hitranSelectedGas = std::clamp(topInt("hitranSelectedGas", -1), -1, 7);
+    ws.hitranThresholdLevel = std::clamp(topInt("hitranThreshold", 2), 0, 3);
+    ws.hitranSmoothLevel = std::clamp(topInt("hitranSmooth", 3), 0, 3);
 
     ws.spectrum.xUnitSelector = viewInt(vs, "spectrumView", "xUnit", ws.spectrum.xUnitSelector);
     ws.spectrum.yScaleSelector = viewInt(vs, "spectrumView", "yScale", ws.spectrum.yScaleSelector);
@@ -500,9 +501,9 @@ nlohmann::json viewStateJson(const WorkspaceSession& ws) {
         {"filesSelectedForAveraging", ws.filesSelectedForAveraging},
         {"currentSortedFileIndex", ws.currentSortedFileIndex}
     };
-    nlohmann::json hitranGases = nlohmann::json::array();
-    for (bool b : ws.hitranGasEnabled) hitranGases.push_back(b);
-    j["hitranGases"] = std::move(hitranGases);
+    j["hitranSelectedGas"] = ws.hitranSelectedGas;
+    j["hitranThreshold"] = ws.hitranThresholdLevel;
+    j["hitranSmooth"] = ws.hitranSmoothLevel;
     j["spectrumView"] = {
         {"xUnit", ws.spectrum.xUnitSelector},
         {"yScale", ws.spectrum.yScaleSelector},

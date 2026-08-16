@@ -1,17 +1,20 @@
 #pragma once
 
-#include <array>
-
-// Dockable "HITRAN Gas Markers" panel: 8 gas checkboxes with color swatches.
-// `enabled[i]` <-> kHitranGases[i] (gas_bands.h). Docks into the main
+// Dockable "HITRAN Gas Markers" panel: exclusive gas selector (at most one
+// gas active, re-click on the active gas clears it) plus the runtime
+// "Strength threshold" and "Smoothing range" selectors. Docks into the main
 // DockSpace on first use; position then persists with the tab-type/workspace
-// layout snapshots. Returns true when a toggle changed (experiment call sites
-// set dirty = true for dirty-gated saves); sets appState.needsRedraw on any
-// toggle.
-bool renderHitranPanel(const char* title, std::array<bool, 8>& enabled);
+// layout snapshots. Returns true when any setting changed (experiment call
+// sites set dirty = true for dirty-gated saves); sets appState.needsRedraw on
+// any change.
+bool renderHitranPanel(const char* title, int& selectedGas,
+                       int& thresholdLevel, int& smoothLevel);
 
-// Draws the band bars for all enabled gases into the CURRENT ImPlot plot.
-// Must be called INSIDE BeginPlot/EndPlot, after the data lines but BEFORE
-// the tracking-cursor block (so the cursor info box stays on top). xUnit:
-// 0 cm-1, 1 um, 2 THz (SpectralToolbox::SpectrumXUnit).
-void renderHitranMarkers(const std::array<bool, 8>& enabled, int xUnit);
+// Draws the selected gas's band markers into the CURRENT ImPlot plot: the
+// full band at reduced alpha, the peak core solid. Must be called INSIDE
+// BeginPlot/EndPlot, after the data lines but BEFORE the tracking-cursor
+// block (so the cursor info box stays on top). No-op when selectedGas < 0.
+// xUnit: 0 cm-1, 1 um, 2 THz (SpectralToolbox::SpectrumXUnit).
+// thresholdLevel/smoothLevel index kHitranThresholds / kHitranSmoothOptions.
+void renderHitranMarkers(int selectedGas, int xUnit,
+                         int thresholdLevel, int smoothLevel);

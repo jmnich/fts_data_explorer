@@ -2112,9 +2112,12 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
         // 100% T View panel (docked)
         renderT100ViewPanel();
 
-        // HITRAN gas-marker toggles (docked panel; markers drawn in the
+        // HITRAN gas-marker settings (docked panel; markers drawn in the
         // Spectrum and Average plots).
-        renderHitranPanel("HITRAN Gas Markers", appState.active->hitranGasEnabled);
+        renderHitranPanel("HITRAN Gas Markers",
+                          appState.active->hitranSelectedGas,
+                          appState.active->hitranThresholdLevel,
+                          appState.active->hitranSmoothLevel);
 
         // Close the panel condition (welcome screen)
         }
