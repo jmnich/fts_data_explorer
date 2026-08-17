@@ -43,6 +43,9 @@ ImVec4 modalAccent() {
 // Confirm-before-remove modal for the Datasets panel rows.
 bool g_showRemoveConfirm = false;
 std::string g_removeSourceId;
+// Resolve a source id → current display name (manifest-derived; defined with
+// the rename helpers below the remove modal — forward-declared for it).
+std::string currentSourceName(const std::string& id);
 
 // Batch panel: edge-triggered Import/Export requests (the FileBrowser dialogs
 // run inside renderBatchImportExport, once per flag).
@@ -62,9 +65,12 @@ void renderRemoveConfirm() {
                                ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
         ImGui::Text("Remove Dataset");
         ImGui::Spacing();
+        // Show the CURRENT display name (a renamed source no longer matches
+        // its stable id slug) — same resolution the Datasets list / tabs use.
+        const std::string removeName = currentSourceName(g_removeSourceId);
         ImGui::TextWrapped("Remove \"%s\" from this multi-workspace? Its workspace tab "
                            "(if open) will be closed. The source file on disk is "
-                           "not affected.", g_removeSourceId.c_str());
+                           "not affected.", removeName.c_str());
         ImGui::Spacing();
         ImGui::Separator();
         ImGui::Spacing();
@@ -107,6 +113,41 @@ void renderRemoveConfirm() {
         wasOpen = false;
     }
     endModal();
+}
+
+// ── Rename dataset / experiment (context-menu "Rename") ─────────────────────
+// One shared target state + modal so future renamable entities need only a new
+// RenameKind case and a "seed current name / apply" pair.
+enum class RenameKind : int { None, Dataset, Experiment };
+RenameKind g_renameKind = RenameKind::None;
+std::string g_renameDatasetId;   // kind == Dataset: the source id
+int g_renameExpIdx = -1;         // kind == Experiment: experiments[] index
+char g_renameBuf[128] = {};
+
+std::string currentSourceName(const std::string& id) {
+    for (const auto& src : appState.sessionTab.sources)
+        if (src.id == id) return src.name;
+    return id;
+}
+
+// Seed the rename modal for a dataset source (manifest-derived display name).
+void beginRenameDataset(const std::string& id) {
+    g_renameKind = RenameKind::Dataset;
+    g_renameDatasetId = id;
+    g_renameExpIdx = -1;
+    std::snprintf(g_renameBuf, sizeof(g_renameBuf), "%s", currentSourceName(id).c_str());
+    appState.needsRedraw = true;
+}
+
+// Seed the rename modal for an active experiment (instanceName).
+void beginRenameExperiment(int idx) {
+    g_renameKind = RenameKind::Experiment;
+    g_renameDatasetId.clear();
+    g_renameExpIdx = idx;
+    if (idx >= 0 && idx < static_cast<int>(appState.experiments.size()))
+        std::snprintf(g_renameBuf, sizeof(g_renameBuf), "%s",
+                      appState.experiments[idx]->instanceName.c_str());
+    appState.needsRedraw = true;
 }
 
 // Dock-selection fallback: if the window is docked but its node's tab bar is
@@ -449,6 +490,80 @@ void renderCreateMultiWorkspaceButton() {
 
 }  // namespace
 
+// Rename dataset / experiment modal (state + seed helpers live in the
+// anonymous namespace above; this member function is defined at file scope).
+void SessionTab::renderRenameModal() {
+    static int focus = 0;
+    static bool wasOpen = false;
+    if (g_renameKind == RenameKind::None) {
+        wasOpen = false;
+        return;
+    }
+    ImGui::OpenPopup("Rename##session");
+    beginModal(420.0f, modalAccent());
+    if (ImGui::BeginPopupModal("Rename##session", nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
+        const char* kindText =
+            (g_renameKind == RenameKind::Dataset) ? "Dataset" : "Experiment";
+        ImGui::Text("Rename %s", kindText);
+        ImGui::Spacing();
+        const std::string current =
+            (g_renameKind == RenameKind::Dataset)
+                ? currentSourceName(g_renameDatasetId)
+                : ((g_renameExpIdx >= 0 &&
+                    g_renameExpIdx < static_cast<int>(appState.experiments.size()))
+                       ? appState.experiments[g_renameExpIdx]->instanceName
+                       : std::string());
+        ImGui::PushTextWrapPos(ImGui::GetContentRegionMax().x);
+        ImGui::TextWrapped("Current: %s", current.c_str());
+        ImGui::PopTextWrapPos();
+        ImGui::Spacing();
+        // No EnterReturnsTrue: modalButtonRow below already treats Enter/Space
+        // as a button activation — combining them would double-fire Confirm on
+        // one Enter (same pattern as the New-Recipe-From-Dataset form).
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::InputText("New name", g_renameBuf, sizeof(g_renameBuf),
+                         ImGuiInputTextFlags_AutoSelectAll);
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+        int pressed = modalButtonRow({"Rename", "Cancel"}, focus, wasOpen, modalAccent());
+        if (pressed == 0) {
+            std::string name = g_renameBuf;
+            const size_t b = name.find_first_not_of(" \t");
+            const size_t e = name.find_last_not_of(" \t");
+            name = (b == std::string::npos) ? std::string() : name.substr(b, e - b + 1);
+            if (!name.empty()) {
+                std::string err;
+                if (g_renameKind == RenameKind::Dataset) {
+                    renameDatasetSource(appState, g_renameDatasetId, name, err);
+                    if (!err.empty()) {
+                        appState.adapterErrorMsg = "Rename failed:\n" + err;
+                        appState.showAdapterErrorPopup = true;
+                    }
+                } else if (g_renameExpIdx >= 0 &&
+                           g_renameExpIdx < static_cast<int>(appState.experiments.size())) {
+                    appState.experiments[g_renameExpIdx]->rename(name);
+                    appState.needsRedraw = true;
+                }
+            }
+            g_renameKind = RenameKind::None;
+            appState.needsRedraw = true;
+            ImGui::CloseCurrentPopup();
+        } else if (pressed == 1 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            g_renameKind = RenameKind::None;
+            appState.needsRedraw = true;
+            ImGui::CloseCurrentPopup();
+        }
+        drawModalAccentFrame(modalAccent());
+        ImGui::EndPopup();
+        wasOpen = true;
+    } else {
+        wasOpen = false;
+    }
+    endModal();
+}
+
 // One experiment-type card (column c) — defined below (file scope, after
 // the anonymous namespace), used by renderAvailableExperimentsPanel.
 static void renderExperimentTypeCard(const char* title, const char* desc, EnvType type);
@@ -459,6 +574,7 @@ const std::string& SessionTab::title() const {
 
 void SessionTab::render() {
     renderRemoveConfirm();
+    renderRenameModal();
     renderBatchConfirmModal();
     renderBatchDeleteModal();
     renderBatchProgressModal();
@@ -553,6 +669,21 @@ void SessionTab::renderDatasetsPanel() {
         const WrappedRow row =
             renderWrappedRow(static_cast<int>(i), lines,
                              static_cast<int>(nameLines.size()), kRowTextIndent);
+        // Right-click menu (attached to the row Selectable — the no-arg
+        // BeginPopupContextItem derives its id from that item, per-row unique).
+        // Delete mirrors the row Delete button below; Rename opens the shared
+        // modal and renames the source's display name.
+        if (ImGui::BeginPopupContextItem()) {
+            if (ImGui::MenuItem("Rename")) {
+                beginRenameDataset(src.id);
+            }
+            if (ImGui::MenuItem("Delete")) {
+                g_removeSourceId = src.id;
+                g_showRemoveConfirm = true;
+                appState.needsRedraw = true;
+            }
+            ImGui::EndPopup();
+        }
         if (renderRowRemoveButton(static_cast<int>(i), row, row.hovered)) {
             g_removeSourceId = src.id;
             g_showRemoveConfirm = true;
@@ -607,6 +738,20 @@ void SessionTab::renderActiveExperimentsPanel() {
         const WrappedRow row =
             renderWrappedRow(static_cast<int>(i), lines,
                              static_cast<int>(titleLines.size()), kRowTextIndent);
+        // Right-click menu: Rename / Delete (Delete ≡ the row Delete button;
+        // transient removal shifts experiments[], so break AFTER EndPopup).
+        if (ImGui::BeginPopupContextItem()) {
+            bool doitBreak = false;
+            if (ImGui::MenuItem("Rename")) {
+                beginRenameExperiment(static_cast<int>(i));
+            }
+            if (ImGui::MenuItem("Delete")) {
+                env->requestDelete();
+                doitBreak = true;
+            }
+            ImGui::EndPopup();
+            if (doitBreak) break;
+        }
         if (renderRowRemoveButton(static_cast<int>(i), row, row.hovered)) {
             // Deletion happens HERE (the tab selector's close only
             // deactivates). Dirty/persisted instances confirm via the modal.

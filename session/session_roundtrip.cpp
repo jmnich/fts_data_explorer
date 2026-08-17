@@ -1925,6 +1925,77 @@ void test14_openTabPersistence() {
     std::remove(crossPath.c_str());
 }
 
+// Dataset rename (Session-tab right-click "Rename"): crossRenameSource patches
+// the manifest name (id untouched); a following crossSaveSource (Ctrl+S of the
+// embedded tab) must NOT revert it; with the source in the global sources the
+// embedded tab label resolves to the renamed name.
+void test15_datasetRename() {
+    std::printf("test15: dataset rename + save-back preservation...\n");
+    const std::string srcPath = "/tmp/fts_rename_src.h5";
+    const std::string crossPath = "/tmp/fts_rename.cross.h5";
+    std::remove(srcPath.c_str());
+    std::remove(crossPath.c_str());
+    std::string err;
+
+    H5Store::save(srcPath, makeFixtureWorkspace("rename"));
+    CHECK(crossCreate(crossPath, err));
+    std::string id;
+    CHECK(crossAddSource(crossPath, srcPath, id, err));
+    CHECK(!id.empty());
+
+    SessionTabState st0;
+    CHECK(crossLoadInto(st0, crossPath, err));
+    CHECK(st0.sources.size() == 1);
+    CHECK(st0.sources[0].name == "fts_rename_src");   // stem of the source file
+
+    // Rename the display name: reload sees it, the stable id is unchanged.
+    CHECK(crossRenameSource(crossPath, id, "renamed_dataset", err));
+    SessionTabState st1;
+    CHECK(crossLoadInto(st1, crossPath, err));
+    CHECK(st1.sources.size() == 1);
+    CHECK(st1.sources[0].id == id);
+    CHECK(st1.sources[0].name == "renamed_dataset");
+
+    // Save-back (exactly what an embedded tab's Ctrl+S does) preserves it.
+    Workspace ws = crossLoadSource(crossPath, id, err);
+    CHECK(err.empty());
+    crossSaveSource(crossPath, id, ws, err);   // void; throws on failure
+    SessionTabState st2;
+    CHECK(crossLoadInto(st2, crossPath, err));
+    CHECK(st2.sources[0].name == "renamed_dataset");
+
+    // Embedded tab label resolves the renamed name through the global sources;
+    // unknown ids fall back to the stable key suffix (harness baseline).
+    ::appState.sessionTab.sources = st2.sources;
+    WorkspaceSession embedded;
+    embedded.key = crossPath + "#" + id;
+    CHECK(embedded.label() == "renamed_dataset");
+    WorkspaceSession missing;
+    missing.key = "/x.cross.h5#ghost";
+    CHECK(missing.label() == "ghost");
+    ::appState.sessionTab.sources.clear();
+
+    // AppState-level wrapper: keeps sources[].name AND an open tab's
+    // currentDatasetName (Files-panel header / export names) in sync.
+    {
+        AppState a;
+        a.sessionTab.multiWorkspacePath = crossPath;
+        a.sessionTab.sources = st2.sources;   // name "renamed_dataset" loaded
+        auto sA = std::make_unique<WorkspaceSession>();
+        sA->key = crossPath + "#" + id;
+        sA->currentDatasetName = id;          // what a fresh open stored
+        a.sessions.push_back(std::move(sA));
+        std::string err2;
+        renameDatasetSource(a, id, "final_name", err2);
+        CHECK(err2.empty());
+        CHECK(a.sessionTab.sources[0].name == "final_name");
+        CHECK(a.sessions[0]->currentDatasetName == "final_name");
+    }
+
+    std::remove(srcPath.c_str());
+    std::remove(crossPath.c_str());
+}
+
 }  // namespace
 
 int main() {
@@ -1943,6 +2014,7 @@ int main() {
     test12_experimentPersistence();
     test13_stalenessPersisted();
     test14_openTabPersistence();
+    test15_datasetRename();
     std::printf("fts_session_roundtrip: all %d checks passed\n", g_checks);
     return 0;
 }

@@ -37,5 +37,6 @@ private:
     void renderBatchProgressModal();            // NEW (blocking)
     void renderNewFromDatasetModals();          // NEW (steps 1+2)
     void renderBatchImportExport();             // NEW
+    void renderRenameModal();                   // Rename dataset / experiment (context menus)
     std::string titleCache_ = "Session";
 };

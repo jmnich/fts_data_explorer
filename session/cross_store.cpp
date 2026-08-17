@@ -314,6 +314,40 @@ bool crossRemoveSource(const std::string& path, const std::string& id, std::stri
     }, err);
 }
 
+bool crossRenameSource(const std::string& path, const std::string& id,
+                       const std::string& newName, std::string& err) {
+    if (newName.empty()) {
+        err = "cross: empty source name";
+        return false;
+    }
+    return atomicMutate(path, [&](const std::string& tmp) {
+        H5FileGuard file(H5Fopen(tmp.c_str(), H5F_ACC_RDWR, H5P_DEFAULT));
+        if (file.id < 0) throw H5Error("crossRenameSource: cannot open temp");
+        nlohmann::json manifest = readManifest(file.id);
+        bool found = false;
+        for (auto& e : manifest["sources"]) {
+            if (e.value("id", "") == id) { e["name"] = newName; found = true; break; }
+        }
+        if (!found) throw H5Error("cross: source '" + id + "' not found");
+        writeManifest(file.id, manifest);
+        // Best-effort @summary patch so the stored summary name follows the
+        // manifest. The summary is informational (the Datasets list and tab
+        // labels read the manifest); a missing/invalid summary is tolerated.
+        const std::string prefix = sourcePrefix(id);
+        H5GroupGuard g(H5Gopen2(file.id, prefix.c_str(), H5P_DEFAULT));
+        if (g.id >= 0 && h5HasAttr(g.id, "summary")) {
+            try {
+                std::string s = h5ReadAttrString(g.id, "summary");
+                nlohmann::json j = nlohmann::json::parse(s, nullptr, false);
+                if (!j.is_discarded() && j.is_object()) {
+                    j["name"] = newName;
+                    h5WriteAttrString(g.id, "summary", j.dump());
+                }
+            } catch (...) { /* best-effort: manifest is authoritative */ }
+        }
+    }, err);
+}
+
 // Best-effort re-walk of every embedded source group after an archive save,
 // so the Session-tab sizes follow the on-disk state.
 void crossRefreshSourceSizes(SessionTabState& st, const std::string& path) {
@@ -413,20 +447,25 @@ Workspace crossLoadSource(const std::string& crossPath, const std::string& sourc
 void crossSaveSource(const std::string& crossPath, const std::string& sourceId,
                      const Workspace& ws, std::string& err) {
     const std::string prefix = sourcePrefix(sourceId);
-    const std::string name = std::filesystem::path(sourceId).stem().string();
     const bool ok = atomicMutate(crossPath, [&](const std::string& tmp) {
         H5Store::saveGroup(tmp, prefix, ws);
         H5FileGuard file(H5Fopen(tmp.c_str(), H5F_ACC_RDWR, H5P_DEFAULT));
         if (file.id < 0) throw H5Error("crossSaveSource: reopen failed");
-        writeSourceSummary(file.id, sourceId, ws, name);
-        // Refresh the manifest entry in the same save (member count etc.).
+        // Preserve the source's DISPLAY name across save-backs (dataset rename
+        // support): prefer the manifest's existing name; fall back to the id
+        // stem only for legacy entries that predate rename (they are equal for
+        // never-renamed sources, so behavior is unchanged).
         nlohmann::json manifest = readManifest(file.id);
+        std::string name = std::filesystem::path(sourceId).stem().string();
         for (auto& e : manifest["sources"]) {
             if (e.value("id", "") == sourceId) {
+                name = e.value("name", name);
                 e["memberCount"] = sourceMemberCount(ws);
                 e["name"] = name;
+                break;
             }
         }
+        writeSourceSummary(file.id, sourceId, ws, name);
         writeManifest(file.id, manifest);
     }, err);
     if (!ok) throw H5Error(err);

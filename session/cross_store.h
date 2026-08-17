@@ -41,6 +41,11 @@ bool crossAddSource(const std::string& path, const std::string& srcPath,
                     std::string& newId, std::string& err, bool slowSave = false);
 // Delete a source group + manifest entry (atomic).
 bool crossRemoveSource(const std::string& path, const std::string& id, std::string& err);
+// Rename a source's DISPLAY name only (atomic): patches the manifest
+// "sources[i].name" and (best-effort) the group's @summary name. The source id
+// and group are untouched — crossSaveSource preserves this name on save-back.
+bool crossRenameSource(const std::string& path, const std::string& id,
+                       const std::string& newName, std::string& err);
 // Manifest → SessionTabState (Session-tab state); nothing auto-opens.
 // The AppState form is a thin wrapper for the app; the state form keeps the
 // CLI round-trip harness free of app_state linkage.

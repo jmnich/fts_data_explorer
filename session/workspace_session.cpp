@@ -108,9 +108,7 @@ void restoreOpenEmbeddedTabs(AppState& s) {
         for (const auto& sess : s.sessions)
             if (sess->key == key) { have = true; break; }
         if (have) continue;
-        std::string name = id;
-        for (const auto& src : s.sessionTab.sources)
-            if (src.id == id) { name = src.name; break; }
+        const std::string name = sourceDisplayName(s, id);
         auto sess = std::make_unique<WorkspaceSession>();
         sess->key = key;
         wireSessionPanels(s, *sess);
@@ -147,6 +145,37 @@ void restoreTabStripOrder(AppState& s) {
     }
 }
 
+// Source id → CURRENT display name (manifest-derived); falls back to the id.
+std::string sourceDisplayName(const AppState& s, const std::string& id) {
+    for (const auto& src : s.sessionTab.sources)
+        if (src.id == id) return src.name;
+    return id;
+}
+
+void renameDatasetSource(AppState& s, const std::string& id,
+                         const std::string& newName, std::string& err) {
+    if (s.sessionTab.multiWorkspacePath.empty()) {
+        err = "No multi-workspace is open";
+        return;
+    }
+    if (!crossRenameSource(s.sessionTab.multiWorkspacePath, id, newName, err))
+        return;
+    // In-memory refresh: the Datasets list, embedded tab labels (label()),
+    // comparator/experiment pickers and batch pickers all read this live.
+    for (auto& src : s.sessionTab.sources)
+        if (src.id == id) { src.name = newName; break; }
+    // Keep currentDatasetName (Files-panel header, export filenames, window
+    // title) in sync for any open tab of this source.
+    const std::string key = s.sessionTab.multiWorkspacePath + "#" + id;
+    for (auto& sess : s.sessions)
+        if (sess->key == key) sess->currentDatasetName = newName;
+    // Open embedded tabs' labels changed their hashed tab ID — the strip
+    // rebuild re-submits them at their saved positions (same mechanism the
+    // experiment rename uses to avoid "jump to end").
+    s.stripTabBarResetRequested = true;
+    s.needsRedraw = true;
+}
+
 void WorkspaceSession::closeRequest() {
     // Wired in M2.2 (closeTab + unsaved modal dispatch).
 }
@@ -162,13 +191,19 @@ const std::string& WorkspaceSession::title() const {
 std::string WorkspaceSession::label() const {
     std::string out = path;
     if (out.empty()) {
-        // Embedded source: label = source name (the part after '#').
+        // Embedded source: label = the CURRENT display name, resolved live
+        // from the manifest-derived sources so a Datasets-panel rename reaches
+        // every open tab immediately (and restored tabs pick it up too). Falls
+        // back to the stable id (the key suffix) when the source was removed —
+        // which also keeps the session roundtrip harness (empty global
+        // sources) asserting the id.
         const size_t hashPos = key.find('#');
-        out = hashPos != std::string::npos ? key.substr(hashPos + 1) : key;
-    } else {
-        out = std::filesystem::path(out).stem().string();
+        const std::string id = hashPos != std::string::npos ? key.substr(hashPos + 1) : key;
+        for (const auto& src : appState.sessionTab.sources)
+            if (src.id == id) return src.name;
+        return id;
     }
-    return out;
+    return std::filesystem::path(out).stem().string();
 }
 
 // ── Tab-switch queue (Amendment 4 / M4.5) ───────────────────────────────────

@@ -171,6 +171,18 @@ void finishSessionLoad(WorkspaceSession& ws, const std::string& displayName);
 // an error popup. No-op when no multi-workspace is open.
 void restoreOpenEmbeddedTabs(AppState& s);
 
+// Rename an embedded dataset's DISPLAY name (AppState-level wrapper for
+// crossRenameSource): persists to the archive, refreshes the in-memory
+// sources[].name (Datasets list, embedded tab labels, pickers all re-read it),
+// and requests a strip rebuild (open tabs' labels changed their hashed IDs).
+void renameDatasetSource(AppState& s, const std::string& id,
+                         const std::string& newName, std::string& err);
+
+// Source id → CURRENT display name (manifest-derived sources); falls back to
+// the id when absent. Single shared lookup for open/restore/rename paths so
+// the Files panel name and embedded tab labels always agree.
+std::string sourceDisplayName(const AppState& s, const std::string& id);
+
 // Rebuild AppState::tabStripOrder from the loaded manifest "tabOrder" so the
 // strip's first submission renders the saved interleave (see definition).
 void restoreTabStripOrder(AppState& s);

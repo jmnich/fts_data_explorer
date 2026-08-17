@@ -38,6 +38,7 @@
 #if FTS_BUILD_HDF5
 #include "workspace_reader.h"
 #include "hdf/h5_store.h"
+#include "workspace_session.h"
 #include "hdf/hdf5_util.h"
 #include "session/cross_store.h"
 #endif
@@ -158,7 +159,10 @@ void executePendingOpen(AppState& s) {
             s.active->showWorkspaceDeleteConfirmPopup = false;
             s.active->pendingWorkspaceDeletionPath.clear();
             s.active->workspaceDirtyRebaselinePending = true;
-            finishWorkspaceLoad(s, sourceId, "");
+            // currentDatasetName = the source's CURRENT display name (same
+            // resolution as restored tabs / rename), so the Files-panel header
+            // matches the Datasets list and the tab label.
+            finishWorkspaceLoad(s, sourceDisplayName(s, sourceId), "");
         }
     } catch (const std::exception& e) {
         // The load failed: drop the blank tab and return to the Session tab.
