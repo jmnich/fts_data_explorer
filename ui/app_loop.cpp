@@ -1197,6 +1197,13 @@ bool AppLoop::runFrame() {
     // A stashed open of a NEW workspace tab: the blank session was swapped in
     // above; load the workspace into the (now blank) flat fields.
     executePendingOpen(appState);
+    // Deferred manual save (Ctrl+S / File→Save / Save As): the request was
+    // queued last frame while the "Saving..." overlay was drawn; run the
+    // actual synchronous save here — the screen still shows "Saving..." for
+    // the duration — then the overlay's min-display expires into the "Saved"
+    // toast. Runs before the queued-close/modal blocks so a just-saved state
+    // is what those flows observe.
+    executePendingSave(appState);
     // Close of a PARKED dirty tab: the swap above brought it in — show its
     // unsaved modal now (flat fields hold the right workspace).
     if (appState.pendingCloseAfterSwap >= 0) {
@@ -1368,6 +1375,27 @@ void AppLoop::scheduleRedraws() {
             }
         }
 
+        // Any in-progress, stepwise, or transient UI state forces a redraw
+        // EVERY frame regardless of input, so nothing ever freezes mid-
+        // transition on a static screen: overlays transition to their
+        // successor, per-step flows advance, and popups/modals render and
+        // close correctly (the modal-flag checks also cover the setting frame,
+        // where the popup is not yet in the stack at this pre-NewFrame point).
+
+        // "Saving..." overlay (deferred manual save): keep rendering while the
+        // request is pending or the minimum-display window is running; once it
+        // expires and the request is consumed, clear it (with a final frame so
+        // the last "Saving..." image is actually wiped) and let the "Saved"
+        // toast take over.
+        if (appState.pendingSaveKind != AppState::PendingSaveKind::None ||
+            appState.saveOverlayUntil > 0.0) {
+            if (appState.pendingSaveKind == AppState::PendingSaveKind::None &&
+                glfwGetTime() >= appState.saveOverlayUntil) {
+                appState.saveOverlayUntil = 0.0;
+            }
+            appState.needsRedraw = true;
+        }
+
         // "Saved" toast: keep frames rendering while the toast is live, plus
         // one final frame right after expiry so the overlay is actually
         // cleared from the screen — the idle skip would otherwise freeze the
@@ -1380,6 +1408,26 @@ void AppLoop::scheduleRedraws() {
                 appState.needsRedraw = true;
             }
         }
+
+        // Stepwise / queued flows: exit Save All (one tab per frame), queued
+        // tab switch, queued tab close / removal resolution, go-home finalizer.
+        const bool stepwiseActive =
+            appState.exitSaveAllRunning ||
+            appState.pendingSwapIdx >= 0 || appState.pendingSwapToSession ||
+            appState.pendingExperimentIdx >= 0 ||
+            appState.pendingCloseAfterSwap >= 0 ||
+            appState.pendingRemoveIdx >= 0 ||
+            appState.pendingTabCloseIdx >= 0 ||
+            appState.pendingGoHome;
+        // Modal/overlay flags: force rendering while any is latched — belt and
+        // suspenders on top of the IsPopupOpen check below (which reflects
+        // last frame's stack and can lag the setting frame).
+        const bool modalActive =
+            appState.showUnsavedPrompt || appState.showStaleDropPrompt ||
+            appState.showExitDirtyModal || appState.showAdapterErrorPopup ||
+            appState.showExperimentDeleteConfirm;
+        if (!appState.needsRedraw && (stepwiseActive || modalActive))
+            appState.needsRedraw = true;
 
         // Any open popup (e.g. a combo dropdown): keep frames rendering while
         // it is open — the idle skip would otherwise freeze a just-opened
@@ -1402,6 +1450,22 @@ void AppLoop::scheduleRedraws() {
 
 void AppLoop::handleInput() {
     ImGuiIO& io = ImGui::GetIO();
+
+        // "Saving..." overlay = UI-locked (deferred manual save): while the
+        // overlay is on screen (request pending or the minimum-display window
+        // after a fast save), suppress app-level input so nothing acts on the
+        // UI behind the dim. Consume the Ctrl+S latch so a held key cannot
+        // re-trigger the instant the lock lifts. The overlay deadline is a
+        // real-time monotonic value that scheduleRedraws clears, so the lock
+        // always ends (capped at ~0.6s for fast saves).
+        const bool saveLockActive =
+            appState.pendingSaveKind != AppState::PendingSaveKind::None ||
+            (appState.saveOverlayUntil > 0.0 && glfwGetTime() < appState.saveOverlayUntil);
+        if (saveLockActive) {
+            appState.sKeyPressedLastFrame =
+                (glfwGetKey(window_, GLFW_KEY_S) == GLFW_PRESS) && io.KeyCtrl;
+            return;
+        }
 
         // Per-workspace input (M2.3): shortcuts, navigation and file loading
         // operate on the ACTIVE workspace tab's fields. With a non-workspace
@@ -1548,15 +1612,18 @@ void AppLoop::handleInput() {
         if (sKeyPressed && !appState.sKeyPressedLastFrame &&
             !ImGui::GetIO().WantCaptureKeyboard) {
 #if FTS_BUILD_HDF5
-            try {
-                if (wsActive && appState.hasWorkspace() && ImGui::GetIO().KeyShift) {
-                    saveWorkspaceAs(appState, window_);
-                } else {
-                    saveEverything(appState);
+            if (wsActive && appState.hasWorkspace() && ImGui::GetIO().KeyShift) {
+                try {
+                    saveWorkspaceAs(appState, window_);   // dialog flow
+                } catch (const std::exception& e) {
+                    appState.adapterErrorMsg = std::string("Save failed:\n") + e.what();
+                    appState.showAdapterErrorPopup = true;
                 }
-            } catch (const std::exception& e) {
-                appState.adapterErrorMsg = std::string("Save failed:\n") + e.what();
-                appState.showAdapterErrorPopup = true;
+            } else {
+                // Deferred manual save: the "Saving..." overlay draws this
+                // frame; executePendingSave runs the sync save at the next
+                // frame top and clears into the "Saved" toast.
+                requestSaveEverything(appState);
             }
 #endif
             appState.needsRedraw = true;
@@ -1801,6 +1868,27 @@ void AppLoop::handleInput() {
 #endif
         }
 
+}
+
+// Centered foreground toast ("Saving..." / "Saved" / export-equivalent look):
+// rounded dark box with an accent border and centered text, drawn on the
+// foreground draw list over the full-screen dim the caller applies. Shared so
+// "Saving..." and "Saved" are byte-identical in style.
+static void drawCenteredToast(const char* msg, float padX, float padY) {
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+    const ImVec2 size = ImGui::GetIO().DisplaySize;
+    const ImVec2 ts = ImGui::CalcTextSize(msg);
+    const ImVec2 pos((size.x - ts.x) * 0.5f, (size.y - ts.y) * 0.5f);
+    dl->AddRectFilled(
+        ImVec2(pos.x - padX, pos.y - padY),
+        ImVec2(pos.x + ts.x + padX, pos.y + ts.y + padY),
+        IM_COL32(30, 30, 50, 230), 8.0f);
+    dl->AddRect(
+        ImVec2(pos.x - padX, pos.y - padY),
+        ImVec2(pos.x + ts.x + padX, pos.y + ts.y + padY),
+        ImGui::ColorConvertFloat4ToU32(modalAccent()),
+        8.0f, ImDrawFlags_None, 2.0f);
+    dl->AddText(pos, IM_COL32(255, 255, 255, 255), msg);
 }
 
 void AppLoop::renderUI() {
@@ -2282,37 +2370,25 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             ImDrawList* dl = ImGui::GetForegroundDrawList();
             ImVec2 size = ImGui::GetIO().DisplaySize;
             dl->AddRectFilled(ImVec2(0, 0), size, IM_COL32(0, 0, 0, 160));
-            const char* msg = "Export in progress... Please wait.";
-            ImVec2 ts = ImGui::CalcTextSize(msg);
-            ImVec2 pos((size.x - ts.x) * 0.5f, (size.y - ts.y) * 0.5f);
-            dl->AddRectFilled(
-                ImVec2(pos.x - 20, pos.y - 12),
-                ImVec2(pos.x + ts.x + 20, pos.y + ts.y + 12),
-                IM_COL32(30, 30, 50, 230), 8.0f);
-            // Accent border, matching the "Saved" toast family.
-            dl->AddRect(
-                ImVec2(pos.x - 20, pos.y - 12),
-                ImVec2(pos.x + ts.x + 20, pos.y + ts.y + 12),
-                ImGui::ColorConvertFloat4ToU32(modalAccent()),
-                8.0f, ImDrawFlags_None, 2.0f);
-            dl->AddText(pos, IM_COL32(255, 255, 255, 255), msg);
+            drawCenteredToast("Export in progress... Please wait.", 20.0f, 12.0f);
         }
-        if (glfwGetTime() < appState.saveToastUntil) {
+
+        // "Saving..." overlay (manual deferred saves): drawn the frame the
+        // request is made and every frame until the minimum display window
+        // (saveOverlayUntil) elapses — the actual sync save runs at the next
+        // frame top while this is still on screen, then "Saved" replaces it.
+        const bool saveOverlayActive =
+            appState.pendingSaveKind != AppState::PendingSaveKind::None ||
+            (appState.saveOverlayUntil > 0.0 &&
+             glfwGetTime() < appState.saveOverlayUntil);
+        if (saveOverlayActive) {
             ImDrawList* dl = ImGui::GetForegroundDrawList();
             ImVec2 size = ImGui::GetIO().DisplaySize;
-            const char* msg = "Saved";
-            ImVec2 ts = ImGui::CalcTextSize(msg);
-            ImVec2 pos((size.x - ts.x) * 0.5f, (size.y - ts.y) * 0.5f);
-            dl->AddRectFilled(
-                ImVec2(pos.x - 22, pos.y - 14),
-                ImVec2(pos.x + ts.x + 22, pos.y + ts.y + 14),
-                IM_COL32(30, 30, 50, 230), 8.0f);
-            dl->AddRect(
-                ImVec2(pos.x - 22, pos.y - 14),
-                ImVec2(pos.x + ts.x + 22, pos.y + ts.y + 14),
-                ImGui::ColorConvertFloat4ToU32(modalAccent()),
-                8.0f, ImDrawFlags_None, 2.0f);
-            dl->AddText(pos, IM_COL32(255, 255, 255, 255), msg);
+            dl->AddRectFilled(ImVec2(0, 0), size, IM_COL32(0, 0, 0, 160));
+            drawCenteredToast("Saving...", 22.0f, 14.0f);
+        }
+        if (glfwGetTime() < appState.saveToastUntil) {
+            drawCenteredToast("Saved", 22.0f, 14.0f);
         }
 
         // Phase 3: finalize the view-state baseline at the end of the first

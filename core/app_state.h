@@ -69,6 +69,15 @@ void saveWorkspaceAs(AppState& s, GLFWwindow* window);
 // (crossSaveExperiments), then shows the "Saved" toast. Throws H5Error on
 // failure. Defined in main.cpp.
 void saveEverything(AppState& s);
+// Deferred-save entry points for MANUAL saves (Ctrl+S / File→Save / Save As):
+// these only queue a request — the "Saving..." overlay is drawn that same
+// frame, then executePendingSave() runs the actual synchronous save at the
+// next frame top (screen still shows "Saving..." during the save) before the
+// "Saved" toast appears. Modal-driven saves (Unsaved-Changes "Save", Stale-Drop,
+// Exit "Save All") stay synchronous and do NOT use these.
+void requestSaveEverything(AppState& s);
+void requestSaveWorkspaceDeferred(AppState& s, const std::string& asPath);
+void executePendingSave(AppState& s);
 // All workspace-discarding entry points route through this; the unsaved-changes
 // modal runs in the frame and dispatches the stashed action on resolution.
 void requestWorkspaceDiscard(AppState& s, PendingWorkspaceAction action, const std::string& path);
@@ -208,6 +217,17 @@ struct AppState {
     // "Saved" toast deadline (glfwGetTime()); 0.0 = inactive. Set after a
     // successful workspace save; renderSaveToast draws while now < deadline.
     double saveToastUntil = 0.0;
+
+    // Deferred "Saving..." overlay state (manual saves only). pendingSaveKind
+    // is set by requestSaveEverything/requestSaveWorkspaceDeferred; the same
+    // frame's render draws the overlay, then executePendingSave() consumes the
+    // request at the NEXT frame top (running the sync save while "Saving..."
+    // is still on screen) and clears the kind. saveOverlayUntil holds the
+    // overlay's minimum display deadline so fast saves are still seen before
+    // the "Saved" toast replaces it.
+    enum class PendingSaveKind : int { None, Workspace, Everything };
+    PendingSaveKind pendingSaveKind = PendingSaveKind::None;
+    double saveOverlayUntil = 0.0;
     
     // Welcome screen state
     bool showWelcomeScreen;

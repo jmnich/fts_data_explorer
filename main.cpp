@@ -372,6 +372,65 @@ void requestSaveWorkspace(AppState& s, const std::string& asPath) {
     s.needsRedraw = true;
 }
 
+// Deferred manual save: request the "Saving..." overlay + run the sync save at
+// the next frame top. Guards: never queue while an exit Save All / exit-dirty
+// modal flow owns the save scheduling, and never show the overlay when there
+// is nothing that could hold state (matches saveEverything's toast guard).
+static bool saveDeferAllowed(const AppState& s) {
+    return !s.exitSaveAllRunning && !s.showExitDirtyModal &&
+           (!s.sessions.empty() || !s.experiments.empty() ||
+            s.sessionTab.multiWorkspaceOpen);
+}
+
+void requestSaveEverything(AppState& s) {
+    if (!saveDeferAllowed(s)) return;
+    s.pendingSaveKind = AppState::PendingSaveKind::Everything;
+    s.saveOverlayUntil = glfwGetTime() + 0.6;
+    s.needsRedraw = true;
+}
+
+void requestSaveWorkspaceDeferred(AppState& s, const std::string& asPath) {
+    if (!saveDeferAllowed(s)) return;
+    markConfigStale(s.active->workspace, s);
+    if (!s.active->workspace.staleCategories().empty()) {
+        // Stale categories need the confirmation modal first; its "Drop Stale
+        // Data" runs doSaveWorkspace synchronously inside the modal flow.
+        s.pendingSaveAsPath = asPath;
+        s.showStaleDropPrompt = true;
+        s.needsRedraw = true;
+        return;
+    }
+    s.pendingSaveKind = AppState::PendingSaveKind::Workspace;
+    s.pendingSaveAsPath = asPath;
+    s.saveOverlayUntil = glfwGetTime() + 0.6;
+    s.needsRedraw = true;
+}
+
+// Frame-top executor for the deferred manual save: runs the actual synchronous
+// save with the same error handling the old direct callers used, then clears
+// the request so the overlay transitions to the "Saved" toast.
+void executePendingSave(AppState& s) {
+    if (s.pendingSaveKind == AppState::PendingSaveKind::None) return;
+    const AppState::PendingSaveKind kind = s.pendingSaveKind;
+    const std::string asPath = s.pendingSaveAsPath;
+    s.pendingSaveKind = AppState::PendingSaveKind::None;
+    s.pendingSaveAsPath.clear();
+    try {
+        if (kind == AppState::PendingSaveKind::Workspace)
+            doSaveWorkspace(s, asPath);
+        else
+            saveEverything(s);
+    } catch (const std::exception& e) {
+        s.adapterErrorMsg = std::string("Save failed:\n") + e.what();
+        s.showAdapterErrorPopup = true;
+        // Drop the "Saving..." overlay immediately so the error popup surfaces
+        // right away instead of hiding behind the min-display dim.
+        s.saveOverlayUntil = 0.0;
+        s.needsRedraw = true;
+    }
+    s.needsRedraw = true;
+}
+
 void saveWorkspaceAs(AppState& s, GLFWwindow* window) {
     std::string defaultFolder = s.active->workspacePath.empty()
         ? (std::filesystem::is_directory(s.active->currentDirectory) ? s.active->currentDirectory : "")
@@ -381,7 +440,7 @@ void saveWorkspaceAs(AppState& s, GLFWwindow* window) {
     std::string path = FileBrowser::showFileSaveDialog(
         "Save Workspace As", "HDF5 files", "*.h5", defaultFolder, displayName, window);
     if (path.empty()) return;
-    requestSaveWorkspace(s, path);
+    requestSaveWorkspaceDeferred(s, path);
 }
 
 // Single choke point for every workspace-discarding entry point (M2.2).

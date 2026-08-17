@@ -45,12 +45,11 @@ void renderMainMenuBar(AppConfig& config, const std::string& configFilePath,
                     if (ImGui::MenuItem("Save", "Ctrl+S", false,
                                         appState.hasWorkspace() ||
                                         appState.sessionTab.multiWorkspaceOpen)) {
-                        try {
-                            saveEverything(appState);
-                        } catch (const std::exception& e) {
-                            appState.adapterErrorMsg = std::string("Save failed:\n") + e.what();
-                            appState.showAdapterErrorPopup = true;
-                        }
+                        // Deferred manual save: "Saving..." overlay this frame,
+                        // sync save at the next frame top, then the "Saved" toast.
+                        // Errors surface via the executor's "Save failed:" popup
+                        // (no throw from the request itself).
+                        requestSaveEverything(appState);
                     }
                     if (ImGui::MenuItem("Save As...", "Ctrl+Shift+S", false, appState.hasWorkspace())) {
                         try {
