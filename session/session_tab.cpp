@@ -1018,6 +1018,15 @@ void SessionTab::renderBatchProgressModal() {
         const float barW = ImGui::GetContentRegionAvail().x;
         const int total = j.totalDatasets();
         if (b.phase == BatchPhase::Running) {
+            // Deep accent fills (GetAccentDark) so the white overlay text in
+            // each bar stays readable on every accent color — the theme's
+            // default PlotHistogram yellow would wash it out.
+            ImGui::PushStyleColor(
+                ImGuiCol_PlotHistogram,
+                GetAccentDark(StringToAccentColor(appState.currentAccentColor)));
+            ImGui::PushStyleColor(
+                ImGuiCol_PlotHistogramHovered,
+                GetAccentDark(StringToAccentColor(appState.currentAccentColor)));
             // top bar — datasets
             char topBuf[48];
             const float topPct = total > 0 ? static_cast<float>(j.completedDatasets) / total : 0.0f;
@@ -1039,6 +1048,7 @@ void SessionTab::renderBatchProgressModal() {
             std::snprintf(granBuf, sizeof(granBuf), "Dataset %d/%d (%d/%d files)",
                           j.currentIdx + 1, total, j.completed, j.submitted);
             ImGui::ProgressBar(granPct, ImVec2(barW, 0.0f), granBuf);
+            ImGui::PopStyleColor(2);
             // dim error lines (last 5)
             if (!j.errors.empty()) {
                 ImGui::Spacing();

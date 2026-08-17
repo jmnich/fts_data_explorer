@@ -43,6 +43,14 @@ ImVec4 GetAccentVeryMuted(AccentColor color) {
     return ImVec4(base.x * 0.45f, base.y * 0.45f, base.z * 0.45f, 0.55f);
 }
 
+// Deep, full-alpha accent fill for surfaces that carry on-top text (e.g. the
+// batch progress bars). Dark enough that white overlay text stays readable on
+// every accent (vs. GetAccentMuted/VeryMuted which trade alpha away).
+ImVec4 GetAccentDark(AccentColor color) {
+    ImVec4 base = GetAccentBase(color);
+    return ImVec4(base.x * 0.32f, base.y * 0.32f, base.z * 0.32f, 1.0f);
+}
+
 ImVec4 GetAccentSubtle(AccentColor color) {
     ImVec4 base = GetAccentBase(color);
     return ImVec4(base.x * 0.25f, base.y * 0.25f, base.z * 0.25f, 0.3f);

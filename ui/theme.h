@@ -53,6 +53,7 @@ ImVec4 GetAccentHovered(AccentColor color);
 ImVec4 GetAccentActive(AccentColor color);
 ImVec4 GetAccentMuted(AccentColor color);
 ImVec4 GetAccentVeryMuted(AccentColor color);
+ImVec4 GetAccentDark(AccentColor color);   // deep accent fill (full alpha) — keeps white text readable
 ImVec4 GetAccentSubtle(AccentColor color);
 
 void ApplyTheme(ImGuiStyle& style, ImPlotStyle& plotStyle, AccentColor accent);
