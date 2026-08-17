@@ -1064,9 +1064,10 @@ static void rebuildDefaultLayout(ImGuiID dockspace_id, float topOffset) {
     ImGui::DockBuilderSplitNode(dock_env_below, ImGuiDir_Up, 0.5f,
                                 &dock_env_range, &dock_env_export);
     ImGui::DockBuilderDockWindow("Settings##envcfg", dock_env_settings);
-    ImGui::DockBuilderDockWindow("HITRAN Gas Markers##envhitran", dock_env_settings);
     ImGui::DockBuilderDockWindow("Plot Ranging##envrange", dock_env_range);
+    // HITRAN stacks with the env's data-export panel (was on Settings).
     ImGui::DockBuilderDockWindow("Export##envexp", dock_env_export);
+    ImGui::DockBuilderDockWindow("HITRAN Gas Markers##envhitran", dock_env_export);
     ImGui::DockBuilderDockWindow("Viewer##envview", dock_env_viewer);
 
     ImGui::DockBuilderDockWindow("Files",              dock_left_top);
@@ -1085,6 +1086,9 @@ static void rebuildDefaultLayout(ImGuiID dockspace_id, float topOffset) {
     ImGui::DockBuilderDockWindow("Spectrum",           dock_left_bottom_bottom);
     ImGui::DockBuilderDockWindow("Interferogram",      dock_left_bottom_bottom);
     ImGui::DockBuilderDockWindow("Average",            dock_left_bottom_bottom);
+    // HITRAN stacks with the Spectrum config panel (was on the right column,
+    // docked with "Spectrum View").
+    ImGui::DockBuilderDockWindow("HITRAN Gas Markers", dock_left_bottom_bottom);
     ImGui::DockBuilderDockWindow("Interferogram View", dock_center);
     ImGui::DockBuilderDockWindow("100% T View",        dock_center);
     ImGui::DockBuilderDockWindow("Allan View",         dock_center);
@@ -1093,7 +1097,6 @@ static void rebuildDefaultLayout(ImGuiID dockspace_id, float topOffset) {
     ImGui::DockBuilderDockWindow("Active Experiments", dock_right_top);
     ImGui::DockBuilderDockWindow("Batch Processing",   dock_right_top);
     ImGui::DockBuilderDockWindow("Spectrum View",      dock_right_bottom);
-    ImGui::DockBuilderDockWindow("HITRAN Gas Markers", dock_right_bottom);
     ImGui::DockBuilderDockWindow("Available Experiments", dock_right_bottom);
 
     ImGui::DockBuilderFinish(dockspace_id);
