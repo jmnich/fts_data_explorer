@@ -1382,16 +1382,18 @@ void AppLoop::scheduleRedraws() {
         // close correctly (the modal-flag checks also cover the setting frame,
         // where the popup is not yet in the stack at this pre-NewFrame point).
 
-        // "Saving..." overlay (deferred manual save): keep rendering while the
-        // request is pending or the minimum-display window is running; once it
-        // expires and the request is consumed, clear it (with a final frame so
-        // the last "Saving..." image is actually wiped) and let the "Saved"
-        // toast take over.
+        // "Saving..."/"Exporting..." overlay (manual deferred saves + dataset
+        // export): keep rendering while the request is pending or the
+        // minimum-display window is running; once it expires and the request
+        // is consumed, clear it (with a final frame so the last overlay image
+        // is actually wiped) and let the "Saved" toast take over. The verb
+        // memory (saveOverlayKind) resets with it.
         if (appState.pendingSaveKind != AppState::PendingSaveKind::None ||
             appState.saveOverlayUntil > 0.0) {
             if (appState.pendingSaveKind == AppState::PendingSaveKind::None &&
                 glfwGetTime() >= appState.saveOverlayUntil) {
                 appState.saveOverlayUntil = 0.0;
+                appState.saveOverlayKind = AppState::PendingSaveKind::None;
             }
             appState.needsRedraw = true;
         }
@@ -2373,10 +2375,13 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             drawCenteredToast("Export in progress... Please wait.", 20.0f, 12.0f);
         }
 
-        // "Saving..." overlay (manual deferred saves): drawn the frame the
-        // request is made and every frame until the minimum display window
-        // (saveOverlayUntil) elapses — the actual sync save runs at the next
-        // frame top while this is still on screen, then "Saved" replaces it.
+        // "Saving..."/"Exporting..." overlay (manual deferred saves + dataset
+        // export): drawn the frame the request is made and every frame until
+        // the minimum display window (saveOverlayUntil) elapses — the actual
+        // sync op runs at the next frame top while this is still on screen,
+        // then "Saved" replaces it. saveOverlayKind keeps the verb correct
+        // across the executor (pendingSaveKind is cleared before the
+        // min-display tail renders).
         const bool saveOverlayActive =
             appState.pendingSaveKind != AppState::PendingSaveKind::None ||
             (appState.saveOverlayUntil > 0.0 &&
@@ -2385,7 +2390,10 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             ImDrawList* dl = ImGui::GetForegroundDrawList();
             ImVec2 size = ImGui::GetIO().DisplaySize;
             dl->AddRectFilled(ImVec2(0, 0), size, IM_COL32(0, 0, 0, 160));
-            drawCenteredToast("Saving...", 22.0f, 14.0f);
+            const char* overlayLabel =
+                (appState.saveOverlayKind == AppState::PendingSaveKind::ExportDataset)
+                    ? "Exporting..." : "Saving...";
+            drawCenteredToast(overlayLabel, 22.0f, 14.0f);
         }
         if (glfwGetTime() < appState.saveToastUntil) {
             drawCenteredToast("Saved", 22.0f, 14.0f);

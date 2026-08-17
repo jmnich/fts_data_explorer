@@ -410,25 +410,63 @@ void requestSaveWorkspaceDeferred(AppState& s, const std::string& asPath) {
     s.needsRedraw = true;
 }
 
-// Frame-top executor for the deferred manual save: runs the actual synchronous
-// save with the same error handling the old direct callers used, then clears
-// the request so the overlay transitions to the "Saved" toast.
+// Dataset export (Session-tab context menu): deferred like the saves — the
+// "Exporting..." overlay draws this frame, the embedded source is written to
+// exportPath at the next frame top. Non-destructive (no removal from the
+// archive). Requests never stack: the blocking file dialog occupies a full
+// frame, so nothing can queue another deferred op in-between.
+void requestExportDataset(AppState& s, const std::string& sourceId,
+                          const std::string& exportPath) {
+    // Parity with the deferred saves: never queue while an exit Save All /
+    // exit-dirty modal flow owns the scheduling.
+    if (s.exitSaveAllRunning || s.showExitDirtyModal) return;
+    if (s.pendingSaveKind != AppState::PendingSaveKind::None) return;
+    if (s.sessionTab.multiWorkspacePath.empty()) return;
+    if (sourceId.empty() || exportPath.empty()) return;
+    s.pendingSaveKind = AppState::PendingSaveKind::ExportDataset;
+    s.saveOverlayKind = AppState::PendingSaveKind::ExportDataset;
+    s.pendingExportSourceId = sourceId;
+    s.pendingSaveAsPath = exportPath;
+    s.saveOverlayUntil = glfwGetTime() + 0.6;
+    s.needsRedraw = true;
+}
+
+// Frame-top executor for the deferred manual save/export: runs the actual
+// synchronous op with the same error handling the old direct callers used,
+// then clears the request so the overlay transitions to the "Saved" toast.
 void executePendingSave(AppState& s) {
     if (s.pendingSaveKind == AppState::PendingSaveKind::None) return;
     const AppState::PendingSaveKind kind = s.pendingSaveKind;
     const std::string asPath = s.pendingSaveAsPath;
+    const std::string srcId = s.pendingExportSourceId;
     s.pendingSaveKind = AppState::PendingSaveKind::None;
     s.pendingSaveAsPath.clear();
+    s.pendingExportSourceId.clear();
     try {
-        if (kind == AppState::PendingSaveKind::Workspace)
+        if (kind == AppState::PendingSaveKind::Workspace) {
             doSaveWorkspace(s, asPath);
-        else
+        } else if (kind == AppState::PendingSaveKind::Everything) {
             saveEverything(s);
+        } else if (kind == AppState::PendingSaveKind::ExportDataset) {
+            // Write the embedded source as a standalone single-workspace .h5:
+            // crossLoadSource reads sources/<id>; H5Store::save is the app's
+            // canonical writer (exactly what "Add Dataset" re-imports), so the
+            // exported file is spec-compliant with identical content.
+            std::string err;
+            Workspace ws = crossLoadSource(s.sessionTab.multiWorkspacePath,
+                                           srcId, err);
+            if (!err.empty()) throw H5Error(err);
+            H5Store::save(asPath, ws);
+            s.saveToastUntil = glfwGetTime() + 1.5;
+        }
     } catch (const std::exception& e) {
-        s.adapterErrorMsg = std::string("Save failed:\n") + e.what();
+        const bool isExport =
+            (kind == AppState::PendingSaveKind::ExportDataset);
+        s.adapterErrorMsg =
+            std::string(isExport ? "Export failed:\n" : "Save failed:\n") + e.what();
         s.showAdapterErrorPopup = true;
-        // Drop the "Saving..." overlay immediately so the error popup surfaces
-        // right away instead of hiding behind the min-display dim.
+        // Drop the overlay immediately so the error popup surfaces right away
+        // instead of hiding behind the min-display dim.
         s.saveOverlayUntil = 0.0;
         s.needsRedraw = true;
     }

@@ -1992,6 +1992,32 @@ void test15_datasetRename() {
         CHECK(a.sessions[0]->currentDatasetName == "final_name");
     }
 
+    // Dataset EXPORT round-trip: crossLoadSource → H5Store::save produces a
+    // standalone single-workspace .h5 whose re-load equals the embedded source
+    // (identical content on re-import — the export path used by the
+    // Session-tab "Export" context menu).
+    {
+        Workspace ws1 = crossLoadSource(crossPath, id, err);
+        CHECK(err.empty());
+        const std::string expPath = "/tmp/fts_exported.h5";
+        std::remove(expPath.c_str());
+        H5Store::save(expPath, ws1);
+        Workspace ws2 = H5Store::load(expPath);
+        CHECK(ws2.format == ws1.format);
+        CHECK(ws2.workspaceJson == ws1.workspaceJson);
+        CHECK(ws2.measurementConfig == ws1.measurementConfig);
+        CHECK(ws2.measurementComment == ws1.measurementComment);
+        CHECK(ws2.tags == ws1.tags);
+        CHECK(ws2.uncorrectedIfg.members.size() == ws1.uncorrectedIfg.members.size());
+        CHECK(ws2.correctedIfg.members.size() == ws1.correctedIfg.members.size());
+        CHECK(ws2.spectra.members.size() == ws1.spectra.members.size());
+        CHECK(ws2.averageSpectra.members.size() == ws1.averageSpectra.members.size());
+        CHECK(ws2.snrSpectra.members.size() == ws1.snrSpectra.members.size());
+        CHECK(ws2.allanWerle.members.size() == ws1.allanWerle.members.size());
+        CHECK(ws2.t100.members.size() == ws1.t100.members.size());
+        std::remove(expPath.c_str());
+    }
+
     std::remove(srcPath.c_str());
     std::remove(crossPath.c_str());
 }

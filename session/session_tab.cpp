@@ -130,6 +130,15 @@ std::string currentSourceName(const std::string& id) {
     return id;
 }
 
+// Default file name for the dataset-export save dialog: sanitized display
+// name (spaces/paths → '_', matching the app's export filename convention) + .h5.
+std::string exportDefaultName(const std::string& id) {
+    std::string out = currentSourceName(id);
+    for (auto& ch : out)
+        if (ch == ' ' || ch == '/' || ch == '\\' || ch == ':') ch = '_';
+    return out + ".h5";
+}
+
 // Seed the rename modal for a dataset source (manifest-derived display name).
 void beginRenameDataset(const std::string& id) {
     g_renameKind = RenameKind::Dataset;
@@ -671,11 +680,32 @@ void SessionTab::renderDatasetsPanel() {
                              static_cast<int>(nameLines.size()), kRowTextIndent);
         // Right-click menu (attached to the row Selectable — the no-arg
         // BeginPopupContextItem derives its id from that item, per-row unique).
-        // Delete mirrors the row Delete button below; Rename opens the shared
-        // modal and renames the source's display name.
+        // Export writes the stored source to a standalone .h5 (deferred,
+        // "Exporting..." overlay, non-destructive). Delete mirrors the row
+        // Delete button below; Rename opens the shared modal.
         if (ImGui::BeginPopupContextItem()) {
             if (ImGui::MenuItem("Rename")) {
                 beginRenameDataset(src.id);
+            }
+            if (ImGui::MenuItem("Export")) {
+                // Default folder: beside the multi-workspace archive (or the
+                // last remembered one). Default name: sanitized display name + .h5.
+                std::string folder;
+                if (!appState.sessionTab.multiWorkspacePath.empty())
+                    folder = std::filesystem::path(
+                        appState.sessionTab.multiWorkspacePath).parent_path().string();
+                else if (appState.configPtr &&
+                         !appState.configPtr->lastMultiWorkspacePath.empty())
+                    folder = std::filesystem::path(
+                        appState.configPtr->lastMultiWorkspacePath).parent_path().string();
+                std::string path = FileBrowser::showFileSaveDialog(
+                    "Export Dataset", "HDF5 files", "*.h5", folder,
+                    exportDefaultName(src.id), glfwGetCurrentContext());
+                if (!path.empty()) {
+                    requestExportDataset(appState, src.id, path);
+                    appState.needsRedraw = true;
+                }
+                ImGui::CloseCurrentPopup();
             }
             if (ImGui::MenuItem("Delete")) {
                 g_removeSourceId = src.id;

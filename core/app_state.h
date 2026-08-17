@@ -77,6 +77,11 @@ void saveEverything(AppState& s);
 // Exit "Save All") stay synchronous and do NOT use these.
 void requestSaveEverything(AppState& s);
 void requestSaveWorkspaceDeferred(AppState& s, const std::string& asPath);
+// Dataset export (Session-tab context menu): deferred like the saves — the
+// "Exporting..." overlay draws this frame, executePendingSave writes the
+// embedded source to exportPath (H5Store::save) at the next frame top.
+void requestExportDataset(AppState& s, const std::string& sourceId,
+                          const std::string& exportPath);
 void executePendingSave(AppState& s);
 // All workspace-discarding entry points route through this; the unsaved-changes
 // modal runs in the frame and dispatches the stashed action on resolution.
@@ -218,16 +223,21 @@ struct AppState {
     // successful workspace save; renderSaveToast draws while now < deadline.
     double saveToastUntil = 0.0;
 
-    // Deferred "Saving..." overlay state (manual saves only). pendingSaveKind
-    // is set by requestSaveEverything/requestSaveWorkspaceDeferred; the same
-    // frame's render draws the overlay, then executePendingSave() consumes the
-    // request at the NEXT frame top (running the sync save while "Saving..."
-    // is still on screen) and clears the kind. saveOverlayUntil holds the
-    // overlay's minimum display deadline so fast saves are still seen before
-    // the "Saved" toast replaces it.
-    enum class PendingSaveKind : int { None, Workspace, Everything };
+    // Deferred "Saving..."/"Exporting..." overlay state (manual saves +
+    // dataset export). pendingSaveKind is set by requestSaveEverything/
+    // requestSaveWorkspaceDeferred/requestExportDataset; the same frame's
+    // render draws the overlay, then executePendingSave() consumes the request
+    // at the NEXT frame top (running the sync op while the overlay is still on
+    // screen) and clears the kind. saveOverlayUntil holds the overlay's
+    // minimum display deadline so fast ops are still seen before the "Saved"
+    // toast replaces it; saveOverlayKind remembers the VERB for the overlay
+    // across the executor (the kind itself is cleared before the min-display
+    // tail renders).
+    enum class PendingSaveKind : int { None, Workspace, Everything, ExportDataset };
     PendingSaveKind pendingSaveKind = PendingSaveKind::None;
+    PendingSaveKind saveOverlayKind = PendingSaveKind::None;
     double saveOverlayUntil = 0.0;
+    std::string pendingExportSourceId;   // kind == ExportDataset: source to export
     
     // Welcome screen state
     bool showWelcomeScreen;
