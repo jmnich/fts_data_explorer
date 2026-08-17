@@ -614,7 +614,33 @@ static float renderTabStrip() {
     // stable tab IDs, so no index remap is needed. NoReorder keeps the
     // Session tab first (ImGui blocks dragging it and crossing over it).
     if (ImGui::BeginTabBar("##WorkspaceTabs",
-            ImGuiTabBarFlags_FittingPolicyScroll | ImGuiTabBarFlags_Reorderable)) {
+            ImGuiTabBarFlags_FittingPolicyScroll |
+            ImGuiTabBarFlags_Reorderable |
+            ImGuiTabBarFlags_NoTabListScrollingButtons)) {
+        // ── Always-on quick-jump "»»»" (tab-list menu) ───────────────────────
+        // Pinned to the bar's right edge (Trailing keeps it outside the
+        // clipped scroll region — ScrollingRectMaxX excludes the trailing
+        // section's width). Submitted FIRST so TabBarLayout registers it in
+        // the trailing section when it runs on this frame's first item. A
+        // Button tab: never selectable, never reordered, and its name is
+        // absent from tabNameToKey so the visual-order capture below skips it.
+        // "»" (U+00BB) is in the default font's Latin-1 glyph range ("⋯" U+22EF
+        // is not); three are stacked to make the trigger comfortably large.
+        // The scroll arrows (▲▼) are disabled via NoTabListScrollingButtons —
+        // overflowing tabs stay reachable through this menu (selecting one
+        // auto-scrolls the bar to it), which also disables the wheel scroll
+        // that was gated on those buttons.
+        //
+        // OpenPopup is DEFERRED past EndTabBar (popup-ID bugfix): BeginTabBarEx
+        // PushOverrideID()s the bar ID, and EndTabBar PopID()s it — calling
+        // OpenPopup here would hash the popup name under the bar's ID stack
+        // while BeginPopup (after EndTabBar) hashes it without it, so the two
+        // never match and the menu would silently fail to open (IMGUI_GUIDE
+        // §19 "Popup inside PushID"). The flag is consumed after EndTabBar.
+        bool tabListRequested = false;
+        if (ImGui::TabItemButton("»»»##stripTabList",
+                ImGuiTabItemFlags_Trailing | ImGuiTabItemFlags_NoReorder))
+            tabListRequested = true;
         // ── Session tab: identical look to workspace tabs (a real tab item),
         // unclosable (nullptr p_open) and order-pinned (NoReorder).
         const bool sessionActive = (appState.activeTabKind == ActiveTabKind::Session);
@@ -713,7 +739,15 @@ static float renderTabStrip() {
             // based IDs remapped ImGui's remembered drag order onto different
             // tabs whenever the vectors were recreated).
             const std::string tabText = t.isWs ? sess->label() : env->instanceName;
-            const std::string label = tabText +
+            // Files-style truncation (shortenFilename — same scheme as the
+            // Files panel: keep first 8 / last 24, ellipsize the middle). A
+            // pure function of tabText ALONE (never width-dependent), so the
+            // hashed tab ID stays stable across frames and window resizes;
+            // only a rename changes tabText and that is handled by the strip
+            // rebuild request. The full name is always shown in the hover
+            // tooltip added below.
+            const std::string disp = shortenFilename(tabText);
+            const std::string label = disp +
                 (t.isWs ? "##ws" : "##env") + t.key.substr(3);
             // Permanent status-marker slot: ImGui reserves the close-button
             // zone in the tab width, but a manually drawn " *" after the
@@ -724,7 +758,7 @@ static float renderTabStrip() {
             // tab size never changes on hover or when a marker appears.
             const float markerReserve = ImGui::CalcTextSize("*").x + 4.0f;
             ImGui::SetNextItemWidth(
-                ImGui::CalcTextSize(tabText.c_str()).x +
+                ImGui::CalcTextSize(disp.c_str()).x +
                 2.0f * ImGui::GetStyle().FramePadding.x +
                 ImGui::GetStyle().ItemInnerSpacing.x + ImGui::GetFontSize() +
                 markerReserve);
@@ -733,10 +767,16 @@ static float renderTabStrip() {
                 isActive ? ImGuiTabItemFlags_SetSelected : 0);
             if (t.isWs) {
                 const bool dirty = isActive ? appState.workspaceDirty() : sess->isDirty();
-                if (dirty) drawTabStatusMark(tabText.c_str(), "*");
+                if (dirty) drawTabStatusMark(disp.c_str(), "*");
             } else if (env->dirty) {
-                drawTabStatusMark(tabText.c_str(), "*");
+                drawTabStatusMark(disp.c_str(), "*");
             }
+            // Full-name tooltip (Files-panel behavior: always show the
+            // un-shortened name on hover). ImGui's own clipped-label tooltip
+            // never fires here — the tab width matches the shortened text, so
+            // the label is never clipped.
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s", tabText.c_str());
             // Click detection runs OUTSIDE the shown gate: BeginTabItem
             // returns "contents visible", not "clicked" — a non-selected tab
             // (e.g. every workspace tab while the Session tab is focused)
@@ -777,6 +817,12 @@ static float renderTabStrip() {
         ImGuiTabBar* stripBar = ImGui::GetCurrentTabBar();
         ImGui::EndTabBar();
 
+        // Deferred popup open: now that EndTabBar has PopID()'d the bar's
+        // override ID, OpenPopup hashes under the same stack that BeginPopup
+        // below will use — the popup IDs match and the menu actually shows.
+        if (tabListRequested)
+            ImGui::OpenPopup("strip tab list");
+
         // Visual-order capture: the tab bar's Tabs array IS the display order
         // (drags physically move entries — TabBarProcessReorder). Record the
         // stable keys in that order for persistence and next-frame
@@ -794,6 +840,55 @@ static float renderTabStrip() {
                         appState.tabStripOrder.push_back(it->second);
                 }
             }
+        }
+
+        // ── "»" tab-list menu ──────────────────────────────────────────────────
+        // A plain popup (menu, not a modal — same family as the per-tab
+        // right-click context menus): lists every open tab by FULL name
+        // (unshortened) with dirty marks, the Session tab pinned first, and
+        // one-click activation identical to clicking the tab itself. Popups
+        // block clicks outside themselves, so stripTabs' indexes cannot go
+        // stale mid-frame. The active tab carries the ImGui "selected" check.
+        if (ImGui::BeginPopup("strip tab list")) {
+            const bool sessionActive =
+                (appState.activeTabKind == ActiveTabKind::Session);
+            if (ImGui::Selectable("Session", sessionActive)) {
+                if (!sessionActive) focusSessionTab(appState);
+                ImGui::CloseCurrentPopup();
+            }
+            for (const auto& t : stripTabs) {
+                if (t.isWs) {
+                    // Hairline guard: a workspace close (closeTab) erases from
+                    // appState.sessions and shifts indexes; the popup rebuilds
+                    // stripTabs every frame, and popups block outside clicks,
+                    // so this cannot actually straddle a close frame — but the
+                    // index must never walk off the vector regardless.
+                    if (t.idx >= static_cast<int>(appState.sessions.size())) continue;
+                    WorkspaceSession* sp = appState.sessions[t.idx].get();
+                    const bool isActive =
+                        (appState.activeTabKind == ActiveTabKind::Workspace &&
+                         appState.activeSessionIdx == t.idx);
+                    // title() = label + " *" when dirty (full name).
+                    const std::string nm = sp->title();
+                    if (ImGui::Selectable(nm.c_str(), isActive)) {
+                        swapInSession(appState, t.idx);
+                        ImGui::CloseCurrentPopup();
+                    }
+                } else {
+                    EnvironmentSession* ep = appState.experiments[t.idx].get();
+                    // tabLabel() = instanceName + " *" when dirty; binds to a
+                    // local — it returns by value, so c_str() must not dangle.
+                    const std::string nm = ep->tabLabel();
+                    const bool isActive =
+                        (appState.activeTabKind == ActiveTabKind::Experiment &&
+                         appState.activeExperimentIdx == t.idx);
+                    if (ImGui::Selectable(nm.c_str(), isActive)) {
+                        activateExperiment(appState, t.idx);
+                        ImGui::CloseCurrentPopup();
+                    }
+                }
+            }
+            ImGui::EndPopup();
         }
     }
 
