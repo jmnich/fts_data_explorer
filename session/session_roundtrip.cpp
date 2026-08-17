@@ -1648,6 +1648,41 @@ void test12_experimentPersistence() {
         CHECK(cfg2["manualXMax"] == 2000.0);
     }
 
+    // X-unit change: convertXInPlace converts the manual zoom window AND
+    // stashes the converted limits into pendingNextX* so renderPlot re-applies
+    // them (the same spectral region stays visible — dataset-workspace
+    // behavior replicated for the comparator/absorbance plots).
+    {
+        using ST = SpectralToolbox::SpectrumXUnit;
+        auto convert = [](double v) {
+            return SpectralToolbox::convertXValue(v, ST::CmInv, ST::Um);
+        };
+        c2->prevXUnitSelector = 0;       // cm-1
+        c2->xUnitSelector = 1;           // -> um
+        c2->shouldAutoscale = false;     // renderPlot has shown the window
+        c2->manualXMin = 2000.0;         // a cm-1 zoom window
+        c2->manualXMax = 4000.0;
+        c2->pendingNextXMin = 0.0;       // clear any leftover restore latch
+        c2->pendingNextXMax = -1.0;
+        c2->convertXInPlace();
+        double wantL = std::min(convert(2000.0), convert(4000.0));
+        double wantH = std::max(convert(2000.0), convert(4000.0));
+        CHECK(c2->manualXMin == wantL);          // window converted (ascending)
+        CHECK(c2->manualXMax == wantH);
+        CHECK(c2->pendingNextXMin == wantL);     // armed for the next plot frame
+        CHECK(c2->pendingNextXMax == wantH);
+        // The data array is converted too (absorbance gridX path).
+        c2->curves.clear();
+        AbsorbanceCurve ac;
+        ac.gridX = {2000.0, 3000.0, 4000.0};
+        c2->curves.push_back(ac);
+        c2->prevXUnitSelector = 0;
+        c2->xUnitSelector = 1;
+        c2->convertXInPlace();
+        CHECK(c2->curves[0].gridX[0] == convert(2000.0));
+        CHECK(c2->curves[0].gridX[2] == convert(4000.0));
+    }
+
     // Dedupe: repeated loads add nothing.
     CHECK(crossLoadExperiments(s4, crossPath, err));
     CHECK(s4.experiments.size() == 3);

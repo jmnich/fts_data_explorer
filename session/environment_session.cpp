@@ -787,6 +787,14 @@ void EnvironmentSession::convertXInPlace() {
         manualXMin = SpectralToolbox::convertXValue(manualXMin, oldU, newU);
         manualXMax = SpectralToolbox::convertXValue(manualXMax, oldU, newU);
         if (manualXMin > manualXMax) std::swap(manualXMin, manualXMax);
+        // Re-apply the converted window so the SAME spectral region stays
+        // visible in the new unit (mirrors the dataset-workspace spectrum
+        // panels, environment_session.cpp:1796 restore block consumes this):
+        // converting manualXMin/Max alone never reaches the plot — ImPlot
+        // keeps the old-unit limits and the per-frame mirror (renderPlot)
+        // overwrites them back.
+        pendingNextXMin = manualXMin;
+        pendingNextXMax = manualXMax;
     }
     dirty = true;
 }
