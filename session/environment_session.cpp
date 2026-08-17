@@ -863,7 +863,9 @@ void EnvironmentSession::renderConfigWindow() {
         // 2026-08-14: renames silently reverted).
         ImGui::TextUnformatted("Name");
         ImGui::SameLine(120.0f);
-        ImGui::SetNextItemWidth(200.0f);
+        // Stretch the rename field across the remaining panel width so long
+        // experiment names are visible while typing (was a fixed 200px).
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
         const bool nameEdited =
             ImGui::InputText("##envName", nameBuf, sizeof(nameBuf),
                              ImGuiInputTextFlags_EnterReturnsTrue |
