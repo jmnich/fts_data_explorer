@@ -283,6 +283,9 @@ void doSaveWorkspace(AppState& s, const std::string& asPath) {
         std::string err;
         crossSaveSource(crossPath, sourceId, *toSave, err);
         if (!err.empty()) throw H5Error(err);
+        // The archive was rewritten: the comparator's sourceCache snapshots
+        // for this source are stale — clear them so the next render re-reads.
+        s.sessionTab.sourceCache.clear();
         s.active->workspace.dirty = false;
         s.active->workspace.changeLog.clear();
         s.active->viewStateBaseline = viewStateJson(s);
@@ -325,6 +328,9 @@ void saveEverything(AppState& s) {
             const std::string sourceId = sess->key.substr(hash + 1);
             std::string err;
             crossSaveSource(crossPath, sourceId, sess->workspace, err);   // throws
+            // The archive was rewritten: the comparator's sourceCache
+            // snapshots are stale — clear them so the next render re-reads.
+            s.sessionTab.sourceCache.clear();
         } else {
             H5Store::save(sess->workspacePath, sess->workspace);          // throws
         }

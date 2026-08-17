@@ -322,6 +322,13 @@ void openEmbeddedInNewTab(AppState& s, const std::string& crossPath,
 void removeTab(AppState& s, int idx) {
     if (idx < 0 || idx >= static_cast<int>(s.sessions.size())) return;
     poolEvictKey(s, s.sessions[idx]->key);
+    // The comparator's sourceCache may hold a pre-open snapshot (captured
+    // before the tab opened and its artifacts were saved) — evict it so the
+    // next render re-reads the source from the archive freshly.
+    const std::string& key = s.sessions[idx]->key;
+    const size_t hash = key.find('#');
+    if (hash != std::string::npos)
+        s.sessionTab.sourceCache.erase(key.substr(hash + 1));
     if (s.active == s.sessions[idx].get()) s.active = nullptr;
     s.sessions.erase(s.sessions.begin() + idx);
     if (s.activeSessionIdx > idx) s.activeSessionIdx--;
