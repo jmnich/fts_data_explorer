@@ -1711,11 +1711,53 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
         prevYScaleSelector = yScaleSelector;
     }
 
+    // Legend row ABOVE the plot (workspace-viewer style: colored square
+    // patches + labels, wrapping to the next line when the row overflows).
+    if (showLegend) {
+        ImGui::BeginGroup();
+        for (size_t k = 0; k < curves.size(); ++k) {
+            const auto& c = curves[k];
+            const ImVec4 color = c.color.w > 0.0f ? c.color : tab20Color(k);
+
+            // Wrap to next line if this item won't fit on the current line.
+            if (k > 0) {
+                float itemWidth = 12.0f + 2.0f * ImGui::GetStyle().ItemSpacing.x +
+                                  ImGui::CalcTextSize(c.label.c_str()).x;
+                if (k < curves.size() - 1)
+                    itemWidth += ImGui::CalcTextSize("  ").x + ImGui::GetStyle().ItemSpacing.x;
+                float itemStartX = ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x;
+                float rightEdge = ImGui::GetWindowPos().x + ImGui::GetContentRegionMax().x;
+                if (itemStartX + itemWidth <= rightEdge)
+                    ImGui::SameLine();
+            }
+
+            // Colored square patch with border (same style as the workspace
+            // viewers' legends).
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            const ImVec2 cursorPos = ImGui::GetCursorScreenPos();
+            const ImVec2 squareSize(12.0f, 12.0f);
+            dl->AddRectFilled(cursorPos,
+                              ImVec2(cursorPos.x + squareSize.x, cursorPos.y + squareSize.y),
+                              ImGui::ColorConvertFloat4ToU32(color));
+            dl->AddRect(cursorPos,
+                        ImVec2(cursorPos.x + squareSize.x, cursorPos.y + squareSize.y),
+                        ImGui::ColorConvertFloat4ToU32(ImVec4(0.2f, 0.2f, 0.2f, 1.0f)));
+            ImGui::Dummy(squareSize);
+            ImGui::SameLine();
+            ImGui::Text("%s", c.label.c_str());
+            if (k < curves.size() - 1) {
+                ImGui::SameLine();
+                ImGui::Text("  ");
+            }
+        }
+        ImGui::EndGroup();
+        ImGui::Separator();
+    }
+
     ImVec4 gridCol = ImPlot::GetStyle().Colors[ImPlotCol_AxisGrid];
     gridCol.w *= appState.gridAlpha;
     ImPlot::PushStyleColor(ImPlotCol_AxisGrid, gridCol);
-    const ImPlotFlags flags = ImPlotFlags_NoTitle |
-                              (showLegend ? 0 : ImPlotFlags_NoLegend);
+    const ImPlotFlags flags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend;
     // Plot rect for the stale-warning overlay. Captured at the END of the
     // plot block: GetPlotPos/GetPlotSize internally call SetupLock(), which
     // would invalidate every later Setup* call.
@@ -1732,9 +1774,6 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
         if (yAxisMode == 0) y_flags |= ImPlotAxisFlags_AutoFit;
         else if (yAxisMode == 1) y_flags |= ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_RangeFit;
         ImPlot::SetupAxes(xLabel.c_str(), yLabel.c_str(), x_flags, y_flags);
-
-        // Legend in the top-right corner (item 7).
-        if (showLegend) ImPlot::SetupLegend(ImPlotLocation_NorthEast);
 
         // Y-axis scale (spectrum-view scheme): log10 axis for log mode.
         if (yScaleSelector == 1) ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Log10);
