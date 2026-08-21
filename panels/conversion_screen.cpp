@@ -686,13 +686,43 @@ void renderConversionScreen(AppState& s) {
         if (!canConvert) ImGui::EndDisabled();
         if (st.job.running) {
             ImGui::Text("Converting...");
+        } else if (!canConvert) {
+            // Surface the first failing condition so the user knows why the
+            // buttons are grayed out instead of guessing.
+            std::string reason;
+            if (st.syncJob.running)
+                reason = "Waiting for repo sync to finish";
+            else if (!st.pyOk)
+                reason = "Python interpreter not found";
+            else if (!st.h5pyOk)
+                reason = "h5py not installed";
+            else if (st.selectedIndex < 0 ||
+                     st.selectedIndex >= static_cast<int>(converters.size()))
+                reason = "Select a converter";
+            else if (converters[st.selectedIndex].broken)
+                reason = "Selected converter is broken";
+            else if (st.inputPathBuf[0] == '\0')
+                reason = "Set an input path";
+            else if (st.outputDirBuf[0] == '\0')
+                reason = "Set an output directory";
+            else if (outFile.empty())
+                reason = "Input path has no file name";
+            else if (outputConflicts)
+                reason = "Output would overwrite the open workspace";
+            if (!reason.empty()) {
+                ImGui::PushStyleColor(ImGuiCol_Text,
+                    ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+                ImGui::TextUnformatted(reason.c_str());
+                ImGui::PopStyleColor();
+            }
         }
 
         // ---- Input format block (pane height fmtH is shared with the list) ------
         const float fmtLabelH = ImGui::GetFrameHeightWithSpacing() + 4.0f;
 
-        // ---- Log tail (yields to the format block; never scrolls) ----------------
-        if (st.showLog) {
+        // ---- Log tail (yields to the format block; auto-scrolls while
+        //       the converter runs so the latest output stays in view) -------
+        if (st.showLog || st.job.running) {
             ImGui::Spacing();
             ImGui::TextDisabled("Log");
             float logLabelH = ImGui::GetFrameHeightWithSpacing();
@@ -703,9 +733,13 @@ void renderConversionScreen(AppState& s) {
                     - (logLabelH + fmtLabelH + fmtH + 8.0f),
                 40.0f, 110.0f);
             ImGui::BeginChild("##convLog", ImVec2(-1, logH), ImGuiChildFlags_Borders,
-                              ImGuiWindowFlags_NoScrollbar |
-                              ImGuiWindowFlags_NoScrollWithMouse);
+                              ImGuiWindowFlags_AlwaysVerticalScrollbar);
             ImGui::TextUnformatted(lastLogLines(st.job, 20).c_str());
+            // While the converter runs, keep the latest output in view; once
+            // it finishes the user can scroll freely through the captured log.
+            if (st.job.running) {
+                ImGui::SetScrollHereY(1.0f);
+            }
             ImGui::EndChild();
         }
 
