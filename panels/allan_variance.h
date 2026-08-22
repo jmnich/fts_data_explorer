@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <string>
+#include <map>
 #include "pthread_compat.h"
 #include <future>
 #include <atomic>
@@ -84,13 +85,14 @@ private:
         std::vector<double> avgX;
         size_t avgNumBins = 0;
         int avgValidFiles = 0;
-        bool avgFirstFile = true;
 
         std::vector<std::vector<double>> fileSpectraY;
         std::vector<std::vector<double>> transmittanceCurves;
 
         // Parallel execution state for phase 0
         std::vector<std::future<SpectralToolbox::ProcessedSpectrum>> pendingAvgFutures;
+        std::vector<std::string> pendingAvgFileIds;   // parallel to pendingAvgFutures
+        std::map<std::string, SpectralToolbox::ProcessedSpectrum> avgFileResults;  // buffer
         std::atomic<int> completedAvgCount{0};
         int totalAvgSubmitted{0};
         bool batchAvgActive{false};
@@ -110,10 +112,11 @@ private:
             avgX.clear();
             avgNumBins = 0;
             avgValidFiles = 0;
-            avgFirstFile = true;
             fileSpectraY.clear();
             transmittanceCurves.clear();
             pendingAvgFutures.clear();
+            pendingAvgFileIds.clear();
+            avgFileResults.clear();
             completedAvgCount = 0;
             totalAvgSubmitted = 0;
             batchAvgActive = false;

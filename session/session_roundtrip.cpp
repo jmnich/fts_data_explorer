@@ -294,7 +294,6 @@ void checkAverageEq(const AverageSpectrum& a, const AverageSpectrum& b) {
     checkVecEq(a.calcCommonX, b.calcCommonX, "avg calcCommonX");
     CHECK(a.calcNumBins == b.calcNumBins);
     CHECK(a.calcValidFiles == b.calcValidFiles);
-    CHECK(a.calcFirstFile == b.calcFirstFile);
     CHECK(a.completedCount_.load() == b.completedCount_.load());   // atomic compared
     CHECK(a.totalSubmitted_ == b.totalSubmitted_);
     CHECK(a.batchActive_ == b.batchActive_);
@@ -330,9 +329,12 @@ void checkSnrEq(const SnrSpectrum& a, const SnrSpectrum& b) {
     checkVecEq(a.calcCommonX, b.calcCommonX, "snr calcCommonX");
     CHECK(a.calcNumBins == b.calcNumBins);
     CHECK(a.calcValidFiles == b.calcValidFiles);
-    CHECK(a.calcFirstFile == b.calcFirstFile);
-    checkVecEq(a.calcSumY, b.calcSumY, "snr calcSumY");
-    checkVecEq(a.calcSumSqY, b.calcSumSqY, "snr calcSumSqY");
+    CHECK(a.calcStats.size() == b.calcStats.size());
+    for (size_t i = 0; i < a.calcStats.size(); ++i) {
+        CHECK(a.calcStats[i].n == b.calcStats[i].n);
+        CHECK(a.calcStats[i].mean == b.calcStats[i].mean);
+        CHECK(a.calcStats[i].m2 == b.calcStats[i].m2);
+    }
     CHECK(a.completedCount_.load() == b.completedCount_.load());
     CHECK(a.totalSubmitted_ == b.totalSubmitted_);
     CHECK(a.batchActive_ == b.batchActive_);
@@ -491,6 +493,8 @@ void checkMirrored(const L& a, const R& b) {
     CHECK(a.xAxisBase == b.xAxisBase);
     CHECK(a.hilbertXCache == b.hilbertXCache);
     CHECK(a.hilbertCacheLaserWavelength == b.hilbertCacheLaserWavelength);
+    CHECK(a.hilbertCacheMethod == b.hilbertCacheMethod);
+    CHECK(a.hilbertCacheProminence == b.hilbertCacheProminence);
     CHECK(a.xCorrectionMethod == b.xCorrectionMethod);
     CHECK(a.peakProminenceThreshold == b.peakProminenceThreshold);
     CHECK(a.showPeakIndicators == b.showPeakIndicators);

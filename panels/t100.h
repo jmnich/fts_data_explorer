@@ -12,6 +12,7 @@
 #include "implot.h"
 #include "apodization.h"
 #include "spectral_toolbox.h"
+#include "running_stats.h"
 
 struct InterferogramData;
 class AppState;
@@ -120,8 +121,7 @@ public:
 private:
 
     std::vector<double> calcStdCommonX;
-    std::vector<double> calcStdSum;
-    std::vector<double> calcStdSum2;
+    std::vector<RunningStats> calcStdStats;   // per-bin Welford mean/variance
     size_t calcStdBins;
     int calcStdValidFiles;
     bool calcStdFirstFile;

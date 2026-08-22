@@ -11,6 +11,7 @@
 #include "app_state.h"
 #include "allan_variance.h"
 #include "cross_store.h"
+#include "running_stats.h"
 #include "workspace_reader.h"
 
 namespace {
@@ -140,8 +141,6 @@ void assembleDataset(BatchJob& j) {
     j.commonX = it0->second.spectrumX;
     j.bins = j.commonX.size();
     j.avgSum.assign(j.bins, 0.0);
-    j.snrSum.assign(j.bins, 0.0);
-    j.snrSumSq.assign(j.bins, 0.0);
     j.t100RefX = j.commonX;                            // reference curve = common grid (cm-1)
     j.validFileIds.clear();
     j.spectraY.clear();
@@ -170,11 +169,8 @@ void assembleDataset(BatchJob& j) {
         else
             y = resampleToGrid(ps.spectrumX, ps.spectrumY, j.commonX);
         if (y.size() != j.bins) continue;
-        for (size_t k = 0; k < j.bins; ++k) {
+        for (size_t k = 0; k < j.bins; ++k)
             j.avgSum[k] += y[k];
-            j.snrSum[k] += y[k];
-            j.snrSumSq[k] += y[k] * y[k];
-        }
         j.spectraY.push_back(std::move(y));            // parallel to validFileIds
         j.validFileIds.push_back(fid);
     }
@@ -204,11 +200,15 @@ void submitAllan(AppState& s) {
         // is NOT set yet at this point (finalizeDataset runs after the allan
         // phase), so compute the mean inline — never read an empty vector.
         const double invNf = 1.0 / static_cast<double>(nf);
+        // relative noise floor.
+        double maxRef = 0.0;
+        for (size_t k = 0; k < bins; ++k) maxRef = std::max(maxRef, j.avgSum[k] * invNf);
+        const double refFloor = maxRef * 1e-3;
         for (size_t f = 0; f < nf; ++f) {
             std::vector<double> t(bins);
             for (size_t k = 0; k < bins; ++k) {
                 const double ref = j.avgSum[k] * invNf;
-                t[k] = (ref > 1e-15) ? (j.spectraY[f][k] / ref) * 100.0 : 0.0;
+                t[k] = (ref > refFloor) ? (j.spectraY[f][k] / ref) * 100.0 : 0.0;
             }
             j.allanCurves.push_back(std::move(t));
         }
@@ -293,12 +293,17 @@ void finalizeDataset(AppState& s) {
 
     if (recipeHas(j.recipe, "snr")) {
         if (nf >= 2) {
-            // mean = sum/nf, stddev = sqrt((sumSq - nf*mean^2)/(nf-1)); SNR = mean/stddev
+            // Two-pass sample variance (N-1) for numerical stability:
+            // mean = avgSum/nf, var = sum((y-mean)^2)/(nf-1); SNR = mean/stddev.
             std::vector<double> snrX = j.commonX, snrY(n);
             for (size_t k = 0; k < n; ++k) {
-                const double mean = j.snrSum[k] / static_cast<double>(nf);
-                const double var = (j.snrSumSq[k] - static_cast<double>(nf) * mean * mean) /
-                                   static_cast<double>(nf - 1);
+                const double mean = j.avgSum[k] / static_cast<double>(nf);
+                double sumSqDev = 0.0;
+                for (size_t f = 0; f < nf; ++f) {
+                    const double dev = j.spectraY[f][k] - mean;
+                    sumSqDev += dev * dev;
+                }
+                const double var = sumSqDev / static_cast<double>(nf - 1);
                 snrY[k] = (var > 0.0) ? mean / std::sqrt(var) : 0.0;
             }
             wsUpsertSnr(j.ws, inputs, static_cast<int>(nf), snrX, snrY,
@@ -314,7 +319,12 @@ void finalizeDataset(AppState& s) {
         // conversions collapsed to identity.
         std::vector<T100Member::Curve> curves;
         curves.reserve(nf);
-        std::vector<double> stdSum(n, 0.0), stdSumSq(n, 0.0);
+        std::vector<RunningStats> stdStats(n);   // per-bin Welford stats
+        // relative noise floor — mask bins where the reference is below 0.1%
+        // of its peak (band edges with weak reference amplify noise by 1/ref).
+        double maxRef = 0.0;
+        for (size_t k = 0; k < n; ++k) maxRef = std::max(maxRef, j.t100RefY[k]);
+        const double refFloor = maxRef * 1e-3;
         for (size_t f = 0; f < nf; ++f) {              // valid files only (aligned with spectraY)
             T100Member::Curve c;
             c.fileId = j.validFileIds[f];
@@ -322,22 +332,17 @@ void finalizeDataset(AppState& s) {
             c.y.resize(n);
             for (size_t k = 0; k < n; ++k) {
                 const double ref = j.t100RefY[k];
-                const double t = (ref > 1e-15) ? (j.spectraY[f][k] / ref) * 100.0 : 0.0;
+                const double t = (ref > refFloor) ? (j.spectraY[f][k] / ref) * 100.0 : 0.0;
                 c.y[k] = t;
-                stdSum[k] += t;
-                stdSumSq[k] += t * t;
+                stdStats[k].add(t);
             }
             curves.push_back(std::move(c));
         }
         // stddev curve (per-bin sample stddev over the nf T% curves)
         std::vector<double> stdX = j.commonX, stdY(n, 0.0);
         if (nf >= 2) {
-            for (size_t k = 0; k < n; ++k) {
-                const double mean = stdSum[k] / static_cast<double>(nf);
-                const double var = (stdSumSq[k] - static_cast<double>(nf) * mean * mean) /
-                                   static_cast<double>(nf - 1);
-                stdY[k] = (var > 0.0) ? std::sqrt(var) : 0.0;
-            }
+            for (size_t k = 0; k < n; ++k)
+                stdY[k] = stdStats[k].stddev();   // sample variance (N-1)
         }
         wsUpsertT100(j.ws, inputs, j.t100RefX, j.t100RefY, stdX, stdY, curves,
                      batchArtifactCfg(j.recipe, inputs, "t100", static_cast<int>(nf),
@@ -435,7 +440,7 @@ void finishDatasetFor(AppState& s, bool ok) {
     j.ws = Workspace{};
     j.fileIds.clear();
     j.commonX.clear(); j.bins = 0;
-    j.avgSum.clear(); j.snrSum.clear(); j.snrSumSq.clear();
+    j.avgSum.clear();
     j.validFileIds.clear(); j.spectraY.clear();
     j.t100RefX.clear(); j.t100RefY.clear();
     j.allanCurves.clear(); j.allanWavelengths.clear(); j.allanSurface.clear();
@@ -533,7 +538,14 @@ void batchTick(AppState& s) {
         j.completed = 0;
         j.fileResults.clear();
         for (const auto& fid : j.fileIds) {
-            InterferogramData raw = workspaceRead(j.ws, fid);
+            InterferogramData raw;
+            try {
+                raw = workspaceRead(j.ws, fid);
+            } catch (const std::exception& e) {
+                fprintf(stderr, "WARNING: Skipping unreadable file in batch Phase-1: %s: %s\n",
+                        fid.c_str(), e.what());
+                continue;   // do not enqueue a future for the failed file
+            }
             auto fut = s.computationPool->enqueue(
                 [raw = std::move(raw), r, refLaser, axisCorr, hasPrecomp, fid]() mutable {
                     return BatchJob::BatchSpectrumResult{

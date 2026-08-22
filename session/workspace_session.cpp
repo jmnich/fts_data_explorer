@@ -180,12 +180,12 @@ void WorkspaceSession::closeRequest() {
     // Wired in M2.2 (closeTab + unsaved modal dispatch).
 }
 
-const std::string& WorkspaceSession::title() const {
-    // Computed per call (cheap): label + dirty star.
+std::string WorkspaceSession::title() const {
+    // Computed per call (cheap): label + dirty star. Returned by value:
+    // a static thread_local buffer would be overwritten by a second call in
+    // the same frame (multiple tabs rendered per frame).
     static const std::string star = " *";
-    static thread_local std::string cached;
-    cached = label() + (workspace.dirty ? star : std::string());
-    return cached;
+    return label() + (workspace.dirty ? star : std::string());
 }
 
 std::string WorkspaceSession::label() const {

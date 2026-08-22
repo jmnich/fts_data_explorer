@@ -21,6 +21,7 @@
 static void normalizeBuffer(std::vector<double>& buf,
                             const std::vector<double>& raw,
                             int yScaleSelector) {
+    if (raw.empty()) return;   // guard against empty range (UB in max_element)
     double maxVal = *std::max_element(raw.begin(), raw.end());
     if (maxVal > 0.0) {
         if (yScaleSelector == 2)
@@ -153,6 +154,30 @@ void Spectrum::resetSpectrumWindow() {
     lastSpectrumParams.clear();
 }
 
+std::array<double, 8> Spectrum::currentSpectrumParams() const {
+    double activeParam = 0.0;
+    if (apodizationSelector == static_cast<int>(ApodizationWindow::Gauss))
+        activeParam = static_cast<double>(apodizationParams.gaussSigma);
+    else if (apodizationSelector == static_cast<int>(ApodizationWindow::Rectangular))
+        activeParam = static_cast<double>(apodizationParams.rectWidth);
+    else if (apodizationSelector == static_cast<int>(ApodizationWindow::NortonBeer))
+        activeParam = static_cast<double>(apodizationParams.nortonBeerFwhm);
+    else if (apodizationSelector == static_cast<int>(ApodizationWindow::DolphChebyshev))
+        activeParam = static_cast<double>(apodizationParams.dolphChebyshevAt);
+    else if (apodizationSelector == static_cast<int>(ApodizationWindow::Hamming))
+        activeParam = static_cast<double>(apodizationParams.hammingAlpha);
+    else if (apodizationSelector == static_cast<int>(ApodizationWindow::Kaiser))
+        activeParam = static_cast<double>(apodizationParams.kaiserBeta);
+    return { static_cast<double>(Kpadding),
+             static_cast<double>(refLaserTextbox),
+             static_cast<double>(apodizationSelector),
+             activeParam,
+             apodizationParams.rectAsymMode ? 1.0 : 0.0,
+             static_cast<double>(appState->active->xCorrectionMethod),
+             static_cast<double>(appState->active->peakProminenceThreshold),
+             0.0 };
+}
+
 bool Spectrum::isSpectrumDirty(const std::string& fileId, const std::vector<double>& primaryDetector) {
     // Check if we have cached data for this file
     auto cachedSpectrumIt = cachedSpectra.find(fileId);
@@ -173,28 +198,7 @@ bool Spectrum::isSpectrumDirty(const std::string& fileId, const std::vector<doub
     if (paramsIt == lastSpectrumParams.end()) return true;
     const auto& lp = paramsIt->second;
 
-    double activeParam = 0.0;
-    if (apodizationSelector == static_cast<int>(ApodizationWindow::Gauss))
-        activeParam = static_cast<double>(apodizationParams.gaussSigma);
-    else if (apodizationSelector == static_cast<int>(ApodizationWindow::Rectangular))
-        activeParam = static_cast<double>(apodizationParams.rectWidth);
-    else if (apodizationSelector == static_cast<int>(ApodizationWindow::NortonBeer))
-        activeParam = static_cast<double>(apodizationParams.nortonBeerFwhm);
-    else if (apodizationSelector == static_cast<int>(ApodizationWindow::DolphChebyshev))
-        activeParam = static_cast<double>(apodizationParams.dolphChebyshevAt);
-    else if (apodizationSelector == static_cast<int>(ApodizationWindow::Hamming))
-        activeParam = static_cast<double>(apodizationParams.hammingAlpha);
-    else if (apodizationSelector == static_cast<int>(ApodizationWindow::Kaiser))
-        activeParam = static_cast<double>(apodizationParams.kaiserBeta);
-
-    if (lp.size() < 8 ||
-        lp[0] != static_cast<double>(Kpadding)               ||
-        lp[1] != static_cast<double>(refLaserTextbox)        ||
-        lp[2] != static_cast<double>(apodizationSelector)    ||
-        lp[3] != activeParam                                  ||
-        lp[4] != (apodizationParams.rectAsymMode ? 1.0 : 0.0) ||
-        lp[5] != static_cast<double>(appState->active->xCorrectionMethod) ||
-        lp[6] != static_cast<double>(appState->active->peakProminenceThreshold)) {
+    if (lp.size() < 8 || lp != currentSpectrumParams()) {
         return true;
     }
 
@@ -231,31 +235,11 @@ void Spectrum::pollPendingSpectra() {
                                  cachedFrequencies[it->fileId], cachedSpectra[it->fileId]);
 #endif
 
-                // Update lastSpectrumParams so isSpectrumDirty returns false next time
-                double activeParam = 0.0;
-                if (apodizationSelector == static_cast<int>(ApodizationWindow::Gauss))
-                    activeParam = static_cast<double>(apodizationParams.gaussSigma);
-                else if (apodizationSelector == static_cast<int>(ApodizationWindow::Rectangular))
-                    activeParam = static_cast<double>(apodizationParams.rectWidth);
-                else if (apodizationSelector == static_cast<int>(ApodizationWindow::NortonBeer))
-                    activeParam = static_cast<double>(apodizationParams.nortonBeerFwhm);
-                else if (apodizationSelector == static_cast<int>(ApodizationWindow::DolphChebyshev))
-                    activeParam = static_cast<double>(apodizationParams.dolphChebyshevAt);
-                else if (apodizationSelector == static_cast<int>(ApodizationWindow::Hamming))
-                    activeParam = static_cast<double>(apodizationParams.hammingAlpha);
-                else if (apodizationSelector == static_cast<int>(ApodizationWindow::Kaiser))
-                    activeParam = static_cast<double>(apodizationParams.kaiserBeta);
-
-                // Update primary detector cache to prevent re-computation
+                // Stamp the fingerprint CAPTURED AT SUBMIT TIME, not the
+                // current selectors — a param change mid-compute must not mark
+                // the stale result as fresh.
                 lastPrimaryDetectors[it->fileId] = it->primaryDetector;
-                lastSpectrumParams[it->fileId] = { static_cast<double>(Kpadding),
-                                                   static_cast<double>(refLaserTextbox),
-                                                   static_cast<double>(apodizationSelector),
-                                                   activeParam,
-                                                   apodizationParams.rectAsymMode ? 1.0 : 0.0,
-                                                   static_cast<double>(appState->active->xCorrectionMethod),
-                                                   static_cast<double>(appState->active->peakProminenceThreshold),
-                                                   0.0 };
+                lastSpectrumParams[it->fileId] = it->params;
             } catch (const std::exception& e) {
                 fprintf(stderr, "WARNING: Spectrum computation failed for %s: %s\n",
                         it->fileId.c_str(), e.what());
@@ -311,31 +295,7 @@ bool Spectrum::computeAndCacheSpectrum(const std::string& filePath, const std::s
         wsMirrorSpectrum(*appState, fileId, cachedFrequencies[fileId], cachedSpectra[fileId]);
 #endif
 
-        double activeParam = 0.0;
-        auto apodSel = static_cast<ApodizationWindow>(apodizationSelector);
-        if (apodSel == ApodizationWindow::Gauss)
-            activeParam = apodizationParams.gaussSigma;
-        else if (apodSel == ApodizationWindow::Rectangular)
-            activeParam = apodizationParams.rectWidth;
-        else if (apodSel == ApodizationWindow::NortonBeer)
-            activeParam = apodizationParams.nortonBeerFwhm;
-        else if (apodSel == ApodizationWindow::DolphChebyshev)
-            activeParam = apodizationParams.dolphChebyshevAt;
-        else if (apodSel == ApodizationWindow::Hamming)
-            activeParam = apodizationParams.hammingAlpha;
-        else if (apodSel == ApodizationWindow::Kaiser)
-            activeParam = apodizationParams.kaiserBeta;
-
-        lastSpectrumParams[fileId] = {
-            static_cast<double>(Kpadding),
-            static_cast<double>(refLaserTextbox),
-            static_cast<double>(apodizationSelector),
-            activeParam,
-            apodizationParams.rectAsymMode ? 1.0 : 0.0,
-            static_cast<double>(appState->active->xCorrectionMethod),
-            static_cast<double>(appState->active->peakProminenceThreshold),
-            0.0
-        };
+        lastSpectrumParams[fileId] = currentSpectrumParams();
 
         return true;
     } catch (const std::exception& e) {
@@ -778,10 +738,17 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                         continue;
                     }
 
-                    // Check if there's already a pending computation for this file
+                    // Check if there's already a pending computation for this
+                    // file with the SAME params. A pending entry with DIFFERENT
+                    // params is stale (a param changed mid-compute) — drop it
+                    // and submit a fresh one.
+                    const auto curParams = currentSpectrumParams();
                     auto pit = std::find_if(pendingSpectra_.begin(), pendingSpectra_.end(),
-                        [&](const PendingSpectrum& p) { return p.fileId == fileId; });
+                        [&](const PendingSpectrum& p) { return p.fileId == fileId && p.params == curParams; });
                     if (pit != pendingSpectra_.end()) continue;
+                    auto stale = std::find_if(pendingSpectra_.begin(), pendingSpectra_.end(),
+                        [&](const PendingSpectrum& p) { return p.fileId == fileId; });
+                    if (stale != pendingSpectra_.end()) pendingSpectra_.erase(stale);
 
                     // Check if cached data exists (even if stale)
                     bool hasAnyCache = cachedSpectra.find(fileId) != cachedSpectra.end() &&
@@ -801,14 +768,7 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                                     SpectralToolbox::SpectrumXUnit::CmInv, targetUnit);
                             cachedFrequencies[fileId] = std::move(freqs);
                             lastPrimaryDetectors[fileId] = rawData.primaryDetector;
-                            lastSpectrumParams[fileId]   = { static_cast<double>(Kpadding),
-                                                             static_cast<double>(refLaserTextbox),
-                                                             static_cast<double>(apodizationSelector),
-                                                             0.0,
-                                                             0.0,
-                                                             0.0,
-                                                             0.0,
-                                                             0.0 };
+                            lastSpectrumParams[fileId]   = currentSpectrumParams();
                         } else {
                         // No cached data at all → compute synchronously to avoid one-frame gap
                         SpectralToolbox::ProcessedSpectrum ps;
@@ -838,29 +798,8 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                                          cachedFrequencies[fileId], cachedSpectra[fileId]);
 #endif
 
-                        double activeParam = 0.0;
-                        if (apodizationSelector == static_cast<int>(ApodizationWindow::Gauss))
-                            activeParam = static_cast<double>(apodizationParams.gaussSigma);
-                        else if (apodizationSelector == static_cast<int>(ApodizationWindow::Rectangular))
-                            activeParam = static_cast<double>(apodizationParams.rectWidth);
-                        else if (apodizationSelector == static_cast<int>(ApodizationWindow::NortonBeer))
-                            activeParam = static_cast<double>(apodizationParams.nortonBeerFwhm);
-                        else if (apodizationSelector == static_cast<int>(ApodizationWindow::DolphChebyshev))
-                            activeParam = static_cast<double>(apodizationParams.dolphChebyshevAt);
-                        else if (apodizationSelector == static_cast<int>(ApodizationWindow::Hamming))
-                            activeParam = static_cast<double>(apodizationParams.hammingAlpha);
-                        else if (apodizationSelector == static_cast<int>(ApodizationWindow::Kaiser))
-                            activeParam = static_cast<double>(apodizationParams.kaiserBeta);
-
                         lastPrimaryDetectors[fileId] = rawData.primaryDetector;
-                        lastSpectrumParams[fileId]   = { static_cast<double>(Kpadding),
-                                                         static_cast<double>(refLaserTextbox),
-                                                         static_cast<double>(apodizationSelector),
-                                                         activeParam,
-                                                         apodizationParams.rectAsymMode ? 1.0 : 0.0,
-                                                         static_cast<double>(appState->active->xCorrectionMethod),
-                                                         static_cast<double>(appState->active->peakProminenceThreshold),
-                                                         0.0 };
+                        lastSpectrumParams[fileId]   = currentSpectrumParams();
                         }
                     } else {
                         // Stale cached data exists → submit async, old spectrum stays visible
@@ -900,6 +839,7 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                             ps.future = std::move(fut);
                             ps.fileId = fileId;
                             ps.primaryDetector = rawData.primaryDetector;
+                            ps.params = curParams;   // captured at submit time
                             pendingSpectra_.push_back(std::move(ps));
                         }
                     }

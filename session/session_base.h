@@ -11,7 +11,7 @@
 class SessionBase {
 public:
     virtual ~SessionBase() = default;
-    virtual const std::string& title() const = 0;   // tab label (stem + dirty *)
+    virtual std::string title() const = 0;   // tab label (stem + dirty *)
     virtual bool isDirty() const = 0;
     virtual void render() = 0;                      // docked windows for this tab type
     virtual void tickAsync() = 0;                   // per-frame poll

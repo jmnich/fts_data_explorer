@@ -1,11 +1,7 @@
 #include "apodization.h"
+#include "spectral_toolbox.h"   // FftwComplexGuard, FftwPlanGuard, fftwPlanMutex
 #include <cmath>
 #include <algorithm>
-#include "fftw3.h"
-#include <pthread.h>
-
-// Shared FFTW plan creation mutex (defined in spectral_toolbox.cpp)
-extern pthread_mutex_t fftwPlanMutex;
 
 #define REAL 0
 #define IMAG 1
@@ -119,8 +115,7 @@ static std::vector<double> genSymmetricDolphChebyshev(std::size_t n, double at) 
     const double beta = std::cosh(
         std::acosh(std::pow(10.0, std::abs(at) / 20.0)) / order);
 
-    fftw_complex* in  = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * n);
-    fftw_complex* out = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * n);
+    FftwComplexGuard in(n), out(n);
 
     for (std::size_t k = 0; k < n; ++k) {
         const double x = beta * std::cos(M_PI * k / static_cast<double>(n));
@@ -146,11 +141,7 @@ static std::vector<double> genSymmetricDolphChebyshev(std::size_t n, double at) 
         }
     }
 
-    fftw_plan plan;
-    pthread_mutex_lock(&fftwPlanMutex);
-    plan = fftw_plan_dft_1d(
-        static_cast<int>(n), in, out, FFTW_FORWARD, FFTW_ESTIMATE);
-    pthread_mutex_unlock(&fftwPlanMutex);
+    FftwPlanGuard plan(static_cast<int>(n), in, out, FFTW_FORWARD, FFTW_ESTIMATE);
     fftw_execute(plan);
 
     if (n % 2) {
@@ -175,10 +166,6 @@ static std::vector<double> genSymmetricDolphChebyshev(std::size_t n, double at) 
             window[half - 1 + i] = halfW[i + 1];
         }
     }
-
-    fftw_destroy_plan(plan);
-    fftw_free(in);
-    fftw_free(out);
 
     // Find max in central 50% to avoid endpoint impulses dominating normalization
     const std::size_t quarter = n / 4;

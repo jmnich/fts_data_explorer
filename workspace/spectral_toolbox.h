@@ -4,8 +4,50 @@
 #include <cstddef>
 #include <algorithm>
 #include <functional>
+#include <map>
+#include <string>
+#include <pthread.h>
 #include <fftw3.h>
 #include "apodization.h"
+
+// FFTW plan creation is serialised across threads via fftwPlanMutex (defined
+// in spectral_toolbox.cpp). The guards below future-proof the alloc/plan
+// sites against leaks if a throwing path is ever inserted between alloc and
+// free. Execution is lock-free; only planning takes the mutex.
+
+/// RAII wrapper over fftw_malloc/free for fftw_complex buffers.
+struct FftwComplexGuard {
+    fftw_complex* p = nullptr;
+    explicit FftwComplexGuard(std::size_t n) : p(static_cast<fftw_complex*>(fftw_malloc(sizeof(fftw_complex) * n))) {}
+    ~FftwComplexGuard() { if (p) fftw_free(p); }
+    FftwComplexGuard(const FftwComplexGuard&) = delete;
+    FftwComplexGuard& operator=(const FftwComplexGuard&) = delete;
+    FftwComplexGuard(FftwComplexGuard&& o) noexcept : p(o.p) { o.p = nullptr; }
+    FftwComplexGuard& operator=(FftwComplexGuard&& o) noexcept { if (this != &o) { if (p) fftw_free(p); p = o.p; o.p = nullptr; } return *this; }
+    operator fftw_complex*() const { return p; }
+    fftw_complex* get() const { return p; }
+};
+
+/// RAII wrapper over fftw_plan_dft_1d/fftw_destroy_plan. Takes fftwPlanMutex
+/// during construction (planning) and releases it immediately after; the
+/// destructor only calls fftw_destroy_plan (no mutex — execution is lock-free).
+struct FftwPlanGuard {
+    fftw_plan plan = nullptr;
+    /// Plans a complex-to-complex 1D FFT. The mutex is held only for the
+    /// duration of fftw_plan_dft_1d (the planner is not thread-safe).
+    FftwPlanGuard(int n, fftw_complex* in, fftw_complex* out, int sign, unsigned flags) {
+        extern pthread_mutex_t fftwPlanMutex;
+        pthread_mutex_lock(&fftwPlanMutex);
+        plan = fftw_plan_dft_1d(n, in, out, sign, flags);
+        pthread_mutex_unlock(&fftwPlanMutex);
+    }
+    ~FftwPlanGuard() { if (plan) fftw_destroy_plan(plan); }
+    FftwPlanGuard(const FftwPlanGuard&) = delete;
+    FftwPlanGuard& operator=(const FftwPlanGuard&) = delete;
+    FftwPlanGuard(FftwPlanGuard&& o) noexcept : plan(o.plan) { o.plan = nullptr; }
+    FftwPlanGuard& operator=(FftwPlanGuard&& o) noexcept { if (this != &o) { if (plan) fftw_destroy_plan(plan); plan = o.plan; o.plan = nullptr; } return *this; }
+    operator fftw_plan() const { return plan; }
+};
 
 // ASTM E1421-style energy ratios: energy at `num` / energy at `den` (each a
 // wavenumber string, or "max" for the global maximum). Moved verbatim from the
@@ -85,7 +127,7 @@ public:
     /// negative-frequency half discarded) + magnitude.
     struct ProcessedSpectrum {
         std::vector<double> spectrumX;   ///< length N/2 (positive freqs only, index 0 = Inf dropped)
-        std::vector<double> spectrumY;   ///< magnitude, normalized by N
+        std::vector<double> spectrumY;   ///< magnitude, normalized by n (unpadded length)
     };
 
     // ---- primitives --------------------------------------------------------
@@ -93,7 +135,9 @@ public:
     /// Linear interpolation at a single point. Endpoints clamped.
     static double interpPoint(double x, const std::vector<double>& xp, const std::vector<double>& fp);
 
-    /// Vectorised linear interpolation.
+    /// Vectorised linear interpolation. @p x must be monotonic in the same
+    /// direction as @p xp (ascending or descending) — the two-pointer merge
+    /// scan advances a single bracket and does not re-search per point.
     static std::vector<double> interpVector(const std::vector<double>& x,
                                             const std::vector<double>& xp,
                                             const std::vector<double>& fp);
@@ -102,6 +146,7 @@ public:
     static void complex_divide(fftw_complex* result, fftw_complex a, fftw_complex b);
 
     /// Index of the element of @p v closest to @p value (port of np.argmin|...|).
+    /// Assumes @p v is sorted ascending (O(log n) binary search).
     static std::size_t findNearest(const std::vector<double>& v, double value);
 
     /// Port of np.linspace.
@@ -200,3 +245,14 @@ public:
                                             ApodizationWindow apodizationWindow = ApodizationWindow::Rectangular,
                                             const ApodizationParams& apodizationParams = {});
 };
+
+// Pick the common grid from fileIds in natural sort order (not completion
+// order), with fallback to the first spectrum that produced a non-empty X.
+// Mirrors batch_engine.cpp assembleDataset's deterministic-grid rule so the
+// GUI panels (Average/SNR/Allan) and the batch engine agree on the resample
+// target for the same file set. `orderedFileIds` is the selected files
+// in natural sort order; `results` is keyed by fileId. Returns an empty
+// vector if no file produced a non-empty X.
+std::vector<double> chooseCommonGrid(
+    const std::vector<std::string>& orderedFileIds,
+    const std::map<std::string, SpectralToolbox::ProcessedSpectrum>& results);

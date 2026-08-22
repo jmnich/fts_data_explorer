@@ -97,6 +97,7 @@ public:
         std::future<SpectralToolbox::ProcessedSpectrum> future;
         std::string fileId;
         std::vector<double> primaryDetector; // cached for updating lastPrimaryDetectors on completion
+        std::array<double, 8> params;         // fingerprint captured at submit time
     };
     std::vector<PendingSpectrum> pendingSpectra_;
     
@@ -116,6 +117,12 @@ public:
     
     // Poll pending async computations
     void pollPendingSpectra();
+
+    // Build the current spectrum-param fingerprint — the same tuple
+    // isSpectrumDirty compares against. Captured at submit time into
+    // PendingSpectrum::params and written back at poll time so a param
+    // change mid-compute cannot stamp the stale result as fresh.
+    std::array<double, 8> currentSpectrumParams() const;
 
     // Compute spectrum for a file and store in cache. Uses current spectrum panel
     // settings (K, xUnit, refLaser, apodization, xCorrectionMethod, etc.).

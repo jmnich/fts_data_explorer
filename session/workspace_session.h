@@ -97,6 +97,8 @@ public:
     int xAxisBase = 0;
     std::map<std::string, std::vector<double>> hilbertXCache;
     float hilbertCacheLaserWavelength = 0.0f;
+    int hilbertCacheMethod = -1;            // cache key (init -1 forces first build)
+    float hilbertCacheProminence = -1.0f;   // cache key (init -1 forces first build)
     int xCorrectionMethod = 0;
     float peakProminenceThreshold = 0.02f;
     bool showPeakIndicators = false;
@@ -131,7 +133,7 @@ public:
     void onActivate() override {}             // AppLoop sets needsRedraw at the swap
     void onDeactivate() override {}           // Phase 4: per-tab-type layout save
     void closeRequest() override;             // dirty → unsaved modal; else remove
-    const std::string& title() const override;
+    std::string title() const override;
     // Tab label WITHOUT the dirty star (stem of the path, or the source name
     // for embedded tabs). The strip/modal append " *" from isDirty().
     std::string label() const;

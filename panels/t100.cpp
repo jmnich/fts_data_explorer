@@ -141,8 +141,7 @@ void T100Spectrum::reset() {
     cachedStdX.clear();
     cachedStdY.clear();
     calcStdCommonX.clear();
-    calcStdSum.clear();
-    calcStdSum2.clear();
+    calcStdStats.clear();
     calcStdBins = 0;
     calcStdValidFiles = 0;
     calcStdFirstFile = true;
@@ -357,6 +356,16 @@ bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
             localFreq = std::move(ps.spectrumX);
             localSpec = std::move(ps.spectrumY);
             useLocal = true;
+            // cache the fallback-computed spectrum so subsequent calls
+            // for the same file reuse it instead of recomputing. Stamp the
+            // Spectrum panel's param fingerprint + primary detector so
+            // isSpectrumDirty returns false on the next frame (consistent
+            // with the sync/async paths in renderSpectrumContents).
+            appState->active->spectrum.cachedFrequencies[fileId] = localFreq;
+            appState->active->spectrum.cachedSpectra[fileId] = localSpec;
+            appState->active->spectrum.lastPrimaryDetectors[fileId] = raw.primaryDetector;
+            appState->active->spectrum.lastSpectrumParams[fileId] =
+                appState->active->spectrum.currentSpectrumParams();
         } catch (const std::exception& e) {
             fprintf(stderr, "[t100] computeTransmittanceForFile: failed to compute fallback: %s\n", e.what());
             return false;
@@ -395,6 +404,12 @@ bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
     newX.reserve(refX.size());
     newY.reserve(refX.size());
 
+    // relative noise floor — mask bins where the reference is below 0.1%
+    // of its peak (band edges with weak reference amplify noise by 1/ref).
+    double maxRef = 0.0;
+    for (double r : refY) maxRef = std::max(maxRef, r);
+    const double refFloor = maxRef * 1e-3;
+
     for (size_t i = 0; i < refX.size(); i++) {
         double targetX = convertedRefX[i];
         if (targetX < overlapMin || targetX > overlapMax)
@@ -402,7 +417,7 @@ bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
 
         newX.push_back(targetX);
         double refVal = refY[i];
-        newY.push_back((refVal > 1e-15) ? (interpVals[i] / refVal) * 100.0 : 0.0);
+        newY.push_back((refVal > refFloor) ? (interpVals[i] / refVal) * 100.0 : 0.0);
     }
 
     if (newX.empty() || newY.empty())
@@ -484,6 +499,12 @@ bool T100Spectrum::computeTransmittanceFromVectors(
     newX.reserve(refX.size());
     newY.reserve(refX.size());
 
+    // relative noise floor — mask bins where the reference is below 0.1%
+    // of its peak (band edges with weak reference amplify noise by 1/ref).
+    double maxRef = 0.0;
+    for (double r : refY) maxRef = std::max(maxRef, r);
+    const double refFloor = maxRef * 1e-3;
+
     for (size_t i = 0; i < refX.size(); i++) {
         double targetX = convertedRefX[i];
         if (targetX < overlapMin || targetX > overlapMax)
@@ -491,7 +512,7 @@ bool T100Spectrum::computeTransmittanceFromVectors(
 
         newX.push_back(targetX);
         double refVal = refY[i];
-        newY.push_back((refVal > 1e-15) ? (interpVals[i] / refVal) * 100.0 : 0.0);
+        newY.push_back((refVal > refFloor) ? (interpVals[i] / refVal) * 100.0 : 0.0);
     }
 
     if (newX.empty() || newY.empty())
@@ -514,8 +535,7 @@ void T100Spectrum::clearStdDev() {
     cachedStdX.clear();
     cachedStdY.clear();
     calcStdCommonX.clear();
-    calcStdSum.clear();
-    calcStdSum2.clear();
+    calcStdStats.clear();
     calcStdBins = 0;
     calcStdValidFiles = 0;
     calcStdFirstFile = true;
@@ -527,8 +547,7 @@ void T100Spectrum::clearStdDev() {
 
 void T100Spectrum::startStdCalculation() {
     calcStdCommonX.clear();
-    calcStdSum.clear();
-    calcStdSum2.clear();
+    calcStdStats.clear();
     calcStdBins = 0;
     calcStdValidFiles = 0;
     calcStdFirstFile = true;
@@ -557,8 +576,7 @@ bool T100Spectrum::tickStdCalculation() {
         pendingFutures_.clear();
         calcStdFirstFile = true;
         calcStdValidFiles = 0;
-        calcStdSum.clear();
-        calcStdSum2.clear();
+        calcStdStats.clear();
         calcRatioA.clear();
         calcRatioB.clear();
         calcRatioC.clear();
@@ -584,9 +602,16 @@ bool T100Spectrum::tickStdCalculation() {
             // Read the raw data on the main thread and capture it by value:
             // the workspace is mutated/replaced by the main thread (open,
             // close, member delete, Ctrl+H), so workers must never read it.
-            InterferogramData raw = workspaceRead(appState->active->workspace, filePath);
+            InterferogramData raw;
+            try {
+                raw = workspaceRead(appState->active->workspace, filePath);
+            } catch (const std::exception& e) {
+                fprintf(stderr, "WARNING: Skipping unreadable file in T100 Phase-1: %s: %s\n",
+                        filePath.c_str(), e.what());
+                continue;   // do not enqueue a future for the failed file
+            }
             auto fut = appState->computationPool->enqueue(
-                [raw = std::move(raw), refLaser, K, xUnit, apodSelector, apodParams, this, axisCorr, hasPrecomp,
+                [raw = std::move(raw), refLaser, K, xUnit, apodSelector, apodParams, axisCorr, hasPrecomp,
                  xMethod = static_cast<SpectralToolbox::XCorrectionMethod>(appState->active->xCorrectionMethod),
                  promThresh = appState->active->peakProminenceThreshold]() mutable {
                     if (hasPrecomp) {
@@ -656,24 +681,19 @@ bool T100Spectrum::tickStdCalculation() {
                     calcStdCommonX = transX;
                     calcStdBins = calcStdCommonX.size();
                     calcStdFirstFile = false;
-                    calcStdSum.assign(calcStdBins, 0.0);
-                    calcStdSum2.assign(calcStdBins, 0.0);
+                    calcStdStats.assign(calcStdBins, RunningStats{});
                 }
 
                 if (calcStdBins > 0) {
                     if (transX.size() == calcStdBins &&
                         std::equal(calcStdCommonX.begin(), calcStdCommonX.end(), transX.begin())) {
-                        for (size_t j = 0; j < calcStdBins; j++) {
-                            calcStdSum[j] += transY[j];
-                            calcStdSum2[j] += transY[j] * transY[j];
-                        }
+                        for (size_t j = 0; j < calcStdBins; j++)
+                            calcStdStats[j].add(transY[j]);
                         calcStdValidFiles++;
                     } else {
                         auto interpVals = resampleToGrid(transX, transY, calcStdCommonX);
-                        for (size_t j = 0; j < calcStdBins; j++) {
-                            calcStdSum[j] += interpVals[j];
-                            calcStdSum2[j] += interpVals[j] * interpVals[j];
-                        }
+                        for (size_t j = 0; j < calcStdBins; j++)
+                            calcStdStats[j].add(interpVals[j]);
                         calcStdValidFiles++;
                     }
                 }
@@ -689,28 +709,23 @@ bool T100Spectrum::tickStdCalculation() {
         if (calcStdValidFiles >= 2) {
             cachedStdX = calcStdCommonX;
             cachedStdY.resize(calcStdBins);
-            for (size_t j = 0; j < calcStdBins; j++) {
-                double mean = calcStdSum[j] / calcStdValidFiles;
-                double meanSq = calcStdSum2[j] / calcStdValidFiles;
-                double variance = meanSq - mean * mean;
-                cachedStdY[j] = (variance > 0.0) ? std::sqrt(variance) : 0.0;
-            }
+            for (size_t j = 0; j < calcStdBins; j++)
+                cachedStdY[j] = calcStdStats[j].stddev();   // sample variance (N-1)
             stddevAvailable = true;
         }
         if (!calcRatioA.empty() || !calcRatioB.empty() || !calcRatioC.empty()) {
             auto computeStats = [](const std::vector<double>& v,
                                     double& avg, double& spread, double& stddev) {
                 if (v.empty()) { avg = spread = stddev = 0.0; return; }
-                double sum = 0.0, sumSq = 0.0;
+                RunningStats rs;
                 double vmin = v[0], vmax = v[0];
                 for (double x : v) {
-                    sum += x; sumSq += x * x;
+                    rs.add(x);
                     if (x < vmin) vmin = x;
                     if (x > vmax) vmax = x;
                 }
-                avg = sum / v.size();
-                double var = sumSq / v.size() - avg * avg;
-                stddev = (var > 0.0) ? std::sqrt(var) : 0.0;
+                avg = rs.mean;
+                stddev = rs.stddev();   // sample variance (N-1)
                 spread = vmax - vmin;
             };
             computeStats(calcRatioA, ratioAvgA, ratioSpreadA, ratioStdDevA);

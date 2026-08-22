@@ -142,7 +142,6 @@ struct BatchJob {
     // accumulators (built in assembleDataset)
     std::vector<double> commonX;  size_t bins = 0;
     std::vector<double> avgSum;                        // spectra average
-    std::vector<double> snrSum, snrSumSq;              // SNR online moments
     std::vector<std::string> validFileIds;             // files that accumulated (parallel to spectraY)
     std::vector<std::vector<double>> spectraY;         // per-VALID-file y on the common grid
                                                        // (deferred T%/Allan need the average first)

@@ -17,6 +17,28 @@ pthread_mutex_t fftwPlanMutex = PTHREAD_MUTEX_INITIALIZER;
 #define IMAG 1
 
 // ============================================================================
+// Deterministic common-grid selector
+// ============================================================================
+
+std::vector<double> chooseCommonGrid(
+    const std::vector<std::string>& orderedFileIds,
+    const std::map<std::string, SpectralToolbox::ProcessedSpectrum>& results) {
+    // First file in natural sort order with a non-empty X wins; this matches
+    // batch_engine.cpp assembleDataset so the GUI panels and the batch engine
+    // agree on the resample target for the same file set.
+    for (const auto& fid : orderedFileIds) {
+        auto it = results.find(fid);
+        if (it != results.end() && !it->second.spectrumX.empty())
+            return it->second.spectrumX;
+    }
+    // Fallback: first result (in map order) with a non-empty X.
+    for (const auto& [fid, ps] : results) {
+        if (!ps.spectrumX.empty()) return ps.spectrumX;
+    }
+    return {};
+}
+
+// ============================================================================
 // Primitives
 // ============================================================================
 
@@ -55,8 +77,30 @@ double SpectralToolbox::interpPoint(double x, const std::vector<double>& xp, con
 
 std::vector<double> SpectralToolbox::interpVector(const std::vector<double>& x, const std::vector<double>& xp, const std::vector<double>& fp) {
     std::vector<double> result(x.size());
+    if (xp.empty() || xp.size() != fp.size()) return result;
+    if (xp.size() == 1) { result.assign(x.size(), fp[0]); return result; }
+
+    // two-pointer merge scan O(n+m) instead of per-point lower_bound O(n log m).
+    // Handles ascending and descending srcX, clamping to ends exactly like interpPoint.
+    const bool ascending = xp.front() < xp.back();
+    std::size_t lo = 0;                          // bracket [lo, lo+1]
     for (std::size_t i = 0; i < x.size(); ++i) {
-        result[i] = interpPoint(x[i], xp, fp);
+        double tx = x[i];
+        // Advance lo so xp[lo] <= tx < xp[lo+1] (ascending) or xp[lo] >= tx > xp[lo+1] (descending)
+        if (ascending) {
+            while (lo + 2 < xp.size() && xp[lo + 1] < tx) ++lo;
+            if (tx <= xp.front()) { result[i] = fp.front(); continue; }
+            if (tx >= xp.back())  { result[i] = fp.back();  continue; }
+        } else {
+            while (lo + 2 < xp.size() && xp[lo + 1] > tx) ++lo;
+            if (tx >= xp.front()) { result[i] = fp.front(); continue; }
+            if (tx <= xp.back())  { result[i] = fp.back();  continue; }
+        }
+        double x0 = xp[lo], x1 = xp[lo + 1];
+        double y0 = fp[lo], y1 = fp[lo + 1];
+        // Same op order as interpPoint (multiply then divide, no intermediate
+        // frac) to preserve last-ULP byte-stability of the spectrum pipeline.
+        result[i] = y0 + (y1 - y0) * (tx - x0) / (x1 - x0);
     }
     return result;
 }
@@ -74,13 +118,14 @@ void SpectralToolbox::complex_divide(fftw_complex* result, fftw_complex a, fftw_
 
 std::size_t SpectralToolbox::findNearest(const std::vector<double>& v, double value) {
     if (v.empty()) return 0;
-    double best = std::abs(v.front() - value);
-    std::size_t idx = 0;
-    for (std::size_t i = 1; i < v.size(); ++i) {
-        double d = std::abs(v[i] - value);
-        if (d < best) { best = d; idx = i; }
-    }
-    return idx;
+    // O(log n) binary search instead of O(n) linear scan. Assumes v is
+    // sorted ascending (callers pass frequency/wavelength axes).
+    if (value <= v.front()) return 0;
+    if (value >= v.back()) return v.size() - 1;
+    auto it = std::lower_bound(v.begin(), v.end(), value);
+    std::size_t hi = static_cast<std::size_t>(it - v.begin());
+    std::size_t lo = hi - 1;
+    return (value - v[lo] <= v[hi] - value) ? lo : hi;
 }
 
 std::vector<double> SpectralToolbox::linspace(double start, double stop, std::size_t num, bool endpoint) {
@@ -187,9 +232,7 @@ void SpectralToolbox::xAxisFromHilbert(const std::vector<double>& referenceSigna
     const std::size_t n = referenceSignal.size();
     if (n == 0) return;
 
-    fftw_complex* in     = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * n);
-    fftw_complex* out    = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * n);
-    fftw_complex* hilbert = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * n);
+    FftwComplexGuard in(n), out(n), hilbert(n);
 
     double ref_avg = std::accumulate(referenceSignal.begin(), referenceSignal.end(), 0.0) / static_cast<double>(n);
 
@@ -198,10 +241,7 @@ void SpectralToolbox::xAxisFromHilbert(const std::vector<double>& referenceSigna
         in[i][IMAG] = 0.0;
     }
 
-    fftw_plan plan_forward;
-    pthread_mutex_lock(&fftwPlanMutex);
-    plan_forward = fftw_plan_dft_1d((int)n, in, hilbert, FFTW_FORWARD, FFTW_ESTIMATE);
-    pthread_mutex_unlock(&fftwPlanMutex);
+    FftwPlanGuard plan_forward(static_cast<int>(n), in, hilbert, FFTW_FORWARD, FFTW_ESTIMATE);
     fftw_execute(plan_forward);
 
     int hN = static_cast<int>(n) >> 1; // N/2
@@ -223,10 +263,7 @@ void SpectralToolbox::xAxisFromHilbert(const std::vector<double>& referenceSigna
         std::memset(&hilbert[hN + 1][REAL], 0, static_cast<std::size_t>(numRem) * sizeof(fftw_complex));
     }
 
-    fftw_plan plan_inverse;
-    pthread_mutex_lock(&fftwPlanMutex);
-    plan_inverse = fftw_plan_dft_1d((int)n, hilbert, out, FFTW_BACKWARD, FFTW_ESTIMATE);
-    pthread_mutex_unlock(&fftwPlanMutex);
+    FftwPlanGuard plan_inverse(static_cast<int>(n), hilbert, out, FFTW_BACKWARD, FFTW_ESTIMATE);
     fftw_execute(plan_inverse);
 
     // Phase difference via complex division (wrap-robust), cumulative sum -> distance in um.
@@ -244,12 +281,6 @@ void SpectralToolbox::xAxisFromHilbert(const std::vector<double>& referenceSigna
         outputHilbertPhase[i] = outputHilbertPhase[i - 1] +
             (diff[i - 1] / (2.0 * M_PI)) * (refLaserWavelength / 2.0);
     }
-
-    fftw_destroy_plan(plan_forward);
-    fftw_destroy_plan(plan_inverse);
-    fftw_free(in);
-    fftw_free(out);
-    fftw_free(hilbert);
 }
 
 // ============================================================================
@@ -361,16 +392,12 @@ SpectralToolbox::ProcessedSpectrum SpectralToolbox::processSpectrum(
     std::copy(uniformY.begin(), uniformY.end(), padded.begin());
 
     // 6. FFT
-    fftw_complex* in  = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * N);
-    fftw_complex* out = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * N);
+    FftwComplexGuard in(N), out(N);
     for (std::size_t i = 0; i < N; ++i) {
         in[i][REAL] = padded[i];
         in[i][IMAG] = 0.0;
     }
-    fftw_plan plan;
-    pthread_mutex_lock(&fftwPlanMutex);
-    plan = fftw_plan_dft_1d((int)N, in, out, FFTW_FORWARD, FFTW_ESTIMATE);
-    pthread_mutex_unlock(&fftwPlanMutex);
+    FftwPlanGuard plan(static_cast<int>(N), in, out, FFTW_FORWARD, FFTW_ESTIMATE);
     fftw_execute(plan);
 
     // 7. Magnitude + build X axis (drop index 0 -> Inf), convert unit.
@@ -392,10 +419,6 @@ SpectralToolbox::ProcessedSpectrum SpectralToolbox::processSpectrum(
         const double im = out[i][IMAG];
         result.spectrumY.push_back(std::sqrt(re * re + im * im) * invN);
     }
-
-    fftw_destroy_plan(plan);
-    fftw_free(in);
-    fftw_free(out);
 
     return result;
 }
@@ -435,16 +458,12 @@ SpectralToolbox::ProcessedSpectrum SpectralToolbox::processSpectrumFromCorrected
     std::vector<double> padded(N, 0.0);
     std::copy(uniformY.begin(), uniformY.end(), padded.begin());
 
-    fftw_complex* in  = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * N);
-    fftw_complex* out = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * N);
+    FftwComplexGuard in(N), out(N);
     for (std::size_t i = 0; i < N; ++i) {
         in[i][REAL] = padded[i];
         in[i][IMAG] = 0.0;
     }
-    fftw_plan plan;
-    pthread_mutex_lock(&fftwPlanMutex);
-    plan = fftw_plan_dft_1d((int)N, in, out, FFTW_FORWARD, FFTW_ESTIMATE);
-    pthread_mutex_unlock(&fftwPlanMutex);
+    FftwPlanGuard plan(static_cast<int>(N), in, out, FFTW_FORWARD, FFTW_ESTIMATE);
     fftw_execute(plan);
 
     const std::size_t halfN = N / 2;
@@ -462,10 +481,6 @@ SpectralToolbox::ProcessedSpectrum SpectralToolbox::processSpectrumFromCorrected
         const double im = out[i][IMAG];
         result.spectrumY.push_back(std::sqrt(re * re + im * im) * invN);
     }
-
-    fftw_destroy_plan(plan);
-    fftw_free(in);
-    fftw_free(out);
 
     return result;
 }

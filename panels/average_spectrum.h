@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <string>
+#include <map>
 #include "pthread_compat.h"
 #include <future>
 #include <atomic>
@@ -71,10 +72,11 @@ public:
     std::vector<double> calcCommonX;
     size_t calcNumBins;
     int calcValidFiles;
-    bool calcFirstFile;
 
     // Parallel execution state
     std::vector<std::future<SpectralToolbox::ProcessedSpectrum>> pendingFutures_;
+    std::vector<std::string> pendingFileIds_;   // parallel to pendingFutures_
+    std::map<std::string, SpectralToolbox::ProcessedSpectrum> fileResults_;  // buffer
     std::atomic<int> completedCount_{0};
     int totalSubmitted_{0};
     bool batchActive_{false};

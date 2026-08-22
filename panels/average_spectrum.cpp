@@ -18,6 +18,7 @@
 static void normalizeBuffer(std::vector<double>& buf,
                             const std::vector<double>& raw,
                             int yScaleSelector) {
+    if (raw.empty()) return;   // guard against empty range (UB in max_element)
     double maxVal = *std::max_element(raw.begin(), raw.end());
     if (maxVal > 0.0) {
         if (yScaleSelector == 2)
@@ -93,8 +94,7 @@ AverageSpectrum::AverageSpectrum()
       convertedXMin(0.0),
       convertedXMax(0.0),
       calcNumBins(0),
-      calcValidFiles(0),
-      calcFirstFile(true)
+      calcValidFiles(0)
 {}
 
 void AverageSpectrum::reset() {
@@ -108,7 +108,6 @@ void AverageSpectrum::reset() {
     calcCommonX.clear();
     calcNumBins = 0;
     calcValidFiles = 0;
-    calcFirstFile = true;
 
     isSelectingXRange = false;
     selectionStartX = 0.0;
@@ -549,7 +548,6 @@ void AverageSpectrum::startCalculation() {
     calcCommonX.clear();
     calcNumBins = 0;
     calcValidFiles = 0;
-    calcFirstFile = true;
     calcInProgress = true;
     progressCurrent = 0;
     progressTotal = 0;
@@ -559,6 +557,8 @@ void AverageSpectrum::startCalculation() {
     averageCount = 0;
     batchActive_ = false;
     pendingFutures_.clear();
+    pendingFileIds_.clear();
+    fileResults_.clear();
     completedCount_ = 0;
     totalSubmitted_ = 0;
 }
@@ -572,7 +572,8 @@ bool AverageSpectrum::tickCalculation() {
         completedCount_ = 0;
         totalSubmitted_ = 0;
         pendingFutures_.clear();
-        calcFirstFile = true;
+        pendingFileIds_.clear();
+        fileResults_.clear();
         calcValidFiles = 0;
 
         double refLaser = appState->active->spectrum.refLaserTextbox;
@@ -591,9 +592,16 @@ bool AverageSpectrum::tickCalculation() {
             // Read the raw data on the main thread and capture it by value:
             // the workspace is mutated/replaced by the main thread (open,
             // close, member delete, Ctrl+H), so workers must never read it.
-            InterferogramData raw = workspaceRead(appState->active->workspace, filePath);
+            InterferogramData raw;
+            try {
+                raw = workspaceRead(appState->active->workspace, filePath);
+            } catch (const std::exception& e) {
+                fprintf(stderr, "WARNING: Skipping unreadable file in average Phase-1: %s: %s\n",
+                        filePath.c_str(), e.what());
+                continue;   // do not enqueue a future for the failed file
+            }
             auto fut = appState->computationPool->enqueue([raw = std::move(raw), refLaser, K, xUnit,
-                                                               apodSelector, apodParams, this, axisCorr, hasPrecomp,
+                                                               apodSelector, apodParams, axisCorr, hasPrecomp,
                                                                xMethod = static_cast<SpectralToolbox::XCorrectionMethod>(appState->active->xCorrectionMethod),
                                                                promThresh = appState->active->peakProminenceThreshold]() mutable {
                 if (hasPrecomp) {
@@ -619,6 +627,7 @@ bool AverageSpectrum::tickCalculation() {
                     apodParams, xMethod, promThresh);
             });
             pendingFutures_.push_back(std::move(fut));
+            pendingFileIds_.push_back(filePath);
             totalSubmitted_++;
         }
         progressTotal = totalSubmitted_;
@@ -630,37 +639,15 @@ bool AverageSpectrum::tickCalculation() {
         }
     }
 
-    // Phase 2: Poll futures
-    for (auto& fut : pendingFutures_) {
+    // Phase 2: Poll futures — BUFFER by fileId, do not accumulate yet
+    for (size_t fi = 0; fi < pendingFutures_.size(); ++fi) {
+        auto& fut = pendingFutures_[fi];
         if (!fut.valid()) continue;
         if (fut.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
             try {
                 auto ps = fut.get();
-                if (ps.spectrumX.empty() || ps.spectrumY.empty()) {
-                    completedCount_++;
-                    continue;
-                }
-                if (calcFirstFile) {
-                    calcCommonX = ps.spectrumX;
-                    calcNumBins = calcCommonX.size();
-                    cachedAverageY.assign(calcNumBins, 0.0);
-                    calcFirstFile = false;
-                }
-
-                if (ps.spectrumX.size() > 0 && calcNumBins > 0) {
-                    std::vector<double> toAdd;
-                    if (ps.spectrumX.size() == calcNumBins &&
-                        std::equal(calcCommonX.begin(), calcCommonX.end(), ps.spectrumX.begin())) {
-                        toAdd = ps.spectrumY;
-                    } else {
-                        toAdd = resampleToGrid(ps.spectrumX, ps.spectrumY, calcCommonX);
-                    }
-                    if (toAdd.size() == calcNumBins) {
-                        for (size_t j = 0; j < calcNumBins; j++)
-                            cachedAverageY[j] += toAdd[j];
-                        calcValidFiles++;
-                    }
-                }
+                if (!ps.spectrumX.empty() && !ps.spectrumY.empty())
+                    fileResults_[pendingFileIds_[fi]] = std::move(ps);
             } catch (const std::exception& e) {
                 fprintf(stderr, "WARNING: Skipping failed file in average calculation: %s\n", e.what());
                 totalSubmitted_--;
@@ -671,6 +658,31 @@ bool AverageSpectrum::tickCalculation() {
     progressCurrent = completedCount_.load();
 
     if (completedCount_.load() >= totalSubmitted_) {
+        // All futures done — select the deterministic common grid and
+        // accumulate in natural sort order.
+        calcCommonX = chooseCommonGrid(appState->active->sortedFiles, fileResults_);
+        calcNumBins = calcCommonX.size();
+        if (calcNumBins > 0) {
+            cachedAverageY.assign(calcNumBins, 0.0);
+            for (const auto& fid : appState->active->sortedFiles) {
+                auto it = fileResults_.find(fid);
+                if (it == fileResults_.end()) continue;
+                const auto& ps = it->second;
+                std::vector<double> toAdd;
+                if (ps.spectrumX.size() == calcNumBins &&
+                    std::equal(calcCommonX.begin(), calcCommonX.end(), ps.spectrumX.begin()))
+                    toAdd = ps.spectrumY;
+                else
+                    toAdd = resampleToGrid(ps.spectrumX, ps.spectrumY, calcCommonX);
+                if (toAdd.size() == calcNumBins) {
+                    for (size_t j = 0; j < calcNumBins; j++)
+                        cachedAverageY[j] += toAdd[j];
+                    calcValidFiles++;
+                }
+            }
+        }
+        fileResults_.clear();
+        pendingFileIds_.clear();
         if (calcValidFiles > 0) {
             for (size_t j = 0; j < calcNumBins; j++)
                 cachedAverageY[j] /= calcValidFiles;

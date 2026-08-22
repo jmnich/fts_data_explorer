@@ -17,7 +17,7 @@ bool isSessionPanelName(const char* name);
 // unreachable by construction).
 class SessionTab : public SessionBase {
 public:
-    const std::string& title() const override;   // "Session"
+    std::string title() const override;   // "Session"
     bool isDirty() const override { return false; }
     void render() override;                      // dockable panels + modals, directly in the main dock
     void tickAsync() override;                   // batchTick(appState) — the batch engine polls here

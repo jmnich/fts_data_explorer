@@ -76,9 +76,9 @@ Panel-specific (see source headers for full detail):
 | Panel | Key difference |
 |-------|---------------|
 | Average | Workers: `workspaceRead` + `processSpectrum()`. Main: interpolate, accumulate, divide. |
-| SNR | Workers: same. Main: online variance (sum + sum-of-squares), SNR = mean/stddev. |
+| SNR | Workers: same. Main: online variance (Welford `RunningStats`), SNR = mean/stddev. stddev uses sample variance N-1. |
 | Allan | 3-phase: avg spectrum, T%, `computeAllanVariance()` per bin (always pool-parallel). MxN flat array. |
-| 100% T | Ref source: file/CSV/Average. T% = interpY/refY*100. Std dev from all checked files. |
+| 100% T | Ref source: file/CSV/Average. T% = interpY/refY*100. Std dev from all checked files. Transmittance noise floor: bins where `ref < max(ref)*1e-3` are masked to 0. Energy-ratio stddev uses sample variance N-1. |
 
 # Dataset conversion (phase 5)
 
@@ -195,7 +195,7 @@ Format: `<YY>.<MM>.<minor>` from `VERSION` file. `./build_script.sh` shows last 
 
 Test data lives in `playground/test_data/` (there is no `example_datasets/`). Visual plot verification is manual. The playground harnesses (each needs `FTS_CONVERTERS_DIR` pointing at a `fts_data_explorer_converters` checkout, plus h5py/numpy/matplotlib):
 
-- **Headless demos** (converter script invoked directly, then process `-w`): `python3 playground/headless_demo/basic_<name>/demo_<name>.py` (spectrum_hilbert, spectrum_peakfinding, average_spectrum, snr, t100, allan; outputs -> `playground/outputs/`). Note: batch-artifact outputs (Average/SNR/Allan/T100) are non-deterministic across runs — `calcCommonX` is taken from the first *completed* future, so completion order shifts the common grid. Single-spectrum outputs are byte-stable.
+- **Headless demos** (converter script invoked directly, then process `-w`): `python3 playground/headless_demo/basic_<name>/demo_<name>.py` (spectrum_hilbert, spectrum_peakfinding, average_spectrum, snr, t100, allan; outputs -> `playground/outputs/`). Batch-artifact outputs (Average/SNR/Allan/T100) are deterministic — the common grid is taken from the first file in natural sort order (`chooseCommonGrid`). Single-spectrum outputs are byte-stable.
 - **Resample check** (`resampleToGrid`, audit §5.4): `g++ -std=c++17 -I. -Ifftw-3.3.10/api playground/tests/resample_grid/test_resample.cpp -o /tmp/test_resample && /tmp/test_resample` (assert-based; no framework).
 - **Session-tab text wrap** (`wrapToLinesCore`, session/wrap_text.h): `g++ -std=c++17 -I. playground/tests/wrap_text/test_wrap.cpp -o /tmp/test_wrap && /tmp/test_wrap` (assert-based; no framework).
 - **Batch recipe model** (recipe JSON/validation/built-ins/capture/strip, session/batch_engine.h — header-only, nothing to link): `g++ -std=c++17 -I. -Iworkspace -Ifftw-3.3.10/api -Ibuild/linux-release/_deps/nlohmann_json-src/include playground/tests/batch_recipes/test_batch_recipes.cpp -o /tmp/test_batch_recipes && /tmp/test_batch_recipes` (assert-based; no framework).

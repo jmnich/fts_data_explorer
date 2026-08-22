@@ -209,7 +209,7 @@ public:
     // delete modal; transient clean instances remove directly.
     void requestDelete();
     bool isDirty() const override { return dirty; }
-    const std::string& title() const override { return titleCache_; }
+    std::string title() const override { return titleCache_; }
     void onActivate() override {}        // AppLoop sets needsRedraw
     void onDeactivate() override {}      // Phase 4: layout save
 

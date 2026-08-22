@@ -727,6 +727,10 @@ void EnvironmentSession::computeAbsorbance(AppState& s) {
                                    std::max(xS.front(), xS.back()));
 
         // Grid = reference points inside [lo, hi], preserving reference order.
+        // the overlap grid uses the REFERENCE resolution only — a finer
+        // sample spectrum is resampled down onto the reference grid. This is a
+        // design choice (the reference defines the absorbance axis); a finer
+        // grid would require interpolating the reference instead.
         std::vector<double> gridX, refY;
         gridX.reserve(xR.size());
         refY.reserve(xR.size());

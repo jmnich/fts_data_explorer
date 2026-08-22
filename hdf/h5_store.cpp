@@ -326,7 +326,7 @@ void writeAllanSub(hid_t file, const char* path, const char* schema,
         h5WriteAttrString(wl.id, "units", "um");
         h5WriteFp64Vector(mg.id, "taus", m.taus);
         H5DatasetGuard ts(H5Dopen2(mg.id, "taus", H5P_DEFAULT));
-        h5WriteAttrString(ts.id, "units", "s");
+        h5WriteAttrString(ts.id, "units", "measurements");   // taus are cluster sizes, not seconds
     }
 }
 

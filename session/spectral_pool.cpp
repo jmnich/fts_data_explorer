@@ -1,7 +1,7 @@
 #include "spectral_pool.h"
 
+#include <cmath>
 #include <cstring>
-#include <functional>
 
 #include "app_state.h"
 #include "workspace_reader.h"
@@ -26,27 +26,35 @@ bool ParamFingerprint::operator==(const ParamFingerprint& o) const {
 }
 
 size_t ParamFingerprint::hash() const {
-    // FNV-1a-style combine; cheap and deterministic.
-    auto combine = [](size_t h, size_t v) {
-        h ^= v;
-        h *= 1099511628211ULL;
+    // deterministic FNV-1a over raw IEEE-754 bits (std::hash<float/double>
+    // is not guaranteed stable across runs — potential per-process seed).
+    auto combine = [](size_t h, uint64_t bits) {
+        for (int b = 0; b < 8; ++b) {
+            h ^= (bits >> (b * 8)) & 0xFF;
+            h *= 1099511628211ULL;
+        }
         return h;
     };
+    auto toBits = [](auto v) -> uint64_t {
+        uint64_t bits = 0;
+        std::memcpy(&bits, &v, sizeof(v));   // sizeof(v), not sizeof(bits)
+        return bits;
+    };
     size_t h = 1469598103934665603ULL;
-    h = combine(h, std::hash<int>{}(K));
-    h = combine(h, std::hash<double>{}(refLaser));
-    h = combine(h, std::hash<int>{}(apodSelector));
-    h = combine(h, std::hash<float>{}(apodParams.gaussSigma));
-    h = combine(h, std::hash<float>{}(apodParams.rectWidth));
-    h = combine(h, std::hash<float>{}(apodParams.nortonBeerFwhm));
-    h = combine(h, std::hash<float>{}(apodParams.dolphChebyshevAt));
-    h = combine(h, std::hash<float>{}(apodParams.hammingAlpha));
-    h = combine(h, std::hash<float>{}(apodParams.kaiserBeta));
-    h = combine(h, std::hash<bool>{}(apodParams.rectAsymMode));
-    h = combine(h, std::hash<int>{}(xMethod));
-    h = combine(h, std::hash<double>{}(prominence));
-    h = combine(h, std::hash<bool>{}(axisIsCorrected));
-    h = combine(h, std::hash<bool>{}(hasPrecomputed));
+    h = combine(h, toBits(K));
+    h = combine(h, toBits(refLaser));
+    h = combine(h, toBits(apodSelector));
+    h = combine(h, toBits(apodParams.gaussSigma));
+    h = combine(h, toBits(apodParams.rectWidth));
+    h = combine(h, toBits(apodParams.nortonBeerFwhm));
+    h = combine(h, toBits(apodParams.dolphChebyshevAt));
+    h = combine(h, toBits(apodParams.hammingAlpha));
+    h = combine(h, toBits(apodParams.kaiserBeta));
+    h = combine(h, toBits(apodParams.rectAsymMode));
+    h = combine(h, toBits(xMethod));
+    h = combine(h, toBits(prominence));
+    h = combine(h, toBits(axisIsCorrected));
+    h = combine(h, toBits(hasPrecomputed));
     return h;
 }
 
@@ -186,12 +194,20 @@ bool poolTryCache(AppState& s, const SpectralRef& ref,
 uint64_t memberDataHash(const double* x, size_t nx, const double* y, size_t ny) {
     // FNV-1a over the IEEE-754 bit patterns — deterministic across app
     // versions (std::hash<double> is not guaranteed stable).
+    // canonicalize NaN (quiet-NaN payload) and -0.0 → +0.0 so multiple
+    // NaN payloads and signed zeros hash identically.
     uint64_t h = 1469598103934665603ULL;
-    auto mix = [&h](const double* p, size_t n) {
+    auto canonicalBits = [](double v) -> uint64_t {
+        uint64_t bits = 0;
+        static_assert(sizeof(bits) == sizeof(double), "double must be 64-bit");
+        std::memcpy(&bits, &v, sizeof(bits));
+        if (std::isnan(v)) return 0x7ff8000000000000ULL;   // canonical quiet NaN
+        if (bits == 0x8000000000000000ULL) return 0;        // -0.0 → +0.0
+        return bits;
+    };
+    auto mix = [&](const double* p, size_t n) {
         for (size_t i = 0; i < n; ++i) {
-            uint64_t bits = 0;
-            static_assert(sizeof(bits) == sizeof(double), "double must be 64-bit");
-            std::memcpy(&bits, &p[i], sizeof(bits));
+            uint64_t bits = canonicalBits(p[i]);
             for (int b = 0; b < 8; ++b) {
                 h ^= (bits >> (b * 8)) & 0xFF;
                 h *= 1099511628211ULL;

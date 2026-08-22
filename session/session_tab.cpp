@@ -577,7 +577,7 @@ void SessionTab::renderRenameModal() {
 // the anonymous namespace), used by renderAvailableExperimentsPanel.
 static void renderExperimentTypeCard(const char* title, const char* desc, EnvType type);
 
-const std::string& SessionTab::title() const {
+std::string SessionTab::title() const {
     return titleCache_;
 }
 

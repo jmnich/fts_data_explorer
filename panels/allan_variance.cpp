@@ -617,23 +617,22 @@ void AllanVariance::computeAllanVariance(const std::vector<double>& signal,
     outTau.resize(maxCluster);
     outAllanVar.resize(maxCluster);
 
+    // Prefix sums -> O(n^2) instead of O(n^3). prefix[i] = sum(signal[0..i-1]).
+    std::vector<double> prefix(n + 1, 0.0);
+    for (size_t i = 0; i < n; ++i) prefix[i + 1] = prefix[i] + signal[i];
+
     for (size_t k = 1; k <= maxCluster; ++k) {
         double sumSq = 0.0;
-        int count = 0;
+        size_t count = 0;
         for (size_t j = 0; j + 2 * k <= n; ++j) {
-            double m1 = 0.0, m2 = 0.0;
-            for (size_t i = 0; i < k; ++i) {
-                m1 += signal[j + i];
-                m2 += signal[j + k + i];
-            }
-            m1 /= (double)k;
-            m2 /= (double)k;
+            double m1 = (prefix[j + k]     - prefix[j])     / static_cast<double>(k);
+            double m2 = (prefix[j + 2 * k] - prefix[j + k]) / static_cast<double>(k);
             double diff = m2 - m1;
             sumSq += diff * diff;
-            count++;
+            ++count;
         }
-        outTau[k - 1] = (double)k;
-        outAllanVar[k - 1] = (count > 0) ? (sumSq / (double)count / 2.0) : 0.0;
+        outTau[k - 1] = static_cast<double>(k);
+        outAllanVar[k - 1] = (count > 0) ? (sumSq / static_cast<double>(count) / 2.0) : 0.0;
     }
 }
 
@@ -674,7 +673,8 @@ bool AllanVariance::tickPhase0_AverageSpectrum() {
         calcState.completedAvgCount = 0;
         calcState.totalAvgSubmitted = 0;
         calcState.pendingAvgFutures.clear();
-        calcState.avgFirstFile = true;
+        calcState.pendingAvgFileIds.clear();
+        calcState.avgFileResults.clear();
         calcState.avgValidFiles = 0;
         calcState.avgSumY.clear();
         calcState.fileSpectraY.clear();
@@ -695,9 +695,16 @@ bool AllanVariance::tickPhase0_AverageSpectrum() {
             // Read the raw data on the main thread and capture it by value:
             // the workspace is mutated/replaced by the main thread (open,
             // close, member delete, Ctrl+H), so workers must never read it.
-            InterferogramData raw = workspaceRead(appState->active->workspace, filePath);
+            InterferogramData raw;
+            try {
+                raw = workspaceRead(appState->active->workspace, filePath);
+            } catch (const std::exception& e) {
+                fprintf(stderr, "WARNING: Skipping unreadable file in Allan Phase-1: %s: %s\n",
+                        filePath.c_str(), e.what());
+                continue;   // do not enqueue a future for the failed file
+            }
             auto fut = appState->computationPool->enqueue([raw = std::move(raw), refLaser, K, xUnit,
-                                                               apodSelector, apodParams, this, axisCorr, hasPrecomp,
+                                                               apodSelector, apodParams, axisCorr, hasPrecomp,
                                                                xMethod = static_cast<SpectralToolbox::XCorrectionMethod>(appState->active->xCorrectionMethod),
                                                                promThresh = appState->active->peakProminenceThreshold]() mutable {
                 if (hasPrecomp) {
@@ -723,6 +730,7 @@ bool AllanVariance::tickPhase0_AverageSpectrum() {
                     apodParams, xMethod, promThresh);
             });
             calcState.pendingAvgFutures.push_back(std::move(fut));
+            calcState.pendingAvgFileIds.push_back(filePath);
             calcState.totalAvgSubmitted++;
         }
         calcState.progressTotal = calcState.totalAvgSubmitted;
@@ -734,33 +742,15 @@ bool AllanVariance::tickPhase0_AverageSpectrum() {
         }
     }
 
-    // Phase 2: Poll futures
-    for (auto& fut : calcState.pendingAvgFutures) {
+    // Phase 2: Poll futures — BUFFER by fileId, do not accumulate yet
+    for (size_t fi = 0; fi < calcState.pendingAvgFutures.size(); ++fi) {
+        auto& fut = calcState.pendingAvgFutures[fi];
         if (!fut.valid()) continue;
         if (fut.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
             try {
                 auto ps = fut.get();
-                if (ps.spectrumX.empty() || ps.spectrumY.empty()) {
-                    calcState.completedAvgCount++;
-                    continue;
-                }
-
-                if (calcState.avgFirstFile) {
-                    calcState.avgX = ps.spectrumX;
-                    calcState.avgNumBins = calcState.avgX.size();
-                    calcState.avgFirstFile = false;
-                    calcState.avgSumY.assign(calcState.avgNumBins, 0.0);
-                    calcState.fileSpectraY.clear();
-                    calcState.fileSpectraY.reserve(calcState.totalAvgSubmitted);
-                }
-
-                std::vector<double> interpolated = resampleToGrid(ps.spectrumX, ps.spectrumY, calcState.avgX);
-                if (interpolated.size() == calcState.avgNumBins) {
-                    for (size_t j = 0; j < calcState.avgNumBins; j++)
-                        calcState.avgSumY[j] += interpolated[j];
-                    calcState.avgValidFiles++;
-                    calcState.fileSpectraY.push_back(std::move(interpolated));
-                }
+                if (!ps.spectrumX.empty() && !ps.spectrumY.empty())
+                    calcState.avgFileResults[calcState.pendingAvgFileIds[fi]] = std::move(ps);
             } catch (const std::exception& e) {
                 fprintf(stderr, "WARNING: Skipping failed file in Allan average: %s\n", e.what());
                 calcState.totalAvgSubmitted--;
@@ -773,6 +763,34 @@ bool AllanVariance::tickPhase0_AverageSpectrum() {
     progressTotal = calcState.progressTotal;
 
     if (calcState.completedAvgCount.load() >= calcState.totalAvgSubmitted) {
+        // All futures done — select the deterministic common grid and
+        // accumulate in natural sort order.
+        calcState.avgX = chooseCommonGrid(appState->active->sortedFiles, calcState.avgFileResults);
+        calcState.avgNumBins = calcState.avgX.size();
+        if (calcState.avgNumBins > 0) {
+            calcState.avgSumY.assign(calcState.avgNumBins, 0.0);
+            calcState.fileSpectraY.clear();
+            calcState.fileSpectraY.reserve(calcState.avgFileResults.size());
+            for (const auto& fid : appState->active->sortedFiles) {
+                auto it = calcState.avgFileResults.find(fid);
+                if (it == calcState.avgFileResults.end()) continue;
+                const auto& ps = it->second;
+                std::vector<double> interpolated;
+                if (ps.spectrumX.size() == calcState.avgNumBins &&
+                    std::equal(calcState.avgX.begin(), calcState.avgX.end(), ps.spectrumX.begin()))
+                    interpolated = ps.spectrumY;
+                else
+                    interpolated = resampleToGrid(ps.spectrumX, ps.spectrumY, calcState.avgX);
+                if (interpolated.size() == calcState.avgNumBins) {
+                    for (size_t j = 0; j < calcState.avgNumBins; j++)
+                        calcState.avgSumY[j] += interpolated[j];
+                    calcState.avgValidFiles++;
+                    calcState.fileSpectraY.push_back(std::move(interpolated));
+                }
+            }
+        }
+        calcState.avgFileResults.clear();
+        calcState.pendingAvgFileIds.clear();
         if (calcState.avgValidFiles == 0) {
             allanAvailable = false;
             calcInProgress = false;
@@ -802,6 +820,11 @@ bool AllanVariance::tickPhase1_Transmittance() {
 
     if (calcBaseSelector == 0) {
         // "100% T" mode: compute transmittance T% = (sample / average) * 100
+        // relative noise floor — mask bins where the reference is below 0.1%
+        // of its peak (band edges with weak reference amplify noise by 1/ref).
+        double maxRef = 0.0;
+        for (double r : avgY) maxRef = std::max(maxRef, r);
+        const double refFloor = maxRef * 1e-3;
         for (size_t fi = 1; fi < calcState.fileSpectraY.size(); ++fi) {
             const auto& fileY = calcState.fileSpectraY[fi];
             std::vector<double> tCurve;
@@ -810,14 +833,16 @@ bool AllanVariance::tickPhase1_Transmittance() {
             for (size_t i = 0; i < avgX.size(); i++) {
                 double ref = avgY[i];
                 double sample = fileY[i];
-                tCurve.push_back((ref > 1e-15) ? (sample / ref) * 100.0 : 0.0);
+                tCurve.push_back((ref > refFloor) ? (sample / ref) * 100.0 : 0.0);
             }
             calcState.transmittanceCurves.push_back(std::move(tCurve));
+            calcState.fileSpectraY[fi].clear();           // free per-file spectrum ASAP
+            calcState.fileSpectraY[fi].shrink_to_fit();
         }
     } else {
         // "Spectrum" mode: use raw spectral intensities directly (skip index 0 = average)
         for (size_t fi = 1; fi < calcState.fileSpectraY.size(); ++fi) {
-            calcState.transmittanceCurves.push_back(calcState.fileSpectraY[fi]);
+            calcState.transmittanceCurves.push_back(std::move(calcState.fileSpectraY[fi]));
         }
     }
 

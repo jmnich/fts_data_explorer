@@ -166,7 +166,6 @@ void renderInterferogramPanel() {
                 // Reset selection positions
                 appState.active->selectionStartX = 0.0;
                 appState.active->selectionEndX = 0.0;
-                std::cout << "DEBUG: Started X-range selection" << std::endl;
             } else if (!shiftPressed && appState.active->isSelectingXRange) {
                 // End selection when Shift is released
                 appState.active->isSelectingXRange = false;
@@ -182,10 +181,7 @@ void renderInterferogramPanel() {
                         appState.active->selectionStartX = appState.active->selectionEndX;
                         appState.active->selectionEndX = dum;
                     }
-                    
-                    std::cout << "DEBUG: Finalizing X-range selection: Start=" << appState.active->selectionStartX << ", End=" << appState.active->selectionEndX << std::endl;
                 } else {
-                    std::cout << "DEBUG: X-range selection cancelled (no valid range)" << std::endl;
                 }
             }
 
@@ -207,10 +203,18 @@ void renderInterferogramPanel() {
                         }
                     }
                 } else {
-                    if (appState.active->hilbertCacheLaserWavelength != appState.active->spectrum.refLaserTextbox) {
+                    // invalidate on (wavelength, method, prominence) change,
+                    // not just wavelength — peak-finding mode shows the wrong
+                    // axis if the method/prominence changed without a wavelength
+                    // change.
+                    if (appState.active->hilbertCacheLaserWavelength != appState.active->spectrum.refLaserTextbox ||
+                        appState.active->hilbertCacheMethod != appState.active->xCorrectionMethod ||
+                        appState.active->hilbertCacheProminence != appState.active->peakProminenceThreshold) {
                         appState.active->hilbertXCache.clear();
                         appState.active->peakPositionsCache.clear();
                         appState.active->hilbertCacheLaserWavelength = appState.active->spectrum.refLaserTextbox;
+                        appState.active->hilbertCacheMethod = appState.active->xCorrectionMethod;
+                        appState.active->hilbertCacheProminence = appState.active->peakProminenceThreshold;
                     }
                     for (size_t i = 0; i < appState.active->loadedData.size(); i++) {
                         const std::string& fileId = appState.active->selectedFilenames[i];
@@ -283,9 +287,11 @@ void renderInterferogramPanel() {
                             double xMin = std::numeric_limits<double>::max();
                             double xMax = std::numeric_limits<double>::lowest();
                             for (size_t i = 0; i < appState.active->loadedData.size(); i++) {
-                                const auto& hx = appState.active->hilbertXCache[appState.active->selectedFilenames[i]];
+                                auto hxit = appState.active->hilbertXCache.find(appState.active->selectedFilenames[i]);
+                                if (hxit == appState.active->hilbertXCache.end()) continue;
+                                const auto& hx = hxit->second;
                                 if (!hx.empty()) {
-                                    double off = (appState.active->maxAtZero && i < peakPositions.size()) ? hx[peakPositions[i]] : 0.0;
+                                    double off = (appState.active->maxAtZero && i < peakPositions.size() && peakPositions[i] < hx.size()) ? hx[peakPositions[i]] : 0.0;
                                     xMin = std::min(xMin, hx.front() - off);
                                     xMax = std::max(xMax, hx.back() - off);
                                 }
@@ -337,9 +343,10 @@ void renderInterferogramPanel() {
                         double xMax = appState.active->last_x_max;
                         if (xMin >= xMax && appState.active->dataLoaded) {
                             if (appState.active->xAxisBase == 1) {
-                                const auto& hx = appState.active->hilbertXCache[appState.active->selectedFilenames[0]];
-                                if (!hx.empty()) {
-                                    double off = (appState.active->maxAtZero && !peakPositions.empty()) ? hx[peakPositions[0]] : 0.0;
+                                auto hxit = appState.active->hilbertXCache.find(appState.active->selectedFilenames[0]);
+                                if (hxit != appState.active->hilbertXCache.end() && !hxit->second.empty()) {
+                                    const auto& hx = hxit->second;
+                                    double off = (appState.active->maxAtZero && !peakPositions.empty() && peakPositions[0] < hx.size()) ? hx[peakPositions[0]] : 0.0;
                                     xMin = hx.front() - off;
                                     xMax = hx.back() - off;
                                 } else {
@@ -374,8 +381,9 @@ void renderInterferogramPanel() {
                                 if (ref_start < refData.size()) {
                                     size_t actual_count = std::min(data_count, refData.size() - ref_start);
                                     if (appState.active->xAxisBase == 1) {
-                                        const auto& hilbX = appState.active->hilbertXCache[appState.active->selectedFilenames[i]];
-                                        if (!hilbX.empty()) {
+                                        auto hxit = appState.active->hilbertXCache.find(appState.active->selectedFilenames[i]);
+                                        if (hxit != appState.active->hilbertXCache.end() && !hxit->second.empty()) {
+                                            const auto& hilbX = hxit->second;
                                             // Map downsampled index to full-res OPD cache proportionally
                                             double ratio = static_cast<double>(hilbX.size()) / refData.size();
                                             auto mapX = [&](size_t j) -> double {
@@ -383,7 +391,7 @@ void renderInterferogramPanel() {
                                                 if (idx >= hilbX.size()) idx = hilbX.size() - 1;
                                                 return hilbX[idx];
                                             };
-                                            if (appState.active->maxAtZero && !peakPositions.empty()) {
+                                            if (appState.active->maxAtZero && !peakPositions.empty() && i < peakPositions.size() && peakPositions[i] < hilbX.size()) {
                                                 std::vector<double> shiftedX(actual_count);
                                                 double peakHilbX = hilbX[peakPositions[i]];
                                                 for (size_t j = 0; j < actual_count; j++)
@@ -418,7 +426,7 @@ void renderInterferogramPanel() {
                                 }
                             }
                         } else {
-                            std::cout << "DEBUG: Invalid data range for plotting: start=" << ref_start << ", end=" << ref_end << ", size=" << appState.active->loadedData[0].referenceDetector.size() << std::endl;
+                            // Invalid data range for plotting — skip
                         }
                     }
 
@@ -584,9 +592,11 @@ void renderInterferogramPanel() {
                             double xMin = std::numeric_limits<double>::max();
                             double xMax = std::numeric_limits<double>::lowest();
                             for (size_t i = 0; i < appState.active->loadedData.size(); i++) {
-                                const auto& hx = appState.active->hilbertXCache[appState.active->selectedFilenames[i]];
+                                auto hxit = appState.active->hilbertXCache.find(appState.active->selectedFilenames[i]);
+                                if (hxit == appState.active->hilbertXCache.end()) continue;
+                                const auto& hx = hxit->second;
                                 if (!hx.empty()) {
-                                    double off = (appState.active->maxAtZero && i < peakPositions.size()) ? hx[peakPositions[i]] : 0.0;
+                                    double off = (appState.active->maxAtZero && i < peakPositions.size() && peakPositions[i] < hx.size()) ? hx[peakPositions[i]] : 0.0;
                                     xMin = std::min(xMin, hx.front() - off);
                                     xMax = std::max(xMax, hx.back() - off);
                                 }
@@ -634,9 +644,10 @@ void renderInterferogramPanel() {
                         double xMax = appState.active->last_x_max;
                         if (xMin >= xMax && appState.active->dataLoaded) {
                             if (appState.active->xAxisBase == 1) {
-                                const auto& hx = appState.active->hilbertXCache[appState.active->selectedFilenames[0]];
-                                if (!hx.empty()) {
-                                    double off = (appState.active->maxAtZero && !peakPositions.empty()) ? hx[peakPositions[0]] : 0.0;
+                                auto hxit = appState.active->hilbertXCache.find(appState.active->selectedFilenames[0]);
+                                if (hxit != appState.active->hilbertXCache.end() && !hxit->second.empty()) {
+                                    const auto& hx = hxit->second;
+                                    double off = (appState.active->maxAtZero && !peakPositions.empty() && peakPositions[0] < hx.size()) ? hx[peakPositions[0]] : 0.0;
                                     xMin = hx.front() - off;
                                     xMax = hx.back() - off;
                                 } else {
@@ -672,8 +683,9 @@ void renderInterferogramPanel() {
                                 if (ref_start < primData.size()) {
                                     size_t actual_count = std::min(data_count, primData.size() - ref_start);
                                     if (appState.active->xAxisBase == 1) {
-                                        const auto& hilbX = appState.active->hilbertXCache[appState.active->selectedFilenames[i]];
-                                        if (!hilbX.empty()) {
+                                        auto hxit = appState.active->hilbertXCache.find(appState.active->selectedFilenames[i]);
+                                        if (hxit != appState.active->hilbertXCache.end() && !hxit->second.empty()) {
+                                            const auto& hilbX = hxit->second;
                                             // Map downsampled index to full-res OPD cache proportionally
                                             double ratio = static_cast<double>(hilbX.size()) / primData.size();
                                             auto mapX = [&](size_t j) -> double {
@@ -681,7 +693,7 @@ void renderInterferogramPanel() {
                                                 if (idx >= hilbX.size()) idx = hilbX.size() - 1;
                                                 return hilbX[idx];
                                             };
-                                            if (appState.active->maxAtZero && !peakPositions.empty()) {
+                                            if (appState.active->maxAtZero && !peakPositions.empty() && i < peakPositions.size() && peakPositions[i] < hilbX.size()) {
                                                 std::vector<double> shiftedX(actual_count);
                                                 double peakHilbX = hilbX[peakPositions[i]];
                                                 for (size_t j = 0; j < actual_count; j++)
@@ -734,11 +746,12 @@ void renderInterferogramPanel() {
                                 windowSpec.LineColor = ImVec4(0.0f, 1.0f, 1.0f, 0.5f);
                                 windowSpec.LineWeight = 2.0f;
                                 if (appState.active->xAxisBase == 1 && !appState.active->selectedFilenames.empty()) {
-                                    const auto& hilbX = appState.active->hilbertXCache[appState.active->selectedFilenames[0]];
-                                    if (!hilbX.empty()) {
+                                    auto hxit = appState.active->hilbertXCache.find(appState.active->selectedFilenames[0]);
+                                    if (hxit != appState.active->hilbertXCache.end() && !hxit->second.empty()) {
+                                        const auto& hilbX = hxit->second;
                                         double ratio = static_cast<double>(hilbX.size()) / primDataOverlay.size();
                                         std::vector<double> overlayX(window.size());
-                                        if (appState.active->maxAtZero && !peakPositions.empty()) {
+                                        if (appState.active->maxAtZero && !peakPositions.empty() && peakPositions[0] < hilbX.size()) {
                                             double peakHilbX = hilbX[peakPositions[0]];
                                             for (size_t j = 0; j < window.size(); j++) {
                                                 size_t idx = static_cast<size_t>(j * ratio);
@@ -1042,10 +1055,21 @@ void renderInterferogramConfigPanel() {
                                 InterferogramData data = loadInterferogram(appState, filePath);
                                 if (appState.active->enableDownsampling && data.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
                                     size_t localDownsampleFactor = data.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
+                                    size_t origSize = data.referenceDetector.size();
                                     std::vector<double> downsampledRef, downsampledPrim;
                                     for (size_t j = 0; j < data.referenceDetector.size(); j += localDownsampleFactor) {
                                         downsampledRef.push_back(data.referenceDetector[j]);
                                         downsampledPrim.push_back(data.primaryDetector[j]);
+                                    }
+                                    // Decimate opdAxis to match: in OPD mode the
+                                    // X axis is built from opdAxis, so it must track
+                                    // the decimated detector length.
+                                    if (!data.opdAxis.empty() && data.opdAxis.size() == origSize) {
+                                        std::vector<double> downsampledOpd;
+                                        downsampledOpd.reserve(downsampledRef.size());
+                                        for (size_t j = 0; j < data.opdAxis.size(); j += localDownsampleFactor)
+                                            downsampledOpd.push_back(data.opdAxis[j]);
+                                        data.opdAxis = std::move(downsampledOpd);
                                     }
                                     data.referenceDetector = downsampledRef;
                                     data.primaryDetector = downsampledPrim;
@@ -1097,10 +1121,19 @@ void renderInterferogramConfigPanel() {
                                 InterferogramData data = loadInterferogram(appState, filePath);
                                 if (appState.active->enableDownsampling && data.referenceDetector.size() > appState.maxPointsBeforeDownsampling) {
                                     size_t localDownsampleFactor = data.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
+                                    size_t origSize = data.referenceDetector.size();
                                     std::vector<double> downsampledRef, downsampledPrim;
                                     for (size_t j = 0; j < data.referenceDetector.size(); j += localDownsampleFactor) {
                                         downsampledRef.push_back(data.referenceDetector[j]);
                                         downsampledPrim.push_back(data.primaryDetector[j]);
+                                    }
+                                    // Decimate opdAxis to match.
+                                    if (!data.opdAxis.empty() && data.opdAxis.size() == origSize) {
+                                        std::vector<double> downsampledOpd;
+                                        downsampledOpd.reserve(downsampledRef.size());
+                                        for (size_t j = 0; j < data.opdAxis.size(); j += localDownsampleFactor)
+                                            downsampledOpd.push_back(data.opdAxis[j]);
+                                        data.opdAxis = std::move(downsampledOpd);
                                     }
                                     data.referenceDetector = downsampledRef;
                                     data.primaryDetector = downsampledPrim;
