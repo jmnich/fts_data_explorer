@@ -1,0 +1,16 @@
+{
+  "spectrum": {
+    "refLaserWavelengthUm": {"value": 1.550},
+    "zeroPadK": {"value": 2},
+    "apodizationWindow": {"value": "Rectangular"},
+    "rectWidth": {"value": 1.0},
+    "rectAsymMode": {"value": true},
+    "xCorrectionMethod": {"value": "Hilbert"},
+    "xUnit": {"value": "cm-1"}
+  },
+  "t100": {
+    "xUnit": {"value": "cm-1"},
+    "referenceSource": {"value": "Average"}
+  },
+  "processing": { "workerThreads": {"value": -1} }
+}

@@ -42,7 +42,9 @@ ExportPanel::ExportPanel()
         ARTIFACT_ALLAN_SLICE,
         ARTIFACT_T100_TRANS,
         ARTIFACT_T100_ALL_TRANS,
-        ARTIFACT_T100_STDDEV
+        ARTIFACT_T100_STDDEV,
+        ARTIFACT_ABSORBANCE,
+        ARTIFACT_TRANSMITTANCE
     };
     artifactChecked.assign(artifactLabels.size(), 0);
 }
@@ -70,6 +72,8 @@ bool ExportPanel::isArtifactAvailable(const char* label) const
         return appState->active->t100.transmittanceAvailable;
     if (lbl == ARTIFACT_T100_STDDEV)
         return appState->active->t100.stddevAvailable;
+    if (lbl == ARTIFACT_ABSORBANCE || lbl == ARTIFACT_TRANSMITTANCE)
+        return appState->active->t100.transmittanceAvailable;
     return false;
 }
 
@@ -243,6 +247,8 @@ bool ExportPanel::exportArtifact(const std::string& label, const std::string& di
     if (label == ARTIFACT_T100_TRANS)    { writeT100TransCsv(dir); return true; }
     if (label == ARTIFACT_T100_ALL_TRANS){ writeT100AllTransCsv(dir); return true; }
     if (label == ARTIFACT_T100_STDDEV)   { writeT100StdDevCsv(dir); return true; }
+    if (label == ARTIFACT_ABSORBANCE)    { writeAbsorbanceCsv(dir); return true; }
+    if (label == ARTIFACT_TRANSMITTANCE) { writeTransmittanceCsv(dir); return true; }
     return false;
 }
 
@@ -694,6 +700,69 @@ void ExportPanel::writeT100StdDevCsv(const std::string& dir)
     for (size_t j = 0; j < n; j++)
         ofs << t100.cachedStdX[j] << "," << t100.cachedStdY[j] << "\n";
     ofs.close();
+}
+
+void ExportPanel::writeAbsorbanceCsv(const std::string& dir)
+{
+    const auto& t100 = appState->active->t100;
+    if (!t100.transmittanceAvailable || t100.lastKnownSelection.empty())
+        return;
+    std::string dsName = sanitizeFilename(appState->active->currentDatasetName);
+    const char* xLabel = "Wavenumber [cm-1]";
+    if (t100.xUnitSelector == 1) xLabel = "Wavelength [um]";
+    else if (t100.xUnitSelector == 2) xLabel = "Frequency [THz]";
+
+    for (const auto& fileId : t100.lastKnownSelection) {
+        auto xIt = t100.cachedTransX.find(fileId);
+        auto yIt = t100.cachedTransY.find(fileId);
+        if (xIt == t100.cachedTransX.end() || yIt == t100.cachedTransY.end()) continue;
+        const auto& xv = xIt->second;
+        const auto& yv = yIt->second;
+        if (xv.empty() || yv.empty()) continue;
+        std::string srcName = exportBaseName(fileId);
+        srcName = sanitizeFilename(srcName);
+        std::string path = dir + "/" + dsName + "_absorbance_" + srcName + ".csv";
+        std::ofstream ofs(path);
+        if (!ofs.is_open()) continue;
+        ofs << xLabel << ",Absorbance\n";
+        size_t n = std::min(xv.size(), yv.size());
+        for (size_t j = 0; j < n; j++) {
+            double tFraction = yv[j] / 100.0;  // T% → fraction
+            double a = (tFraction > 1e-15) ? -std::log10(tFraction) : 0.0;
+            ofs << xv[j] << "," << a << "\n";
+        }
+        ofs.close();
+    }
+}
+
+void ExportPanel::writeTransmittanceCsv(const std::string& dir)
+{
+    const auto& t100 = appState->active->t100;
+    if (!t100.transmittanceAvailable || t100.lastKnownSelection.empty())
+        return;
+    std::string dsName = sanitizeFilename(appState->active->currentDatasetName);
+    const char* xLabel = "Wavenumber [cm-1]";
+    if (t100.xUnitSelector == 1) xLabel = "Wavelength [um]";
+    else if (t100.xUnitSelector == 2) xLabel = "Frequency [THz]";
+
+    for (const auto& fileId : t100.lastKnownSelection) {
+        auto xIt = t100.cachedTransX.find(fileId);
+        auto yIt = t100.cachedTransY.find(fileId);
+        if (xIt == t100.cachedTransX.end() || yIt == t100.cachedTransY.end()) continue;
+        const auto& xv = xIt->second;
+        const auto& yv = yIt->second;
+        if (xv.empty() || yv.empty()) continue;
+        std::string srcName = exportBaseName(fileId);
+        srcName = sanitizeFilename(srcName);
+        std::string path = dir + "/" + dsName + "_transmittance_" + srcName + ".csv";
+        std::ofstream ofs(path);
+        if (!ofs.is_open()) continue;
+        ofs << xLabel << ",Transmittance\n";
+        size_t n = std::min(xv.size(), yv.size());
+        for (size_t j = 0; j < n; j++)
+            ofs << xv[j] << "," << (yv[j] / 100.0) << "\n";  // T% → fraction
+        ofs.close();
+    }
 }
 void ExportPanel::renderPanel() {
         ImGui::Begin("Export");

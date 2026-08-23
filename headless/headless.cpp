@@ -54,6 +54,10 @@ static void handleHelp() {
               << "                 Run a converter (<id> from -l converter, or a direct\n"
               << "                 .py path) on <input>, validate the result, exit 0/1.\n"
               << "                 Uses the local clone as-is (no implicit network).\n"
+              << "  -cmp <sample.h5> <reference.h5> <output type> <output dir> [<config.json>]\n"
+              << "                 Compare two workspaces: compute the average spectrum\n"
+              << "                 from each, then emit the ratio or difference.\n"
+              << "                 Output types: Comparator ratio, Comparator difference.\n"
               << "  -sync-converters\n"
               << "                 Clone (first run) or pull the standard converter repo.\n"
               << "  -t             Generate template.json with all config settings.\n"
@@ -111,6 +115,8 @@ static void handleList(const std::string& type) {
             { "100% T transmission line" },
             { "100% T lines for all files" },
             { "100% T standard deviation" },
+            { "Absorbance from selected files" },
+            { "Transmittance from selected files" },
         };
         for (const auto& l : labels) {
             std::cout << l.name << std::endl;
@@ -536,6 +542,38 @@ static bool computeAndExport(const HeadlessConfig& cfg) {
         } else {
             computedOk = appState.active->t100.transmittanceAvailable;
         }
+    } else if (ot == "Absorbance from selected files" ||
+               ot == "Transmittance from selected files") {
+        // Reuse the T100 transmittance pipeline (T% = spec/ref × 100);
+        // the export writers convert to -log10(T) or fractional T.
+        if (!appState.active->selectedFiles.empty()) {
+            std::string fid0 = appState.active->selectedFilenames[0];
+            if (appState.active->spectrum.cachedSpectra.find(fid0) == appState.active->spectrum.cachedSpectra.end()) {
+                computeSpectrumForFile(appState, appState.active->selectedFiles[0], fid0);
+            }
+        }
+        if (!setupT100Reference()) {
+            std::cerr << "Error: Failed to set 100% T reference" << std::endl;
+            exit(1);
+        }
+        if (!appState.active->t100.transmittanceAvailable) {
+            for (const auto& fp : appState.active->selectedFiles) {
+                std::string fid = fp;
+                size_t ls = fid.find_last_of("/\\");
+                if (ls != std::string::npos) fid = fid.substr(ls + 1);
+                auto it = appState.active->spectrum.cachedSpectra.find(fid);
+                if (it == appState.active->spectrum.cachedSpectra.end()) {
+                    computeSpectrumForFile(appState, fp, fid);
+                }
+            }
+            appState.active->t100.lastKnownSelection = appState.active->selectedFilenames;
+            appState.active->t100.needsRecompute = true;
+            for (const auto& fid : appState.active->t100.lastKnownSelection) {
+                appState.active->t100.computeTransmittanceForFile(fid);
+            }
+            appState.active->t100.transmittanceAvailable = true;
+        }
+        computedOk = appState.active->t100.transmittanceAvailable;
     } else {
         std::cerr << "Error: Unknown output type '" << ot << "'. "
                   << "Available: Corrected interferograms from selected files, "
@@ -543,7 +581,9 @@ static bool computeAndExport(const HeadlessConfig& cfg) {
                   << "Average spectrum, SNR spectrum, Spectra from selected files, "
                   << "Allan-Werle 3D, Allan-Werle slice, "
                   << "100% T transmission line, 100% T lines for all files, "
-                  << "100% T standard deviation" << std::endl;
+                  << "100% T standard deviation, "
+                  << "Absorbance from selected files, "
+                  << "Transmittance from selected files" << std::endl;
         exit(1);
     }
 
@@ -762,6 +802,150 @@ static void handleSyncConverters() {
 }
 
 // ---------------------------------------------------------------------------
+// Compare (-cmp): compute average spectrum from two workspaces, emit ratio/diff.
+// ---------------------------------------------------------------------------
+static void computeAvgSpectrum(const std::string& h5Path,
+                               std::vector<double>& outX, std::vector<double>& outY) {
+    // Open workspace, load all members, compute spectra, average on common grid.
+    auto sess = std::make_unique<WorkspaceSession>();
+    sess->key = h5Path;
+    sess->path = h5Path;
+    wireSessionPanels(appState, *sess);
+    appState.sessions.push_back(std::move(sess));
+    appState.active = appState.sessions.back().get();
+    appState.activeSessionIdx = static_cast<int>(appState.sessions.size() - 1);
+    appState.lastActiveSessionIdx = appState.activeSessionIdx;
+    appState.activeTabKind = ActiveTabKind::Workspace;
+
+    try {
+        openWorkspace(appState, h5Path);
+    } catch (const std::exception& e) {
+        std::cerr << "Error: Failed to open workspace '" << h5Path << "': " << e.what() << std::endl;
+        exit(1);
+    }
+    if (appState.active->csvFiles.empty()) {
+        std::cerr << "Error: No members in workspace '" << h5Path << "'" << std::endl;
+        exit(1);
+    }
+    appState.active->sortedFiles = appState.active->csvFiles;
+    std::sort(appState.active->sortedFiles.begin(), appState.active->sortedFiles.end(), naturalSortCompare);
+    for (size_t i = 0; i < appState.active->sortedFiles.size(); i++) {
+        try {
+            const auto& filePath = appState.active->sortedFiles[i];
+            InterferogramData data = workspaceRead(appState.active->workspace, filePath);
+            appState.active->rawDataCache.push_back(data);
+            appState.active->loadedData.push_back(data);
+            appState.active->selectedFiles.push_back(filePath);
+            std::string fname = filePath;
+            size_t ls = fname.find_last_of("/\\");
+            if (ls != std::string::npos) fname = fname.substr(ls + 1);
+            appState.active->selectedFilenames.push_back(fname);
+        } catch (...) { continue; }
+    }
+    appState.active->dataLoaded = true;
+    appState.active->filesSelectedForAveraging.resize(appState.active->sortedFiles.size(), true);
+    pollUntilDone(appState.active->averageSpectrum);
+    if (!appState.active->averageSpectrum.averageAvailable) {
+        std::cerr << "Error: Average spectrum computation failed for '" << h5Path << "'" << std::endl;
+        exit(1);
+    }
+    outX = appState.active->averageSpectrum.cachedAverageX;
+    outY = appState.active->averageSpectrum.cachedAverageY;
+}
+
+static void handleCompare(const HeadlessConfig& cfg) {
+    if (!std::filesystem::is_regular_file(cfg.path)) {
+        std::cerr << "Error: Sample workspace '" << cfg.path << "' not found" << std::endl;
+        exit(1);
+    }
+    if (!std::filesystem::is_regular_file(cfg.referencePath)) {
+        std::cerr << "Error: Reference workspace '" << cfg.referencePath << "' not found" << std::endl;
+        exit(1);
+    }
+    if (!std::filesystem::exists(cfg.outputDir)) {
+        std::cerr << "Error: Directory '" << cfg.outputDir << "' does not exist" << std::endl;
+        exit(1);
+    }
+
+    // Optional config for the sample workspace
+    json j;
+    if (!cfg.configPath.empty()) {
+        try {
+            std::ifstream ifs(cfg.configPath);
+            ifs >> j;
+        } catch (const std::exception& e) {
+            std::cerr << "Error: Invalid config: " << e.what() << std::endl;
+            exit(1);
+        }
+    }
+
+    // Compute average spectra
+    std::vector<double> sampleX, sampleY, refX, refY;
+    computeAvgSpectrum(cfg.path, sampleX, sampleY);
+    // Apply config to the sample session before computing
+    if (!j.empty()) applyJsonConfig(appState, j);
+    // Recompute if config changed params
+    if (!j.empty()) {
+        appState.active->averageSpectrum.averageAvailable = false;
+        pollUntilDone(appState.active->averageSpectrum);
+        sampleX = appState.active->averageSpectrum.cachedAverageX;
+        sampleY = appState.active->averageSpectrum.cachedAverageY;
+    }
+
+    // Save sample session, compute reference
+    auto sampleSess = std::move(appState.sessions.back());
+    appState.sessions.pop_back();
+    computeAvgSpectrum(cfg.referencePath, refX, refY);
+
+    // Interpolate sample onto ref grid, compute ratio/difference
+    std::vector<double> interpSample(refX.size());
+    for (size_t i = 0; i < refX.size(); i++) {
+        // Linear interpolation of sample onto refX
+        double x = refX[i];
+        if (x <= sampleX.front()) { interpSample[i] = sampleY.front(); continue; }
+        if (x >= sampleX.back())  { interpSample[i] = sampleY.back();  continue; }
+        auto it = std::lower_bound(sampleX.begin(), sampleX.end(), x);
+        size_t hi = it - sampleX.begin();
+        size_t lo = hi - 1;
+        double t = (x - sampleX[lo]) / (sampleX[hi] - sampleX[lo]);
+        interpSample[i] = sampleY[lo] + t * (sampleY[hi] - sampleY[lo]);
+    }
+
+    std::string slug = std::filesystem::path(cfg.path).stem().string();
+    // Sanitize: replace non-alphanumeric/underscore/dash with underscore
+    for (char& c : slug)
+        if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_' && c != '-')
+            c = '_';
+    std::string ot = cfg.outputType;
+
+    if (ot == "Comparator ratio") {
+        std::string path = cfg.outputDir + "/" + slug + "_comparator_ratio.csv";
+        std::ofstream ofs(path);
+        if (!ofs.is_open()) { std::cerr << "Error: cannot write " << path << std::endl; exit(1); }
+        ofs << "Wavenumber [cm-1],Ratio\n";
+        for (size_t i = 0; i < refX.size(); i++) {
+            double r = (std::abs(refY[i]) > 1e-15) ? (interpSample[i] / refY[i]) : 0.0;
+            ofs << refX[i] << "," << r << "\n";
+        }
+        ofs.close();
+        std::cout << "Exported 'Comparator ratio' to " << cfg.outputDir << std::endl;
+    } else if (ot == "Comparator difference") {
+        std::string path = cfg.outputDir + "/" + slug + "_comparator_difference.csv";
+        std::ofstream ofs(path);
+        if (!ofs.is_open()) { std::cerr << "Error: cannot write " << path << std::endl; exit(1); }
+        ofs << "Wavenumber [cm-1],Difference\n";
+        for (size_t i = 0; i < refX.size(); i++)
+            ofs << refX[i] << "," << (interpSample[i] - refY[i]) << "\n";
+        ofs.close();
+        std::cout << "Exported 'Comparator difference' to " << cfg.outputDir << std::endl;
+    } else {
+        std::cerr << "Error: Unknown comparator output type '" << ot << "'. "
+                  << "Available: Comparator ratio, Comparator difference" << std::endl;
+        exit(1);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Public interface
 // ---------------------------------------------------------------------------
 
@@ -829,6 +1013,21 @@ bool parseHeadlessArgs(int argc, char* argv[], HeadlessConfig& cfg) {
         return false;
     }
 
+    if (flag == "-cmp") {
+        if (argc < 6 || argc > 7) {
+            std::cerr << "Error: -cmp requires <sample.h5> <reference.h5> <output type> <output dir> [<config>]"
+                      << std::endl;
+            return true;
+        }
+        cfg.command = HeadlessConfig::Command::Compare;
+        cfg.path = argv[2];
+        cfg.referencePath = argv[3];
+        cfg.outputType = argv[4];
+        cfg.outputDir = argv[5];
+        if (argc == 7) cfg.configPath = argv[6];
+        return false;
+    }
+
     if (flag == "-sync-converters") {
         if (argc != 2) {
             std::cerr << "Error: -sync-converters takes no arguments" << std::endl;
@@ -885,6 +1084,9 @@ bool runHeadlessCommand(const HeadlessConfig& cfg) {
             return true;
         case HeadlessConfig::Command::SyncConverters:
             handleSyncConverters();
+            return true;
+        case HeadlessConfig::Command::Compare:
+            handleCompare(cfg);
             return true;
         case HeadlessConfig::Command::None:
             return false;

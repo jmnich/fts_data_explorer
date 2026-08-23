@@ -19,6 +19,8 @@ public:
     static constexpr const char* ARTIFACT_T100_TRANS    = "100% T transmission line";
     static constexpr const char* ARTIFACT_T100_ALL_TRANS = "100% T lines for all files";
     static constexpr const char* ARTIFACT_T100_STDDEV    = "100% T standard deviation";
+    static constexpr const char* ARTIFACT_ABSORBANCE     = "Absorbance from selected files";
+    static constexpr const char* ARTIFACT_TRANSMITTANCE  = "Transmittance from selected files";
 
     std::vector<std::string> artifactLabels;
     std::vector<int>         artifactChecked; // 0=false, 1=true
@@ -58,4 +60,6 @@ private:
     void writeT100TransCsv(const std::string& dir);
     void writeT100AllTransCsv(const std::string& dir);
     void writeT100StdDevCsv(const std::string& dir);
+    void writeAbsorbanceCsv(const std::string& dir);
+    void writeTransmittanceCsv(const std::string& dir);
 };
