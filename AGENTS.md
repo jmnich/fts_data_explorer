@@ -203,6 +203,22 @@ Test data lives in `playground/test_data/` (there is no `example_datasets/`). Vi
 - **Spectrum validation**: `python3 playground/tests/spectrum_validation/validate_spectrum.py`.
 - **HDF5 conformance**: `python3 playground/tests/hdf_conformance/run_conformance.py` (regenerates the golden from the parser, validates Python- and C++-written `.h5` files via `validate_h5.py`, runs `fts_hdf_roundtrip` and a headless `-w` pass). Manual like the other playground scripts.
 
+## Mathematical-accuracy regression harness
+
+`test_harness/` is the numeric-fidelity regression harness (separate from the
+playground). It drives the real headless binary on real datasets and compares
+against an independent Python reimplementation + frozen golden `.h5` archives.
+
+```
+python3 test_harness/run_tests.py [-v] [--only test1,test4] [--list]
+```
+
+10 tests covering the full pipeline (spectrum, X-correction, parameter matrix,
+average, SNR, T100, T100-stddev, Allan, absorbance/transmittance, comparator).
+See `test_harness/test_instruction.md` for the canonical standards and the
+how-to-add-a-test recipe. `reference_input/` and `reference_output/` hold
+git-tracked data; `output/` and `temporary/` are gitignored runtime artifacts.
+
 # Working with the codebase
 
 1. Converter/conversion code: `io/converter.{h,cpp}`, `panels/conversion_screen.{h,cpp}`, `io/app_dirs.{h,cpp}`, and `headless/headless.cpp` (`-c`/`-sync-converters`).
