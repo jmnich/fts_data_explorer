@@ -221,6 +221,17 @@ def classify(name: str, exit_code: int, workdir: Path, duration: float,
 # Report (C4)
 # ---------------------------------------------------------------------------
 
+def _md_table(headers: list[str], rows: list[list]) -> str:
+    """Render a markdown table with aligned `|` columns for human readability."""
+    def cells(row):
+        return [str(c) for c in row]
+    all_rows = [cells(headers)] + [cells(r) for r in rows]
+    widths = [max(len(r[i]) for r in all_rows) for i in range(len(headers))]
+    fmt = lambda r: "| " + " | ".join(c.ljust(widths[i]) for i, c in enumerate(r)) + " |"
+    sep = "|" + "|".join("-" * (w + 2) for w in widths) + "|"
+    return "\n".join([fmt(cells(headers)), sep] + [fmt(cells(r)) for r in rows])
+
+
 def write_report(records: list[dict]) -> None:
     n_pass = sum(1 for r in records if r["status"] == S_PASS)
     n_fail = sum(1 for r in records if r["status"] == S_FAIL)
@@ -241,25 +252,29 @@ def write_report(records: list[dict]) -> None:
     md.append(f"\nRun: {time.strftime('%Y-%m-%d %H:%M:%S')}  "
               f"Tests: {len(records)}  "
               f"Pass: {n_pass}  Fail: {n_fail}  Error: {n_err}  Skip: {n_skip}\n")
-    md.append("\n| # | Test | Status | Duration | Summary |\n")
-    md.append("|---|------|--------|----------|--------|\n")
+    md.append("\n")
+    rows = []
     for i, r in enumerate(records, 1):
         dur = f"{r['duration_s']:.1f}s" if isinstance(r["duration_s"], (int, float)) else ""
         summ = (r["summary"] or "").replace("|", "\\|")
-        md.append(f"| {i} | {r['test']} | {r['status'].upper()} | {dur} | {summ} |\n")
+        rows.append([i, r["test"], r["status"].upper(), dur, summ])
+    md.append(_md_table(["#", "Test", "Status", "Duration", "Summary"], rows))
+    md.append("\n")
     # Per-test comparison detail
-    md.append("\n## Comparison details\n\n")
+    md.append("## Comparison details\n\n")
     for r in records:
         if not r["comparisons"]:
             continue
         md.append(f"### {r['test']}\n\n")
-        md.append("| Comparison | Status | Weighted RMS % | Max |rel| % | Threshold RMS % | Threshold Max % | Bins |\n")
-        md.append("|------------|--------|----------------|-----------|-----------------|------------------|------|\n")
+        crows = []
         for c in r["comparisons"]:
-            md.append(f"| {c.get('name','')} | {c.get('status','').upper()} | "
-                      f"{c.get('weighted_rms_rel_pct','')} | {c.get('max_abs_rel_pct','')} | "
-                      f"{c.get('threshold_wrms_pct','')} | {c.get('threshold_max_pct','')} | "
-                      f"{c.get('n_bins','')} |\n")
+            crows.append([c.get('name', ''), c.get('status', '').upper(),
+                          c.get('weighted_rms_rel_pct', ''), c.get('max_abs_rel_pct', ''),
+                          c.get('threshold_wrms_pct', ''), c.get('threshold_max_pct', ''),
+                          c.get('n_bins', '')])
+        md.append(_md_table(["Comparison", "Status", "Weighted RMS %", "Max |rel| %",
+                             "Threshold RMS %", "Threshold Max %", "Bins"], crows))
+        md.append("\n")
     (OUTPUT_DIR / "report.md").write_text("".join(md))
 
     # report.json (D11)
@@ -311,8 +326,10 @@ def check_golden_integrity() -> bool:
         return True  # no goldens present
 
     if not checksums_path.is_file():
-        # First freeze: write the checksums
+        # First freeze: write the checksums AND the marker, so the golden
+        # three-way comparisons run on the very first run too (fresh checkout).
         checksums_path.write_text(json.dumps(current, indent=2))
+        (TEMP_DIR / "golden_ok").write_text("1")
         print(f"Golden checksums frozen: {checksums_path}")
         return True
 
@@ -349,9 +366,11 @@ def main():
         wanted = set(s.strip() for s in args.only.split(","))
         tests = [t for t in tests if t["name"] in wanted]
         found_names = {t["name"] for t in tests}
-        for w in wanted:
-            if w not in found_names:
-                print(f"Error: test '{w}' not found", file=sys.stderr)
+        missing_names = sorted(w for w in wanted if w not in found_names)
+        for w in missing_names:
+            print(f"Error: test '{w}' not found", file=sys.stderr)
+    else:
+        missing_names = []
 
     binary = resolve_binary(args)
 
@@ -364,7 +383,7 @@ def main():
     if not tests:
         print("No tests discovered.")
         write_report([])
-        return 0
+        return EXIT_FAIL if missing_names else 0
 
     print(f"Running {len(tests)} test(s) with binary: {binary}")
     records = []
@@ -373,16 +392,26 @@ def main():
         rec = run_test(t, binary, args.v)
         records.append(rec)
 
+    # A tampered golden must fail the run, not silently degrade to A-only.
+    if not golden_ok:
+        records.append({"test": "_golden_integrity", "status": S_ERROR,
+                        "summary": "golden .h5 checksum mismatch — golden comparisons skipped",
+                        "duration_s": 0.0, "comparisons": [], "artifacts": []})
+
     write_report(records)
 
     n_fail = sum(1 for r in records if r["status"] == S_FAIL)
     n_err = sum(1 for r in records if r["status"] == S_ERROR)
     verdict = "PASS" if (n_fail == 0 and n_err == 0) else "FAIL"
-    print(f"\n{verdict}  Pass:{sum(1 for r in records if r['status']==S_PASS)}  "
-          f"Fail:{n_fail}  Error:{n_err}  "
-          f"Skip:{sum(1 for r in records if r['status']==S_SKIP)}")
+    print(f"\n{verdict:<6}  Pass:{sum(1 for r in records if r['status']==S_PASS):<5}"
+          f"Fail:{n_fail:<5}  Error:{n_err:<5}  Skip:{sum(1 for r in records if r['status']==S_SKIP):<5}")
     print(f"Report: {OUTPUT_DIR / 'report.md'}")
-    return EXIT_PASS if (n_fail == 0 and n_err == 0) else EXIT_FAIL
+    if n_fail != 0 or n_err != 0:
+        return EXIT_FAIL
+    # --only with an unknown test name is a user error, not a green run
+    if args.only and missing_names:
+        return EXIT_FAIL
+    return EXIT_PASS
 
 
 if __name__ == "__main__":

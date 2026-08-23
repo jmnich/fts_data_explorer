@@ -65,23 +65,35 @@ def run_binary(binary: str | Path, work_h5: str | Path,
 def load_csv(path: str | Path) -> tuple[np.ndarray, list[np.ndarray]]:
     """Load a CSV: first column is X, subsequent columns are per-file curves.
 
-    Returns (x, [y1, y2, ...]). Parses the header generically.
+    Returns (x, [y1, y2, ...]). Parses the header generically. Malformed rows
+    (wrong column count) and non-numeric cells are counted; if EVERY row is
+    malformed the function returns empty arrays so callers fail loudly instead
+    of silently comparing on a near-empty file.
     """
     with open(path) as f:
         reader = csv.reader(f)
         header = next(reader, None)
         ncols = len(header) if header else 0
         cols = [[] for _ in range(max(ncols, 0))]
+        skipped_rows = 0
+        skipped_cells = 0
         for row in reader:
             if ncols and len(row) != ncols:
+                skipped_rows += 1
                 continue
             for i, v in enumerate(row):
                 try:
                     cols[i].append(float(v))
                 except ValueError:
-                    pass
-    if not cols:
+                    skipped_cells += 1
+    if not cols or all(len(c) == 0 for c in cols):
+        if skipped_rows or skipped_cells:
+            print(f"WARNING: load_csv({path}): {skipped_rows} malformed row(s), "
+                  f"{skipped_cells} non-numeric cell(s), no data kept", file=sys.stderr)
         return np.array([]), []
+    if skipped_rows or skipped_cells:
+        print(f"WARNING: load_csv({path}): {skipped_rows} malformed row(s), "
+              f"{skipped_cells} non-numeric cell(s) skipped", file=sys.stderr)
     x = np.array(cols[0])
     ys = [np.array(c) for c in cols[1:]]
     return x, ys

@@ -339,7 +339,8 @@ def mean_spectrum(spectra: list[tuple[np.ndarray, np.ndarray]],
             continue
         xx = x if x[0] < x[-1] else x[::-1]
         yy = y if x[0] < x[-1] else y[::-1]
-        interp = np.interp(common_x, xx, yy, left=0.0, right=0.0)
+        # Endpoint-clamped (hold-edge), matching C++ resampleToGrid
+        interp = np.interp(common_x, xx, yy, left=yy[0], right=yy[-1])
         acc += interp
         count += 1
     if count > 0:
@@ -358,7 +359,7 @@ def snr_spectrum(spectra: list[tuple[np.ndarray, np.ndarray]],
             continue
         xx = x if x[0] < x[-1] else x[::-1]
         yy = y if x[0] < x[-1] else y[::-1]
-        ys.append(np.interp(common_x, xx, yy, left=0.0, right=0.0))
+        ys.append(np.interp(common_x, xx, yy, left=yy[0], right=yy[-1]))
     if len(ys) < 2:
         return common_x, np.zeros_like(common_x)
     arr = np.array(ys)
@@ -404,6 +405,8 @@ def transmittance(spec_x: np.ndarray, spec_y: np.ndarray,
 
     x_unit: 0=cm-1, 1=um, 2=THz (display unit). Returns (trans_x, trans_y).
     Masks bins where ref < max(ref)*1e-3 (noise floor).
+    Interpolation is endpoint-clamped (hold-edge), matching the C++
+    resampleToGrid used by the engine; spec_x may be ascending or descending.
     """
     if ref_x.size == 0 or spec_x.size == 0:
         return np.array([]), np.array([])
@@ -411,8 +414,11 @@ def transmittance(spec_x: np.ndarray, spec_y: np.ndarray,
     # Noise floor
     max_ref = np.max(ref_y)
     ref_floor = max_ref * 1e-3
-    # Interpolate spec onto ref grid
-    interp_vals = np.interp(ref_x, spec_x, spec_y, left=0.0, right=0.0)
+    # Interpolate spec onto ref grid (sort spec_x first — handles descending X)
+    si = np.argsort(spec_x)
+    spec_xs, spec_ys = spec_x[si], spec_y[si]
+    interp_vals = np.interp(ref_x, spec_xs, spec_ys,
+                            left=spec_ys[0], right=spec_ys[-1])
     # Overlap region
     cur_xmin = min(spec_x[0], spec_x[-1])
     cur_xmax = max(spec_x[0], spec_x[-1])

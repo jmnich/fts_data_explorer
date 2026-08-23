@@ -56,7 +56,8 @@ static void handleHelp() {
               << "                 Uses the local clone as-is (no implicit network).\n"
               << "  -cmp <sample.h5> <reference.h5> <output type> <output dir> [<config.json>]\n"
               << "                 Compare two workspaces: compute the average spectrum\n"
-              << "                 from each, then emit the ratio or difference.\n"
+              << "                 from each, then emit the ratio or difference. The\n"
+              << "                 optional processing config applies to BOTH workspaces.\n"
               << "                 Output types: Comparator ratio, Comparator difference.\n"
               << "  -sync-converters\n"
               << "                 Clone (first run) or pull the standard converter repo.\n"
@@ -805,7 +806,8 @@ static void handleSyncConverters() {
 // Compare (-cmp): compute average spectrum from two workspaces, emit ratio/diff.
 // ---------------------------------------------------------------------------
 static void computeAvgSpectrum(const std::string& h5Path,
-                               std::vector<double>& outX, std::vector<double>& outY) {
+                               std::vector<double>& outX, std::vector<double>& outY,
+                               const json* cfg = nullptr) {
     // Open workspace, load all members, compute spectra, average on common grid.
     auto sess = std::make_unique<WorkspaceSession>();
     sess->key = h5Path;
@@ -827,6 +829,9 @@ static void computeAvgSpectrum(const std::string& h5Path,
         std::cerr << "Error: No members in workspace '" << h5Path << "'" << std::endl;
         exit(1);
     }
+    // Optional processing config — the -cmp command passes the same config to
+    // both workspaces so the ratio/difference is a like-for-like comparison.
+    if (cfg && !cfg->empty()) applyJsonConfig(appState, *cfg);
     appState.active->sortedFiles = appState.active->csvFiles;
     std::sort(appState.active->sortedFiles.begin(), appState.active->sortedFiles.end(), naturalSortCompare);
     for (size_t i = 0; i < appState.active->sortedFiles.size(); i++) {
@@ -834,7 +839,21 @@ static void computeAvgSpectrum(const std::string& h5Path,
             const auto& filePath = appState.active->sortedFiles[i];
             InterferogramData data = workspaceRead(appState.active->workspace, filePath);
             appState.active->rawDataCache.push_back(data);
-            appState.active->loadedData.push_back(data);
+
+            // Same downsampling pass as handleWorkspace (parity between -w and -cmp).
+            InterferogramData processed = data;
+            if (appState.active->enableDownsampling && processed.dataSize() > appState.maxPointsBeforeDownsampling) {
+                size_t factor = processed.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
+                std::vector<double> downRef, downPrim;
+                for (size_t j = 0; j < processed.referenceDetector.size(); j += factor) {
+                    downRef.push_back(processed.referenceDetector[j]);
+                    downPrim.push_back(processed.primaryDetector[j]);
+                }
+                processed.referenceDetector = downRef;
+                processed.primaryDetector = downPrim;
+            }
+
+            appState.active->loadedData.push_back(processed);
             appState.active->selectedFiles.push_back(filePath);
             std::string fname = filePath;
             size_t ls = fname.find_last_of("/\\");
@@ -867,7 +886,7 @@ static void handleCompare(const HeadlessConfig& cfg) {
         exit(1);
     }
 
-    // Optional config for the sample workspace
+    // Optional processing config (applied to both workspaces below)
     json j;
     if (!cfg.configPath.empty()) {
         try {
@@ -879,37 +898,18 @@ static void handleCompare(const HeadlessConfig& cfg) {
         }
     }
 
-    // Compute average spectra
+    // Compute average spectra — the same optional processing config is applied
+    // to BOTH workspaces so the ratio/difference is a like-for-like comparison.
     std::vector<double> sampleX, sampleY, refX, refY;
-    computeAvgSpectrum(cfg.path, sampleX, sampleY);
-    // Apply config to the sample session before computing
-    if (!j.empty()) applyJsonConfig(appState, j);
-    // Recompute if config changed params
-    if (!j.empty()) {
-        appState.active->averageSpectrum.averageAvailable = false;
-        pollUntilDone(appState.active->averageSpectrum);
-        sampleX = appState.active->averageSpectrum.cachedAverageX;
-        sampleY = appState.active->averageSpectrum.cachedAverageY;
-    }
-
-    // Save sample session, compute reference
+    computeAvgSpectrum(cfg.path, sampleX, sampleY, &j);
     auto sampleSess = std::move(appState.sessions.back());
     appState.sessions.pop_back();
-    computeAvgSpectrum(cfg.referencePath, refX, refY);
+    sampleSess.reset();   // free the sample session's loaded data before the reference
+    computeAvgSpectrum(cfg.referencePath, refX, refY, &j);
 
-    // Interpolate sample onto ref grid, compute ratio/difference
-    std::vector<double> interpSample(refX.size());
-    for (size_t i = 0; i < refX.size(); i++) {
-        // Linear interpolation of sample onto refX
-        double x = refX[i];
-        if (x <= sampleX.front()) { interpSample[i] = sampleY.front(); continue; }
-        if (x >= sampleX.back())  { interpSample[i] = sampleY.back();  continue; }
-        auto it = std::lower_bound(sampleX.begin(), sampleX.end(), x);
-        size_t hi = it - sampleX.begin();
-        size_t lo = hi - 1;
-        double t = (x - sampleX[lo]) / (sampleX[hi] - sampleX[lo]);
-        interpSample[i] = sampleY[lo] + t * (sampleY[hi] - sampleY[lo]);
-    }
+    // Interpolate the sample onto the reference grid (resampleToGrid handles
+    // both ascending and descending X, endpoint-clamped — same as the panels).
+    auto interpSample = resampleToGrid(sampleX, sampleY, refX);
 
     std::string slug = std::filesystem::path(cfg.path).stem().string();
     // Sanitize: replace non-alphanumeric/underscore/dash with underscore
@@ -918,11 +918,16 @@ static void handleCompare(const HeadlessConfig& cfg) {
             c = '_';
     std::string ot = cfg.outputType;
 
+    // X-unit label follows the average panel's selector (matches export.cpp).
+    const char* xLabel = "Wavenumber [cm-1]";
+    if (appState.active->averageSpectrum.xUnitSelector == 1) xLabel = "Wavelength [um]";
+    else if (appState.active->averageSpectrum.xUnitSelector == 2) xLabel = "Frequency [THz]";
+
     if (ot == "Comparator ratio") {
         std::string path = cfg.outputDir + "/" + slug + "_comparator_ratio.csv";
         std::ofstream ofs(path);
         if (!ofs.is_open()) { std::cerr << "Error: cannot write " << path << std::endl; exit(1); }
-        ofs << "Wavenumber [cm-1],Ratio\n";
+        ofs << xLabel << ",Ratio\n";
         for (size_t i = 0; i < refX.size(); i++) {
             double r = (std::abs(refY[i]) > 1e-15) ? (interpSample[i] / refY[i]) : 0.0;
             ofs << refX[i] << "," << r << "\n";
@@ -933,7 +938,7 @@ static void handleCompare(const HeadlessConfig& cfg) {
         std::string path = cfg.outputDir + "/" + slug + "_comparator_difference.csv";
         std::ofstream ofs(path);
         if (!ofs.is_open()) { std::cerr << "Error: cannot write " << path << std::endl; exit(1); }
-        ofs << "Wavenumber [cm-1],Difference\n";
+        ofs << xLabel << ",Difference\n";
         for (size_t i = 0; i < refX.size(); i++)
             ofs << refX[i] << "," << (interpSample[i] - refY[i]) << "\n";
         ofs.close();

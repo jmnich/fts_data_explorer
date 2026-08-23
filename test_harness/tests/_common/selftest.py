@@ -22,6 +22,7 @@ sys.path.insert(0, str(HERE.parent))
 
 from _common.pipeline import (
     hilbert_x_axis, process_spectrum, apply_window, NORTON_BEER_COEFFS,
+    allan_variance, transmittance, stddev_curves, snr_spectrum, mean_spectrum,
 )
 from _common.compare import relative_error, ComparisonError, residual_metrics, snr_weights
 from _common.h5io import strip_derivatives, validate_h5
@@ -145,6 +146,68 @@ def test_strip_derivatives():
         print("  OK: strip_derivatives removes derivatives, keeps originals, validates")
 
 
+def test_allan_variance():
+    """Overlapping clusters vs hand computation."""
+    s = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+    # tau=2 (k=2, n=6): overlapping pairs j=0,1,2, each diff=2 → 4
+    # sum=12, count=3 → 12/3/2 = 2.0
+    assert_close(allan_variance(s, 2), 2.0, tol=1e-12, msg="allan_variance tau=2")
+    assert allan_variance(s, 5) == 0.0, "tau too large → 0"
+    assert allan_variance(s, 0) == 0.0, "tau=0 → 0"
+    print("  OK: allan_variance overlapping clusters match hand computation")
+
+
+def test_transmittance():
+    """Noise-floor masking + descending-X interpolation."""
+    ref_x = np.array([1.0, 2.0, 3.0, 4.0])
+    ref_y = np.array([1.0, 2.0, 3.0, 4.0])
+    spec_x = np.array([4.0, 3.0, 2.0, 1.0])   # descending X
+    spec_y = np.array([4.0, 3.0, 2.0, 1.0])   # identical → T = 100%
+    tx, ty = transmittance(spec_x, spec_y, ref_x, ref_y)
+    assert np.allclose(ty, 100.0, atol=1e-9), "T=100 for identical curves"
+    # noise floor: ref < max(ref)*1e-3 → masked to 0
+    ref_y2 = np.array([1e-6, 2.0, 3.0, 4.0])
+    _, ty2 = transmittance(spec_x, spec_y, ref_x, ref_y2)
+    assert ty2[0] == 0.0, "noise-floor bin masked to 0"
+    assert ty2[1] > 0.0, "above-floor bin kept"
+    print("  OK: transmittance noise floor + descending-X")
+
+
+def test_stddev_curves():
+    """Sample variance (ddof=1) per bin; single curve → zeros."""
+    curves = [np.array([1.0, 2.0, 3.0]), np.array([2.0, 3.0, 4.0])]
+    c = stddev_curves(curves)
+    expected = np.std(np.array(curves), axis=0, ddof=1)
+    assert np.allclose(c, expected, atol=1e-12), "ddof=1 std matches numpy"
+    assert_close(c[0], np.std([1.0, 2.0], ddof=1), tol=1e-12, msg="std of [1,2]")
+    z = stddev_curves([np.array([1.0, 2.0])])
+    assert np.all(z == 0.0), "single curve → zeros"
+    print("  OK: stddev_curves sample variance (ddof=1)")
+
+
+def test_snr_spectrum():
+    """SNR = mean/std with population std (ddof=0); zero-std guarded."""
+    grid = np.array([1.0, 2.0, 3.0])
+    spectra = [(grid, np.array([1.0, 2.0, 3.0])),
+               (grid, np.array([3.0, 2.0, 1.0]))]
+    _, snr = snr_spectrum(spectra, grid)
+    # mean=[2,2,2], std(ddof=0)=[1,0,1] → SNR=[2, 0 (guard), 2]
+    assert_close(snr[0], 2.0, tol=1e-9, msg="SNR bin 0")
+    assert snr[1] == 0.0, "zero-std bin → 0 (guarded)"
+    assert_close(snr[2], 2.0, tol=1e-9, msg="SNR bin 2")
+    print("  OK: snr_spectrum population std + zero-std guard")
+
+
+def test_mean_spectrum():
+    """Elementwise mean on a shared grid; descending-X input handled."""
+    grid = np.array([1.0, 2.0, 3.0])
+    s1 = (np.array([3.0, 2.0, 1.0]), np.array([3.0, 2.0, 1.0]))  # descending X
+    s2 = (grid, np.array([2.0, 4.0, 6.0]))
+    _, mean = mean_spectrum([s1, s2], grid)
+    assert np.allclose(mean, [1.5, 3.0, 4.5], atol=1e-12), "mean of two spectra"
+    print("  OK: mean_spectrum elementwise + descending-X")
+
+
 def main():
     tests = [
         ("synthetic spectrum", test_synthetic_spectrum),
@@ -152,6 +215,11 @@ def main():
         ("relative_error guards", test_relative_error_guards),
         ("residual_metrics", test_residual_metrics),
         ("strip_derivatives", test_strip_derivatives),
+        ("allan_variance", test_allan_variance),
+        ("transmittance", test_transmittance),
+        ("stddev_curves", test_stddev_curves),
+        ("snr_spectrum", test_snr_spectrum),
+        ("mean_spectrum", test_mean_spectrum),
     ]
     failed = 0
     for name, fn in tests:

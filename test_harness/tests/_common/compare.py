@@ -10,6 +10,7 @@ from __future__ import annotations
 import numpy as np
 
 EPSILON = 1e-15  # D14
+MAX_BINS = 200000  # D15 — eval-grid cap with decimation
 
 
 class ComparisonError(Exception):
@@ -125,8 +126,12 @@ def common_grid_resample(x: np.ndarray, y: np.ndarray,
 def _one_comparison(name: str, cand_x: np.ndarray, cand_y: np.ndarray,
                     ref_x: np.ndarray, ref_y: np.ndarray,
                     thresholds: dict, eval_window: tuple[float, float] | None = None,
-                    snr_ref: np.ndarray | None = None) -> dict:
-    """Run one (A)/(B)/(C) comparison on a common grid."""
+                    snr_ref: tuple[np.ndarray, np.ndarray] | None = None) -> dict:
+    """Run one (A)/(B)/(C) comparison on a common grid.
+
+    snr_ref: optional (snr_x, snr_y) SNR curve; resampled onto the same eval
+    grid as the curves so the SNR weighting engages (per §9.3).
+    """
     # Build evaluation grid: union of X ranges, intersected with eval_window
     xmin = max(min(cand_x[0], cand_x[-1]), min(ref_x[0], ref_x[-1]))
     xmax = min(max(cand_x[0], cand_x[-1]), max(ref_x[0], ref_x[-1]))
@@ -145,9 +150,18 @@ def _one_comparison(name: str, cand_x: np.ndarray, cand_y: np.ndarray,
     if grid.size == 0:
         return {"name": name, "status": "error",
                 "summary": "empty grid", "n_bins": 0, "n_weighted_bins": 0}
+    # D15: cap the eval grid with decimation
+    if grid.size > MAX_BINS:
+        step = int(np.ceil(grid.size / MAX_BINS))
+        grid = grid[::step]
     _, cand_on = common_grid_resample(cand_x, cand_y, grid)
     _, ref_on = common_grid_resample(ref_x, ref_y, grid)
-    weights = snr_weights(ref_on, snr_ref)
+    if snr_ref is not None:
+        snr_x, snr_y = snr_ref
+        _, snr_on = common_grid_resample(snr_x, snr_y, grid)
+        weights = snr_weights(ref_on, snr_on)
+    else:
+        weights = snr_weights(ref_on)
     try:
         m = residual_metrics(cand_on, ref_on, weights)
     except ComparisonError as e:
@@ -173,11 +187,13 @@ def compare(headless_x: np.ndarray, headless_y: np.ndarray,
              golden_x: np.ndarray | None, golden_y: np.ndarray | None,
              thresholds: dict,
              eval_window: tuple[float, float] | None = None,
-             snr_ref: np.ndarray | None = None,
+             snr_ref: tuple[np.ndarray, np.ndarray] | None = None,
              declared: list[str] | None = None) -> list[dict]:
     """Run the three-way comparison (A)/(B)/(C) per §3 of the overview.
 
     declared: subset of ["A","B","C"] to run; default = all available.
+    snr_ref: optional (snr_x, snr_y) SNR curve used as the quality signal for
+    weighting (§9.3); resampled onto each comparison's eval grid.
     Returns a list of comparison dicts.
     """
     results = []

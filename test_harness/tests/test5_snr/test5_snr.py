@@ -6,7 +6,7 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
-from _common.pipeline import process_spectrum, snr_spectrum, common_grid
+from _common.pipeline import process_spectrum, snr_spectrum
 from _common.compare import compare, snr_weights
 from _common.test_helpers import read_raw_ifg, list_members, write_result, strip_and_validate
 from _common.headless import run_binary, load_csv, find_exported_csv
@@ -43,12 +43,14 @@ def main():
         ref, prim = read_raw_ifg(work_h5, m)
         x, y = process_spectrum(prim, ref, CONFIG)
         spectra.append((x, y))
-    grid = common_grid([s[0] for s in spectra])
+    # Grid = first file's spectrum X (matches C++ chooseCommonGrid)
+    grid = spectra[0][0]
     _, py_snr = snr_spectrum(spectra, grid)
-    # SNR-weighted: use the SNR curve itself as quality signal
+    # SNR-weighted: use the SNR curve itself as quality signal, on the same
+    # grid as the comparison's reference (compare() resamples it internally).
     thresholds = {"weighted_rms_rel_pct": 1.0, "max_abs_rel_pct": 50.0}
     comps = compare(cpp_x, cpp_ys[0], grid, py_snr, None, None, thresholds,
-                    eval_window=EVAL, snr_ref=py_snr, declared=["A"])
+                    eval_window=EVAL, snr_ref=(grid, py_snr), declared=["A"])
     all_pass = all(c["status"]=="pass" for c in comps)
     status = "pass" if all_pass else "fail"
     summary = f"wrms={comps[0]['weighted_rms_rel_pct']}% max={comps[0]['max_abs_rel_pct']}% n_w={comps[0]['n_weighted_bins']}"

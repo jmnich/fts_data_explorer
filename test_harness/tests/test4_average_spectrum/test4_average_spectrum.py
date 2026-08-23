@@ -6,7 +6,7 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
-from _common.pipeline import process_spectrum, mean_spectrum, common_grid
+from _common.pipeline import process_spectrum, mean_spectrum
 from _common.compare import compare
 from _common.test_helpers import read_raw_ifg, list_members, write_result, strip_and_validate, nsk
 from _common.headless import run_binary, load_csv, find_exported_csv
@@ -37,14 +37,15 @@ def main():
     if not csv_path: write_result(workdir,"test4_average_spectrum","error","no avg CSV"); return 2
     cpp_x, cpp_ys = load_csv(csv_path)
     if not cpp_ys: write_result(workdir,"test4_average_spectrum","error","empty CSV"); return 2
-    # Python reference: all files
+    # Python reference: all files. Grid = first file's spectrum X (matches
+    # the C++ chooseCommonGrid: first file in natural sort order).
     members = list_members(work_h5)
     spectra = []
     for m in members:
         ref, prim = read_raw_ifg(work_h5, m)
         x, y = process_spectrum(prim, ref, CONFIG)
         spectra.append((x, y))
-    grid = common_grid([s[0] for s in spectra])
+    grid = spectra[0][0]
     _, py_avg = mean_spectrum(spectra, grid)
     thresholds = {"weighted_rms_rel_pct": 0.1, "max_abs_rel_pct": 19.0}
     comps = compare(cpp_x, cpp_ys[0], grid, py_avg, None, None, thresholds, eval_window=EVAL, declared=["A"])

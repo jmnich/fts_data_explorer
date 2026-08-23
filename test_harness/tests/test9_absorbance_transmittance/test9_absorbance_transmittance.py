@@ -47,7 +47,7 @@ def main():
 
     # Run transmittance
     rc, log = run_binary(args.binary, work_h5, OUTPUT_TYPE_T, workdir, HERE/"config.json", timeout=600)
-    (workdir/"run.log").write_text(log)
+    (workdir/"run_t.log").write_text(log)
     if rc != 0: write_result(workdir,"test9_absorbance_transmittance","error",f"headless rc={rc}"); return 2
     slug = work_h5.stem
     t_csvs = sorted(workdir.glob(f"{slug}_transmittance_*.csv"))
@@ -56,6 +56,7 @@ def main():
 
     # Run absorbance
     rc2, log2 = run_binary(args.binary, work_h5, OUTPUT_TYPE_A, workdir, HERE/"config.json", timeout=600)
+    (workdir/"run_a.log").write_text(log2)
     if rc2 != 0: write_result(workdir,"test9_absorbance_transmittance","error",f"absorbance rc={rc2}"); return 2
     a_csvs = sorted(workdir.glob(f"{slug}_absorbance_*.csv"))
     if not a_csvs: write_result(workdir,"test9_absorbance_transmittance","error","no absorbance CSV"); return 2
@@ -73,7 +74,7 @@ def main():
     avg_y = np.zeros(len(grid))
     for sx, sy in spectra:
         si = np.argsort(sx)
-        avg_y += np.interp(grid, sx[si], sy[si], left=0.0, right=0.0)
+        avg_y += np.interp(grid, sx[si], sy[si], left=sy[si][0], right=sy[si][-1])
     avg_y /= len(spectra)
     # First file transmittance against the average (mirrors C++ computeTransmittanceFromVectors)
     # transmittance() returns T in percent (×100); C++ export writes fraction (T%/100)

@@ -37,8 +37,13 @@ tolerance.
 - [x] A: headless vs Python reference
 
 ## Tolerance
-weighted_rms_rel_pct: 0.1
-max_abs_rel_pct: 19.0
+Per-method thresholds (hardcoded in `test2_interferogram_x_correction.py:111-118`,
+relative to the OPD range, abs diff for the primary):
+
+| Sub-scenario | OPD rel. diff threshold | Primary abs. diff |
+|--------------|-------------------------|-------------------|
+| Hilbert      | 0.01% (1e-4)            | 1e-6 (float32)    |
+| PeakFinding  | 0.1% (1e-3)             | 1e-6 (float32)    |
 
 ## Timeout
 timeout: 1200

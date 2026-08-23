@@ -70,7 +70,7 @@ def main():
     for sx, sy in spectra:
         # np.interp needs ascending x; reverse both arrays (sx is descending)
         si = np.argsort(sx)
-        yg = np.interp(avg_x, sx[si], sy[si], left=0.0, right=0.0)
+        yg = np.interp(avg_x, sx[si], sy[si], left=sy[si][0], right=sy[si][-1])
         file_on_grid.append(yg)
         avg_y += yg
     avg_y /= len(file_on_grid)
@@ -119,10 +119,20 @@ def main():
             "n_bins": int(np.sum(valid)), "n_weighted_bins": int(np.sum(w > 0))})
     else:
         comparisons.append({"name": "allan_surface", "status": "error", "summary": "no valid bins"})
-    # Exact axis check
-    axis_ok = (len(cpp_waves) > 0 and len(cpp_taus) > 0)
+    # Exact axis check: the CSV wavelengths must match the Python reference
+    # wavelength bins (valid_indices, reversed to ascending 1→30 um) and the
+    # taus must be 1..n_taus. CSV is written at default stream precision
+    # (6 significant digits), so wavelengths are compared with rtol=1e-4;
+    # taus are small integers and must match exactly.
+    py_waves = avg_x[np.array(valid_indices)][::-1]
+    py_taus = np.arange(1, n_taus + 1, dtype=float)
+    axis_ok = (len(cpp_waves) == len(py_waves) and
+               np.allclose(cpp_waves, py_waves, rtol=1e-4, atol=1e-6) and
+               len(cpp_taus) == len(py_taus) and
+               np.array_equal(cpp_taus, py_taus))
     comparisons.append({"name": "axis_exact", "status": "pass" if axis_ok else "fail",
-        "n_wavelengths": len(cpp_waves), "n_taus": len(cpp_taus)})
+        "n_wavelengths": len(cpp_waves), "n_taus": len(cpp_taus),
+        "expected_wavelengths": len(py_waves), "expected_taus": len(py_taus)})
     all_pass = all(c["status"] == "pass" for c in comparisons)
     status = "pass" if all_pass else "fail"
     summary = f"surface={comparisons[0]['status']} axis={comparisons[1]['status']}"

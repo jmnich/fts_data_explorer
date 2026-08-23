@@ -53,7 +53,7 @@ def main():
     # Interpolate all transmittance curves onto the grid
     on_grid = []
     for tx, ty in zip(trans_xs, trans_curves):
-        on_grid.append(np.interp(grid, tx, ty, left=0.0, right=0.0))
+        on_grid.append(np.interp(grid, tx, ty, left=ty[0], right=ty[-1]))
     py_std = stddev_curves(on_grid)
     thresholds = {"weighted_rms_rel_pct": 1.0, "max_abs_rel_pct": 100.0}
     comps = compare(cpp_x, cpp_ys[0], grid, py_std, None, None, thresholds, eval_window=EVAL, declared=["A"])

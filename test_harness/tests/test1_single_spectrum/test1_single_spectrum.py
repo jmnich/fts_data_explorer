@@ -187,11 +187,12 @@ def _save_plot(workdir, py_x, py_y, cpp_x, cpp_y, comp):
     ax1.plot(cpp_x[mask], cpp_y[mask], label="C++ headless", ls="--", lw=0.7, alpha=0.85)
     ax1.set_yscale("log"); ax1.legend(); ax1.set_xlabel("cm-1"); ax1.set_ylabel("Magnitude")
     ax1.set_title(f"test1 single spectrum — {comp['status']} (wrms {comp['weighted_rms_rel_pct']}%)")
-    # residual
-    py_interp = np.interp(cpp_x[mask], py_x[(py_x >= cm_lo) & (py_x <= cm_hi)],
-                         py_y[(py_x >= cm_lo) & (py_x <= cm_hi)], left=0, right=0)
+    # residual — same convention as the metric: (candidate - reference) / reference
+    py_m = (py_x >= cm_lo) & (py_x <= cm_hi)
+    py_xm, py_ym = py_x[py_m], py_y[py_m]
+    py_interp = np.interp(cpp_x[mask], py_xm, py_ym, left=py_ym[0], right=py_ym[-1])
     with np.errstate(divide="ignore", invalid="ignore"):
-        rd = np.where(cpp_y[mask] > 1e-15, (py_interp - cpp_y[mask]) / cpp_y[mask] * 100, np.nan)
+        rd = np.where(py_interp > 1e-15, (cpp_y[mask] - py_interp) / py_interp * 100, np.nan)
     ax2.plot(cpp_x[mask], rd, lw=0.5, color="tab:red")
     ax2.set_ylim(-5, 5); ax2.set_xlabel("cm-1"); ax2.set_ylabel("rel. diff %")
     ax2.axhline(0, color="grey", lw=0.4)

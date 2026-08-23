@@ -3,6 +3,17 @@
 > Canonical standards for the FTS Data Explorer mathematical-accuracy regression
 > harness. Every test must conform to this document.
 
+## 0. Setup
+
+Dependencies are declared in `test_harness/requirements.txt` (numpy, scipy,
+h5py, matplotlib):
+
+```
+source ~/PythonVenv/jupyterVenv/bin/activate.fish   # bash/zsh: source .../bin/activate
+python -m pip install -r test_harness/requirements.txt
+python3 test_harness/run_tests.py [-v]
+```
+
 ## 1. Purpose
 
 The harness answers one question on every run:

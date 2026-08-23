@@ -20,6 +20,10 @@ headless `-w` on the stripped input exports `work_spectra.csv`;
 
 ## Comparisons declared
 - [x] A: headless vs Python reference
+- [x] B: headless vs golden `.h5` (runs when the golden exists and the
+      integrity guard passes — `temporary/golden_ok` marker)
+- [x] C: Python reference vs golden `.h5` (sanity guard; a C-only failure is
+      classified `error`, not `fail`)
 
 ## Tolerance
 weighted_rms_rel_pct: 0.1

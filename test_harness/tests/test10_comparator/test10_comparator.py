@@ -10,7 +10,7 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
-from _common.pipeline import process_spectrum, mean_spectrum, common_grid
+from _common.pipeline import process_spectrum, mean_spectrum
 from _common.compare import compare
 from _common.test_helpers import read_raw_ifg, list_members, write_result, strip_and_validate
 from _common.headless import run_binary
@@ -37,7 +37,7 @@ def compute_avg(h5_path, config):
         r, p = read_raw_ifg(h5_path, m)
         sx, sy = process_spectrum(p, r, config)
         spectra.append((sx, sy))
-    grid = common_grid([s[0] for s in spectra])
+    grid = spectra[0][0]  # first file's grid (matches C++ chooseCommonGrid)
     _, avg_y = mean_spectrum(spectra, grid)
     return grid, avg_y
 
@@ -58,8 +58,14 @@ def main():
     # Strip both to temporary copies (the -cmp flag doesn't mutate, but strip for safety)
     sample_work = stripped/f"{SAMPLE}_test10.h5"
     ref_work = stripped/f"{REFERENCE}_test10.h5"
-    strip_and_validate(sample_h5, sample_work)
-    strip_and_validate(ref_h5, ref_work)
+    ok, errs = strip_and_validate(sample_h5, sample_work)
+    if not ok:
+        write_result(workdir, "test10_comparator", "error", f"strip sample: {errs[:2]}")
+        return 2
+    ok, errs = strip_and_validate(ref_h5, ref_work)
+    if not ok:
+        write_result(workdir, "test10_comparator", "error", f"strip reference: {errs[:2]}")
+        return 2
 
     # Run -cmp
     cmd = [args.binary, "-cmp", str(sample_work), str(ref_work), OUTPUT_TYPE, str(workdir)]
@@ -87,7 +93,8 @@ def main():
     ref_x, avg_ref = compute_avg(ref_work, CONFIG)
     # Interpolate sample average onto the reference grid
     si = np.argsort(sample_x)
-    sample_on_ref = np.interp(ref_x, sample_x[si], avg_sample[si], left=0.0, right=0.0)
+    sample_on_ref = np.interp(ref_x, sample_x[si], avg_sample[si],
+                              left=avg_sample[si][0], right=avg_sample[si][-1])
     py_ratio = np.where(np.abs(avg_ref) > 1e-15, sample_on_ref / avg_ref, 0.0)
 
     thresholds = {"weighted_rms_rel_pct": 1.0, "max_abs_rel_pct": 100.0}
