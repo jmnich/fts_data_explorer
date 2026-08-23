@@ -86,3 +86,8 @@ imgui.ini.layout.*
 # HITRAN band generator — downloaded line data + bytecode (dev cache)
 hitran/.hapi_cache/
 __pycache__/
+
+# test harness runtime artifacts
+test_harness/output/
+test_harness/temporary/
+test_harness/reference_output/.checksums

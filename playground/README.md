@@ -1,8 +1,11 @@
-# Playground — Test harness
+# Playground
 
 ## Overview
 
-The playground contains a Python test harness that processes real instrument
+Playground contains headless-mode demos for users and C++ unit tests. Numeric
+accuracy regression testing lives in `test_harness/`.
+
+The playground includes a Python demo harness that processes real instrument
 data, generates all 10 export artifacts, and produces PNG plots of raw
 interferograms and spectra.  It uses the same pipeline structure as the C++
 application (FFT → average → T% → Allan, etc.) to produce CSVs matching the
