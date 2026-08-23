@@ -10,6 +10,7 @@ from _common.pipeline import process_spectrum, transmittance
 from _common.compare import compare
 from _common.test_helpers import read_raw_ifg, list_members, write_result, strip_and_validate
 from _common.headless import run_binary, load_csv, find_exported_csv
+from _common.report_images import save_overlay_residual
 
 DATASET = "wust_mini"; OUTPUT_TYPE = "100% T transmission line"
 EVAL = (1e4/30.0, 1e4/1.0)
@@ -51,6 +52,11 @@ def main():
     all_pass = all(c["status"]=="pass" for c in comps)
     status = "pass" if all_pass else "fail"
     summary = f"wrms={comps[0]['weighted_rms_rel_pct']}% max={comps[0]['max_abs_rel_pct']}%"
+    save_overlay_residual("test6_t100", root,
+                          cpp_x, cpp_ys[0], py_x, py_y,
+                          eval_window=EVAL, title="test6 100% T transmission",
+                          log_y=False, y_label="Transmittance %",
+                          status=comps[0]["status"], metrics=comps[0])
     write_result(workdir,"test6_t100",status,summary,comps,OUTPUT_TYPE,["compare.png"],t0)
     return 0 if all_pass else 1
 

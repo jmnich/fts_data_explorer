@@ -14,6 +14,7 @@ from _common.pipeline import process_spectrum, mean_spectrum
 from _common.compare import compare
 from _common.test_helpers import read_raw_ifg, list_members, write_result, strip_and_validate
 from _common.headless import run_binary
+from _common.report_images import save_overlay_residual
 
 SAMPLE = "2025-04-16_12-19-18_ceramicLPF"
 REFERENCE = "2025-04-15_11-52-54_ref1"
@@ -102,6 +103,11 @@ def main():
     all_pass = all(c["status"]=="pass" for c in comps)
     status = "pass" if all_pass else "fail"
     summary = f"wrms={comps[0]['weighted_rms_rel_pct']}% max={comps[0]['max_abs_rel_pct']}%"
+    save_overlay_residual("test10_comparator", root,
+                          cpp_x, cpp_y, ref_x, py_ratio,
+                          eval_window=EVAL, title="test10 comparator ratio",
+                          log_y=False, y_label="avg(sample)/avg(ref)",
+                          status=comps[0]["status"], metrics=comps[0])
     write_result(workdir,"test10_comparator",status,summary,comps,OUTPUT_TYPE,[],t0)
     return 0 if all_pass else 1
 

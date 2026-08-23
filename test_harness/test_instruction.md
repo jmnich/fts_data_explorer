@@ -35,15 +35,18 @@ test_harness/
 ├── reference_output/            # .h5 INPUT+OUTPUT golden files (tracked, NEVER CHANGED)
 ├── tests/                        # one directory per test, NO .h5 data here
 │   ├── _common/                  # shared reference math + harness helpers
+│   │   ├── report_images.py       # sanity-check PNG helpers (see §10)
 │   └── test<N>_<name>/           # <name>.py + description.md
 ├── output/                       # cleared at start of each run (gitignored)
+│   └── report_images/            # sanity-check PNGs, <testname>_<suffix>.png
 └── temporary/                    # scratch; purged at start of each run (gitignored)
 ```
 
 Rules: `tests/` holds **code only** — no `.h5` file is ever committed under
 `tests/`. `reference_input/` and `reference_output/` hold **data only** (no
 scripts, no results) and are git-tracked. `output/` and `temporary/` are
-gitignored.
+gitignored. `output/report_images/` is recreated each run by the orchestrator
+and by the helpers in `_common/report_images.py`.
 
 ## 3. Headless `-w` contract
 
@@ -204,7 +207,55 @@ timeout: <seconds>   (default 1200)
    - Run the headless binary (`tests/_common/headless.py`).
    - Compute the reference (`tests/_common/pipeline.py`).
    - Compare (`tests/_common/compare.py`) and write `result.json`.
+   - Emit a sanity-check PNG to `output/report_images/` (see §10).
    - Exit 0/1/2/3 per the result contract.
 3. Write `description.md` from the template.
 4. Run `python3 test_harness/run_tests.py --only test<N>_<name> -v`.
 5. Calibrate thresholds from observed residuals; record in `description.md`.
+
+## 10. Report images (visual sanity checks)
+
+Every test should, whenever practical, save a matplotlib comparison plot to
+`output/report_images/` so a human can judge at a glance whether the result is
+reasonable. These are **not** pass/fail evidence — the numeric metrics in
+`result.json` are authoritative — they are a sanity-check aid for spotting
+gross regressions, wrong units, or a broken reference.
+
+### Naming
+
+Files are named `<testname>_<suffix>.png`, where `<testname>` is the test
+directory name (e.g. `test1_single_spectrum`) and `<suffix>` distinguishes
+multiple plots from the same test. Conventions:
+
+| Suffix | Use |
+|--------|-----|
+| `compare` | default single-curve overlay+residual |
+| `transmittance`, `absorbance` | per-quantity plots when a test emits several |
+| (method name) | per-variant panel for matrix tests |
+
+### Helpers (`tests/_common/report_images.py`)
+
+All helpers take `root` (the harness root passed via `--root`), resolve
+`output/report_images/` under it, create the directory on demand, and
+degrade gracefully (return `None`) when matplotlib is unavailable or the
+curves are empty. They must never raise into the test path.
+
+| Helper | Layout | Use for |
+|--------|--------|---------|
+| `save_overlay_residual` | 2 panels: overlay (log-Y by default) + residual % | single-curve tests (1, 4, 5, 6, 7, 9, 10) |
+| `save_multi_overlay` | N panels, one overlay per variant | matrix tests (2, 3) |
+| `save_allan_surface` | side-by-side log-color surfaces | Allan 3D (8) |
+
+The residual panel uses the same convention as the canonical metric:
+`(candidate - reference) / reference * 100`, clamped to ±5% for readability.
+
+### Requirements
+
+- matplotlib is already a declared dependency (`requirements.txt`); the harness
+  still runs without it (helpers return `None`, tests stay green).
+- Images are gitignored (they live under `output/`); the orchestrator
+  recreates `output/report_images/` each run and lists the generated files in
+  `report.md`.
+- A test that cannot produce a meaningful plot (e.g. an axis-only check) may
+  skip the image — this is a "whenever practical" expectation, not a hard
+  requirement.

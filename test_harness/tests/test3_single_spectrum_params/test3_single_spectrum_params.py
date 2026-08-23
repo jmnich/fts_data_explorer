@@ -10,6 +10,7 @@ from _common.pipeline import process_spectrum
 from _common.compare import compare
 from _common.test_helpers import read_raw_ifg, list_members, write_result, strip_and_validate
 from _common.headless import run_binary, load_csv, find_exported_csv, build_config
+from _common.report_images import save_multi_overlay
 
 DATASET = "wust_mini"; OUTPUT_TYPE = "Spectra from selected files"
 EVAL = (1e4/30.0, 1e4/1.0)
@@ -52,6 +53,7 @@ def main():
     thresholds = {"weighted_rms_rel_pct": 0.5, "max_abs_rel_pct": 19.0}
     comparisons = []
     all_pass = True
+    panels = []
     for v in VARIANTS:
         vdir = workdir / v["name"]; vdir.mkdir(exist_ok=True)
         cfg_path = vdir / "config.json"
@@ -74,6 +76,14 @@ def main():
         c["name"] = v["name"]
         comparisons.append(c)
         if c["status"] != "pass": all_pass = False
+        panels.append({
+            "name": v["name"], "cand_x": cpp_x, "cand_y": cpp_ys[0],
+            "ref_x": py_x, "ref_y": py_y, "eval_window": EVAL,
+            "status": c["status"], "metrics": c,
+        })
+    if panels:
+        save_multi_overlay("test3_single_spectrum_params", root, panels,
+                           title="test3 parameter matrix (C++ vs Python)")
     status = "pass" if all_pass else "fail"
     summary = "; ".join(f"{c['name']}={c['status']}" for c in comparisons)
     write_result(workdir,"test3_single_spectrum_params",status,summary,comparisons,OUTPUT_TYPE,[],t0)

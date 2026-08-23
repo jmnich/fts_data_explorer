@@ -15,6 +15,7 @@ sys.path.insert(0, str(TESTS_DIR))
 from _common.pipeline import hilbert_x_axis, x_axis_from_peaks
 from _common.h5io import strip_derivatives, validate_h5
 from _common.headless import run_binary, load_csv
+from _common.report_images import save_multi_overlay
 
 DATASET = "wust_mini"
 OUTPUT_TYPE = "Corrected interferograms from selected files"
@@ -44,17 +45,17 @@ def load_ifg_csv(path):
     return np.array(xs), np.array(ys)
 
 def run_variant(work_h5, config_path, workdir, binary, ref, prim, method):
-    """Run one X-correction variant, return (opd_max_abs_diff, primary_max_abs_diff)."""
+    """Run one X-correction variant, return (opd_max_abs_diff, primary_max_abs_diff, cpp_opd, cpp_prim, py_opd)."""
     out_dir = workdir / f"out_{method}"
     out_dir.mkdir(exist_ok=True)
     rc, log = run_binary(binary, work_h5, OUTPUT_TYPE, out_dir, config_path, timeout=600)
     if rc != 0:
-        return None, None, f"headless failed (rc={rc})"
+        return None, None, None, None, None, f"headless failed (rc={rc})"
     # Find the first-file CSV
     slug = work_h5.stem
     csvs = sorted(out_dir.glob(f"{slug}_corrected_ifg_*.csv"), key=lambda p: nsk(p.stem))
     if not csvs:
-        return None, None, "no corrected IFG CSV found"
+        return None, None, None, None, None, "no corrected IFG CSV found"
     cpp_opd, cpp_prim = load_ifg_csv(csvs[0])
     # Python reference
     if method == "peakfinding":
@@ -62,7 +63,7 @@ def run_variant(work_h5, config_path, workdir, binary, ref, prim, method):
     else:
         py_axis = hilbert_x_axis(ref, 1.55)
     if py_axis.size == 0:
-        return None, None, "python axis empty"
+        return None, None, None, None, None, "python axis empty"
     py_opd = py_axis * 2.0
     # Compare OPD (abs diff — same grid, same length)
     n = min(len(cpp_opd), len(py_opd))
@@ -70,7 +71,7 @@ def run_variant(work_h5, config_path, workdir, binary, ref, prim, method):
     # Primary (should be identical — raw data)
     pn = min(len(cpp_prim), len(prim))
     prim_diff = np.max(np.abs(cpp_prim[:pn] - prim[:pn]))
-    return opd_diff, prim_diff, None
+    return opd_diff, prim_diff, cpp_opd, cpp_prim, py_opd, None
 
 def main():
     ap = argparse.ArgumentParser()
@@ -99,10 +100,11 @@ def main():
 
     comparisons = []
     all_pass = True
+    plot_panels = []
     # OPD range for relative threshold (max OPD ~ laser/2 * n_fringes)
     opd_range = float(np.max(np.abs(hilbert_x_axis(ref, 1.55) * 2.0))) if ref.size else 1.0
     for method, cfg in [("hilbert", "config_hilbert.json"), ("peakfinding", "config_peakfinding.json")]:
-        opd_diff, prim_diff, err = run_variant(
+        opd_diff, prim_diff, cpp_opd, cpp_prim, py_opd, err = run_variant(
             work_h5, HERE / cfg, workdir, args.binary, ref, prim, method)
         if err:
             comparisons.append({"name": f"opd_{method}", "status": "error", "summary": err})
@@ -128,6 +130,20 @@ def main():
         })
         if status != "pass":
             all_pass = False
+        if cpp_opd is not None and py_opd is not None:
+            n = min(len(cpp_opd), len(py_opd))
+            plot_panels.append({
+                "name": f"OPD axis ({method})",
+                "cand_x": cpp_opd[:n], "cand_y": cpp_prim[:n],
+                "ref_x": py_opd[:n], "ref_y": prim[:n],
+                "log_y": False, "y_label": "Primary [V]",
+                "status": status,
+                "metrics": {"weighted_rms_rel_pct": round(rel_diff * 100, 6)},
+            })
+    if plot_panels:
+        save_multi_overlay("test2_interferogram_x_correction", root, plot_panels,
+                           x_label="OPD [um]",
+                           title="test2 corrected IFG (OPD axis: C++ vs Python)")
 
     status = "pass" if all_pass else "fail"
     summary = "; ".join(f"{c['name']}={c['status']}" for c in comparisons)

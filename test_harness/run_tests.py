@@ -32,6 +32,7 @@ from pathlib import Path
 HARNESS_DIR = Path(__file__).resolve().parent
 TESTS_DIR = HARNESS_DIR / "tests"
 OUTPUT_DIR = HARNESS_DIR / "output"
+REPORT_IMAGES_DIR = OUTPUT_DIR / "report_images"
 TEMP_DIR = HARNESS_DIR / "temporary"
 REFERENCE_INPUT = HARNESS_DIR / "reference_input"
 REFERENCE_OUTPUT = HARNESS_DIR / "reference_output"
@@ -260,6 +261,17 @@ def write_report(records: list[dict]) -> None:
         rows.append([i, r["test"], r["status"].upper(), dur, summ])
     md.append(_md_table(["#", "Test", "Status", "Duration", "Summary"], rows))
     md.append("\n")
+    # Report images (sanity-check PNGs)
+    if REPORT_IMAGES_DIR.is_dir():
+        imgs = sorted(REPORT_IMAGES_DIR.glob("*.png"))
+        if imgs:
+            md.append("## Report images\n\n")
+            md.append("Visual sanity-check comparisons (C++ headless vs Python "
+                      "reference) saved under `output/report_images/`:\n\n")
+            for img in imgs:
+                rel = img.relative_to(OUTPUT_DIR)
+                md.append(f"- `{rel}`\n")
+            md.append("\n")
     # Per-test comparison detail
     md.append("## Comparison details\n\n")
     for r in records:
@@ -376,6 +388,7 @@ def main():
 
     purge_runtime_dirs()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    REPORT_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
     TEMP_DIR.mkdir(parents=True, exist_ok=True)
     (TEMP_DIR / "stripped").mkdir(parents=True, exist_ok=True)
     golden_ok = check_golden_integrity()

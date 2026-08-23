@@ -14,6 +14,7 @@ from _common.pipeline import process_spectrum, mean_spectrum, common_grid, trans
 from _common.compare import compare
 from _common.test_helpers import read_raw_ifg, list_members, write_result, strip_and_validate
 from _common.headless import run_binary, load_csv
+from _common.report_images import save_overlay_residual
 
 DATASET = "2025-04-16_12-19-18_ceramicLPF"
 OUTPUT_TYPE_T = "Transmittance from selected files"
@@ -96,6 +97,18 @@ def main():
     all_pass = all(c["status"]=="pass" for c in comparisons)
     status = "pass" if all_pass else "fail"
     summary = f"T={comps[0]['status']} A={comps_a[0]['status']}"
+    save_overlay_residual("test9_absorbance_transmittance", root,
+                          cpp_tx, cpp_ty, py_tx, py_t,
+                          eval_window=EVAL, suffix="transmittance",
+                          title="test9 transmittance", log_y=False,
+                          y_label="Transmittance (fraction)",
+                          status=comps[0]["status"], metrics=comps[0])
+    save_overlay_residual("test9_absorbance_transmittance", root,
+                          cpp_ax, cpp_ay, py_tx, py_a,
+                          eval_window=EVAL, suffix="absorbance",
+                          title="test9 absorbance", log_y=False,
+                          y_label="Absorbance (-log10 T)",
+                          status=comps_a[0]["status"], metrics=comps_a[0])
     write_result(workdir,"test9_absorbance_transmittance",status,summary,comparisons,OUTPUT_TYPE_T,[],t0)
     return 0 if all_pass else 1
 

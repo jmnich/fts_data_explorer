@@ -10,6 +10,7 @@ from _common.pipeline import process_spectrum, mean_spectrum
 from _common.compare import compare
 from _common.test_helpers import read_raw_ifg, list_members, write_result, strip_and_validate, nsk
 from _common.headless import run_binary, load_csv, find_exported_csv
+from _common.report_images import save_overlay_residual
 
 DATASET = "wust_mini"; OUTPUT_TYPE = "Average spectrum"
 EVAL = (1e4/30.0, 1e4/1.0)
@@ -52,6 +53,10 @@ def main():
     all_pass = all(c["status"]=="pass" for c in comps)
     status = "pass" if all_pass else "fail"
     summary = f"wrms={comps[0]['weighted_rms_rel_pct']}% max={comps[0]['max_abs_rel_pct']}%"
+    save_overlay_residual("test4_average_spectrum", root,
+                          cpp_x, cpp_ys[0], grid, py_avg,
+                          eval_window=EVAL, title="test4 average spectrum",
+                          status=comps[0]["status"], metrics=comps[0])
     write_result(workdir,"test4_average_spectrum",status,summary,comps,OUTPUT_TYPE,["compare.png"],t0)
     return 0 if all_pass else 1
 

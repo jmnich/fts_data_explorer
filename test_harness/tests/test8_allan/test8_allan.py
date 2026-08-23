@@ -10,6 +10,7 @@ from _common.pipeline import process_spectrum, transmittance, allan_variance
 from _common.compare import compare
 from _common.test_helpers import read_raw_ifg, list_members, write_result, strip_and_validate
 from _common.headless import run_binary
+from _common.report_images import save_allan_surface
 
 DATASET = "wust_mini"; OUTPUT_TYPE = "Allan-Werle 3D"
 EVAL = (1e4/30.0, 1e4/1.0)
@@ -136,6 +137,10 @@ def main():
     all_pass = all(c["status"] == "pass" for c in comparisons)
     status = "pass" if all_pass else "fail"
     summary = f"surface={comparisons[0]['status']} axis={comparisons[1]['status']}"
+    save_allan_surface("test8_allan", root,
+                       cpp_waves, cpp_taus, cpp_surface,
+                       py_waves, py_taus, py_surface,
+                       status=comparisons[0]["status"])
     write_result(workdir,"test8_allan",status,summary,comparisons,OUTPUT_TYPE,[],t0)
     return 0 if all_pass else 1
 

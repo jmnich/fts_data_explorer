@@ -22,6 +22,7 @@ from _common.pipeline import process_spectrum
 from _common.compare import compare
 from _common.h5io import strip_derivatives, validate_h5, read_golden_member
 from _common.headless import run_binary, load_csv, find_exported_csv
+from _common.report_images import save_overlay_residual
 
 DATASET = "wust_mini"
 OUTPUT_TYPE = "Spectra from selected files"
@@ -149,6 +150,12 @@ def main():
 
     # 6. Plot (overlay + residual)
     _save_plot(workdir, py_x, py_y, cpp_x, cpp_ys[0], comparisons[0])
+    save_overlay_residual("test1_single_spectrum", root,
+                          cpp_x, cpp_ys[0], py_x, py_y,
+                          eval_window=EVAL_WINDOW_CM,
+                          title="test1 single spectrum",
+                          status=comparisons[0]["status"],
+                          metrics=comparisons[0])
 
     # 7. Result
     all_pass = all(c["status"] == "pass" for c in comparisons)
