@@ -81,8 +81,7 @@ T100Spectrum::T100Spectrum()
       ratioSpreadA(0.0), ratioSpreadB(0.0), ratioSpreadC(0.0),
       ratioStdDevA(0.0), ratioStdDevB(0.0), ratioStdDevC(0.0),
       calcStdBins(0),
-      calcStdValidFiles(0),
-      calcStdFirstFile(true)
+      calcStdValidFiles(0)
 {
     csvPathBuffer[0] = '\0';
     energyRatioNumA[0] = '\0';
@@ -144,7 +143,6 @@ void T100Spectrum::reset() {
     calcStdStats.clear();
     calcStdBins = 0;
     calcStdValidFiles = 0;
-    calcStdFirstFile = true;
     ratioStatsAvailable = false;
     ratioAvgA = ratioAvgB = ratioAvgC = 0.0;
     ratioSpreadA = ratioSpreadB = ratioSpreadC = 0.0;
@@ -538,7 +536,6 @@ void T100Spectrum::clearStdDev() {
     calcStdStats.clear();
     calcStdBins = 0;
     calcStdValidFiles = 0;
-    calcStdFirstFile = true;
     ratioStatsAvailable = false;
     ratioAvgA = ratioAvgB = ratioAvgC = 0.0;
     ratioSpreadA = ratioSpreadB = ratioSpreadC = 0.0;
@@ -550,7 +547,6 @@ void T100Spectrum::startStdCalculation() {
     calcStdStats.clear();
     calcStdBins = 0;
     calcStdValidFiles = 0;
-    calcStdFirstFile = true;
     calcStdInProgress = true;
     stdProgressCurrent = 0;
     stdProgressTotal = 0;
@@ -563,6 +559,9 @@ void T100Spectrum::startStdCalculation() {
     ratioStatsAvailable = false;
     batchActive_ = false;
     pendingFutures_.clear();
+    pendingFileIds_.clear();
+    stdFileResults_.clear();
+    stdRatioResults_.clear();
     totalSubmitted_ = 0;
 }
 
@@ -574,7 +573,9 @@ bool T100Spectrum::tickStdCalculation() {
         batchActive_ = true;
         totalSubmitted_ = 0;
         pendingFutures_.clear();
-        calcStdFirstFile = true;
+        pendingFileIds_.clear();
+        stdFileResults_.clear();
+        stdRatioResults_.clear();
         calcStdValidFiles = 0;
         calcStdStats.clear();
         calcRatioA.clear();
@@ -637,6 +638,7 @@ bool T100Spectrum::tickStdCalculation() {
                         apodParams, xMethod, promThresh);
                 });
             pendingFutures_.push_back(std::move(fut));
+            pendingFileIds_.push_back(filePath);
             totalSubmitted_++;
         }
         stdProgressTotal = totalSubmitted_;
@@ -648,55 +650,15 @@ bool T100Spectrum::tickStdCalculation() {
         }
     }
 
-    // Phase 2: Poll futures
-    for (auto& fut : pendingFutures_) {
+    // Phase 2: Poll futures — BUFFER by fileId, do not accumulate yet
+    for (size_t fi = 0; fi < pendingFutures_.size(); ++fi) {
+        auto& fut = pendingFutures_[fi];
         if (!fut.valid()) continue;
         if (fut.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
             try {
                 auto ps = fut.get();
-
-                // Compute energy ratios on main thread
-                bool collectRatios = (energyRatioNumA[0] != '\0' || energyRatioDenA[0] != '\0' ||
-                                      energyRatioNumB[0] != '\0' || energyRatioDenB[0] != '\0' ||
-                                      energyRatioNumC[0] != '\0' || energyRatioDenC[0] != '\0');
-                if (collectRatios) {
-                    EnergyRatios er = computeEnergyRatiosDirect(
-                        energyRatioNumA, energyRatioDenA,
-                        energyRatioNumB, energyRatioDenB,
-                        energyRatioNumC, energyRatioDenC,
-                        xUnitSelector, ps.spectrumX, ps.spectrumY);
-                    if (er.validA) calcRatioA.push_back(er.a);
-                    if (er.validB) calcRatioB.push_back(er.b);
-                    if (er.validC) calcRatioC.push_back(er.c);
-                }
-
-                std::vector<double> transX, transY;
-                if (!computeTransmittanceFromVectors(ps.spectrumX, ps.spectrumY,
-                        xUnitSelector, transX, transY)) {
-                    stdProgressCurrent++;
-                    continue;
-                }
-
-                if (calcStdFirstFile) {
-                    calcStdCommonX = transX;
-                    calcStdBins = calcStdCommonX.size();
-                    calcStdFirstFile = false;
-                    calcStdStats.assign(calcStdBins, RunningStats{});
-                }
-
-                if (calcStdBins > 0) {
-                    if (transX.size() == calcStdBins &&
-                        std::equal(calcStdCommonX.begin(), calcStdCommonX.end(), transX.begin())) {
-                        for (size_t j = 0; j < calcStdBins; j++)
-                            calcStdStats[j].add(transY[j]);
-                        calcStdValidFiles++;
-                    } else {
-                        auto interpVals = resampleToGrid(transX, transY, calcStdCommonX);
-                        for (size_t j = 0; j < calcStdBins; j++)
-                            calcStdStats[j].add(interpVals[j]);
-                        calcStdValidFiles++;
-                    }
-                }
+                if (!ps.spectrumX.empty() && !ps.spectrumY.empty())
+                    stdFileResults_[pendingFileIds_[fi]] = std::move(ps);
             } catch (const std::exception& e) {
                 fprintf(stderr, "WARNING: Skipping failed file in T100 std dev: %s\n", e.what());
                 totalSubmitted_--;
@@ -706,12 +668,74 @@ bool T100Spectrum::tickStdCalculation() {
     }
 
     if (stdProgressCurrent >= totalSubmitted_) {
+        // All futures done — compute transmittance + ratios in natural sort
+        // order and select the common grid from the first sorted file with a
+        // valid transmittance (deterministic, matches average/snr/allan).
+        bool collectRatios = (energyRatioNumA[0] != '\0' || energyRatioDenA[0] != '\0' ||
+                              energyRatioNumB[0] != '\0' || energyRatioDenB[0] != '\0' ||
+                              energyRatioNumC[0] != '\0' || energyRatioDenC[0] != '\0');
+        bool firstValid = true;
+        for (const auto& fid : appState->active->sortedFiles) {
+            auto it = stdFileResults_.find(fid);
+            if (it == stdFileResults_.end()) continue;
+            const auto& ps = it->second;
+
+            if (collectRatios) {
+                EnergyRatios er = computeEnergyRatiosDirect(
+                    energyRatioNumA, energyRatioDenA,
+                    energyRatioNumB, energyRatioDenB,
+                    energyRatioNumC, energyRatioDenC,
+                    xUnitSelector, ps.spectrumX, ps.spectrumY);
+                stdRatioResults_[fid] = er;
+            }
+
+            std::vector<double> transX, transY;
+            if (!computeTransmittanceFromVectors(ps.spectrumX, ps.spectrumY,
+                    xUnitSelector, transX, transY))
+                continue;
+
+            if (firstValid) {
+                calcStdCommonX = transX;
+                calcStdBins = calcStdCommonX.size();
+                firstValid = false;
+                calcStdStats.assign(calcStdBins, RunningStats{});
+            }
+
+            if (calcStdBins > 0) {
+                if (transX.size() == calcStdBins &&
+                    std::equal(calcStdCommonX.begin(), calcStdCommonX.end(), transX.begin())) {
+                    for (size_t j = 0; j < calcStdBins; j++)
+                        calcStdStats[j].add(transY[j]);
+                    calcStdValidFiles++;
+                } else {
+                    auto interpVals = resampleToGrid(transX, transY, calcStdCommonX);
+                    for (size_t j = 0; j < calcStdBins; j++)
+                        calcStdStats[j].add(interpVals[j]);
+                    calcStdValidFiles++;
+                }
+            }
+        }
+        stdFileResults_.clear();
+        pendingFileIds_.clear();
+
         if (calcStdValidFiles >= 2) {
             cachedStdX = calcStdCommonX;
             cachedStdY.resize(calcStdBins);
             for (size_t j = 0; j < calcStdBins; j++)
                 cachedStdY[j] = calcStdStats[j].stddev();   // sample variance (N-1)
             stddevAvailable = true;
+        }
+        if (collectRatios) {
+            // Collect ratio values in natural sort order for determinism.
+            for (const auto& fid : appState->active->sortedFiles) {
+                auto it = stdRatioResults_.find(fid);
+                if (it == stdRatioResults_.end()) continue;
+                const auto& er = it->second;
+                if (er.validA) calcRatioA.push_back(er.a);
+                if (er.validB) calcRatioB.push_back(er.b);
+                if (er.validC) calcRatioC.push_back(er.c);
+            }
+            stdRatioResults_.clear();
         }
         if (!calcRatioA.empty() || !calcRatioB.empty() || !calcRatioC.empty()) {
             auto computeStats = [](const std::vector<double>& v,

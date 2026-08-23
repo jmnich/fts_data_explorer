@@ -90,6 +90,9 @@ public:
 
     // Parallel execution state
     std::vector<std::future<SpectralToolbox::ProcessedSpectrum>> pendingFutures_;
+    std::vector<std::string> pendingFileIds_;   // parallel to pendingFutures_
+    std::map<std::string, SpectralToolbox::ProcessedSpectrum> stdFileResults_;  // buffer
+    std::map<std::string, EnergyRatios> stdRatioResults_;                        // buffer
     int totalSubmitted_{0};
     bool batchActive_{false};
 
@@ -124,7 +127,6 @@ private:
     std::vector<RunningStats> calcStdStats;   // per-bin Welford mean/variance
     size_t calcStdBins;
     int calcStdValidFiles;
-    bool calcStdFirstFile;
 
     std::vector<double> calcRatioA;
     std::vector<double> calcRatioB;
