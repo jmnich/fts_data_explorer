@@ -19,12 +19,13 @@ CONFIG = {"refLaserWavelengthUm":1.55,"zeroPadK":2,"apodizationWindow":"Rectangu
 
 # Region-locked strict comparison: 2050-2250 cm-1 strong-signal shoulder.
 # Stddev is noisier than spectra (sample variance across files) but still good
-# in the strong region (observed 0.025822% wrms / 0.066423% max). 0.1% / 0.5%
-# gives ~4x / 7.5x headroom, far stricter than the full-window 1.0% / 100%.
+# in the strong region (observed 0.025822% wrms / 0.066423% max). 0.1% wrms /
+# 0.005 abs-max gives ~4x / ~15x headroom, far stricter than the full-window
+# 1.0% / 2.0 abs-max. Max metric is absolute, matching the full-window comparison.
 STRONG_REGION = {
     "name": "strong_2050_2250",
     "window": (2050.0, 2250.0),
-    "thresholds_a": {"weighted_rms_rel_pct": 0.1, "max_abs_rel_pct": 0.5},
+    "thresholds_a": {"weighted_rms_rel_pct": 0.1, "max_abs": 0.005},
 }
 
 def main():

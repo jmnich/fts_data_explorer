@@ -21,10 +21,11 @@ BASE = {"refLaserWavelengthUm":1.55,"zeroPadK":2,"apodizationWindow":"Rectangula
 # Region-locked strict comparison: 2050-2250 cm-1 strong-signal shoulder.
 # A-only (test3 declares A per variant). 0.01% wrms gives ~3x headroom on the
 # worst variant (laser1310, 0.003% observed) and ~18x on typical variants.
+# Max metric is absolute (max_abs), matching the full-window comparison.
 STRONG_REGION = {
     "name": "strong_2050_2250",
     "window": (2050.0, 2250.0),
-    "thresholds_a": {"weighted_rms_rel_pct": 0.01, "max_abs_rel_pct": 0.05},
+    "thresholds_a": {"weighted_rms_rel_pct": 0.01, "max_abs": 1e-6},
 }
 
 VARIANTS = [

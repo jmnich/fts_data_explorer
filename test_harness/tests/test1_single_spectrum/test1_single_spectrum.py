@@ -34,12 +34,14 @@ GOLDEN_MEMBER = "spectra/spec_raw_0"  # group/member-id of the first-file golden
 # B (headless vs golden) is stricter than A (headless vs Python) because the app
 # must reproduce the same numbers across versions; C (Python vs golden) is the
 # tightest sanity guard (two independent implementations agreeing).
+# Max metric is absolute (max_abs) throughout, matching the full-window
+# comparison — relative max blows up at noise-floor bins where ref≈0.
 STRONG_REGION = {
     "name": "strong_2050_2250",
     "window": (2050.0, 2250.0),
-    "thresholds_a": {"weighted_rms_rel_pct": 0.005, "max_abs_rel_pct": 0.05},
-    "thresholds_b": {"weighted_rms_rel_pct": 0.002, "max_abs_rel_pct": 0.02},
-    "thresholds_c": {"weighted_rms_rel_pct": 0.0005, "max_abs_rel_pct": 0.005},
+    "thresholds_a": {"weighted_rms_rel_pct": 0.005, "max_abs": 1e-6},
+    "thresholds_b": {"weighted_rms_rel_pct": 0.002, "max_abs": 1e-6},
+    "thresholds_c": {"weighted_rms_rel_pct": 0.0005, "max_abs": 1e-6},
 }
 
 

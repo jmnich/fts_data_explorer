@@ -222,12 +222,79 @@ def classify(name: str, exit_code: int, workdir: Path, duration: float,
 # Report (C4)
 # ---------------------------------------------------------------------------
 
-def _md_table(headers: list[str], rows: list[list]) -> str:
-    """Render a markdown table with aligned `|` columns for human readability."""
+def _word_wrap(text: str, width: int) -> list[str]:
+    """Wrap ``text`` to ``width`` columns at word boundaries.
+
+    A word longer than ``width`` is hard-broken across lines (no mid-word
+    ellipsis). Returns at least one line.
+    """
+    words = text.split()
+    if not words:
+        return [""]
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        if not current:
+            current = word
+        elif len(current) + 1 + len(word) <= width:
+            current += " " + word
+        elif len(word) > width:
+            lines.append(current)
+            current = ""
+            while len(word) > width:
+                lines.append(word[:width])
+                word = word[width:]
+            current = word
+        else:
+            lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines
+
+
+def _md_table(headers: list[str], rows: list[list], max_width: int | None = None,
+              wrap_col: int | None = None) -> str:
+    """Render a markdown table with aligned ``|`` columns for human readability.
+
+    When ``max_width`` is set, no rendered line exceeds that many columns.
+    The column at ``wrap_col`` (default: last) is shrunk to the remaining
+    width budget and its cells are word-wrapped across multiple table rows
+    — the first row carries the identity columns, continuation rows leave
+    them blank. Other columns keep their natural width.
+    """
     def cells(row):
         return [str(c) for c in row]
     all_rows = [cells(headers)] + [cells(r) for r in rows]
     widths = [max(len(r[i]) for r in all_rows) for i in range(len(headers))]
+
+    if max_width is not None:
+        if wrap_col is None:
+            wrap_col = len(headers) - 1
+        # Row overhead: leading "| " + (N-1) * " | " + trailing " |" = 3*N + 1
+        overhead = 3 * len(headers) + 1
+        non_wrap = sum(widths[i] for i in range(len(headers)) if i != wrap_col)
+        wrap_w = max(4, max_width - overhead - non_wrap)
+        widths[wrap_col] = min(widths[wrap_col], wrap_w)
+        # Expand rows whose wrap-column cell overflows into continuation rows
+        expanded: list[list] = []
+        for row in rows:
+            srow = cells(row)
+            cell = srow[wrap_col]
+            if len(cell) <= widths[wrap_col]:
+                expanded.append(srow)
+                continue
+            lines = _word_wrap(cell, widths[wrap_col])
+            for j, line in enumerate(lines):
+                nr = list(srow)
+                nr[wrap_col] = line
+                if j > 0:
+                    for k in range(len(headers)):
+                        if k != wrap_col:
+                            nr[k] = ""
+                expanded.append(nr)
+        rows = expanded
+
     fmt = lambda r: "| " + " | ".join(c.ljust(widths[i]) for i, c in enumerate(r)) + " |"
     sep = "|" + "|".join("-" * (w + 2) for w in widths) + "|"
     return "\n".join([fmt(cells(headers)), sep] + [fmt(cells(r)) for r in rows])
@@ -259,7 +326,8 @@ def write_report(records: list[dict]) -> None:
         dur = f"{r['duration_s']:.1f}s" if isinstance(r["duration_s"], (int, float)) else ""
         summ = (r["summary"] or "").replace("|", "\\|")
         rows.append([i, r["test"], r["status"].upper(), dur, summ])
-    md.append(_md_table(["#", "Test", "Status", "Duration", "Summary"], rows))
+    md.append(_md_table(["#", "Test", "Status", "Duration", "Summary"], rows,
+                        max_width=140, wrap_col=4))
     md.append("\n")
     # Report images (sanity-check PNGs)
     if REPORT_IMAGES_DIR.is_dir():
@@ -279,6 +347,14 @@ def write_report(records: list[dict]) -> None:
             continue
         md.append(f"### {r['test']}\n\n")
         crows = []
+        # Determine the max metric type for this test so the column header
+        # matches the cell content. A test is "absolute" when any comparison
+        # carries threshold_max_abs; otherwise it is relative (max_abs_rel_pct).
+        # After the consistency sweep each test is uniform, but the check is
+        # "any" so a stray mixed row still picks the absolute header.
+        use_abs = any(c.get("threshold_max_abs") is not None for c in r["comparisons"])
+        max_hdr = "Max (abs)" if use_abs else "Max %"
+        thr_max_hdr = "Threshold Max (abs)" if use_abs else "Threshold Max %"
         for c in r["comparisons"]:
             # When threshold_max_abs is set, pass/fail uses the absolute max;
             # show only the abs value to avoid redundant/confusing rel data.
@@ -292,8 +368,9 @@ def write_report(records: list[dict]) -> None:
                           c.get('weighted_rms_rel_pct', ''), max_val,
                           c.get('threshold_wrms_pct', ''), thr_max,
                           c.get('n_bins', '')])
-        md.append(_md_table(["Comparison", "Status", "Weighted RMS %", "Max",
-                             "Threshold RMS %", "Threshold Max", "Bins"], crows))
+        md.append(_md_table(["Comparison", "Status", "Weighted RMS %", max_hdr,
+                             "Threshold RMS %", thr_max_hdr, "Bins"], crows,
+                            max_width=140, wrap_col=0))
         md.append("\n")
     (OUTPUT_DIR / "report.md").write_text("".join(md))
 

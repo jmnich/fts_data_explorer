@@ -20,10 +20,11 @@ CONFIG = {"refLaserWavelengthUm":1.55,"zeroPadK":2,"apodizationWindow":"Rectangu
 # Region-locked strict comparison: 2050-2250 cm-1 strong-signal shoulder.
 # A-only (test4 declares A). Averaging smooths residuals, so the strong region
 # is even tighter than test1 (observed 0.000288% wrms / 0.000770% max).
+# Max metric is absolute (max_abs), matching the full-window comparison.
 STRONG_REGION = {
     "name": "strong_2050_2250",
     "window": (2050.0, 2250.0),
-    "thresholds_a": {"weighted_rms_rel_pct": 0.005, "max_abs_rel_pct": 0.05},
+    "thresholds_a": {"weighted_rms_rel_pct": 0.005, "max_abs": 1e-6},
 }
 
 def main():

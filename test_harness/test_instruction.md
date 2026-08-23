@@ -183,6 +183,15 @@ Each region emits an additional comparison dict (full-window comparison is
 always returned first). Region comparisons contribute to pass/fail
 independently.
 
+**Metric consistency**: within a single test, the max metric must be uniform
+across the full-window and all region subtests — either all absolute
+(`max_abs` set) or all relative (`max_abs_rel_pct`). Mixing the two makes the
+report's "Max" column ambiguous (some cells bare, some suffixed `%`). Since
+the full window typically needs `max_abs` (relative max blows up at
+noise-floor bins), regions should use `max_abs` too. The report column header
+reflects the choice: "Max (abs)" / "Threshold Max (abs)" or "Max %" /
+"Threshold Max %".
+
 **Threshold hierarchy** (B stricter than A, C strictest):
 
 | Comparison type | Rationale |
