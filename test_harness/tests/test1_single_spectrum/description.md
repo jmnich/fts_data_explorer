@@ -37,3 +37,12 @@ timeout: 1200
 
 ## Dependencies
 - reference_input/wust_mini.h5
+
+## Provenance (golden)
+- Build version: 26.08.0 (dev)
+- Golden file: reference_output/wust_mini.golden.h5
+- Produced by: `fts_data_explorer -w reference_output/wust_mini.golden.h5 "Spectra from selected files" <dir> tests/test1_single_spectrum/config.json`
+- Config sha: see config.json (Rectangular, zeroPadK=2, Hilbert, cm-1)
+- Date: 2026-08-23
+- Golden member: spectra/spec_raw_0 (first-file spectrum, derivative)
+- Policy (D5): C++-produced golden; Python reference is the independent cross-check

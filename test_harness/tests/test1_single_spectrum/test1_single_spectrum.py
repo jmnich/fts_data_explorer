@@ -20,12 +20,13 @@ sys.path.insert(0, str(TESTS_DIR))
 
 from _common.pipeline import process_spectrum
 from _common.compare import compare
-from _common.h5io import strip_derivatives, validate_h5
+from _common.h5io import strip_derivatives, validate_h5, read_golden_member
 from _common.headless import run_binary, load_csv, find_exported_csv
 
 DATASET = "wust_mini"
 OUTPUT_TYPE = "Spectra from selected files"
 EVAL_WINDOW_CM = (1e4 / 30.0, 1e4 / 1.0)  # 333.33 – 10000 cm-1
+GOLDEN_MEMBER = "spectra/spec_raw_0"  # group/member-id of the first-file golden
 
 
 def natural_sort_key(name):
@@ -111,11 +112,40 @@ def main():
     }
     py_x, py_y = process_spectrum(prim, ref, config)
 
-    # 5. Compare (A only) — first-file spectrum
+    # 5. Compare (A)/(B)/(C) — first-file spectrum
     thresholds = {"weighted_rms_rel_pct": 0.1, "max_abs_rel_pct": 19.0}
+
+    # Golden read (if available and integrity guard passed)
+    golden_x, golden_y = None, None
+    golden_path = root / "reference_output" / f"{DATASET}.golden.h5"
+    golden_ok_marker = Path(args.input).parent / "golden_ok"
+    if golden_path.is_file() and golden_ok_marker.is_file():
+        try:
+            group, member_id = GOLDEN_MEMBER.split("/", 1)
+            golden_x, golden_y = read_golden_member(golden_path, group, member_id)
+        except Exception as e:
+            _write_result(workdir, "error", f"golden read failed: {e}")
+            return 2
+    elif golden_path.is_file() and not golden_ok_marker.is_file():
+        # Golden exists but integrity guard failed — skip golden comparisons
+        pass
+
     comparisons = compare(cpp_x, cpp_ys[0], py_x, py_y,
-                          None, None, thresholds,
-                          eval_window=EVAL_WINDOW_CM, declared=["A"])
+                          golden_x, golden_y, thresholds,
+                          eval_window=EVAL_WINDOW_CM)
+
+    # (C) sanity guard: if (C) fails while (A)/(B) pass, classify error not fail
+    if comparisons:
+        c_status = next((c for c in comparisons if c["name"] == "python_vs_golden"), None)
+        ab_pass = all(c["status"] == "pass" for c in comparisons
+                      if c["name"] in ("headless_vs_python", "headless_vs_golden"))
+        if c_status and c_status["status"] != "pass" and ab_pass:
+            for c in comparisons:
+                c["status"] = "error"
+            _write_result(workdir, "error",
+                          "golden/Python inconsistency (C failed, A/B passed)",
+                          comparisons, t0)
+            return 2
 
     # 6. Plot (overlay + residual)
     _save_plot(workdir, py_x, py_y, cpp_x, cpp_ys[0], comparisons[0])

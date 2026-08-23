@@ -289,6 +289,46 @@ def purge_runtime_dirs():
             d.mkdir(parents=True, exist_ok=True)
 
 
+def check_golden_integrity() -> bool:
+    """T6.1: SHA-256 guard for reference_output/*.h5.
+
+    On first run (no .checksums), write the checksums. On subsequent runs, a
+    mismatch → report ERROR and skip golden comparisons. Returns True if the
+    goldens are intact (or just frozen). Writes a marker the tests read.
+    """
+    import hashlib
+    checksums_path = REFERENCE_OUTPUT / ".checksums"
+    current = {}
+    if REFERENCE_OUTPUT.is_dir():
+        for h5 in sorted(REFERENCE_OUTPUT.glob("*.h5")):
+            h = hashlib.sha256()
+            with open(h5, "rb") as f:
+                for chunk in iter(lambda: f.read(65536), b""):
+                    h.update(chunk)
+            current[str(h5.name)] = h.hexdigest()
+
+    if not current:
+        return True  # no goldens present
+
+    if not checksums_path.is_file():
+        # First freeze: write the checksums
+        checksums_path.write_text(json.dumps(current, indent=2))
+        print(f"Golden checksums frozen: {checksums_path}")
+        return True
+
+    # Verify
+    stored = json.loads(checksums_path.read_text())
+    ok = True
+    for name, sha in current.items():
+        if stored.get(name) != sha:
+            print(f"ERROR: golden integrity mismatch — {name} changed", file=sys.stderr)
+            ok = False
+    if ok:
+        # Write a marker so tests know the golden is valid
+        (TEMP_DIR / "golden_ok").write_text("1")
+    return ok
+
+
 def main():
     ap = argparse.ArgumentParser(description="FTS regression harness orchestrator")
     ap.add_argument("--binary", help="path to fts_data_explorer binary")
@@ -319,6 +359,7 @@ def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     TEMP_DIR.mkdir(parents=True, exist_ok=True)
     (TEMP_DIR / "stripped").mkdir(parents=True, exist_ok=True)
+    golden_ok = check_golden_integrity()
 
     if not tests:
         print("No tests discovered.")
