@@ -822,11 +822,6 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                                  apodParams = apodizationParams,
                                  xMethod = static_cast<SpectralToolbox::XCorrectionMethod>(appState->active->xCorrectionMethod),
                                  promThresh = appState->active->peakProminenceThreshold]() {
-                                    thread_local bool fftwInited = false;
-                                    if (!fftwInited) {
-                                        fftw_plan_with_nthreads(1);
-                                        fftwInited = true;
-                                    }
                                     if (axisCorr) {
                                         return SpectralToolbox::processSpectrumFromCorrectedAxis(
                                             primary, opd, K, xUnit, apodWin, apodParams);

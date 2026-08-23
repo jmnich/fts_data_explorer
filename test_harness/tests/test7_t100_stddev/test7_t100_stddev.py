@@ -17,6 +17,16 @@ EVAL = (1e4/30.0, 1e4/1.0)
 CONFIG = {"refLaserWavelengthUm":1.55,"zeroPadK":2,"apodizationWindow":"Rectangular",
           "rectWidth":1.0,"rectAsymMode":True,"xUnit":"cm-1","xCorrectionMethod":"Hilbert"}
 
+# Region-locked strict comparison: 2050-2250 cm-1 strong-signal shoulder.
+# Stddev is noisier than spectra (sample variance across files) but still good
+# in the strong region (observed 0.025822% wrms / 0.066423% max). 0.1% / 0.5%
+# gives ~4x / 7.5x headroom, far stricter than the full-window 1.0% / 100%.
+STRONG_REGION = {
+    "name": "strong_2050_2250",
+    "window": (2050.0, 2250.0),
+    "thresholds_a": {"weighted_rms_rel_pct": 0.1, "max_abs_rel_pct": 0.5},
+}
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root",required=True); ap.add_argument("--binary",required=True)
@@ -56,8 +66,8 @@ def main():
     for tx, ty in zip(trans_xs, trans_curves):
         on_grid.append(np.interp(grid, tx, ty, left=ty[0], right=ty[-1]))
     py_std = stddev_curves(on_grid)
-    thresholds = {"weighted_rms_rel_pct": 1.0, "max_abs_rel_pct": 100.0}
-    comps = compare(cpp_x, cpp_ys[0], grid, py_std, None, None, thresholds, eval_window=EVAL, declared=["A"])
+    thresholds = {"weighted_rms_rel_pct": 1.0, "max_abs_rel_pct": 1.0, "max_abs": 2.0}
+    comps = compare(cpp_x, cpp_ys[0], grid, py_std, None, None, thresholds, eval_window=EVAL, declared=["A"], regions=[STRONG_REGION])
     all_pass = all(c["status"]=="pass" for c in comps)
     status = "pass" if all_pass else "fail"
     summary = f"wrms={comps[0]['weighted_rms_rel_pct']}% max={comps[0]['max_abs_rel_pct']}%"

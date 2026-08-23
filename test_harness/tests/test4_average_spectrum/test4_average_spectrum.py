@@ -17,6 +17,15 @@ EVAL = (1e4/30.0, 1e4/1.0)
 CONFIG = {"refLaserWavelengthUm":1.55,"zeroPadK":2,"apodizationWindow":"Rectangular",
           "rectWidth":1.0,"rectAsymMode":True,"xUnit":"cm-1","xCorrectionMethod":"Hilbert"}
 
+# Region-locked strict comparison: 2050-2250 cm-1 strong-signal shoulder.
+# A-only (test4 declares A). Averaging smooths residuals, so the strong region
+# is even tighter than test1 (observed 0.000288% wrms / 0.000770% max).
+STRONG_REGION = {
+    "name": "strong_2050_2250",
+    "window": (2050.0, 2250.0),
+    "thresholds_a": {"weighted_rms_rel_pct": 0.005, "max_abs_rel_pct": 0.05},
+}
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root",required=True); ap.add_argument("--binary",required=True)
@@ -48,8 +57,8 @@ def main():
         spectra.append((x, y))
     grid = spectra[0][0]
     _, py_avg = mean_spectrum(spectra, grid)
-    thresholds = {"weighted_rms_rel_pct": 0.1, "max_abs_rel_pct": 19.0}
-    comps = compare(cpp_x, cpp_ys[0], grid, py_avg, None, None, thresholds, eval_window=EVAL, declared=["A"])
+    thresholds = {"weighted_rms_rel_pct": 0.1, "max_abs_rel_pct": 1.0, "max_abs": 1e-6}
+    comps = compare(cpp_x, cpp_ys[0], grid, py_avg, None, None, thresholds, eval_window=EVAL, declared=["A"], regions=[STRONG_REGION])
     all_pass = all(c["status"]=="pass" for c in comps)
     status = "pass" if all_pass else "fail"
     summary = f"wrms={comps[0]['weighted_rms_rel_pct']}% max={comps[0]['max_abs_rel_pct']}%"

@@ -29,6 +29,19 @@ OUTPUT_TYPE = "Spectra from selected files"
 EVAL_WINDOW_CM = (1e4 / 30.0, 1e4 / 1.0)  # 333.33 – 10000 cm-1
 GOLDEN_MEMBER = "spectra/spec_raw_0"  # group/member-id of the first-file golden
 
+# Region-locked strict comparison: 2050-2250 cm-1 is the strong-signal shoulder
+# (mean magnitude 87% of peak). Thresholds are aggressive here, relaxed elsewhere.
+# B (headless vs golden) is stricter than A (headless vs Python) because the app
+# must reproduce the same numbers across versions; C (Python vs golden) is the
+# tightest sanity guard (two independent implementations agreeing).
+STRONG_REGION = {
+    "name": "strong_2050_2250",
+    "window": (2050.0, 2250.0),
+    "thresholds_a": {"weighted_rms_rel_pct": 0.005, "max_abs_rel_pct": 0.05},
+    "thresholds_b": {"weighted_rms_rel_pct": 0.002, "max_abs_rel_pct": 0.02},
+    "thresholds_c": {"weighted_rms_rel_pct": 0.0005, "max_abs_rel_pct": 0.005},
+}
+
 
 def natural_sort_key(name):
     parts = re.split(r"(\d+)", name)
@@ -114,7 +127,7 @@ def main():
     py_x, py_y = process_spectrum(prim, ref, config)
 
     # 5. Compare (A)/(B)/(C) — first-file spectrum
-    thresholds = {"weighted_rms_rel_pct": 0.1, "max_abs_rel_pct": 19.0}
+    thresholds = {"weighted_rms_rel_pct": 0.1, "max_abs_rel_pct": 1.0, "max_abs": 1e-6}
 
     # Golden read (if available and integrity guard passed)
     golden_x, golden_y = None, None
@@ -133,20 +146,27 @@ def main():
 
     comparisons = compare(cpp_x, cpp_ys[0], py_x, py_y,
                           golden_x, golden_y, thresholds,
-                          eval_window=EVAL_WINDOW_CM)
+                          eval_window=EVAL_WINDOW_CM,
+                          regions=[STRONG_REGION])
 
-    # (C) sanity guard: if (C) fails while (A)/(B) pass, classify error not fail
+    # (C) sanity guard: if any (C) comparison (full-window or region) fails
+    # while the matching (A)/(B) pass, classify error not fail — the two
+    # independent references disagree, which is a harness/reference defect.
     if comparisons:
-        c_status = next((c for c in comparisons if c["name"] == "python_vs_golden"), None)
-        ab_pass = all(c["status"] == "pass" for c in comparisons
-                      if c["name"] in ("headless_vs_python", "headless_vs_golden"))
-        if c_status and c_status["status"] != "pass" and ab_pass:
-            for c in comparisons:
-                c["status"] = "error"
-            _write_result(workdir, "error",
-                          "golden/Python inconsistency (C failed, A/B passed)",
-                          comparisons, t0)
-            return 2
+        c_comps = [c for c in comparisons if c["name"].startswith("python_vs_golden")]
+        ab_names = {"headless_vs_python", "headless_vs_golden"}
+        for c_comp in c_comps:
+            suffix = c_comp["name"].removeprefix("python_vs_golden")
+            a_name = f"headless_vs_python{suffix}"
+            b_name = f"headless_vs_golden{suffix}"
+            ab = [c for c in comparisons if c["name"] in (a_name, b_name)]
+            if ab and all(c["status"] == "pass" for c in ab) and c_comp["status"] != "pass":
+                for c in comparisons:
+                    c["status"] = "error"
+                _write_result(workdir, "error",
+                              f"golden/Python inconsistency ({c_comp['name']} failed, A/B passed)",
+                              comparisons, t0)
+                return 2
 
     # 6. Plot (overlay + residual)
     _save_plot(workdir, py_x, py_y, cpp_x, cpp_ys[0], comparisons[0])

@@ -45,6 +45,16 @@ relative to the OPD range, abs diff for the primary):
 | Hilbert      | 0.01% (1e-4)            | 1e-6 (float32)    |
 | PeakFinding  | 0.1% (1e-3)             | 1e-6 (float32)    |
 
+## Burst-window plotting
+Interferogram comparison plots use a burst window of 5% of the total length
+centered on `argmax(|primary|)` (the burst is at 50% of the data, idx ~9773 of
+19533). Residual is absolute difference `(candidate - reference)` in signal
+units (V for primary, um for the OPD axis) — interferograms cross zero, so
+relative error is meaningless near the wings. One figure per method
+(`test2_interferogram_x_correction_compare_hilbert.png`,
+`test2_interferogram_x_correction_compare_peakfinding.png`), each with three
+panels: primary overlay, primary residual (V), OPD axis residual (um).
+
 ## Timeout
 timeout: 1200
 

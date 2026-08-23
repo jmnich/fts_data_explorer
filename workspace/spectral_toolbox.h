@@ -29,8 +29,9 @@ struct FftwComplexGuard {
 };
 
 /// RAII wrapper over fftw_plan_dft_1d/fftw_destroy_plan. Takes fftwPlanMutex
-/// during construction (planning) and releases it immediately after; the
-/// destructor only calls fftw_destroy_plan (no mutex — execution is lock-free).
+/// during both construction (planning) and destruction (plan teardown) —
+/// fftw_destroy_plan mutates the global planner and is not thread-safe
+/// against concurrent fftw_plan_dft_1d calls from other workers.
 struct FftwPlanGuard {
     fftw_plan plan = nullptr;
     /// Plans a complex-to-complex 1D FFT. The mutex is held only for the
@@ -41,11 +42,32 @@ struct FftwPlanGuard {
         plan = fftw_plan_dft_1d(n, in, out, sign, flags);
         pthread_mutex_unlock(&fftwPlanMutex);
     }
-    ~FftwPlanGuard() { if (plan) fftw_destroy_plan(plan); }
+    /// Destroys the plan under the mutex — fftw_destroy_plan mutates the
+    /// shared global planner and races with concurrent plan creation.
+    ~FftwPlanGuard() {
+        if (plan) {
+            extern pthread_mutex_t fftwPlanMutex;
+            pthread_mutex_lock(&fftwPlanMutex);
+            fftw_destroy_plan(plan);
+            pthread_mutex_unlock(&fftwPlanMutex);
+        }
+    }
     FftwPlanGuard(const FftwPlanGuard&) = delete;
     FftwPlanGuard& operator=(const FftwPlanGuard&) = delete;
     FftwPlanGuard(FftwPlanGuard&& o) noexcept : plan(o.plan) { o.plan = nullptr; }
-    FftwPlanGuard& operator=(FftwPlanGuard&& o) noexcept { if (this != &o) { if (plan) fftw_destroy_plan(plan); plan = o.plan; o.plan = nullptr; } return *this; }
+    FftwPlanGuard& operator=(FftwPlanGuard&& o) noexcept {
+        if (this != &o) {
+            if (plan) {
+                extern pthread_mutex_t fftwPlanMutex;
+                pthread_mutex_lock(&fftwPlanMutex);
+                fftw_destroy_plan(plan);
+                pthread_mutex_unlock(&fftwPlanMutex);
+            }
+            plan = o.plan;
+            o.plan = nullptr;
+        }
+        return *this;
+    }
     operator fftw_plan() const { return plan; }
 };
 

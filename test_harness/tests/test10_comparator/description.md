@@ -17,7 +17,10 @@ Python reference computes avg(ceramicLPF)/avg(ref1) independently.
 - [x] A: headless vs Python reference
 ## Tolerance
 weighted_rms_rel_pct: 1.0
-max_abs_rel_pct: 100.0
+max_abs_rel_pct: 1.0
+
+Rationale: the comparator ratio (avg(sample)/avg(reference)) has observed
+max 0.23% relative — well within 1%, so the relative max is retained.
 ## Timeout
 timeout: 1200
 ## Dependencies

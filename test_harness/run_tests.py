@@ -280,12 +280,20 @@ def write_report(records: list[dict]) -> None:
         md.append(f"### {r['test']}\n\n")
         crows = []
         for c in r["comparisons"]:
+            # When threshold_max_abs is set, pass/fail uses the absolute max;
+            # show only the abs value to avoid redundant/confusing rel data.
+            if c.get("threshold_max_abs") is not None:
+                max_val = c.get("max_abs", "")
+                thr_max = c.get("threshold_max_abs", "")
+            else:
+                max_val = f"{c.get('max_abs_rel_pct', '')}%" if c.get("max_abs_rel_pct") is not None else ""
+                thr_max = f"{c.get('threshold_max_pct', '')}%" if c.get("threshold_max_pct") is not None else ""
             crows.append([c.get('name', ''), c.get('status', '').upper(),
-                          c.get('weighted_rms_rel_pct', ''), c.get('max_abs_rel_pct', ''),
-                          c.get('threshold_wrms_pct', ''), c.get('threshold_max_pct', ''),
+                          c.get('weighted_rms_rel_pct', ''), max_val,
+                          c.get('threshold_wrms_pct', ''), thr_max,
                           c.get('n_bins', '')])
-        md.append(_md_table(["Comparison", "Status", "Weighted RMS %", "Max |rel| %",
-                             "Threshold RMS %", "Threshold Max %", "Bins"], crows))
+        md.append(_md_table(["Comparison", "Status", "Weighted RMS %", "Max",
+                             "Threshold RMS %", "Threshold Max", "Bins"], crows))
         md.append("\n")
     (OUTPUT_DIR / "report.md").write_text("".join(md))
 

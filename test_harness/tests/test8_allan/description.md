@@ -18,12 +18,24 @@ compared exactly.
 - [x] axis: taus/wavelengths exact match
 ## Tolerance
 weighted_rms_rel_pct: 10.0
-max_abs_rel_pct: 250.0
+max_abs_rel_pct: 1.0 (cap; not used for pass/fail)
+max_abs: 10% of peak Allan variance (absolute, drives pass/fail)
+
+Rationale: Allan variance spans many orders of magnitude, so the relative
+max blows up at small-variance bins (observed 249.7% relative, 7.26
+absolute vs peak 3665). The absolute max (10% of peak) is the correct
+pass/fail metric.
 
 ## Calibration
 Observed: weighted_rms_rel_pct = 0.23%, max_abs_rel_pct = 249.7% (at a
 long-tau noisy bin). The weighted RMS is excellent; the max is driven by
 a single noisy long-tau bin where Allan variance has few clusters.
+
+## Report image
+The Allan surface comparison plot has three subplots: C++ surface, Python
+surface, and a residual ratio surface `(cpp - py) / cpp * 100` (clamped to
+±200% for readability, diverging colormap). The numeric metric in
+result.json remains authoritative.
 ## Timeout
 timeout: 1200
 ## Dependencies

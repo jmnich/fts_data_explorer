@@ -10,7 +10,7 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
-from _common.pipeline import process_spectrum, mean_spectrum, common_grid, transmittance
+from _common.pipeline import process_spectrum, mean_spectrum, common_grid, snr_spectrum, transmittance
 from _common.compare import compare
 from _common.test_helpers import read_raw_ifg, list_members, write_result, strip_and_validate
 from _common.headless import run_binary, load_csv
@@ -84,14 +84,23 @@ def main():
     py_t = py_t_pct / 100.0  # convert percent → fraction
     py_a = np.where(py_t > 1e-15, -np.log10(np.maximum(py_t, 1e-15)), 0.0)
 
-    # Tolerance is loose: transmittance/absorbance relative error is unstable at
-    # T≈1 (no absorption, -log10→0) and T≈0 (full absorption, -log10→inf).
-    # The weighted RMS is dominated by these unstable bins.
-    thresholds_t = {"weighted_rms_rel_pct": 35.0, "max_abs_rel_pct": 10000.0}
-    thresholds_a = {"weighted_rms_rel_pct": 110.0, "max_abs_rel_pct": 100000.0}
-    comps = compare(cpp_tx, cpp_ty, py_tx, py_t, None, None, thresholds_t, eval_window=EVAL, declared=["A"])
+    # SNR spectrum for the hard mask: only evaluate bins where the signal is
+    # strong. Transmittance uses SNR>=30; absorbance uses SNR>=70 because
+    # -log10(T) is unstable at T≈1 (no absorption) even in high-SNR bins.
+    _, snr_y = snr_spectrum(spectra, grid)
+    snr_ref = (grid, snr_y)
+
+    # Tolerance is now much tighter because the SNR mask excludes the unstable
+    # noise-floor / T≈0 / T≈1 bins that dominated the old full-window residual.
+    thresholds_t = {"weighted_rms_rel_pct": 0.5, "max_abs_rel_pct": 1.0, "max_abs": 0.05}
+    thresholds_a = {"weighted_rms_rel_pct": 50.0, "max_abs_rel_pct": 1.0, "max_abs": 0.01}
+    comps = compare(cpp_tx, cpp_ty, py_tx, py_t, None, None, thresholds_t,
+                    eval_window=EVAL, snr_ref=snr_ref, declared=["A"],
+                    snr_mask_threshold=30.0)
     comps[0]["name"] = "transmittance"
-    comps_a = compare(cpp_ax, cpp_ay, py_tx, py_a, None, None, thresholds_a, eval_window=EVAL, declared=["A"])
+    comps_a = compare(cpp_ax, cpp_ay, py_tx, py_a, None, None, thresholds_a,
+                     eval_window=EVAL, snr_ref=snr_ref, declared=["A"],
+                     snr_mask_threshold=70.0)
     comps_a[0]["name"] = "absorbance"
     comparisons = comps + comps_a
     all_pass = all(c["status"]=="pass" for c in comparisons)

@@ -17,6 +17,16 @@ EVAL = (1e4/30.0, 1e4/1.0)
 CONFIG = {"refLaserWavelengthUm":1.55,"zeroPadK":2,"apodizationWindow":"Rectangular",
           "rectWidth":1.0,"rectAsymMode":True,"xUnit":"cm-1","xCorrectionMethod":"Hilbert"}
 
+# Region-locked strict comparison: 2050-2250 cm-1 strong-signal shoulder.
+# SNR is a ratio (mean/std), so even in the strong region the residual is ~0.5%
+# (observed 0.501616% wrms / 0.566423% max). 1.0% / 2.0% gives ~2x headroom and
+# is still far stricter than the full-window 1.0% / 50%.
+STRONG_REGION = {
+    "name": "strong_2050_2250",
+    "window": (2050.0, 2250.0),
+    "thresholds_a": {"weighted_rms_rel_pct": 1.0, "max_abs_rel_pct": 1.0, "max_abs": 2.0},
+}
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root",required=True); ap.add_argument("--binary",required=True)
@@ -49,9 +59,10 @@ def main():
     _, py_snr = snr_spectrum(spectra, grid)
     # SNR-weighted: use the SNR curve itself as quality signal, on the same
     # grid as the comparison's reference (compare() resamples it internally).
-    thresholds = {"weighted_rms_rel_pct": 1.0, "max_abs_rel_pct": 50.0}
+    thresholds = {"weighted_rms_rel_pct": 1.0, "max_abs_rel_pct": 1.0, "max_abs": 5.0}
     comps = compare(cpp_x, cpp_ys[0], grid, py_snr, None, None, thresholds,
-                    eval_window=EVAL, snr_ref=(grid, py_snr), declared=["A"])
+                    eval_window=EVAL, snr_ref=(grid, py_snr), declared=["A"],
+                    regions=[STRONG_REGION])
     all_pass = all(c["status"]=="pass" for c in comps)
     status = "pass" if all_pass else "fail"
     summary = f"wrms={comps[0]['weighted_rms_rel_pct']}% max={comps[0]['max_abs_rel_pct']}% n_w={comps[0]['n_weighted_bins']}"

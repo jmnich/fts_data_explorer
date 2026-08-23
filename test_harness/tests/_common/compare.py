@@ -66,10 +66,10 @@ def relative_error(candidate: np.ndarray, reference: np.ndarray,
 def residual_metrics(candidate: np.ndarray, reference: np.ndarray,
                      weights: np.ndarray | None = None,
                      eps: float = EPSILON) -> dict:
-    """Compute weighted/unweighted RMS and max relative error (§9.1).
+    """Compute weighted/unweighted RMS and max relative + absolute error (§9.1).
 
     Returns: weighted_rms_rel_pct, unweighted_rms_rel_pct, max_abs_rel_pct,
-    n_bins, n_weighted_bins.
+    max_abs (absolute |c-r|), n_bins, n_weighted_bins.
     """
     rel = relative_error(candidate, reference, eps)
     abs_rel = np.abs(rel)
@@ -79,10 +79,12 @@ def residual_metrics(candidate: np.ndarray, reference: np.ndarray,
     # Unweighted (over valid bins only)
     if n_bins > 0:
         unweighted_rms = float(np.sqrt(np.mean(rel[valid] ** 2))) * 100.0
-        max_abs = float(np.max(abs_rel[valid])) * 100.0
+        max_abs_rel = float(np.max(abs_rel[valid])) * 100.0
+        max_abs_err = float(np.max(np.abs(candidate[valid] - reference[valid])))
     else:
         unweighted_rms = 0.0
-        max_abs = 0.0
+        max_abs_rel = 0.0
+        max_abs_err = 0.0
 
     # Weighted
     if weights is not None and n_bins > 0:
@@ -102,7 +104,8 @@ def residual_metrics(candidate: np.ndarray, reference: np.ndarray,
     return {
         "weighted_rms_rel_pct": round(weighted_rms, 6),
         "unweighted_rms_rel_pct": round(unweighted_rms, 6),
-        "max_abs_rel_pct": round(max_abs, 6),
+        "max_abs_rel_pct": round(max_abs_rel, 6),
+        "max_abs": round(max_abs_err, 9),
         "n_bins": n_bins,
         "n_weighted_bins": n_weighted,
     }
@@ -126,11 +129,58 @@ def common_grid_resample(x: np.ndarray, y: np.ndarray,
 def _one_comparison(name: str, cand_x: np.ndarray, cand_y: np.ndarray,
                     ref_x: np.ndarray, ref_y: np.ndarray,
                     thresholds: dict, eval_window: tuple[float, float] | None = None,
-                    snr_ref: tuple[np.ndarray, np.ndarray] | None = None) -> dict:
+                    snr_ref: tuple[np.ndarray, np.ndarray] | None = None,
+                    regions: list[dict] | None = None,
+                    snr_mask_threshold: float | None = None) -> list[dict]:
     """Run one (A)/(B)/(C) comparison on a common grid.
 
     snr_ref: optional (snr_x, snr_y) SNR curve; resampled onto the same eval
     grid as the curves so the SNR weighting engages (per §9.3).
+    regions: optional list of ``{name, window, thresholds}`` dicts. Each region
+    produces an additional comparison dict with name ``<name>__<region_name>``
+    and its own thresholds, evaluated on the region window. The full-window
+    comparison is always returned first. Returns a list of comparison dicts
+    (length 1 when regions is None/empty).
+    snr_mask_threshold: when set with snr_ref, bins where the resampled SNR is
+    below the threshold are excluded entirely (hard mask, not downweighting).
+    """
+    full = _compute_comparison(name, cand_x, cand_y, ref_x, ref_y,
+                               thresholds, eval_window, snr_ref, snr_mask_threshold)
+    results = [full]
+    if not regions:
+        return results
+    # Map comparison name to per-type threshold key (a/b/c)
+    type_key = {"headless_vs_python": "a",
+                "headless_vs_golden": "b",
+                "python_vs_golden": "c"}.get(name)
+    for region in regions:
+        r_name = region.get("name", "")
+        r_window = region.get("window")
+        if r_window is None:
+            continue
+        # Per-type thresholds override region defaults override global defaults
+        r_thr = thresholds
+        if "thresholds" in region:
+            r_thr = region["thresholds"]
+        if type_key and f"thresholds_{type_key}" in region:
+            r_thr = region[f"thresholds_{type_key}"]
+        suffix = f"__{r_name}" if r_name else ""
+        results.append(_compute_comparison(
+            f"{name}{suffix}", cand_x, cand_y, ref_x, ref_y,
+            r_thr, r_window, snr_ref, snr_mask_threshold))
+    return results
+
+
+def _compute_comparison(name: str, cand_x: np.ndarray, cand_y: np.ndarray,
+                         ref_x: np.ndarray, ref_y: np.ndarray,
+                         thresholds: dict, eval_window: tuple[float, float] | None = None,
+                         snr_ref: tuple[np.ndarray, np.ndarray] | None = None,
+                         snr_mask_threshold: float | None = None) -> dict:
+    """Compute one comparison on a common grid restricted to eval_window.
+
+    When ``snr_ref`` and ``snr_mask_threshold`` are both provided, bins where
+    the resampled SNR is below the threshold are excluded entirely (hard mask,
+    not downweighting) — the residual is computed only over strong-signal bins.
     """
     # Build evaluation grid: union of X ranges, intersected with eval_window
     xmin = max(min(cand_x[0], cand_x[-1]), min(ref_x[0], ref_x[-1]))
@@ -159,6 +209,17 @@ def _one_comparison(name: str, cand_x: np.ndarray, cand_y: np.ndarray,
     if snr_ref is not None:
         snr_x, snr_y = snr_ref
         _, snr_on = common_grid_resample(snr_x, snr_y, grid)
+        # Hard SNR mask: exclude bins below threshold entirely
+        if snr_mask_threshold is not None:
+            keep = snr_on >= snr_mask_threshold
+            if not np.any(keep):
+                return {"name": name, "status": "error",
+                        "summary": f"no bins with SNR >= {snr_mask_threshold}",
+                        "n_bins": 0, "n_weighted_bins": 0}
+            grid = grid[keep]
+            cand_on = cand_on[keep]
+            ref_on = ref_on[keep]
+            snr_on = snr_on[keep]
         weights = snr_weights(ref_on, snr_on)
     else:
         weights = snr_weights(ref_on)
@@ -169,17 +230,27 @@ def _one_comparison(name: str, cand_x: np.ndarray, cand_y: np.ndarray,
                 "n_bins": 0, "n_weighted_bins": 0}
     thr_wrms = thresholds.get("weighted_rms_rel_pct", 0.5)
     thr_max = thresholds.get("max_abs_rel_pct", 5.0)
-    status = "pass" if (m["weighted_rms_rel_pct"] <= thr_wrms
-                       and m["max_abs_rel_pct"] <= thr_max) else "fail"
-    return {
+    thr_max_abs = thresholds.get("max_abs", None)
+    # When threshold_max_abs is set, use the absolute max for pass/fail instead
+    # of the relative max (which blows up at noise-floor bins where ref≈0).
+    if thr_max_abs is not None:
+        max_ok = m["max_abs"] <= thr_max_abs
+    else:
+        max_ok = m["max_abs_rel_pct"] <= thr_max
+    status = "pass" if (m["weighted_rms_rel_pct"] <= thr_wrms and max_ok) else "fail"
+    result = {
         "name": name, "status": status,
         "weighted_rms_rel_pct": m["weighted_rms_rel_pct"],
         "unweighted_rms_rel_pct": m["unweighted_rms_rel_pct"],
         "max_abs_rel_pct": m["max_abs_rel_pct"],
+        "max_abs": m["max_abs"],
         "threshold_wrms_pct": thr_wrms,
         "threshold_max_pct": thr_max,
         "n_bins": m["n_bins"], "n_weighted_bins": m["n_weighted_bins"],
     }
+    if thr_max_abs is not None:
+        result["threshold_max_abs"] = thr_max_abs
+    return result
 
 
 def compare(headless_x: np.ndarray, headless_y: np.ndarray,
@@ -188,26 +259,34 @@ def compare(headless_x: np.ndarray, headless_y: np.ndarray,
              thresholds: dict,
              eval_window: tuple[float, float] | None = None,
              snr_ref: tuple[np.ndarray, np.ndarray] | None = None,
-             declared: list[str] | None = None) -> list[dict]:
+             declared: list[str] | None = None,
+             regions: list[dict] | None = None,
+             snr_mask_threshold: float | None = None) -> list[dict]:
     """Run the three-way comparison (A)/(B)/(C) per §3 of the overview.
 
     declared: subset of ["A","B","C"] to run; default = all available.
     snr_ref: optional (snr_x, snr_y) SNR curve used as the quality signal for
     weighting (§9.3); resampled onto each comparison's eval grid.
+    regions: optional list of ``{name, window, thresholds}`` dicts. When given,
+    each (A)/(B)/(C) comparison emits the full-window result plus one per
+    region (name suffixed ``__<region_name>``), each with its own thresholds.
+    snr_mask_threshold: when set with snr_ref, bins where the resampled SNR is
+    below the threshold are excluded entirely (hard mask, not downweighting) —
+    use to restrict transmittance/absorbance comparisons to strong-signal bins.
     Returns a list of comparison dicts.
     """
     results = []
     run = declared or ["A", "B", "C"]
     if "A" in run and python_x is not None and python_x.size > 0:
-        results.append(_one_comparison("headless_vs_python",
+        results.extend(_one_comparison("headless_vs_python",
                          headless_x, headless_y, python_x, python_y,
-                         thresholds, eval_window, snr_ref))
+                         thresholds, eval_window, snr_ref, regions, snr_mask_threshold))
     if "B" in run and golden_x is not None and golden_x.size > 0:
-        results.append(_one_comparison("headless_vs_golden",
+        results.extend(_one_comparison("headless_vs_golden",
                          headless_x, headless_y, golden_x, golden_y,
-                         thresholds, eval_window, snr_ref))
+                         thresholds, eval_window, snr_ref, regions, snr_mask_threshold))
     if "C" in run and golden_x is not None and golden_x.size > 0:
-        results.append(_one_comparison("python_vs_golden",
+        results.extend(_one_comparison("python_vs_golden",
                          python_x, python_y, golden_x, golden_y,
-                         thresholds, eval_window, snr_ref))
+                         thresholds, eval_window, snr_ref, regions, snr_mask_threshold))
     return results

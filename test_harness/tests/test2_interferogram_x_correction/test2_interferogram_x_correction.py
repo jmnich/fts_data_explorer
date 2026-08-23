@@ -15,7 +15,7 @@ sys.path.insert(0, str(TESTS_DIR))
 from _common.pipeline import hilbert_x_axis, x_axis_from_peaks
 from _common.h5io import strip_derivatives, validate_h5
 from _common.headless import run_binary, load_csv
-from _common.report_images import save_multi_overlay
+from _common.report_images import save_ifg_burst_residual
 
 DATASET = "wust_mini"
 OUTPUT_TYPE = "Corrected interferograms from selected files"
@@ -100,7 +100,7 @@ def main():
 
     comparisons = []
     all_pass = True
-    plot_panels = []
+    plot_data = []  # (method, cpp_opd, cpp_prim, py_opd, prim, status, rel_diff)
     # OPD range for relative threshold (max OPD ~ laser/2 * n_fringes)
     opd_range = float(np.max(np.abs(hilbert_x_axis(ref, 1.55) * 2.0))) if ref.size else 1.0
     for method, cfg in [("hilbert", "config_hilbert.json"), ("peakfinding", "config_peakfinding.json")]:
@@ -131,19 +131,21 @@ def main():
         if status != "pass":
             all_pass = False
         if cpp_opd is not None and py_opd is not None:
-            n = min(len(cpp_opd), len(py_opd))
-            plot_panels.append({
-                "name": f"OPD axis ({method})",
-                "cand_x": cpp_opd[:n], "cand_y": cpp_prim[:n],
-                "ref_x": py_opd[:n], "ref_y": prim[:n],
-                "log_y": False, "y_label": "Primary [V]",
-                "status": status,
-                "metrics": {"weighted_rms_rel_pct": round(rel_diff * 100, 6)},
-            })
-    if plot_panels:
-        save_multi_overlay("test2_interferogram_x_correction", root, plot_panels,
-                           x_label="OPD [um]",
-                           title="test2 corrected IFG (OPD axis: C++ vs Python)")
+            plot_data.append((method, cpp_opd, cpp_prim, py_opd, prim, status, rel_diff))
+    # Burst-window residual plots: one per method, 5% of length around the burst.
+    # Absolute-difference residual (interferograms cross zero, relative is meaningless).
+    for method, cpp_opd, cpp_prim, py_opd, prim_, st, rd in plot_data:
+        n = min(len(cpp_opd), len(py_opd), len(prim_))
+        save_ifg_burst_residual(
+            "test2_interferogram_x_correction", root,
+            cpp_opd[:n], cpp_prim[:n], py_opd[:n], prim_[:n],
+            burst_frac=0.05,
+            ref_axis_x=py_opd[:n], cand_axis_x=cpp_opd[:n],
+            suffix=f"compare_{method}",
+            title=f"test2 corrected IFG ({method})",
+            y_label="Primary [V]", x_label="OPD [um]",
+            status=st,
+            metrics={"opd_rel_diff_pct": round(rd * 100, 6)})
 
     status = "pass" if all_pass else "fail"
     summary = "; ".join(f"{c['name']}={c['status']}" for c in comparisons)

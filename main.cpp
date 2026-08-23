@@ -35,6 +35,17 @@
 #include "ui/window.h"
 #include "ui/app_loop.h"
 #include "panels/panels.h"
+
+// FFTW is built with ENABLE_THREADS ON and links fftw3_threads. Calling
+// fftw_init_threads() at startup registers threaded solver hooks in the
+// global planner; without it, concurrent fftw_plan_with_nthreads calls from
+// worker threads race on the planner's non-atomic init flag. Centralizing
+// both calls here (before any worker starts) eliminates that race.
+// fftw_plan_with_nthreads(1) forces single-threaded FFT — the app parallelizes
+// via its own ThreadPool, not FFTW's internal threads.
+// DO NOT REMOVE: these must run before any fftw_plan_dft_1d call.
+// Both functions are declared in fftw3.h (included via spectral_toolbox.h).
+
 #if FTS_BUILD_HDF5
 #include "workspace_reader.h"
 #include "hdf/h5_store.h"
@@ -567,6 +578,11 @@ void dispatchPendingAction(AppState& s) {
 #endif // FTS_BUILD_HDF5
 
 int main(int argc, char* argv[]) {
+    // Initialize FFTW threading support before any FFTW plan creation.
+    // See the comment above the fftw3.h include for why this is required.
+    fftw_init_threads();
+    fftw_plan_with_nthreads(1);
+
     // Parse headless mode flags before any GUI initialization
     HeadlessConfig headlessCfg;
     if (parseHeadlessArgs(argc, argv, headlessCfg)) return 1;

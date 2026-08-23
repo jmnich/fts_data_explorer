@@ -150,6 +150,63 @@ weighted RMS drives PASS/FAIL.
 | headless vs golden `.h5` | ≤ 0.5 % | ≤ 5 % |
 | Python reference vs golden (sanity) | ≤ 0.5 % | ≤ 5 % |
 
+**Max threshold cap**: `max_abs_rel_pct` must be ≤ 1% in every comparison.
+When the observed relative max exceeds 1% (noise-floor bins where the
+reference is near zero, ratio metrics like SNR, or -log10 transforms like
+absorbance), the test must set `max_abs` (an absolute `|c-r|` threshold) in
+the thresholds dict. When `max_abs` is set, it drives pass/fail instead of
+the relative max; the relative max is still reported for transparency but
+capped at 1% in the threshold field. This keeps the "maximum allowed error"
+at or below 1% everywhere while correctly handling metrics where relative
+error is mathematically unstable.
+
+### Region-locked strict comparisons
+
+A test may declare one or more **regions** — signal-strong sub-windows
+evaluated with much tighter, per-comparison-type thresholds, independent of
+the full-window comparison. This catches regressions in the bands that matter
+most while keeping the full-window thresholds loose enough to absorb
+noise-floor bins.
+
+**Contract** (`compare(regions=[...])`): each region is a dict with:
+
+| Key | Meaning |
+|-----|---------|
+| `name` | region suffix, appended to the comparison name as `__<name>` |
+| `window` | `(lo, hi)` eval window for the region |
+| `thresholds` | default region thresholds (applies to A, B, C) |
+| `thresholds_a` | overrides `thresholds` for A (headless vs Python) |
+| `thresholds_b` | overrides `thresholds` for B (headless vs golden) |
+| `thresholds_c` | overrides `thresholds` for C (Python vs golden) |
+
+Each region emits an additional comparison dict (full-window comparison is
+always returned first). Region comparisons contribute to pass/fail
+independently.
+
+**Threshold hierarchy** (B stricter than A, C strictest):
+
+| Comparison type | Rationale |
+|-----------------|-----------|
+| A (headless vs Python) | Different FFT engines (FFTW vs scipy); most headroom |
+| B (headless vs golden) | Same engine, different builds; the app must reproduce the same numbers across versions — strict |
+| C (Python vs golden) | Two independent implementations agreeing is the sanity guard — tightest |
+
+**Calibration convention**: set thresholds from observed residuals with
+documented headroom. Aggressive (1.5–4x) in strong-signal regions where the
+app must be bit-stable; relaxed elsewhere. Record observed values and
+headroom in each test's `description.md`.
+
+### SNR-masked evaluation (transmittance/absorbance)
+
+Transmittance and absorbance comparisons use a **hard SNR mask**
+(`snr_mask_threshold` parameter to `compare()`): bins where the resampled
+SNR is below the threshold are excluded entirely (not downweighted). This
+restricts the comparison to strong-signal bins where the relative error is
+meaningful, avoiding the T≈0 / T≈1 instability that dominates full-window
+residuals. The SNR curve is passed via `snr_ref` (same as the weighting path)
+and the threshold is per-test (e.g. 30 for transmittance, 70 for absorbance
+where -log10 amplifies small differences).
+
 ## 6. Reference-Python standard
 
 The independent reimplementation in `tests/_common/pipeline.py`:
@@ -243,8 +300,9 @@ curves are empty. They must never raise into the test path.
 | Helper | Layout | Use for |
 |--------|--------|---------|
 | `save_overlay_residual` | 2 panels: overlay (log-Y by default) + residual % | single-curve tests (1, 4, 5, 6, 7, 9, 10) |
-| `save_multi_overlay` | N panels, one overlay per variant | matrix tests (2, 3) |
-| `save_allan_surface` | side-by-side log-color surfaces | Allan 3D (8) |
+| `save_multi_overlay` | N panels, one overlay + residual strip per variant | matrix tests (2, 3) |
+| `save_ifg_burst_residual` | 2-3 panels: burst-window overlay + abs residual (+ axis residual) | interferogram tests (2) |
+| `save_allan_surface` | 3 panels: C++ surface + Python surface + ratio surface | Allan 3D (8) |
 
 The residual panel uses the same convention as the canonical metric:
 `(candidate - reference) / reference * 100`, clamped to ±5% for readability.
@@ -259,3 +317,28 @@ The residual panel uses the same convention as the canonical metric:
 - A test that cannot produce a meaningful plot (e.g. an axis-only check) may
   skip the image — this is a "whenever practical" expectation, not a hard
   requirement.
+
+### Residual panel convention
+
+**All comparison plots must include a residual panel.** The residual is the
+visual counterpart of the canonical metric in `compare.py`:
+
+| Plot type | Residual | Units |
+|-----------|----------|-------|
+| Spectrum (single or matrix) | `(candidate - reference) / reference * 100` | relative %, clamped to ±5% |
+| Interferogram | `(candidate - reference)` | absolute, signal units (V, um) |
+| Allan surface | `(cpp - py) / cpp * 100` | relative %, clamped to ±200%, diverging colormap |
+
+Interferograms cross zero, so relative error is meaningless near the wings —
+absolute difference is the correct residual. Spectrum residuals use relative
+percent to match the pass/fail metric.
+
+### Burst-window plotting (interferograms)
+
+Interferogram comparison plots show only a **burst window** — a configurable
+fraction of the total length centered on `argmax(|candidate_y|)`. Default
+`burst_frac=0.05` (5% of length); per-test configurable, documented in the
+test's `description.md`. Rationale: the burst contains all the signal; the
+wings are noise and dominate the plot if shown in full. The `save_ifg_burst_residual`
+helper renders three panels when an axis comparison is provided: primary
+overlay, primary residual (absolute), axis residual (absolute).

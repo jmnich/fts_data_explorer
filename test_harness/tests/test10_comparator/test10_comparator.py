@@ -98,7 +98,7 @@ def main():
                               left=avg_sample[si][0], right=avg_sample[si][-1])
     py_ratio = np.where(np.abs(avg_ref) > 1e-15, sample_on_ref / avg_ref, 0.0)
 
-    thresholds = {"weighted_rms_rel_pct": 1.0, "max_abs_rel_pct": 100.0}
+    thresholds = {"weighted_rms_rel_pct": 1.0, "max_abs_rel_pct": 1.0}
     comps = compare(cpp_x, cpp_y, ref_x, py_ratio, None, None, thresholds, eval_window=EVAL, declared=["A"])
     all_pass = all(c["status"]=="pass" for c in comps)
     status = "pass" if all_pass else "fail"

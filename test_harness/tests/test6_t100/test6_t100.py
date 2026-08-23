@@ -47,7 +47,7 @@ def main():
     ref_x, ref_y = process_spectrum(prim0, ref0, CONFIG)
     # First file transmittance against itself
     py_x, py_y = transmittance(ref_x, ref_y, ref_x, ref_y)
-    thresholds = {"weighted_rms_rel_pct": 0.5, "max_abs_rel_pct": 100.0}
+    thresholds = {"weighted_rms_rel_pct": 0.5, "max_abs_rel_pct": 1.0, "max_abs": 1.0}
     comps = compare(cpp_x, cpp_ys[0], py_x, py_y, None, None, thresholds, eval_window=EVAL, declared=["A"])
     all_pass = all(c["status"]=="pass" for c in comps)
     status = "pass" if all_pass else "fail"
