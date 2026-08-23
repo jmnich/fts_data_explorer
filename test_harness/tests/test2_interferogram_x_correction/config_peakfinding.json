@@ -1,0 +1,9 @@
+{
+  "spectrum": {
+    "refLaserWavelengthUm": {"value": 1.550},
+    "xCorrectionMethod": {"value": "PeakFinding"},
+    "peakProminence": {"value": 0.02},
+    "xUnit": {"value": "cm-1"}
+  },
+  "processing": { "workerThreads": {"value": -1} }
+}

@@ -1,0 +1,8 @@
+{
+  "spectrum": {
+    "refLaserWavelengthUm": {"value": 1.550},
+    "xCorrectionMethod": {"value": "Hilbert"},
+    "xUnit": {"value": "cm-1"}
+  },
+  "processing": { "workerThreads": {"value": -1} }
+}

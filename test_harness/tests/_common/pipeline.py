@@ -63,9 +63,11 @@ def x_axis_from_peaks(ref_signal: np.ndarray, laser_um: float,
                       prominence: float = 0.02) -> np.ndarray:
     """Corrected X axis in um — mirrors SpectralToolbox::xAxisFromPeaks.
 
-    Finds fringe peaks (maxima) via scipy.signal.find_peaks with a prominence
-    threshold (fraction of max), assigns each anchor k an OPD of k*lambda/4,
-    and linearly interpolates between anchors. Returns empty if < 2 anchors.
+    Finds BOTH maxima and minima (peaks in the signal and the negated signal)
+    via scipy.signal.find_peaks with a prominence threshold (fraction of max),
+    merges and sorts them, assigns each anchor k an OPD of k*lambda/4, and
+    linearly interpolates between anchors. Clamps before first / after last
+    anchor. Returns empty if < 2 anchors.
     """
     n = len(ref_signal)
     sig = ref_signal - np.mean(ref_signal)
@@ -73,12 +75,26 @@ def x_axis_from_peaks(ref_signal: np.ndarray, laser_um: float,
     if max_val <= 0.0:
         return np.array([])
     prom = prominence * max_val
-    peaks, _ = find_peaks(sig, prominence=prom)
-    if len(peaks) < 2:
+    maxima, _ = find_peaks(sig, prominence=prom)
+    minima, _ = find_peaks(-sig, prominence=prom)
+    anchors = np.sort(np.concatenate([maxima, minima]))
+    if len(anchors) < 2:
         return np.array([])
-    # OPD at each anchor: k * lambda/4 (mirror displacement)
-    opd_anchors = np.arange(len(peaks)) * (laser_um / 4.0)
-    opd = np.interp(np.arange(n), peaks, opd_anchors)
+    # Each anchor (max or min) advances OPD by lambda/4
+    opd = np.zeros(n)
+    for k, a in enumerate(anchors):
+        opd[a] = k * (laser_um / 4.0)
+    # Linear interpolation between anchors
+    for k in range(len(anchors) - 1):
+        a0, a1 = anchors[k], anchors[k + 1]
+        y0, y1 = opd[a0], opd[a1]
+        length = a1 - a0
+        if length > 0:
+            for i in range(a0 + 1, a1):
+                opd[i] = y0 + (float(i - a0) / length) * (y1 - y0)
+    # Clamp before first and after last anchor
+    opd[:anchors[0]] = 0.0
+    opd[anchors[-1] + 1:] = opd[anchors[-1]]
     return opd
 
 
@@ -354,23 +370,31 @@ def snr_spectrum(spectra: list[tuple[np.ndarray, np.ndarray]],
 
 
 def allan_variance(timeseries: np.ndarray, tau: int) -> float:
-    """Overlapping Allan-Werle variance for a given tau (in samples).
+    """Overlapping Allan-Werle variance for a given tau (cluster size k).
 
-    Mirrors AllanVariance::computeAllanVariance (cluster-mean algorithm).
+    Mirrors AllanVariance::computeAllanVariance (overlapping cluster-mean via
+    prefix sums). For each cluster size k, iterates all overlapping pairs
+    j=0..n-2k, computes m1=mean(signal[j:j+k]), m2=mean(signal[j+k:j+2k]),
+    AllanVar = sum((m2-m1)^2) / count / 2.0.
     """
     n = len(timeseries)
-    if n < 2 * tau:
+    if n < 2 or tau < 1:
         return 0.0
-    m = n - 2 * tau
-    if m <= 0:
+    k = tau
+    if 2 * k > n:
         return 0.0
-    # cluster means
-    cumsum = np.cumsum(timeseries)
-    cluster_sums = cumsum[2 * tau - 1:] - np.concatenate(([0.0], cumsum[:m]))
-    cluster_means = cluster_sums / (2.0 * tau)
-    # consecutive differences
-    diffs = np.diff(cluster_means)
-    return float(np.sum(diffs ** 2) / (2.0 * len(diffs)))
+    # Prefix sums (prefix[i] = sum(signal[0..i-1]))
+    prefix = np.zeros(n + 1)
+    prefix[1:] = np.cumsum(timeseries)
+    sum_sq = 0.0
+    count = 0
+    for j in range(n - 2 * k + 1):
+        m1 = (prefix[j + k] - prefix[j]) / k
+        m2 = (prefix[j + 2 * k] - prefix[j + k]) / k
+        diff = m2 - m1
+        sum_sq += diff * diff
+        count += 1
+    return float(sum_sq / count / 2.0) if count > 0 else 0.0
 
 
 def transmittance(spec_x: np.ndarray, spec_y: np.ndarray,

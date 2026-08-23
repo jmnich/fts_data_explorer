@@ -1,0 +1,24 @@
+{
+  "spectrum": {
+    "refLaserWavelengthUm": {"value": 1.550},
+    "zeroPadK": {"value": 2},
+    "apodizationWindow": {"value": "Rectangular"},
+    "rectWidth": {"value": 1.0},
+    "rectAsymMode": {"value": true},
+    "xCorrectionMethod": {"value": "Hilbert"},
+    "xUnit": {"value": "cm-1"}
+  },
+  "allan": {
+    "xUnit": {"value": "um"},
+    "wavelengthDecimation": {"value": 5},
+    "xRangeMinUm": {"value": 1.0},
+    "xRangeMaxUm": {"value": 30.0},
+    "calcBase": {"value": "100% T"},
+    "sliceIndex": {"value": 0}
+  },
+  "t100": {
+    "xUnit": {"value": "cm-1"},
+    "referenceSource": {"value": "File"}
+  },
+  "processing": { "workerThreads": {"value": -1} }
+}
