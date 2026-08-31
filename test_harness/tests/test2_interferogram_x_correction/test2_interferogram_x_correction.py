@@ -16,18 +16,19 @@ from _common.pipeline import hilbert_x_axis, x_axis_from_peaks
 from _common.h5io import strip_derivatives, validate_h5
 from _common.headless import run_binary, load_csv
 from _common.report_images import save_ifg_burst_residual
-from _common.compare import compare
+from _common.compare import compare, residual_metrics, snr_weights
+from _common import thresholds as thr
 
 DATASET = "wust_mini"
 OUTPUT_TYPE = "Corrected interferograms from selected files"
 
-# Absolute max-abs threshold (V) for the post-correction, OPD-aligned primary
-# residual in the burst window (§10: interferograms cross zero, so relative
-# error is meaningless — gate on absolute difference). Calibrated from the
-# observed residual after the CSV export precision fix (setprecision(15)):
-# hilbert ~4.7e-5 V, peakfinding ~4.8e-5 V on a burst peak of ~0.86 V;
-# 5e-4 V gives ~10x headroom over the larger observed value. See description.md.
-PRIMARY_RESAMPLED_MAX_ABS_V = 5e-4
+# Thresholds live in _common/thresholds.py (single source of truth).
+OPD_REL_LIMIT = {
+    "hilbert": thr.get("test2_interferogram_x_correction", "opd_hilbert_rel_limit"),
+    "peakfinding": thr.get("test2_interferogram_x_correction", "opd_peakfinding_rel_limit"),
+}
+PRIMARY_IDENTITY_MAX_ABS = thr.get("test2_interferogram_x_correction", "primary_identity_max_abs")
+RESAMPLED_PRIMARY_THR = thr.get("test2_interferogram_x_correction", "resampled_primary")
 
 def nsk(n):
     parts = re.split(r"(\d+)", n)
@@ -119,23 +120,32 @@ def main():
             comparisons.append({"name": f"opd_{method}", "status": "error", "summary": err})
             all_pass = False
             continue
-        # Hilbert: FFTW vs scipy FFT — ~1e-6 relative; threshold 0.01% (1e-4)
-        # PeakFinding: custom vs scipy peak finder — ~0.02% relative; threshold 0.1% (1e-3)
         rel_diff = opd_diff / opd_range if opd_range > 0 else opd_diff
-        if method == "hilbert":
-            opd_pass = rel_diff < 1e-4  # 0.01%
-        else:
-            opd_pass = rel_diff < 1e-3  # 0.1%
-        prim_pass = prim_diff < 1e-6  # raw data, float32 precision (~1e-7)
+        opd_rel_limit = OPD_REL_LIMIT[method]
+        opd_thr_max_abs = opd_range * opd_rel_limit if opd_range > 0 else opd_rel_limit
+        opd_thr_wrms_pct = opd_rel_limit * 100.0  # % — companion wrms cap
+        # Real weighted RMS of the OPD-axis relative error (was a 0.0 placeholder).
+        # Reuses the canonical residual_metrics so the value matches compare().
+        n = min(len(cpp_opd), len(py_opd))
+        cand_axis = cpp_opd[:n]
+        ref_axis = py_opd[:n]
+        w = snr_weights(ref_axis)
+        opd_metrics = residual_metrics(cand_axis, ref_axis, w)
+        opd_pass = (opd_metrics["weighted_rms_rel_pct"] <= opd_thr_wrms_pct
+                    and opd_diff <= opd_thr_max_abs)
+        prim_pass = prim_diff < PRIMARY_IDENTITY_MAX_ABS  # raw data, float32 precision
         status = "pass" if (opd_pass and prim_pass) else "fail"
         comparisons.append({
             "name": f"opd_{method}", "status": status,
-            "weighted_rms_rel_pct": 0.0,
-            "max_abs_rel_pct": round(rel_diff * 100, 6),
+            "weighted_rms_rel_pct": opd_metrics["weighted_rms_rel_pct"],
+            "max_abs_rel_pct": opd_metrics["max_abs_rel_pct"],
+            "max_abs": opd_metrics["max_abs"],
+            "threshold_wrms_pct": opd_thr_wrms_pct,
+            "threshold_max_abs": opd_thr_max_abs,
             "opd_max_abs_diff": float(opd_diff),
             "opd_rel_diff_pct": round(rel_diff * 100, 6),
             "primary_max_abs_diff": float(prim_diff),
-            "n_bins": int(len(ref)),
+            "n_bins": opd_metrics["n_bins"],
         })
         if status != "pass":
             all_pass = False
@@ -149,7 +159,7 @@ def main():
         half = int(len(cpp_prim) * 0.05 / 2.0)
         opd_lo = float(cpp_opd[max(0, burst_idx - half)])
         opd_hi = float(cpp_opd[min(len(cpp_opd), burst_idx + half) - 1])
-        prim_thr = {"max_abs": PRIMARY_RESAMPLED_MAX_ABS_V, "weighted_rms_rel_pct": 1.0}
+        prim_thr = RESAMPLED_PRIMARY_THR
         prim_comps = compare(cpp_opd, cpp_prim, py_opd, prim, None, None,
                              prim_thr, eval_window=(opd_lo, opd_hi), declared=["A"])
         comparisons.extend(prim_comps)

@@ -11,21 +11,16 @@ from _common.compare import compare
 from _common.test_helpers import read_raw_ifg, list_members, write_result, strip_and_validate, nsk
 from _common.headless import run_binary, load_csv, find_exported_csv
 from _common.report_images import save_overlay_residual
+from _common import thresholds as thr
 
 DATASET = "wust_mini"; OUTPUT_TYPE = "Average spectrum"
 EVAL = (1e4/30.0, 1e4/1.0)
 CONFIG = {"refLaserWavelengthUm":1.55,"zeroPadK":2,"apodizationWindow":"Rectangular",
           "rectWidth":1.0,"rectAsymMode":True,"xUnit":"cm-1","xCorrectionMethod":"Hilbert"}
 
-# Region-locked strict comparison: 2050-2250 cm-1 strong-signal shoulder.
-# A-only (test4 declares A). Averaging smooths residuals, so the strong region
-# is even tighter than test1 (observed 0.000288% wrms / 0.000770% max).
-# Max metric is absolute (max_abs), matching the full-window comparison.
-STRONG_REGION = {
-    "name": "strong_2050_2250",
-    "window": (2050.0, 2250.0),
-    "thresholds_a": {"weighted_rms_rel_pct": 0.005, "max_abs": 1e-6},
-}
+# Thresholds live in _common/thresholds.py (single source of truth).
+THRESHOLDS = thr.full_window("test4_average_spectrum")
+REGIONS = thr.regions("test4_average_spectrum")
 
 def main():
     ap = argparse.ArgumentParser()
@@ -58,8 +53,8 @@ def main():
         spectra.append((x, y))
     grid = spectra[0][0]
     _, py_avg = mean_spectrum(spectra, grid)
-    thresholds = {"weighted_rms_rel_pct": 0.1, "max_abs_rel_pct": 1.0, "max_abs": 1e-6}
-    comps = compare(cpp_x, cpp_ys[0], grid, py_avg, None, None, thresholds, eval_window=EVAL, declared=["A"], regions=[STRONG_REGION])
+    thresholds = THRESHOLDS
+    comps = compare(cpp_x, cpp_ys[0], grid, py_avg, None, None, thresholds, eval_window=EVAL, declared=["A"], regions=REGIONS)
     all_pass = all(c["status"]=="pass" for c in comps)
     status = "pass" if all_pass else "fail"
     summary = f"wrms={comps[0]['weighted_rms_rel_pct']}% max={comps[0]['max_abs_rel_pct']}%"

@@ -11,6 +11,7 @@ from _common.compare import compare
 from _common.test_helpers import read_raw_ifg, list_members, write_result, strip_and_validate
 from _common.headless import run_binary, load_csv, find_exported_csv, build_config
 from _common.report_images import save_multi_overlay
+from _common import thresholds as thr
 
 DATASET = "wust_mini"; OUTPUT_TYPE = "Spectra from selected files"
 EVAL = (1e4/30.0, 1e4/1.0)
@@ -18,15 +19,9 @@ BASE = {"refLaserWavelengthUm":1.55,"zeroPadK":2,"apodizationWindow":"Rectangula
         "rectWidth":1.0,"rectAsymMode":True,"xUnit":"cm-1","xCorrectionMethod":"Hilbert",
         "gaussSigma":1.0,"nortonBeerFwhm":1.5,"dolphChebyshevAttenuationDb":60.0}
 
-# Region-locked strict comparison: 2050-2250 cm-1 strong-signal shoulder.
-# A-only (test3 declares A per variant). 0.01% wrms gives ~3x headroom on the
-# worst variant (laser1310, 0.003% observed) and ~18x on typical variants.
-# Max metric is absolute (max_abs), matching the full-window comparison.
-STRONG_REGION = {
-    "name": "strong_2050_2250",
-    "window": (2050.0, 2250.0),
-    "thresholds_a": {"weighted_rms_rel_pct": 0.01, "max_abs": 1e-6},
-}
+# Thresholds live in _common/thresholds.py (single source of truth).
+THRESHOLDS = thr.full_window("test3_single_spectrum_params")
+REGIONS = thr.regions("test3_single_spectrum_params")
 
 VARIANTS = [
     # zeroPadK (Rectangular)
@@ -60,7 +55,7 @@ def main():
     if not ok: write_result(workdir,"test3_single_spectrum_params","error",f"stripped: {errs[:2]}"); return 2
     members = list_members(work_h5)
     ref, prim = read_raw_ifg(work_h5, members[0])
-    thresholds = {"weighted_rms_rel_pct": 0.5, "max_abs_rel_pct": 1.0, "max_abs": 1e-6}
+    thresholds = THRESHOLDS
     comparisons = []
     all_pass = True
     panels = []
@@ -81,7 +76,7 @@ def main():
             comparisons.append({"name": v["name"], "status": "error", "summary": "empty CSV"})
             all_pass = False; continue
         py_x, py_y = process_spectrum(prim, ref, v["config"])
-        comps = compare(cpp_x, cpp_ys[0], py_x, py_y, None, None, thresholds, eval_window=EVAL, declared=["A"], regions=[STRONG_REGION])
+        comps = compare(cpp_x, cpp_ys[0], py_x, py_y, None, None, thresholds, eval_window=EVAL, declared=["A"], regions=REGIONS)
         # Rename full + region comparisons with the variant name prefix.
         # Full comparison "headless_vs_python" → v["name"]; region comparisons
         # "headless_vs_python__<region>" → v["name"]__<region>".

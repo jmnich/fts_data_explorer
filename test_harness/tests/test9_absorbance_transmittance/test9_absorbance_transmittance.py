@@ -15,6 +15,7 @@ from _common.compare import compare
 from _common.test_helpers import read_raw_ifg, list_members, write_result, strip_and_validate
 from _common.headless import run_binary, load_csv
 from _common.report_images import save_overlay_residual
+from _common import thresholds as thr
 
 DATASET = "2025-04-16_12-19-18_ceramicLPF"
 OUTPUT_TYPE_T = "Transmittance from selected files"
@@ -22,6 +23,12 @@ OUTPUT_TYPE_A = "Absorbance from selected files"
 EVAL = (1e4/30.0, 1e4/1.0)
 CONFIG = {"refLaserWavelengthUm":1.55,"zeroPadK":2,"apodizationWindow":"Rectangular",
           "rectWidth":1.0,"rectAsymMode":True,"xUnit":"cm-1","xCorrectionMethod":"Hilbert"}
+
+# Thresholds live in _common/thresholds.py (single source of truth).
+THRESHOLDS_T = thr.get("test9_absorbance_transmittance", "transmittance")
+THRESHOLDS_A = thr.get("test9_absorbance_transmittance", "absorbance")
+SNR_MASK_T = thr.get("test9_absorbance_transmittance", "snr_mask_threshold_transmittance")
+SNR_MASK_A = thr.get("test9_absorbance_transmittance", "snr_mask_threshold_absorbance")
 
 def load_two_col_csv(path):
     xs, ys = [], []
@@ -92,15 +99,15 @@ def main():
 
     # Tolerance is now much tighter because the SNR mask excludes the unstable
     # noise-floor / T≈0 / T≈1 bins that dominated the old full-window residual.
-    thresholds_t = {"weighted_rms_rel_pct": 0.5, "max_abs_rel_pct": 1.0, "max_abs": 0.05}
-    thresholds_a = {"weighted_rms_rel_pct": 50.0, "max_abs_rel_pct": 1.0, "max_abs": 0.01}
+    thresholds_t = THRESHOLDS_T
+    thresholds_a = THRESHOLDS_A
     comps = compare(cpp_tx, cpp_ty, py_tx, py_t, None, None, thresholds_t,
                     eval_window=EVAL, snr_ref=snr_ref, declared=["A"],
-                    snr_mask_threshold=30.0)
+                    snr_mask_threshold=SNR_MASK_T)
     comps[0]["name"] = "transmittance"
     comps_a = compare(cpp_ax, cpp_ay, py_tx, py_a, None, None, thresholds_a,
                      eval_window=EVAL, snr_ref=snr_ref, declared=["A"],
-                     snr_mask_threshold=70.0)
+                     snr_mask_threshold=SNR_MASK_A)
     comps_a[0]["name"] = "absorbance"
     comparisons = comps + comps_a
     all_pass = all(c["status"]=="pass" for c in comparisons)

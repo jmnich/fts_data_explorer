@@ -23,26 +23,16 @@ from _common.compare import compare
 from _common.h5io import strip_derivatives, validate_h5, read_golden_member
 from _common.headless import run_binary, load_csv, find_exported_csv
 from _common.report_images import save_overlay_residual
+from _common import thresholds as thr
 
 DATASET = "wust_mini"
 OUTPUT_TYPE = "Spectra from selected files"
 EVAL_WINDOW_CM = (1e4 / 30.0, 1e4 / 1.0)  # 333.33 – 10000 cm-1
 GOLDEN_MEMBER = "spectra/spec_raw_0"  # group/member-id of the first-file golden
 
-# Region-locked strict comparison: 2050-2250 cm-1 is the strong-signal shoulder
-# (mean magnitude 87% of peak). Thresholds are aggressive here, relaxed elsewhere.
-# B (headless vs golden) is stricter than A (headless vs Python) because the app
-# must reproduce the same numbers across versions; C (Python vs golden) is the
-# tightest sanity guard (two independent implementations agreeing).
-# Max metric is absolute (max_abs) throughout, matching the full-window
-# comparison — relative max blows up at noise-floor bins where ref≈0.
-STRONG_REGION = {
-    "name": "strong_2050_2250",
-    "window": (2050.0, 2250.0),
-    "thresholds_a": {"weighted_rms_rel_pct": 0.005, "max_abs": 1e-6},
-    "thresholds_b": {"weighted_rms_rel_pct": 0.002, "max_abs": 1e-6},
-    "thresholds_c": {"weighted_rms_rel_pct": 0.0005, "max_abs": 1e-6},
-}
+# Thresholds live in _common/thresholds.py (single source of truth).
+THRESHOLDS = thr.full_window("test1_single_spectrum")
+REGIONS = thr.regions("test1_single_spectrum")
 
 
 def natural_sort_key(name):
@@ -129,8 +119,6 @@ def main():
     py_x, py_y = process_spectrum(prim, ref, config)
 
     # 5. Compare (A)/(B)/(C) — first-file spectrum
-    thresholds = {"weighted_rms_rel_pct": 0.1, "max_abs_rel_pct": 1.0, "max_abs": 1e-6}
-
     # Golden read (if available and integrity guard passed)
     golden_x, golden_y = None, None
     golden_path = root / "reference_output" / f"{DATASET}.golden.h5"
@@ -147,9 +135,9 @@ def main():
         pass
 
     comparisons = compare(cpp_x, cpp_ys[0], py_x, py_y,
-                          golden_x, golden_y, thresholds,
+                          golden_x, golden_y, THRESHOLDS,
                           eval_window=EVAL_WINDOW_CM,
-                          regions=[STRONG_REGION])
+                          regions=REGIONS)
 
     # (C) sanity guard: if any (C) comparison (full-window or region) fails
     # while the matching (A)/(B) pass, classify error not fail — the two

@@ -15,6 +15,7 @@ from _common.compare import compare
 from _common.test_helpers import read_raw_ifg, list_members, write_result, strip_and_validate
 from _common.headless import run_binary
 from _common.report_images import save_overlay_residual
+from _common import thresholds as thr
 
 SAMPLE = "2025-04-16_12-19-18_ceramicLPF"
 REFERENCE = "2025-04-15_11-52-54_ref1"
@@ -22,6 +23,9 @@ OUTPUT_TYPE = "Comparator ratio"
 EVAL = (1e4/30.0, 1e4/1.0)
 CONFIG = {"refLaserWavelengthUm":1.55,"zeroPadK":2,"apodizationWindow":"Rectangular",
           "rectWidth":1.0,"rectAsymMode":True,"xUnit":"cm-1","xCorrectionMethod":"Hilbert"}
+
+# Thresholds live in _common/thresholds.py (single source of truth).
+THRESHOLDS = thr.full_window("test10_comparator")
 
 def load_two_col_csv(path):
     xs, ys = [], []
@@ -98,7 +102,7 @@ def main():
                               left=avg_sample[si][0], right=avg_sample[si][-1])
     py_ratio = np.where(np.abs(avg_ref) > 1e-15, sample_on_ref / avg_ref, 0.0)
 
-    thresholds = {"weighted_rms_rel_pct": 1.0, "max_abs_rel_pct": 1.0}
+    thresholds = THRESHOLDS
     comps = compare(cpp_x, cpp_y, ref_x, py_ratio, None, None, thresholds, eval_window=EVAL, declared=["A"])
     all_pass = all(c["status"]=="pass" for c in comps)
     status = "pass" if all_pass else "fail"

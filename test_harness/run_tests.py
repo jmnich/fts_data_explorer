@@ -300,6 +300,19 @@ def _md_table(headers: list[str], rows: list[list], max_width: int | None = None
     return "\n".join([fmt(cells(headers)), sep] + [fmt(cells(r)) for r in rows])
 
 
+def _fmt_num(v) -> str:
+    """Render a numeric value in scientific notation at 3 significant figures.
+
+    Non-numeric / missing values pass through as empty strings so the report
+    shows blank cells (not "0.000e+00") when a metric was not computed.
+    """
+    if v is None or v == "":
+        return ""
+    if isinstance(v, (int, float)):
+        return f"{float(v):.3e}"
+    return str(v)
+
+
 def write_report(records: list[dict]) -> None:
     n_pass = sum(1 for r in records if r["status"] == S_PASS)
     n_fail = sum(1 for r in records if r["status"] == S_FAIL)
@@ -327,7 +340,7 @@ def write_report(records: list[dict]) -> None:
         summ = (r["summary"] or "").replace("|", "\\|")
         rows.append([i, r["test"], r["status"].upper(), dur, summ])
     md.append(_md_table(["#", "Test", "Status", "Duration", "Summary"], rows,
-                        max_width=140, wrap_col=4))
+                        max_width=120, wrap_col=4))
     md.append("\n")
     # Report images (sanity-check PNGs)
     if REPORT_IMAGES_DIR.is_dir():
@@ -341,7 +354,7 @@ def write_report(records: list[dict]) -> None:
                 md.append(f"- `{rel}`\n")
             md.append("\n")
     # Per-test comparison detail
-    md.append("## Comparison details\n\n")
+    md.append("\n\n## Test details\n\n")
     for r in records:
         if not r["comparisons"]:
             continue
@@ -359,19 +372,18 @@ def write_report(records: list[dict]) -> None:
             # When threshold_max_abs is set, pass/fail uses the absolute max;
             # show only the abs value to avoid redundant/confusing rel data.
             if c.get("threshold_max_abs") is not None:
-                max_val = c.get("max_abs", "")
-                thr_max = c.get("threshold_max_abs", "")
+                max_val = _fmt_num(c.get("max_abs"))
+                thr_max = _fmt_num(c.get("threshold_max_abs"))
             else:
-                max_val = f"{c.get('max_abs_rel_pct', '')}%" if c.get("max_abs_rel_pct") is not None else ""
-                thr_max = f"{c.get('threshold_max_pct', '')}%" if c.get("threshold_max_pct") is not None else ""
+                max_val = _fmt_num(c.get("max_abs_rel_pct"))
+                thr_max = _fmt_num(c.get("threshold_max_pct"))
             crows.append([c.get('name', ''), c.get('status', '').upper(),
-                          c.get('weighted_rms_rel_pct', ''), max_val,
-                          c.get('threshold_wrms_pct', ''), thr_max,
-                          c.get('n_bins', '')])
-        md.append(_md_table(["Comparison", "Status", "Weighted RMS %", max_hdr,
-                             "Threshold RMS %", thr_max_hdr, "Bins"], crows,
-                            max_width=140, wrap_col=0))
-        md.append("\n")
+                          _fmt_num(c.get('weighted_rms_rel_pct')),
+                          _fmt_num(c.get('threshold_wrms_pct')), max_val, thr_max])
+        md.append(_md_table(["Subtest", "Result", "Weighted RMS %",
+                             "Threshold RMS %", max_hdr, thr_max_hdr], crows,
+                            max_width=120, wrap_col=0))
+        md.append("\n\n")
     (OUTPUT_DIR / "report.md").write_text("".join(md))
 
     # report.json (D11)

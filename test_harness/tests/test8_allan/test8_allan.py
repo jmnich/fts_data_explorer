@@ -11,11 +11,18 @@ from _common.compare import compare
 from _common.test_helpers import read_raw_ifg, list_members, write_result, strip_and_validate
 from _common.headless import run_binary
 from _common.report_images import save_allan_surface
+from _common import thresholds as thr
 
 DATASET = "wust_mini"; OUTPUT_TYPE = "Allan-Werle 3D"
 EVAL = (1e4/30.0, 1e4/1.0)
 CONFIG = {"refLaserWavelengthUm":1.55,"zeroPadK":2,"apodizationWindow":"Rectangular",
           "rectWidth":1.0,"rectAsymMode":True,"xUnit":"cm-1","xCorrectionMethod":"Hilbert"}
+
+# Thresholds live in _common/thresholds.py (single source of truth).
+ALLAN_THR = thr.full_window("test8_allan")
+MAX_ABS_FRACTION = thr.get("test8_allan", "max_abs_fraction_of_peak")
+AXIS_RTOL = thr.get("test8_allan", "axis_rtol")
+AXIS_ATOL = thr.get("test8_allan", "axis_atol")
 
 def load_allan_3d(path):
     """Load the long-format Allan 3D CSV → (wavelengths, taus, surface[MxN])."""
@@ -116,8 +123,9 @@ def main():
         # so relative max blows up at small-variance bins. Use absolute for
         # pass/fail; report relative for transparency.
         max_abs_err = float(np.max(np.abs(ps - cs)))
-        thr_w, thr_m = 10.0, 1.0
-        thr_max_abs = max_abs * 0.1  # 10% of peak Allan variance
+        thr_w = ALLAN_THR["weighted_rms_rel_pct"]
+        thr_m = ALLAN_THR["max_abs_rel_pct"]
+        thr_max_abs = max_abs * MAX_ABS_FRACTION  # 10% of peak Allan variance
         status = "pass" if (wrms <= thr_w and max_abs_err <= thr_max_abs) else "fail"
         comparisons.append({"name": "allan_surface", "status": status,
             "weighted_rms_rel_pct": round(wrms, 6), "max_abs_rel_pct": round(maxrel, 6),
@@ -135,7 +143,7 @@ def main():
     py_waves = avg_x[np.array(valid_indices)][::-1]
     py_taus = np.arange(1, n_taus + 1, dtype=float)
     axis_ok = (len(cpp_waves) == len(py_waves) and
-               np.allclose(cpp_waves, py_waves, rtol=1e-4, atol=1e-6) and
+               np.allclose(cpp_waves, py_waves, rtol=AXIS_RTOL, atol=AXIS_ATOL) and
                len(cpp_taus) == len(py_taus) and
                np.array_equal(cpp_taus, py_taus))
     comparisons.append({"name": "axis_exact", "status": "pass" if axis_ok else "fail",

@@ -11,21 +11,16 @@ from _common.compare import compare, snr_weights
 from _common.test_helpers import read_raw_ifg, list_members, write_result, strip_and_validate
 from _common.headless import run_binary, load_csv, find_exported_csv
 from _common.report_images import save_overlay_residual
+from _common import thresholds as thr
 
 DATASET = "wust_mini"; OUTPUT_TYPE = "SNR spectrum"
 EVAL = (1e4/30.0, 1e4/1.0)
 CONFIG = {"refLaserWavelengthUm":1.55,"zeroPadK":2,"apodizationWindow":"Rectangular",
           "rectWidth":1.0,"rectAsymMode":True,"xUnit":"cm-1","xCorrectionMethod":"Hilbert"}
 
-# Region-locked strict comparison: 2050-2250 cm-1 strong-signal shoulder.
-# SNR is a ratio (mean/std), so even in the strong region the residual is ~0.5%
-# (observed 0.501616% wrms / 0.566423% max). 1.0% / 2.0% gives ~2x headroom and
-# is still far stricter than the full-window 1.0% / 50%.
-STRONG_REGION = {
-    "name": "strong_2050_2250",
-    "window": (2050.0, 2250.0),
-    "thresholds_a": {"weighted_rms_rel_pct": 1.0, "max_abs_rel_pct": 1.0, "max_abs": 2.0},
-}
+# Thresholds live in _common/thresholds.py (single source of truth).
+THRESHOLDS = thr.full_window("test5_snr")
+REGIONS = thr.regions("test5_snr")
 
 def main():
     ap = argparse.ArgumentParser()
@@ -59,10 +54,10 @@ def main():
     _, py_snr = snr_spectrum(spectra, grid)
     # SNR-weighted: use the SNR curve itself as quality signal, on the same
     # grid as the comparison's reference (compare() resamples it internally).
-    thresholds = {"weighted_rms_rel_pct": 1.0, "max_abs_rel_pct": 1.0, "max_abs": 5.0}
+    thresholds = THRESHOLDS
     comps = compare(cpp_x, cpp_ys[0], grid, py_snr, None, None, thresholds,
                     eval_window=EVAL, snr_ref=(grid, py_snr), declared=["A"],
-                    regions=[STRONG_REGION])
+                    regions=REGIONS)
     all_pass = all(c["status"]=="pass" for c in comps)
     status = "pass" if all_pass else "fail"
     summary = f"wrms={comps[0]['weighted_rms_rel_pct']}% max={comps[0]['max_abs_rel_pct']}% n_w={comps[0]['n_weighted_bins']}"

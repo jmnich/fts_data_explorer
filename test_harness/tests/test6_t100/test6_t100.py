@@ -11,11 +11,15 @@ from _common.compare import compare
 from _common.test_helpers import read_raw_ifg, list_members, write_result, strip_and_validate
 from _common.headless import run_binary, load_csv, find_exported_csv
 from _common.report_images import save_overlay_residual
+from _common import thresholds as thr
 
 DATASET = "wust_mini"; OUTPUT_TYPE = "100% T transmission line"
 EVAL = (1e4/30.0, 1e4/1.0)
 CONFIG = {"refLaserWavelengthUm":1.55,"zeroPadK":2,"apodizationWindow":"Rectangular",
           "rectWidth":1.0,"rectAsymMode":True,"xUnit":"cm-1","xCorrectionMethod":"Hilbert"}
+
+# Thresholds live in _common/thresholds.py (single source of truth).
+THRESHOLDS = thr.full_window("test6_t100")
 
 def main():
     ap = argparse.ArgumentParser()
@@ -47,7 +51,7 @@ def main():
     ref_x, ref_y = process_spectrum(prim0, ref0, CONFIG)
     # First file transmittance against itself
     py_x, py_y = transmittance(ref_x, ref_y, ref_x, ref_y)
-    thresholds = {"weighted_rms_rel_pct": 0.5, "max_abs_rel_pct": 1.0, "max_abs": 1.0}
+    thresholds = THRESHOLDS
     comps = compare(cpp_x, cpp_ys[0], py_x, py_y, None, None, thresholds, eval_window=EVAL, declared=["A"])
     all_pass = all(c["status"]=="pass" for c in comps)
     status = "pass" if all_pass else "fail"
