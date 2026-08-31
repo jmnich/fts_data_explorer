@@ -3,19 +3,21 @@
 
 Discovers tests under test_harness/tests/, runs each as an isolated subprocess
 with a per-test timeout, classifies the result from the exit code + result.json
-(D1), and writes report.md + report.json (D11). The parent never aborts on a
+(D1), and writes report.html + report.json (D11). The parent never aborts on a
 test failure — it continues and aggregates.
 
 Contracts (authoritative — see test_instruction.md):
   C1  Discovery: ^test\\d+_ dirs containing <dirname>.py, natural-sorted.
   C2  Result: result.json + exit 0=pass 1=fail 2=error 3=skip.
   C3  CLI: --binary --build-dir --only --list -v (FTS_BINARY env).
-  C4  Report: report.md + report.json, verdict on first line after title.
+  C4  Report: report.html + report.json, verdict on first line after title.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
+import html
 import json
 import os
 import re
@@ -222,84 +224,6 @@ def classify(name: str, exit_code: int, workdir: Path, duration: float,
 # Report (C4)
 # ---------------------------------------------------------------------------
 
-def _word_wrap(text: str, width: int) -> list[str]:
-    """Wrap ``text`` to ``width`` columns at word boundaries.
-
-    A word longer than ``width`` is hard-broken across lines (no mid-word
-    ellipsis). Returns at least one line.
-    """
-    words = text.split()
-    if not words:
-        return [""]
-    lines: list[str] = []
-    current = ""
-    for word in words:
-        if not current:
-            current = word
-        elif len(current) + 1 + len(word) <= width:
-            current += " " + word
-        elif len(word) > width:
-            lines.append(current)
-            current = ""
-            while len(word) > width:
-                lines.append(word[:width])
-                word = word[width:]
-            current = word
-        else:
-            lines.append(current)
-            current = word
-    if current:
-        lines.append(current)
-    return lines
-
-
-def _md_table(headers: list[str], rows: list[list], max_width: int | None = None,
-              wrap_col: int | None = None) -> str:
-    """Render a markdown table with aligned ``|`` columns for human readability.
-
-    When ``max_width`` is set, no rendered line exceeds that many columns.
-    The column at ``wrap_col`` (default: last) is shrunk to the remaining
-    width budget and its cells are word-wrapped across multiple table rows
-    — the first row carries the identity columns, continuation rows leave
-    them blank. Other columns keep their natural width.
-    """
-    def cells(row):
-        return [str(c) for c in row]
-    all_rows = [cells(headers)] + [cells(r) for r in rows]
-    widths = [max(len(r[i]) for r in all_rows) for i in range(len(headers))]
-
-    if max_width is not None:
-        if wrap_col is None:
-            wrap_col = len(headers) - 1
-        # Row overhead: leading "| " + (N-1) * " | " + trailing " |" = 3*N + 1
-        overhead = 3 * len(headers) + 1
-        non_wrap = sum(widths[i] for i in range(len(headers)) if i != wrap_col)
-        wrap_w = max(4, max_width - overhead - non_wrap)
-        widths[wrap_col] = min(widths[wrap_col], wrap_w)
-        # Expand rows whose wrap-column cell overflows into continuation rows
-        expanded: list[list] = []
-        for row in rows:
-            srow = cells(row)
-            cell = srow[wrap_col]
-            if len(cell) <= widths[wrap_col]:
-                expanded.append(srow)
-                continue
-            lines = _word_wrap(cell, widths[wrap_col])
-            for j, line in enumerate(lines):
-                nr = list(srow)
-                nr[wrap_col] = line
-                if j > 0:
-                    for k in range(len(headers)):
-                        if k != wrap_col:
-                            nr[k] = ""
-                expanded.append(nr)
-        rows = expanded
-
-    fmt = lambda r: "| " + " | ".join(c.ljust(widths[i]) for i, c in enumerate(r)) + " |"
-    sep = "|" + "|".join("-" * (w + 2) for w in widths) + "|"
-    return "\n".join([fmt(cells(headers)), sep] + [fmt(cells(r)) for r in rows])
-
-
 def _fmt_num(v) -> str:
     """Render a numeric value in scientific notation at 3 significant figures.
 
@@ -311,6 +235,287 @@ def _fmt_num(v) -> str:
     if isinstance(v, (int, float)):
         return f"{float(v):.3e}"
     return str(v)
+
+
+# ---------------------------------------------------------------------------
+# HTML report rendering
+# ---------------------------------------------------------------------------
+
+_HTML_CSS = """
+:root {
+  --bg: #0d1117;
+  --surface: #161b22;
+  --surface2: #21262d;
+  --border: #30363d;
+  --text: #e6edf3;
+  --text-dim: #8b949e;
+  --pass: #1a7d3c;
+  --fail: #b3261e;
+  --error: #9a6700;
+  --skip: #5f6368;
+  --accent: #2f81f7;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 2rem 2.5rem;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, "Segoe UI", "Inter", system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+}
+h1 { font-size: 1.55rem; margin: 0 0 0.4rem; font-weight: 650; letter-spacing: -0.01em; }
+h2 { font-size: 1.2rem; margin: 2.2rem 0 0.6rem; font-weight: 600; padding-bottom: 0.3rem; border-bottom: 1px solid var(--border); }
+h3 { font-size: 1.0rem; margin: 1.4rem 0 0.5rem; font-weight: 600; color: var(--text); }
+code { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; font-size: 0.85em; background: var(--surface2); padding: 0.1em 0.35em; border-radius: 4px; }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.3rem 0 0.6rem;
+  font-size: 0.86rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+th, td {
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+th { background: var(--surface2); font-weight: 600; color: var(--text-dim); text-transform: uppercase; font-size: 0.72rem; letter-spacing: 0.04em; text-align: left; }
+tr:last-child td { border-bottom: none; }
+td.num, th.num { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; font-size: 0.82rem; text-align: left; }
+td.wrap { white-space: normal; word-break: break-word; }
+tr.subtest td:first-child { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; font-size: 0.82rem; }
+.badge {
+  display: inline-block;
+  padding: 0.12em 0.6em;
+  border-radius: 10px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.badge-pass { background: rgba(26,125,60,0.18); color: var(--pass); border: 1px solid rgba(26,125,60,0.4); }
+.badge-fail { background: rgba(179,38,30,0.18); color: var(--fail); border: 1px solid rgba(179,38,30,0.4); }
+.badge-error { background: rgba(154,103,0,0.18); color: var(--error); border: 1px solid rgba(154,103,0,0.4); }
+.badge-skip { background: rgba(95,99,104,0.18); color: var(--skip); border: 1px solid rgba(95,99,104,0.4); }
+.badge-partial { background: rgba(95,99,104,0.18); color: var(--skip); border: 1px solid rgba(95,99,104,0.4); }
+.verdict-banner {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  padding: 0.35rem 1rem;
+  border-radius: 8px;
+  font-size: 1.1rem; font-weight: 700;
+  margin: 0.3rem 0 0.8rem;
+}
+.verdict-pass { background: rgba(26,125,60,0.15); color: var(--pass); border: 1px solid rgba(26,125,60,0.45); }
+.verdict-fail { background: rgba(179,38,30,0.15); color: var(--fail); border: 1px solid rgba(179,38,30,0.45); }
+.verdict-partial { background: rgba(95,99,104,0.15); color: var(--skip); border: 1px solid rgba(95,99,104,0.45); }
+.meta { color: var(--text-dim); font-size: 0.85rem; margin: 0.4rem 0 0; }
+.summary-stats { display: flex; gap: 1.2rem; flex-wrap: wrap; margin: 0.6rem 0 0.4rem; }
+.stat { display: inline-flex; align-items: baseline; gap: 0.35rem; }
+.stat .n { font-size: 1.1rem; font-weight: 700; }
+.stat .lbl { color: var(--text-dim); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+details.collapsible {
+  margin: 0.5rem 0 0.8rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.3rem 0.8rem 0.5rem;
+}
+details.collapsible > summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text);
+  padding: 0.2rem 0;
+  list-style: none;
+  user-select: none;
+}
+details.collapsible > summary::-webkit-details-marker { display: none; }
+details.collapsible > summary::before {
+  content: "\\25B8";
+  display: inline-block;
+  margin-right: 0.45rem;
+  color: var(--text-dim);
+  transition: transform 0.15s ease;
+  font-size: 0.8em;
+}
+details.collapsible[open] > summary::before { transform: rotate(90deg); }
+details.collapsible > summary:hover { color: var(--accent); }
+details.collapsible > summary:hover::before { color: var(--accent); }
+details.test-desc { margin: 0.3rem 0 0.6rem; }
+pre.desc-body {
+  margin: 0.4rem 0 0.2rem;
+  padding: 0.6rem 0.8rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}
+figure.report-img {
+  margin: 0.8rem 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem;
+  text-align: center;
+}
+figure.report-img img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  display: block;
+  margin: 0 auto;
+}
+figure.report-img figcaption {
+  margin-top: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+"""
+
+
+def _status_badge(status: str) -> str:
+    cls = {
+        "PASS": "badge-pass", "FAIL": "badge-fail",
+        "ERROR": "badge-error", "SKIP": "badge-skip", "PARTIAL": "badge-partial",
+    }.get(status, "badge-skip")
+    return f'<span class="badge {cls}">{html.escape(status)}</span>'
+
+
+def _img_data_uri(path: Path) -> str:
+    """Return a base64 data URI for a PNG image (self-contained HTML)."""
+    data = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:image/png;base64,{data}"
+
+
+def _load_description(test_name: str) -> str:
+    """Return the description.md body (frontmatter stripped, escaped).
+
+    Returns "" if the file is missing. The frontmatter is the YAML block
+    delimited by leading/trailing '---' lines.
+    """
+    path = TESTS_DIR / test_name / "description.md"
+    if not path.is_file():
+        return ""
+    text = path.read_text()
+    if text.startswith("---"):
+        end = text.find("\n---", 3)
+        if end != -1:
+            text = text[end + 4:].lstrip()
+    return html.escape(text)
+
+
+def _build_html_report(records: list[dict], verdict: str,
+                       images: list[Path]) -> str:
+    n_pass = sum(1 for r in records if r["status"] == S_PASS)
+    n_fail = sum(1 for r in records if r["status"] == S_FAIL)
+    n_err = sum(1 for r in records if r["status"] == S_ERROR)
+    n_skip = sum(1 for r in records if r["status"] == S_SKIP)
+    ts = time.strftime('%Y-%m-%d %H:%M:%S')
+
+    p = []
+    p.append("<!DOCTYPE html>")
+    p.append('<html lang="en"><head><meta charset="utf-8">')
+    p.append('<meta name="viewport" content="width=device-width, initial-scale=1">')
+    p.append("<title>FTS Data Explorer — Regression Harness Report</title>")
+    p.append(f"<style>{_HTML_CSS}</style>")
+    p.append("</head><body>")
+    p.append("<h1>FTS Data Explorer — Regression Harness Report</h1>")
+    # Verdict banner (no nested badge — text only)
+    vcls = {"PASS": "verdict-pass", "FAIL": "verdict-fail",
+            "PARTIAL": "verdict-partial"}.get(verdict, "verdict-partial")
+    p.append(f'<div class="verdict-banner {vcls}">{html.escape(verdict)}</div>')
+    p.append(f'<p class="meta">Run: {ts} &nbsp;·&nbsp; Tests: {len(records)}</p>')
+    p.append('<div class="summary-stats">')
+    p.append(f'<span class="stat"><span class="n" style="color:var(--pass)">{n_pass}</span><span class="lbl">Pass</span></span>')
+    p.append(f'<span class="stat"><span class="n" style="color:var(--fail)">{n_fail}</span><span class="lbl">Fail</span></span>')
+    p.append(f'<span class="stat"><span class="n" style="color:var(--error)">{n_err}</span><span class="lbl">Error</span></span>')
+    p.append(f'<span class="stat"><span class="n" style="color:var(--skip)">{n_skip}</span><span class="lbl">Skip</span></span>')
+    p.append('</div>')
+
+    # Summary table
+    p.append('<h2>Summary</h2>')
+    p.append('<table><thead><tr><th>#</th><th>Test</th><th>Status</th><th>Duration</th><th>Summary</th></tr></thead><tbody>')
+    for i, r in enumerate(records, 1):
+        dur = f"{r['duration_s']:.1f}s" if isinstance(r["duration_s"], (int, float)) else ""
+        p.append(
+            f'<tr><td>{i}</td><td>{html.escape(r["test"])}</td>'
+            f'<td>{_status_badge(r["status"].upper())}</td>'
+            f'<td>{html.escape(dur)}</td>'
+            f'<td class="wrap">{html.escape(r["summary"] or "")}</td></tr>'
+        )
+    p.append('</tbody></table>')
+
+    # Report images (collapsible, collapsed by default)
+    if images:
+        p.append('<details class="collapsible">')
+        p.append('<summary>Report images</summary>')
+        p.append('<p class="meta">Visual sanity-check comparisons (C++ headless vs Python reference) saved under <code>output/report_images/</code>:</p>')
+        for img_path in images:
+            rel = img_path.relative_to(OUTPUT_DIR).as_posix()
+            uri = _img_data_uri(img_path)
+            p.append(f'<figure class="report-img">')
+            p.append(f'<img src="{uri}" alt="{html.escape(rel)}" loading="lazy">')
+            p.append(f'<figcaption><code>{html.escape(rel)}</code></figcaption>')
+            p.append('</figure>')
+        p.append('</details>')
+
+    # Test details
+    p.append('<h2>Test details</h2>')
+    for r in records:
+        if not r["comparisons"]:
+            continue
+        p.append(f'<h3>{html.escape(r["test"])}</h3>')
+        # Collapsible test description (collapsed by default)
+        desc = _load_description(r["test"])
+        if desc:
+            p.append('<details class="collapsible test-desc">')
+            p.append('<summary>Description</summary>')
+            p.append(f'<pre class="desc-body">{desc}</pre>')
+            p.append('</details>')
+        use_abs = any(c.get("threshold_max_abs") is not None for c in r["comparisons"])
+        max_hdr = "Max (abs)" if use_abs else "Max %"
+        thr_max_hdr = "Threshold Max (abs)" if use_abs else "Threshold Max %"
+        p.append('<table><thead><tr>'
+                 '<th>Subtest</th><th>Result</th>'
+                 '<th class="num">Weighted RMS %</th><th class="num">Threshold RMS %</th>'
+                 f'<th class="num">{html.escape(max_hdr)}</th><th class="num">{html.escape(thr_max_hdr)}</th>'
+                 '</tr></thead><tbody>')
+        for c in r["comparisons"]:
+            if c.get("threshold_max_abs") is not None:
+                max_val = _fmt_num(c.get("max_abs"))
+                thr_max = _fmt_num(c.get("threshold_max_abs"))
+            else:
+                max_val = _fmt_num(c.get("max_abs_rel_pct"))
+                thr_max = _fmt_num(c.get("threshold_max_pct"))
+            p.append(
+                f'<tr class="subtest">'
+                f'<td>{html.escape(c.get("name", ""))}</td>'
+                f'<td>{_status_badge(c.get("status", "").upper())}</td>'
+                f'<td class="num">{html.escape(_fmt_num(c.get("weighted_rms_rel_pct")))}</td>'
+                f'<td class="num">{html.escape(_fmt_num(c.get("threshold_wrms_pct")))}</td>'
+                f'<td class="num">{html.escape(max_val)}</td>'
+                f'<td class="num">{html.escape(thr_max)}</td>'
+                f'</tr>'
+            )
+        p.append('</tbody></table>')
+
+    p.append("</body></html>")
+    return "".join(p)
 
 
 def write_report(records: list[dict]) -> None:
@@ -326,65 +531,14 @@ def write_report(records: list[dict]) -> None:
     else:
         verdict = "FAIL"
 
-    # report.md
-    md = []
-    md.append("# FTS Data Explorer — Regression Harness Report\n")
-    md.append(f"{verdict}\n")
-    md.append(f"\nRun: {time.strftime('%Y-%m-%d %H:%M:%S')}  "
-              f"Tests: {len(records)}  "
-              f"Pass: {n_pass}  Fail: {n_fail}  Error: {n_err}  Skip: {n_skip}\n")
-    md.append("\n")
-    rows = []
-    for i, r in enumerate(records, 1):
-        dur = f"{r['duration_s']:.1f}s" if isinstance(r["duration_s"], (int, float)) else ""
-        summ = (r["summary"] or "").replace("|", "\\|")
-        rows.append([i, r["test"], r["status"].upper(), dur, summ])
-    md.append(_md_table(["#", "Test", "Status", "Duration", "Summary"], rows,
-                        max_width=120, wrap_col=4))
-    md.append("\n")
     # Report images (sanity-check PNGs)
+    images = []
     if REPORT_IMAGES_DIR.is_dir():
-        imgs = sorted(REPORT_IMAGES_DIR.glob("*.png"))
-        if imgs:
-            md.append("## Report images\n\n")
-            md.append("Visual sanity-check comparisons (C++ headless vs Python "
-                      "reference) saved under `output/report_images/`:\n\n")
-            for img in imgs:
-                rel = img.relative_to(OUTPUT_DIR)
-                md.append(f"- `{rel}`\n")
-            md.append("\n")
-    # Per-test comparison detail
-    md.append("\n\n## Test details\n\n")
-    for r in records:
-        if not r["comparisons"]:
-            continue
-        md.append(f"### {r['test']}\n\n")
-        crows = []
-        # Determine the max metric type for this test so the column header
-        # matches the cell content. A test is "absolute" when any comparison
-        # carries threshold_max_abs; otherwise it is relative (max_abs_rel_pct).
-        # After the consistency sweep each test is uniform, but the check is
-        # "any" so a stray mixed row still picks the absolute header.
-        use_abs = any(c.get("threshold_max_abs") is not None for c in r["comparisons"])
-        max_hdr = "Max (abs)" if use_abs else "Max %"
-        thr_max_hdr = "Threshold Max (abs)" if use_abs else "Threshold Max %"
-        for c in r["comparisons"]:
-            # When threshold_max_abs is set, pass/fail uses the absolute max;
-            # show only the abs value to avoid redundant/confusing rel data.
-            if c.get("threshold_max_abs") is not None:
-                max_val = _fmt_num(c.get("max_abs"))
-                thr_max = _fmt_num(c.get("threshold_max_abs"))
-            else:
-                max_val = _fmt_num(c.get("max_abs_rel_pct"))
-                thr_max = _fmt_num(c.get("threshold_max_pct"))
-            crows.append([c.get('name', ''), c.get('status', '').upper(),
-                          _fmt_num(c.get('weighted_rms_rel_pct')),
-                          _fmt_num(c.get('threshold_wrms_pct')), max_val, thr_max])
-        md.append(_md_table(["Subtest", "Result", "Weighted RMS %",
-                             "Threshold RMS %", max_hdr, thr_max_hdr], crows,
-                            max_width=120, wrap_col=0))
-        md.append("\n\n")
-    (OUTPUT_DIR / "report.md").write_text("".join(md))
+        images = sorted(REPORT_IMAGES_DIR.glob("*.png"))
+
+    # report.html
+    html_text = _build_html_report(records, verdict, images)
+    (OUTPUT_DIR / "report.html").write_text(html_text)
 
     # report.json (D11)
     report_json = {
@@ -515,7 +669,7 @@ def main():
     verdict = "PASS" if (n_fail == 0 and n_err == 0) else "FAIL"
     print(f"\n{verdict:<6}  Pass:{sum(1 for r in records if r['status']==S_PASS):<5}"
           f"Fail:{n_fail:<5}  Error:{n_err:<5}  Skip:{sum(1 for r in records if r['status']==S_SKIP):<5}")
-    print(f"Report: {OUTPUT_DIR / 'report.md'}")
+    print(f"Report: {OUTPUT_DIR / 'report.html'}")
     if n_fail != 0 or n_err != 0:
         return EXIT_FAIL
     # --only with an unknown test name is a user error, not a green run

@@ -321,8 +321,8 @@ The residual panel uses the same convention as the canonical metric:
 - matplotlib is already a declared dependency (`requirements.txt`); the harness
   still runs without it (helpers return `None`, tests stay green).
 - Images are gitignored (they live under `output/`); the orchestrator
-  recreates `output/report_images/` each run and lists the generated files in
-  `report.md`.
+  recreates `output/report_images/` each run and embeds the generated PNGs in
+  `report.html` (base64, self-contained).
 - A test that cannot produce a meaningful plot (e.g. an axis-only check) may
   skip the image — this is a "whenever practical" expectation, not a hard
   requirement.
