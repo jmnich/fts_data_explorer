@@ -80,6 +80,7 @@ def save_overlay_residual(test_name: str, root: str | Path,
     ax1.legend()
     ax1.set_xlabel(x_label)
     ax1.set_ylabel(y_label)
+    ax1.set_xmargin(0)
     head = title or test_name
     if status:
         head += f" — {status}"
@@ -102,6 +103,7 @@ def save_overlay_residual(test_name: str, root: str | Path,
     ax2.set_xlabel(x_label)
     ax2.set_ylabel("rel. diff %")
     ax2.axhline(0, color="grey", lw=0.4)
+    ax2.set_xmargin(0)
     fig.tight_layout()
     fig.savefig(out_path, dpi=120)
     plt.close(fig)
@@ -151,10 +153,21 @@ def save_ifg_burst_residual(test_name: str, root: str | Path,
     lo_i = max(0, burst_idx - half)
     hi_i = min(n, burst_idx + half)
 
+    # Resample the reference primary onto the candidate OPD grid over the FULL
+    # arrays (interpolation needs the full monotonic X range; slicing first
+    # would clamp edges incorrectly), then take the burst window. This aligns
+    # the two curves on OPD before differencing — the primary is raw data, but
+    # the same samples sit at slightly different OPD positions once each side's
+    # X-correction is applied, so an index-aligned subtraction is trivially ~0.
+    order = np.argsort(ref_x)
+    ref_interp = np.interp(cand_x, ref_x[order], ref_y[order],
+                          left=ref_y[order][0], right=ref_y[order][-1])
+
     cx = cand_x[lo_i:hi_i]
     cy = cand_y[lo_i:hi_i]
     rx = ref_x[lo_i:hi_i]
     ry = ref_y[lo_i:hi_i]
+    ri = ref_interp[lo_i:hi_i]
     if cx.size == 0 or rx.size == 0:
         return None
 
@@ -174,6 +187,7 @@ def save_ifg_burst_residual(test_name: str, root: str | Path,
     ax1.legend()
     ax1.set_xlabel(x_label)
     ax1.set_ylabel(y_label)
+    ax1.set_xmargin(0)
     head = title or test_name
     if status:
         head += f" — {status}"
@@ -189,11 +203,16 @@ def save_ifg_burst_residual(test_name: str, root: str | Path,
                 head += f" (OPD rel. diff {opd_rd}%)"
     ax1.set_title(f"{head} [burst {burst_frac*100:.0f}%]")
 
-    # Primary residual: absolute difference (signal crosses zero)
-    ax2.plot(cx, cy - ry, lw=0.5, color="tab:red")
+    # Primary residual: post-correction, OPD-aligned absolute difference
+    # (signal crosses zero, so relative error is meaningless near the wings).
+    # Interpolating the reference onto the candidate OPD grid makes this the
+    # signal impact of the X-correction difference, not a raw-data sanity check.
+    ax2.plot(cx, cy - ri, lw=0.5, color="tab:red")
     ax2.set_xlabel(x_label)
     ax2.set_ylabel(f"abs. diff ({y_label})")
+    ax2.set_title("Primary residual — post-correction, OPD-aligned", fontsize=9)
     ax2.axhline(0, color="grey", lw=0.4)
+    ax2.set_xmargin(0)
 
     if has_axis:
         cax = cand_axis_x[lo_i:hi_i]
@@ -201,7 +220,9 @@ def save_ifg_burst_residual(test_name: str, root: str | Path,
         ax3.plot(cx, cax - rax, lw=0.5, color="tab:purple")
         ax3.set_xlabel(x_label)
         ax3.set_ylabel(f"axis abs. diff ({x_label})")
+        ax3.set_title("OPD-axis residual — per-sample axis difference", fontsize=9)
         ax3.axhline(0, color="grey", lw=0.4)
+        ax3.set_xmargin(0)
 
     fig.tight_layout()
     fig.savefig(out_path, dpi=120)
@@ -272,6 +293,7 @@ def save_multi_overlay(test_name: str, root: str | Path,
         if m:
             head += f" wrms={m.get('weighted_rms_rel_pct', '?')}%"
         ax.set_title(head, fontsize=9)
+        ax.set_xmargin(0)
         if residual and cx.size and rx.size:
             rax = axes[prow + 1, pcol]
             order = np.argsort(rx)
@@ -289,6 +311,7 @@ def save_multi_overlay(test_name: str, root: str | Path,
                 rax.set_ylabel("rel. diff %")
             rax.set_xlabel(x_label)
             rax.axhline(0, color="grey", lw=0.4)
+            rax.set_xmargin(0)
     # Hide unused subplots
     for idx in range(n, nrows * ncols):
         prow = (idx // ncols) * rows_per_panel
@@ -332,6 +355,7 @@ def save_allan_surface(test_name: str, root: str | Path,
             ax.set_xlabel("wavelength (um)")
             ax.set_ylabel("tau (samples)")
             ax.set_title(f"{label}", fontsize=9)
+            ax.set_xmargin(0)
             fig.colorbar(im, ax=ax, label="log10|Allan var|")
     # Ratio/residual surface
     if cpp_surface.size and py_surface.size and cpp_surface.shape == py_surface.shape:
@@ -343,6 +367,7 @@ def save_allan_surface(test_name: str, root: str | Path,
                                 cmap="RdBu", vmin=-200, vmax=200)
         axes[2].set_xlabel("wavelength (um)")
         axes[2].set_title("residual (cpp-py)/cpp %", fontsize=9)
+        axes[2].set_xmargin(0)
         fig.colorbar(im, ax=axes[2], label="rel. diff %")
     else:
         axes[2].axis("off")

@@ -170,10 +170,15 @@ std::vector<size_t> findPeaksWithProminence(const std::vector<double>& signal,
         size_t peakIdx = candidates[p];
         double peakVal = centered[peakIdx];
 
+        // Scan left down to and including index 0 — symmetric with the right
+        // scan reaching n-1. A plain `j > 0` loop skips index 0, so a peak at
+        // index 1 never sees the boundary as a valid base, gets prominence 0,
+        // and is dropped (shifts every anchor's OPD by one step).
         double leftMin = peakVal;
-        for (size_t j = peakIdx; j > 0; --j) {
+        for (size_t j = peakIdx; ; --j) {
             if (centered[j] > peakVal) break;
             if (centered[j] < leftMin) leftMin = centered[j];
+            if (j == 0) break;   // avoid size_t underflow
         }
 
         double rightMin = peakVal;

@@ -14,6 +14,7 @@
 #include "file_browser.h"
 #include <GLFW/glfw3.h>
 #include <fstream>
+#include <iomanip>
 #include <filesystem>
 #include <cmath>
 #include <algorithm>
@@ -293,6 +294,7 @@ void ExportPanel::writeCorrectedIFGCsv(const std::string& dir)
         std::string path = dir + "/" + dsName + "_corrected_ifg_" + fname + ".csv";
         std::ofstream ofs(path);
         if (!ofs.is_open()) continue;
+        ofs << std::setprecision(15);
         ofs << "OPD [um],Primary Detector [V]\n";
         size_t n = std::min(opdX.size(), raw.primaryDetector.size());
         for (size_t j = 0; j < n; j++) {
@@ -307,6 +309,7 @@ void ExportPanel::writeUncorrectedIFGCsv(const std::string& dir)
     std::string path = dir + "/" + dsName + "_uncorrected_ifgs.csv";
     std::ofstream ofs(path);
     if (!ofs.is_open()) return;
+    ofs << std::setprecision(15);
 
     size_t nFiles = std::min(appState->active->selectedFiles.size(), appState->active->rawDataCache.size());
     size_t maxLen = 0;
@@ -349,6 +352,7 @@ void ExportPanel::writeAvgSpectrumCsv(const std::string& dir)
     std::string path = dir + "/" + dsName + "_average_spectrum.csv";
     std::ofstream ofs(path);
     if (!ofs.is_open()) return;
+    ofs << std::setprecision(15);
 
     const char* xLabel = "Wavenumber [cm-1]";
     if (avg.xUnitSelector == 1) xLabel = "Wavelength [um]";
@@ -372,6 +376,7 @@ void ExportPanel::writeSnrSpectrumCsv(const std::string& dir)
     std::string path = dir + "/" + dsName + "_snr_spectrum.csv";
     std::ofstream ofs(path);
     if (!ofs.is_open()) return;
+    ofs << std::setprecision(15);
 
     const char* xLabel = "Wavenumber [cm-1]";
     if (snr.xUnitSelector == 1) xLabel = "Wavelength [um]";
@@ -429,6 +434,7 @@ void ExportPanel::writeSpectraCsv(const std::string& dir)
     std::string path = dir + "/" + dsName + "_spectra.csv";
     std::ofstream ofs(path);
     if (!ofs.is_open()) return;
+    ofs << std::setprecision(15);
 
     const char* xLabel = "Wavenumber [cm-1]";
     if (appState->active->spectrum.xUnitSelector == 1) xLabel = "Wavelength [um]";
@@ -494,6 +500,7 @@ void ExportPanel::writeAllan3DCsv(const std::string& dir)
     std::string path = dir + "/" + dsName + "_allan_3d.csv";
     std::ofstream ofs(path);
     if (!ofs.is_open()) return;
+    ofs << std::setprecision(15);
 
     const char* wlLabel = "Wavenumber [cm-1]";
     if (al.xUnitSelector == 1) wlLabel = "Wavelength [um]";
@@ -544,6 +551,7 @@ void ExportPanel::writeAllanSliceCsv(const std::string& dir)
     std::string path = dir + "/" + dsName + "_allan_slice_" + wlStr + ".csv";
     std::ofstream ofs(path);
     if (!ofs.is_open()) return;
+    ofs << std::setprecision(15);
 
     ofs << "Tau [measurements],Allan Variance\n";
 
@@ -574,6 +582,7 @@ void ExportPanel::writeT100TransCsv(const std::string& dir)
     std::string path = dir + "/" + dsName + "_t100_transmission_" + srcName + ".csv";
     std::ofstream ofs(path);
     if (!ofs.is_open()) return;
+    ofs << std::setprecision(15);
 
     const char* xLabel = "Wavenumber [cm-1]";
     if (t100.xUnitSelector == 1) xLabel = "Wavelength [um]";
@@ -647,6 +656,7 @@ void ExportPanel::writeT100AllTransCsv(const std::string& dir)
     std::string path = dir + "/" + dsName + "_t100_all_transmissions.csv";
     std::ofstream ofs(path);
     if (!ofs.is_open()) return;
+    ofs << std::setprecision(15);
 
     const char* xLabel = "Wavenumber [cm-1]";
     if (t100.xUnitSelector == 1) xLabel = "Wavelength [um]";
@@ -690,6 +700,7 @@ void ExportPanel::writeT100StdDevCsv(const std::string& dir)
     std::string path = dir + "/" + dsName + "_t100_stddev.csv";
     std::ofstream ofs(path);
     if (!ofs.is_open()) return;
+    ofs << std::setprecision(15);
 
     const char* xLabel = "Wavenumber [cm-1]";
     if (t100.xUnitSelector == 1) xLabel = "Wavelength [um]";
@@ -724,6 +735,7 @@ void ExportPanel::writeAbsorbanceCsv(const std::string& dir)
         std::string path = dir + "/" + dsName + "_absorbance_" + srcName + ".csv";
         std::ofstream ofs(path);
         if (!ofs.is_open()) continue;
+        ofs << std::setprecision(15);
         ofs << xLabel << ",Absorbance\n";
         size_t n = std::min(xv.size(), yv.size());
         for (size_t j = 0; j < n; j++) {
@@ -757,6 +769,7 @@ void ExportPanel::writeTransmittanceCsv(const std::string& dir)
         std::string path = dir + "/" + dsName + "_transmittance_" + srcName + ".csv";
         std::ofstream ofs(path);
         if (!ofs.is_open()) continue;
+        ofs << std::setprecision(15);
         ofs << xLabel << ",Transmittance\n";
         size_t n = std::min(xv.size(), yv.size());
         for (size_t j = 0; j < n; j++)

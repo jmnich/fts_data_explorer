@@ -16,9 +16,18 @@ from _common.pipeline import hilbert_x_axis, x_axis_from_peaks
 from _common.h5io import strip_derivatives, validate_h5
 from _common.headless import run_binary, load_csv
 from _common.report_images import save_ifg_burst_residual
+from _common.compare import compare
 
 DATASET = "wust_mini"
 OUTPUT_TYPE = "Corrected interferograms from selected files"
+
+# Absolute max-abs threshold (V) for the post-correction, OPD-aligned primary
+# residual in the burst window (§10: interferograms cross zero, so relative
+# error is meaningless — gate on absolute difference). Calibrated from the
+# observed residual after the CSV export precision fix (setprecision(15)):
+# hilbert ~4.7e-5 V, peakfinding ~4.8e-5 V on a burst peak of ~0.86 V;
+# 5e-4 V gives ~10x headroom over the larger observed value. See description.md.
+PRIMARY_RESAMPLED_MAX_ABS_V = 5e-4
 
 def nsk(n):
     parts = re.split(r"(\d+)", n)
@@ -130,11 +139,29 @@ def main():
         })
         if status != "pass":
             all_pass = False
+        # Resampled-primary comparison: the post-correction primary, aligned on
+        # a common OPD grid and restricted to the burst window (where the signal
+        # lives; the wings are noise and cross zero, so a full-range residual is
+        # dominated by interpolation artifacts at the clamped ends). Absolute
+        # threshold (V) per §10 — interferograms cross zero, so relative error is
+        # meaningless. compare() drives pass/fail via max_abs (see compare.py).
+        burst_idx = int(np.argmax(np.abs(cpp_prim)))
+        half = int(len(cpp_prim) * 0.05 / 2.0)
+        opd_lo = float(cpp_opd[max(0, burst_idx - half)])
+        opd_hi = float(cpp_opd[min(len(cpp_opd), burst_idx + half) - 1])
+        prim_thr = {"max_abs": PRIMARY_RESAMPLED_MAX_ABS_V, "weighted_rms_rel_pct": 1.0}
+        prim_comps = compare(cpp_opd, cpp_prim, py_opd, prim, None, None,
+                             prim_thr, eval_window=(opd_lo, opd_hi), declared=["A"])
+        comparisons.extend(prim_comps)
+        for pc in prim_comps:
+            if pc.get("status") != "pass":
+                all_pass = False
+        prim_resamp_max_abs = prim_comps[0].get("max_abs") if prim_comps else None
         if cpp_opd is not None and py_opd is not None:
-            plot_data.append((method, cpp_opd, cpp_prim, py_opd, prim, status, rel_diff))
+            plot_data.append((method, cpp_opd, cpp_prim, py_opd, prim, status, rel_diff, prim_resamp_max_abs))
     # Burst-window residual plots: one per method, 5% of length around the burst.
     # Absolute-difference residual (interferograms cross zero, relative is meaningless).
-    for method, cpp_opd, cpp_prim, py_opd, prim_, st, rd in plot_data:
+    for method, cpp_opd, cpp_prim, py_opd, prim_, st, rd, prim_resamp_max in plot_data:
         n = min(len(cpp_opd), len(py_opd), len(prim_))
         save_ifg_burst_residual(
             "test2_interferogram_x_correction", root,
@@ -145,7 +172,8 @@ def main():
             title=f"test2 corrected IFG ({method})",
             y_label="Primary [V]", x_label="OPD [um]",
             status=st,
-            metrics={"opd_rel_diff_pct": round(rd * 100, 6)})
+            metrics={"opd_rel_diff_pct": round(rd * 100, 6),
+                     "prim_resamp_max_abs": prim_resamp_max})
 
     status = "pass" if all_pass else "fail"
     summary = "; ".join(f"{c['name']}={c['status']}" for c in comparisons)
