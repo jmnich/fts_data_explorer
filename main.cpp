@@ -306,7 +306,7 @@ void doSaveWorkspace(AppState& s, const std::string& asPath) {
         s.active->viewStateBaseline = viewStateJson(s);
         s.active->viewStateBaselinePending = false;
         s.needsRedraw = true;
-        s.saveToastUntil = glfwGetTime() + 1.5;
+        s.saveToastUntil = std::max(glfwGetTime() + 1.5, s.saveOverlayUntil);
         return;
     }
     H5Store::save(asPath.empty() ? s.active->workspacePath : asPath, *toSave);   // throws H5Error
@@ -324,7 +324,7 @@ void doSaveWorkspace(AppState& s, const std::string& asPath) {
     s.active->viewStateBaselinePending = false;
     s.needsRedraw = true;
     // The save was effective (no exception, no cancel): show the "Saved" toast.
-    s.saveToastUntil = glfwGetTime() + 1.5;
+    s.saveToastUntil = std::max(glfwGetTime() + 1.5, s.saveOverlayUntil);
 }
 
 // Ctrl+S / File→Save from ANY tab kind: everything dirty gets saved — every
@@ -373,7 +373,7 @@ void saveEverything(AppState& s) {
     // has none — a "Saved" toast there would be a lie).
     if (!s.sessions.empty() || !s.experiments.empty() ||
         s.sessionTab.multiWorkspaceOpen)
-        s.saveToastUntil = glfwGetTime() + 1.5;
+        s.saveToastUntil = std::max(glfwGetTime() + 1.5, s.saveOverlayUntil);
 }
 
 void requestSaveWorkspace(AppState& s, const std::string& asPath) {
@@ -391,6 +391,14 @@ void requestSaveWorkspace(AppState& s, const std::string& asPath) {
 // the next frame top. Guards: never queue while an exit Save All / exit-dirty
 // modal flow owns the save scheduling, and never show the overlay when there
 // is nothing that could hold state (matches saveEverything's toast guard).
+// Minimum time the "Saving..."/"Exporting..." overlay stays on screen, from
+// the REQUEST (the sync save itself runs at the next frame top and is never
+// delayed by this — for large datasets the save blocks far longer than the
+// floor and the overlay shows for the whole duration). Small datasets finish
+// in milliseconds; without a floor the overlay would flash for a single frame
+// and read as a glitch. Set to 0.0 for strictly need-based display.
+static constexpr double kSaveOverlayMinDisplay = 0.2;
+
 static bool saveDeferAllowed(const AppState& s) {
     return !s.exitSaveAllRunning && !s.showExitDirtyModal &&
            (!s.sessions.empty() || !s.experiments.empty() ||
@@ -400,7 +408,7 @@ static bool saveDeferAllowed(const AppState& s) {
 void requestSaveEverything(AppState& s) {
     if (!saveDeferAllowed(s)) return;
     s.pendingSaveKind = AppState::PendingSaveKind::Everything;
-    s.saveOverlayUntil = glfwGetTime() + 0.6;
+    s.saveOverlayUntil = glfwGetTime() + kSaveOverlayMinDisplay;
     s.needsRedraw = true;
 }
 
@@ -417,7 +425,7 @@ void requestSaveWorkspaceDeferred(AppState& s, const std::string& asPath) {
     }
     s.pendingSaveKind = AppState::PendingSaveKind::Workspace;
     s.pendingSaveAsPath = asPath;
-    s.saveOverlayUntil = glfwGetTime() + 0.6;
+    s.saveOverlayUntil = glfwGetTime() + kSaveOverlayMinDisplay;
     s.needsRedraw = true;
 }
 
@@ -438,7 +446,7 @@ void requestExportDataset(AppState& s, const std::string& sourceId,
     s.saveOverlayKind = AppState::PendingSaveKind::ExportDataset;
     s.pendingExportSourceId = sourceId;
     s.pendingSaveAsPath = exportPath;
-    s.saveOverlayUntil = glfwGetTime() + 0.6;
+    s.saveOverlayUntil = glfwGetTime() + kSaveOverlayMinDisplay;
     s.needsRedraw = true;
 }
 
@@ -468,7 +476,7 @@ void executePendingSave(AppState& s) {
                                            srcId, err);
             if (!err.empty()) throw H5Error(err);
             H5Store::save(asPath, ws);
-            s.saveToastUntil = glfwGetTime() + 1.5;
+            s.saveToastUntil = std::max(glfwGetTime() + 1.5, s.saveOverlayUntil);
         }
     } catch (const std::exception& e) {
         const bool isExport =

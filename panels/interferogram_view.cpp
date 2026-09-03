@@ -268,10 +268,15 @@ void renderInterferogramPanel() {
                     ImPlot::PushStyleColor(ImPlotCol_AxisGrid, refGridCol);
                 }
                 if (ImPlot::BeginPlot(workspacePlotId("Reference").c_str(), ImVec2(-1, -1), ref_flags)) {
-                    // Set up axes with auto-fit flag for Y-axis when enabled
-                    ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
+                    // Set up axes: Y is ALWAYS auto-fitted (bugfix: with the
+                    // flag off the Y range was manually zoomable). The toggle
+                    // only picks the fit mode, mirroring the spectral panels:
+                    //   off  = "all"   (AutoFit — full data extents, Y locked)
+                    //   on   = "tight" (AutoFit|RangeFit — visible X range)
+                    ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks |
+                                              ImPlotAxisFlags_AutoFit;
                     if (appState.active->autoFitYAxis) {
-                        y_flags |= ImPlotAxisFlags_AutoFit;
+                        y_flags |= ImPlotAxisFlags_RangeFit;
                     }
                     const char* refXLabel = (appState.active->xAxisBase == 1) ? "OPD [\xC2\xB5m]" : "Sample num";
                     ImPlot::SetupAxes(refXLabel, "Voltage [V]", ImPlotAxisFlags_NoTickMarks, y_flags);
@@ -297,11 +302,10 @@ void renderInterferogramPanel() {
                                 }
                             }
                             if (xMin < xMax) {
-                                if (!appState.active->autoFitYAxis) {
-                                    ImPlot::SetupAxesLimits(xMin, xMax, appState.active->ref_y_min, appState.active->ref_y_max, ImPlotCond_Always);
-                                } else {
-                                    ImPlot::SetupAxisLimits(ImAxis_X1, xMin, xMax, ImPlotCond_Always);
-                                }
+                                // X-only: Y is always auto-fitted now — a
+                                // Cond_Always Y limit here would lock the
+                                // range and defeat the AutoFit flag.
+                                ImPlot::SetupAxisLimits(ImAxis_X1, xMin, xMax, ImPlotCond_Always);
                             }
                         } else {
                             if (appState.active->maxAtZero && !peakPositions.empty()) {
@@ -314,18 +318,10 @@ void renderInterferogramPanel() {
                                     xMax = std::max(xMax, N - 1.0 - off);
                                 }
                                 if (xMin < xMax) {
-                                    if (!appState.active->autoFitYAxis) {
-                                        ImPlot::SetupAxesLimits(xMin, xMax, appState.active->ref_y_min, appState.active->ref_y_max, ImPlotCond_Always);
-                                    } else {
-                                        ImPlot::SetupAxisLimits(ImAxis_X1, xMin, xMax, ImPlotCond_Always);
-                                    }
+                                    ImPlot::SetupAxisLimits(ImAxis_X1, xMin, xMax, ImPlotCond_Always);
                                 }
                             } else {
-                                if (!appState.active->autoFitYAxis) {
-                                    ImPlot::SetupAxesLimits(0, appState.active->loadedData[0].referenceDetector.size(), appState.active->ref_y_min, appState.active->ref_y_max, ImPlotCond_Always);
-                                } else {
-                                    ImPlot::SetupAxisLimits(ImAxis_X1, 0, appState.active->loadedData[0].referenceDetector.size(), ImPlotCond_Always);
-                                }
+                                ImPlot::SetupAxisLimits(ImAxis_X1, 0, appState.active->loadedData[0].referenceDetector.size(), ImPlotCond_Always);
                             }
                         }
                         // Reset the force flag after use
@@ -558,10 +554,12 @@ void renderInterferogramPanel() {
                     ImPlot::PushStyleColor(ImPlotCol_AxisGrid, primGridCol);
                 }
                 if (ImPlot::BeginPlot(workspacePlotId("Primary").c_str(), ImVec2(-1, -1), prim_flags)) {
-                    // Set up axes with auto-fit flag for Y-axis when enabled
-                    ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
+                    // Set up axes: Y always auto-fitted — see the reference
+                    // plot note (off = "all", on = "tight").
+                    ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks |
+                                              ImPlotAxisFlags_AutoFit;
                     if (appState.active->autoFitYAxis) {
-                        y_flags |= ImPlotAxisFlags_AutoFit;
+                        y_flags |= ImPlotAxisFlags_RangeFit;
                     }
 
                     const char* primXLabel = (appState.active->xAxisBase == 1) ? "OPD [\xC2\xB5m]" : "Sample num";
@@ -602,11 +600,9 @@ void renderInterferogramPanel() {
                                 }
                             }
                             if (xMin < xMax) {
-                                if (!appState.active->autoFitYAxis) {
-                                    ImPlot::SetupAxesLimits(xMin, xMax, appState.active->prim_y_min, appState.active->prim_y_max, ImPlotCond_Always);
-                                } else {
-                                    ImPlot::SetupAxisLimits(ImAxis_X1, xMin, xMax, ImPlotCond_Always);
-                                }
+                                // X-only: Y is always auto-fitted — see the
+                                // reference plot note.
+                                ImPlot::SetupAxisLimits(ImAxis_X1, xMin, xMax, ImPlotCond_Always);
                             }
                         } else {
                             if (appState.active->maxAtZero && !peakPositions.empty()) {
@@ -619,18 +615,10 @@ void renderInterferogramPanel() {
                                     xMax = std::max(xMax, N - 1.0 - off);
                                 }
                                 if (xMin < xMax) {
-                                    if (!appState.active->autoFitYAxis) {
-                                        ImPlot::SetupAxesLimits(xMin, xMax, appState.active->prim_y_min, appState.active->prim_y_max, ImPlotCond_Always);
-                                    } else {
-                                        ImPlot::SetupAxisLimits(ImAxis_X1, xMin, xMax, ImPlotCond_Always);
-                                    }
+                                    ImPlot::SetupAxisLimits(ImAxis_X1, xMin, xMax, ImPlotCond_Always);
                                 }
                             } else {
-                                if (!appState.active->autoFitYAxis) {
-                                    ImPlot::SetupAxesLimits(0, appState.active->loadedData[0].primaryDetector.size(), appState.active->prim_y_min, appState.active->prim_y_max, ImPlotCond_Always);
-                                } else {
-                                    ImPlot::SetupAxisLimits(ImAxis_X1, 0, appState.active->loadedData[0].primaryDetector.size(), ImPlotCond_Always);
-                                }
+                                ImPlot::SetupAxisLimits(ImAxis_X1, 0, appState.active->loadedData[0].primaryDetector.size(), ImPlotCond_Always);
                             }
                         }
                     }
@@ -745,6 +733,11 @@ void renderInterferogramPanel() {
                                 ImPlotSpec windowSpec;
                                 windowSpec.LineColor = ImVec4(0.0f, 1.0f, 1.0f, 0.5f);
                                 windowSpec.LineWeight = 2.0f;
+                                // Overlay only — never contribute to the Y
+                                // (or X) auto-fit extents (bugfix: with Y
+                                // auto-fit on, the window curve scaled to the
+                                // data maximum pulled the fit off the data).
+                                windowSpec.Flags = ImPlotItemFlags_NoFit;
                                 if (appState.active->xAxisBase == 1 && !appState.active->selectedFilenames.empty()) {
                                     auto hxit = appState.active->hilbertXCache.find(appState.active->selectedFilenames[0]);
                                     if (hxit != appState.active->hilbertXCache.end() && !hxit->second.empty()) {
@@ -976,6 +969,9 @@ void renderInterferogramConfigPanel() {
             if (ImGui::Button("off##AfyOff")) {
                 if (appState.active->autoFitYAxis) {
                     appState.active->autoFitYAxis = false;
+                    // Fit applies at EndPlot AFTER drawing — render the
+                    // follow-up frames so the fitted Y shows immediately.
+                    appState.pendingRedrawFrames = 2;
                     appState.needsRedraw = true;
                 }
             }
@@ -988,6 +984,9 @@ void renderInterferogramConfigPanel() {
             if (ImGui::Button("on##AfyOn")) {
                 if (!appState.active->autoFitYAxis) {
                     appState.active->autoFitYAxis = true;
+                    // Fit applies at EndPlot AFTER drawing — render the
+                    // follow-up frames so the fitted Y shows immediately.
+                    appState.pendingRedrawFrames = 2;
                     if (appState.active->dataLoaded) {
                         if (!appState.active->loadedData[0].referenceDetector.empty()) {
                             auto ref_min_max = std::minmax_element(appState.active->loadedData[0].referenceDetector.begin(), appState.active->loadedData[0].referenceDetector.end());

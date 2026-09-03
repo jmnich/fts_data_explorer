@@ -28,8 +28,13 @@ static void SetupAxisTicksLimited(ImAxis axis, double min, double max, int maxTi
     double firstTick = std::ceil(min / step) * step;
     std::vector<double> ticks;
     ticks.reserve(maxTicks);
-    for (double tick = firstTick; tick <= max + step * 0.5; tick += step)
-        ticks.push_back(tick);
+    for (double tick = firstTick; tick <= max + step * 0.5; tick += step) {
+        // Snap to an exact step multiple (see panels/spectral_plot.cpp):
+        // accumulated FP error otherwise yields labels like "-2.78e-17"
+        // near zero. `t + 0.0` normalizes a snapped -0 back to +0.
+        double t = std::round(tick / step) * step;
+        ticks.push_back(t + 0.0);
+    }
     if (!ticks.empty())
         ImPlot::SetupAxisTicks(axis, ticks.data(), ticks.size(), nullptr);
 }

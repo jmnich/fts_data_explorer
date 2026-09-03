@@ -212,6 +212,13 @@ struct AppState {
 
     // Idle rendering optimization
     std::atomic<bool> needsRedraw;
+    // Extra rendered frames after a state change (selector toggles that
+    // alter plot fit flags): ImPlot applies fits at the END of EndPlot —
+    // AFTER the plot was drawn — so the fitted view only appears on the
+    // NEXT frame. The toggle's own needsRedraw is consumed by the stale
+    // frame; pendingRedrawFrames keeps the loop rendering until the fitted
+    // result is on screen.
+    int pendingRedrawFrames = 0;
     // Raw scroll deltas accumulated from the GLFW callback (main-thread only),
     // drained at one wheel notch per frame by the rate limiter in main.cpp.
     // lastScrollEventTime gates the drain: excess is discarded once no fresh

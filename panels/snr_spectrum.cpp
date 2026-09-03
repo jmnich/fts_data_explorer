@@ -404,8 +404,10 @@ void renderSnrPanel() {
             ImGui::PopStyleColor(3);
 
             auto& snrPlot = appState.active->snrSpectrum.plot;
-            if (snrPlot.renderYScaleButtons("##Snr", /*withDb=*/false))
-                appState.needsRedraw = true;
+            if (snrPlot.renderYScaleButtons("##Snr", /*withDb=*/false)) {
+                    appState.needsRedraw = true;
+                    appState.pendingRedrawFrames = 2;   // EndPlot-time fit (see app_state.h)
+                }
 
             if (snrPlot.renderXUnitButtons("##SnrXUnit"))
                 appState.needsRedraw = true;
@@ -438,8 +440,10 @@ void renderSnrPanel() {
                 appState.needsRedraw = true;
             }
 
-            if (snrPlot.renderYModeButtons("##SnrYAxis"))
-                appState.needsRedraw = true;
+            if (snrPlot.renderYModeButtons("##SnrYAxis")) {
+                    appState.needsRedraw = true;
+                    appState.pendingRedrawFrames = 2;   // EndPlot-time fit
+                }
 
             if (snrPlot.yAxisMode == kYModeForce) {
                 ImGui::Text("min:");

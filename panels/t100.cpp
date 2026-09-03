@@ -1541,8 +1541,10 @@ void renderT100Panel() {
                     appState.needsRedraw = true;
                 }
 
-                if (t100Plot.renderYModeButtons("##T100YAxis"))
-                    appState.needsRedraw = true;
+                if (t100Plot.renderYModeButtons("##T100YAxis")) {
+                        appState.needsRedraw = true;
+                        appState.pendingRedrawFrames = 2;   // EndPlot-time fit
+                    }
             }
 
         } else {

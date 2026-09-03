@@ -39,7 +39,11 @@ void SetupAxisTicksLimited(ImAxis axis, double min, double max, int maxTicks) {
     std::vector<double> ticks;
     ticks.reserve(maxTicks);
     for (double tick = firstTick; tick <= max + step * 0.5; tick += step) {
-        ticks.push_back(tick);
+        // Snap to an exact step multiple (see panels/spectral_plot.cpp):
+        // accumulated FP error otherwise yields labels like "-2.78e-17"
+        // near zero. `t + 0.0` normalizes a snapped -0 back to +0.
+        double t = std::round(tick / step) * step;
+        ticks.push_back(t + 0.0);
     }
 
     if (!ticks.empty()) {
@@ -188,6 +192,16 @@ bool initializeApplication(AppConfig& config, GLFWwindow*& window) {
 
     // Enable docking
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+
+    // Process the ENTIRE queued input batch every frame (bugfix: selector
+    // toggles waited for mouse movement). With trickling on (default), a
+    // click arriving while the loop idles is consumed one event per frame —
+    // the release could sit in ImGui's queue after the idle gate re-engaged,
+    // so the click only registered when the next GLFW event (typically a
+    // mouse move) woke the loop. Wheel input is unaffected: the app's own
+    // scroll accumulator + rate limiter (IMGUI_GUIDE §20) clamps to one
+    // notch per frame regardless.
+    io.ConfigInputTrickleEventQueue = false;
 
     ImGui::StyleColorsDark();
 

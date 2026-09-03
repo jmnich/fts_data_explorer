@@ -485,8 +485,10 @@ void renderAveragePanel() {
 
             // ---- Y scale / X unit / Match X / Y Axis (INDEPENDENT) ----
             auto& avgPlot = appState.active->averageSpectrum.plot;
-            if (avgPlot.renderYScaleButtons("##AvgYScale", true))
-                appState.needsRedraw = true;
+            if (avgPlot.renderYScaleButtons("##AvgYScale", true)) {
+                    appState.needsRedraw = true;
+                    appState.pendingRedrawFrames = 2;   // EndPlot-time fit (see app_state.h)
+                }
 
             if (avgPlot.renderXUnitButtons("##AvgXUnit"))
                 appState.needsRedraw = true;
@@ -523,8 +525,10 @@ void renderAveragePanel() {
                 appState.needsRedraw = true;
             }
 
-            if (avgPlot.renderYModeButtons("##AvgYAxis"))
-                appState.needsRedraw = true;
+            if (avgPlot.renderYModeButtons("##AvgYAxis")) {
+                    appState.needsRedraw = true;
+                    appState.pendingRedrawFrames = 2;   // EndPlot-time fit
+                }
 
             if (avgPlot.yAxisMode == kYModeForce) {
                 ImGui::Text("min:");

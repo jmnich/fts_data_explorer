@@ -836,12 +836,16 @@ void Spectrum::renderPanel(AppState& s) {
                 // Y scale / X unit / Y axis (rendering only — no cache invalidation
                 // needed; the view's tickPrePlot handles the refits)
                 auto& specPlot = s.active->spectrum.plot;
-                if (specPlot.renderYScaleButtons("##YScaleDb", /*withDb=*/true))
-                    s.needsRedraw = true;
+                if (specPlot.renderYScaleButtons("##YScaleDb", /*withDb=*/true)) {
+                        s.needsRedraw = true;
+                        s.pendingRedrawFrames = 2;   // EndPlot-time fit (see app_state.h)
+                    }
                 if (specPlot.renderXUnitButtons("##XUnitCm"))
                     s.needsRedraw = true;
-                if (specPlot.renderYModeButtons("##YAxisAll"))
-                    s.needsRedraw = true;
+                if (specPlot.renderYModeButtons("##YAxisAll")) {
+                        s.needsRedraw = true;
+                        s.pendingRedrawFrames = 2;   // EndPlot-time fit
+                    }
 
                 // Forced-Y inputs (L6): renderYModeButtons exposes "force" but
                 // the min/max fields were missing here (unlike Average/SNR/T100).

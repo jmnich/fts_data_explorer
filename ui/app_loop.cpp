@@ -9,6 +9,7 @@
 #include "menu_bar.h"
 #include "theme.h"
 #include "popup_utils.h"
+#include "imgui_internal.h"   // InputEventsQueue (drain guard below)
 #include "workspace_reader.h"
 #include "window.h"
 #include "spectral_toolbox.h"
@@ -1240,16 +1241,39 @@ bool AppLoop::runFrame() {
     scheduleRedraws();
 
     // Skip rendering when UI is static — saves CPU/GPU
+    // A fit-affecting toggle must render follow-up frames: ImPlot applies
+    // fits at the END of EndPlot — AFTER the plot was drawn — so the fitted
+    // view only appears on the next frame (see app_state.h). The toggle
+    // itself commits during renderUI (after the plot drew), so the counter
+    // is decremented HERE at the gate — never consuming the toggle frame.
+    if (appState.pendingRedrawFrames > 0)
+        appState.needsRedraw = true;
+
     if (!appState.needsRedraw) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
         return true;
     }
+    if (appState.pendingRedrawFrames > 0)
+        --appState.pendingRedrawFrames;
     if (!appState.showWelcomeScreen || appState.welcomeScreenInitialized) {
         appState.needsRedraw = false;
     }
 
     handleInput();
     renderUI();
+    // Interaction backstops (bugfix: selector toggles waited for mouse move):
+    // 1. While any mouse button is held or an item is active, keep rendering —
+    //    the click release is then consumed in a RENDERING frame, so the
+    //    toggle registers and its needsRedraw renders the result even if the
+    //    release's own wakeup were lost.
+    // 2. Drain guard: ImGui's queued input must be fully consumed (no-ops once
+    //    ConfigInputTrickleEventQueue is off, but protects the drain invariant).
+    if (ImGui::GetCurrentContext()) {
+        ImGuiContext* g = ImGui::GetCurrentContext();
+        if (ImGui::IsMouseDown(0) || ImGui::IsAnyItemActive() || g->ActiveId != 0 ||
+            !g->InputEventsQueue.empty())
+            appState.needsRedraw = true;
+    }
     present();
     // Black-first-frame fix (2026-08-14): after a tab-kind switch the just-
     // rendered frame could not show the incoming dock panels (the tab bars
@@ -2398,7 +2422,11 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                     ? "Exporting..." : "Saving...";
             drawCenteredToast(overlayLabel, 22.0f, 14.0f);
         }
-        if (glfwGetTime() < appState.saveToastUntil) {
+        // "Saved" toast: never co-drawn with the "Saving..."/"Exporting..."
+        // overlay (small datasets save faster than the overlay's min-display
+        // window — the toast start is also clamped past saveOverlayUntil at
+        // the set sites in main.cpp; this guard is the render-side backstop).
+        if (glfwGetTime() < appState.saveToastUntil && !saveOverlayActive) {
             drawCenteredToast("Saved", 22.0f, 14.0f);
         }
 

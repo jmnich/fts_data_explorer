@@ -34,7 +34,14 @@ static void SetupAxisTicksLimited(ImAxis axis, double min, double max, int maxTi
     std::vector<double> ticks;
     ticks.reserve(maxTicks);
     for (double tick = firstTick; tick <= max + step * 0.5; tick += step) {
-        ticks.push_back(tick);
+        // Snap to an exact step multiple: accumulated FP error in the loop
+        // otherwise yields tick values like -2.78e-17 near zero, which the
+        // default "%g" tick label prints verbatim (bugfix). Every tick on the
+        // axis ends up at the same precision (a multiple of `step`); the
+        // tracking cursor remains the precise readout. `t + 0.0` normalizes
+        // a snapped -0 back to +0.
+        double t = std::round(tick / step) * step;
+        ticks.push_back(t + 0.0);
     }
 
     if (!ticks.empty()) {

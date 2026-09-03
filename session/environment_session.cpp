@@ -1711,6 +1711,18 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
         return;
     }
 
+    // Comparator dB mode: normalize the GLOBAL curve maximum to 0 dB — same
+    // convention as the spectrum/average dB modes (max = 0 dB). Absorbance
+    // keeps raw dB (transmittance % has an absolute reference).
+    const bool dBNormalize = (type == EnvType::Comparator) &&
+                             plot.yScaleSelector == kYScaleDb;
+    double dBRefMax = 0.0;
+    if (dBNormalize) {
+        for (const auto& c : curves)
+            for (double v : c.y) dBRefMax = std::max(dBRefMax, v);
+        if (dBRefMax <= 0.0) dBRefMax = 1.0;   // all-zero curves → floored at -300 dB
+    }
+
     // Unified view/interaction phases (panels/spectral_plot.h). Env owns
     // unit switching (xUnitEnabled = false — the Ranging-window button handler
     // + convertXInPlace handle units; no tick-time conversion, R2).
@@ -1743,13 +1755,15 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
         }
         return have;
     };
-    f.yDataRange = [this, &curves](double& y0, double& y1) -> bool {
+    f.yDataRange = [this, &curves, dBNormalize, dBRefMax](double& y0, double& y1) -> bool {
         bool have = false;
         for (const auto& c : curves) {
             if (c.y.empty()) continue;
             for (double v : c.y) {
                 if (plot.yScaleSelector == kYScaleDb)
-                    v = 10.0 * std::log10(std::max(v, 1e-300));
+                    v = dBNormalize
+                        ? 10.0 * std::log10(std::max(v / dBRefMax, 1e-300))
+                        : 10.0 * std::log10(std::max(v, 1e-300));
                 if (!have) { y0 = y1 = v; have = true; }
                 else { y0 = std::min(y0, v); y1 = std::max(y1, v); }
             }
@@ -1843,7 +1857,10 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
             if (plot.yScaleSelector == kYScaleDb) {
                 // dB needs a writable buffer: copy only when not downsampled.
                 if (px == &c.x) { dy = c.y; py = &dy; }
-                for (double& v : dy) v = 10.0 * std::log10(std::max(v, 1e-300));
+                for (double& v : dy)
+                    v = dBNormalize
+                        ? 10.0 * std::log10(std::max(v / dBRefMax, 1e-300))
+                        : 10.0 * std::log10(std::max(v, 1e-300));
             }
             ImPlotSpec spec;
             if (c.color.w > 0.0f) spec.LineColor = c.color;
@@ -1893,7 +1910,11 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
                 cc.color = curveColors[k];
                 if (type != EnvType::Comparator) cc.label = curves[k].label;
                 if (plot.yScaleSelector == kYScaleDb)
-                    cc.transform = [](double v) { return 10.0 * std::log10(std::max(v, 1e-300)); };
+                    cc.transform = [dBNormalize, dBRefMax](double v) {
+                        return dBNormalize
+                            ? 10.0 * std::log10(std::max(v / dBRefMax, 1e-300))
+                            : 10.0 * std::log10(std::max(v, 1e-300));
+                    };
                 cursorCurves.push_back(std::move(cc));
             }
             renderCursorOverlay(header, cursorCurves);
