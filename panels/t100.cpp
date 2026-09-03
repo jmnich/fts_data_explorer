@@ -392,6 +392,19 @@ bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
     return true;
 }
 
+void T100Spectrum::refreshTransmittanceCache() {
+    if (needsRecompute) {
+        cachedTransX.clear();
+        cachedTransY.clear();
+        transmittanceAvailable = false;
+        needsRecompute = false;
+    }
+    for (const auto& fileId : lastKnownSelection) {
+        if (cachedTransX.find(fileId) == cachedTransX.end())
+            computeTransmittanceForFile(fileId);
+    }
+}
+
 bool T100Spectrum::computeTransmittanceFromVectors(
         const std::vector<double>& specX,
         const std::vector<double>& specY,
@@ -778,14 +791,23 @@ static void formatEnergyRatio(char* buf, size_t bufSize, double val) {
 }
 
 void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
-#if FTS_BUILD_HDF5
-    // Staleness banner (§4.2).
-    if (appState && appState->hasWorkspace() && t100Outdated(*appState)) {
-        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
-            "Saved result is stale - press Calculate to recompute.");
-        ImGui::Spacing();
-    }
-#endif
+    // Stale-data overlay shared with the experiment tabs (in-plot message +
+    // Recompute button; button hidden while the recompute chain is busy).
+    auto renderStaleIfNeeded = [this](const ImVec2& rMin, const ImVec2& rMax) {
+        if (!appState || !appState->hasWorkspace()) return;
+        if (!t100Outdated(*appState) &&
+            !chainTargetsPanel(*appState, PanelKind::T100))
+            return;
+        renderStaleDataOverlay(ImGui::GetWindowDrawList(), rMin, rMax,
+                               "Stale data: source changed.",
+                               panelStaleDetails(*appState, PanelKind::T100),
+                               "##staleRecomputeT100",
+                               !artifactRecomputeBusy(*appState, PanelKind::T100),
+                               [this]() {
+                                   requestRecomputeChain(*appState, PanelKind::T100);
+                               });
+    };
+
     // Detect file selection changes
     {
         std::vector<std::string> currentSelection(appState->active->selectedFilenames.begin(),
@@ -801,10 +823,13 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
         ImVec2 avail = ImGui::GetContentRegionAvail();
         const char* msg = "No reference spectrum loaded";
         ImVec2 textSize = ImGui::CalcTextSize(msg);
+        const ImVec2 contentMin = ImGui::GetCursorScreenPos();
         ImGui::SetCursorPos(ImVec2(
             (avail.x - textSize.x) * 0.5f,
             (avail.y - textSize.y) * 0.5f));
         ImGui::Text("%s", msg);
+        renderStaleIfNeeded(contentMin,
+                            ImVec2(contentMin.x + avail.x, contentMin.y + avail.y));
         return;
     }
 
@@ -812,10 +837,13 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
         ImVec2 avail = ImGui::GetContentRegionAvail();
         const char* msg = "No data loaded.";
         ImVec2 textSize = ImGui::CalcTextSize(msg);
+        const ImVec2 contentMin = ImGui::GetCursorScreenPos();
         ImGui::SetCursorPos(ImVec2(
             (avail.x - textSize.x) * 0.5f,
             (avail.y - textSize.y) * 0.5f));
         ImGui::Text("%s", msg);
+        renderStaleIfNeeded(contentMin,
+                            ImVec2(contentMin.x + avail.x, contentMin.y + avail.y));
         return;
     }
 
@@ -875,19 +903,15 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
     // (BeginSubplots returns false on SkipItems WITHOUT resetting ImPlot's
     // NextPlotData). Runs before the plot (IMGUI_GUIDE §19) so setupAxes'
     // suppliers see the freshly computed curves.
-    if (needsRecompute) {
-        cachedTransX.clear();
-        cachedTransY.clear();
-        transmittanceAvailable = false;
-        needsRecompute = false;
-    }
-    for (const auto& fileId : lastKnownSelection) {
-        if (cachedTransX.find(fileId) == cachedTransX.end())
-            computeTransmittanceForFile(fileId);
-    }
+    refreshTransmittanceCache();
 
-    if (!transmittanceAvailable || cachedTransY.empty())
+    if (!transmittanceAvailable || cachedTransY.empty()) {
+        const ImVec2 avail = ImGui::GetContentRegionAvail();
+        const ImVec2 contentMin = ImGui::GetCursorScreenPos();
+        renderStaleIfNeeded(contentMin,
+                            ImVec2(contentMin.x + avail.x, contentMin.y + avail.y));
         return;
+    }
 
     // When the std-dev plot first appears, BeginSubplots resets its shared
     // ColLinkData to (0,1) whenever the row count changes (implot.cpp:
@@ -1012,6 +1036,8 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
     // SetNextAxisLimits propagates through the link).
     const int rows = stddevAvailable ? 2 : 1;
     float rowRatios[2] = {plotHeight, stdPlotHeight};
+    // Plot rect for the stale-warning overlay (main transmittance plot).
+    ImVec2 mainPlotPos(0.0f, 0.0f), mainPlotSize(0.0f, 0.0f);
     if (ImPlot::BeginSubplots(workspacePlotId("T100Stack").c_str(), rows, 1,
             ImVec2(-1, stddevAvailable
                             ? plotHeight + stdPlotHeight +
@@ -1090,6 +1116,10 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
 
         plot.captureLimits();
 
+        // Stale-warning rect: GetPlotPos/GetPlotSize lock the setup phase, so
+        // they must run AFTER every Setup* call (all PlotX already ran here).
+        mainPlotPos = ImPlot::GetPlotPos();
+        mainPlotSize = ImPlot::GetPlotSize();
         ImPlot::EndPlot();
     }
 
@@ -1149,6 +1179,11 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
     ImPlot::EndSubplots();
     }
     ImPlot::PopStyleColor();
+
+    if (mainPlotSize.x > 0.0f && mainPlotSize.y > 0.0f)
+        renderStaleIfNeeded(mainPlotPos,
+                            ImVec2(mainPlotPos.x + mainPlotSize.x,
+                                   mainPlotPos.y + mainPlotSize.y));
 
     if (showTable) {
         if (ImGui::BeginTable("##T100Ratios", 4,
@@ -1448,12 +1483,21 @@ void renderT100Panel() {
 
             ImGui::Text("Std Deviation");
             if (!appState.active->t100.calcStdInProgress) {
+                // Same chain entry point as the in-plot Recompute button: stale
+                // upstreams (the Average reference) resolve first, then the
+                // reference + transmittance refresh, then the std batch.
+                // forceStd = true: the user explicitly asked for std dev.
+                // Busy snapshot taken ONCE — the click starts the chain, so a
+                // second live evaluation would EndDisabled without a matching
+                // BeginDisabled.
+                const bool t100Busy = artifactRecomputeBusy(appState, PanelKind::T100);
+                if (t100Busy) ImGui::BeginDisabled();
                 if (ImGui::Button("Calculate std##T100CalcStd")) {
-                    if (appState.active->t100.referenceAvailable) {
-                        appState.active->t100.startStdCalculation();
-                        appState.needsRedraw = true;
-                    }
+                    if (appState.active->t100.referenceAvailable)
+                        requestRecomputeChain(appState, PanelKind::T100,
+                                              /*forceStd=*/true);
                 }
+                if (t100Busy) ImGui::EndDisabled();
             } else {
                 float pct = appState.active->t100.stdProgressTotal > 0
                     ? (float)appState.active->t100.stdProgressCurrent / (float)appState.active->t100.stdProgressTotal

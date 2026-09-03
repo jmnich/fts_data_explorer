@@ -137,6 +137,13 @@ bool cfgNumEq(const nlohmann::json& cfg, const char* key, double value) {
     return it != cfg.end() && it->is_number() && it->get<double>() == value;
 }
 
+// cfgNumEq, but an ABSENT key passes: members written by versions that did
+// not persist a key must not be flagged stale for it (allanMemberFresh).
+bool cfgNumEqOrAbsent(const nlohmann::json& cfg, const char* key, double value) {
+    auto it = cfg.find(key);
+    return it == cfg.end() || (it->is_number() && it->get<double>() == value);
+}
+
 bool configParamsMatch(const nlohmann::json& cfg, const WorkspaceSession& sess) {
     if (!cfgNumEq(cfg, "refLaserUm", sess.spectrum.refLaserTextbox)) return false;
     if (!cfgNumEq(cfg, "zeroPadK", sess.spectrum.Kpadding)) return false;
@@ -241,6 +248,37 @@ bool t100MemberFresh(const Workspace& ws, const WorkspaceSession& sess, const T1
 
 bool t100MemberFresh(const Workspace& ws, const AppState& s, const T100Member& m) {
     return t100MemberFresh(ws, *s.active, m);
+}
+
+// Allan adds its own compute inputs (calc base, X range, decimation) to the
+// shared spectrum-params + inputs freshness: switching them flags the saved
+// surface stale. The batch engine writes the same keys (batch_engine.cpp), so
+// session-tab artifacts compare identically. Absent keys pass (members from
+// versions that did not persist them stay fresh).
+bool allanMemberFresh(const WorkspaceSession& sess, const MemberBase& m,
+                      const std::vector<std::string>& checked) {
+    if (m.kind != MemberKind::Derivative) return false;
+    nlohmann::json cfg = parseConfig(m.config);
+    if (!configParamsMatch(cfg, sess)) return false;
+    if (!configInputsEqual(cfg, checked)) return false;
+    auto sel = cfg.find("calcBase");
+    if (sel != cfg.end() && (!sel->is_string() ||
+        sel->get<std::string>() !=
+            (sess.allanVariance.calcBaseSelector == 0 ? "t100" : "spectrum")))
+        return false;
+    if (!cfgNumEqOrAbsent(cfg, "xRangeMin", sess.allanVariance.xRangeMin))
+        return false;
+    if (!cfgNumEqOrAbsent(cfg, "xRangeMax", sess.allanVariance.xRangeMax))
+        return false;
+    if (!cfgNumEqOrAbsent(cfg, "wavelengthDecimation",
+                          sess.allanVariance.wavelengthDecimation))
+        return false;
+    return true;
+}
+
+bool allanMemberFresh(const AppState& s, const MemberBase& m,
+                      const std::vector<std::string>& checked) {
+    return allanMemberFresh(*s.active, m, checked);
 }
 
 
@@ -959,7 +997,7 @@ void markConfigStale(Workspace& ws, const AppState& s) {
     for (auto& m : ws.snrSpectra.members)
         m.stale = !panelMemberFresh(s, m, checked);
     for (auto& m : ws.allanWerle.members)
-        m.stale = !panelMemberFresh(s, m, checked);
+        m.stale = !allanMemberFresh(s, m, checked);
     for (auto& m : ws.t100.members)
         m.stale = !t100MemberFresh(ws, s, m) || !configInputsEqual(parseConfig(m.config), checked);
 }
@@ -985,7 +1023,7 @@ bool allanOutdated(const AppState& s) {
     if (!s.hasWorkspace()) return false;
     for (const auto& m : s.active->workspace.allanWerle.members)
         if (m.id == "allan")
-            return !panelMemberFresh(s, m, checkedInputPaths(s));
+            return !allanMemberFresh(s, m, checkedInputPaths(s));
     return false;
 }
 
@@ -1082,7 +1120,7 @@ void seedPanelsFromWorkspace(WorkspaceSession& sess) {
 
     // Allan.
     for (const auto& m : ws.allanWerle.members) {
-        if (m.id != "allan" || !panelMemberFresh(sess, m, checkedInputPaths(sess))) continue;
+        if (m.id != "allan" || !allanMemberFresh(sess, m, checkedInputPaths(sess))) continue;
         sess.allanVariance.cachedSurfaceTaus = m.taus;
         sess.allanVariance.cachedSurfaceWavelengths = m.wavelengths;
         sess.allanVariance.cachedSurfaceAllanVar = m.surface;
@@ -1165,6 +1203,259 @@ void seedPanelsFromWorkspace(WorkspaceSession& sess) {
 void seedPanelsFromWorkspace(AppState& s) {
     if (!s.hasWorkspace()) return;
     seedPanelsFromWorkspace(*s.active);
+}
+
+// ── Stale-recompute chain (single-dataset panels) ───────────────────────────
+
+namespace {
+
+// Stale upstream manual-recalc panels of `kind`, from CURRENT panel state.
+// The single known panel-to-panel edge today: T100 with the Average reference
+// (SNR/Allan/Average record only per-file spectra inputs, refreshed inside
+// their own workers). Extend here when a new edge appears.
+std::vector<PanelKind> staleUpstreams(const AppState& s, PanelKind kind) {
+    std::vector<PanelKind> up;
+    if (kind == PanelKind::T100 && s.hasWorkspace() && s.active &&
+        s.active->t100.referenceSource == 2 && averageOutdated(s))
+        up.push_back(PanelKind::Average);
+    return up;
+}
+
+bool panelCalcInProgress(const AppState& s, PanelKind kind) {
+    if (!s.active) return false;
+    switch (kind) {
+        case PanelKind::Average: return s.active->averageSpectrum.calcInProgress;
+        case PanelKind::Snr:     return s.active->snrSpectrum.calcInProgress;
+        case PanelKind::Allan:   return s.active->allanVariance.calcInProgress;
+        case PanelKind::T100:    return s.active->t100.calcStdInProgress;
+        default:                 return false;
+    }
+}
+
+// Start the batch computation for `kind` (no-op when its own calc is already
+// running — the chain then waits for that run instead of restarting it).
+// T100's step is driven by tickRecomputeChain (sync reference/transmittance
+// refresh, then the std batch when requested).
+void startPanelCalc(AppState& s, PanelKind kind) {
+    switch (kind) {
+        case PanelKind::Average:
+            if (!s.active->averageSpectrum.calcInProgress)
+                s.active->averageSpectrum.startCalculation();
+            break;
+        case PanelKind::Snr:
+            if (!s.active->snrSpectrum.calcInProgress)
+                s.active->snrSpectrum.startCalculation();
+            break;
+        case PanelKind::Allan:
+            if (!s.active->allanVariance.calcInProgress)
+                s.active->allanVariance.startCalculation();
+            break;
+        default:
+            break;
+    }
+}
+
+} // namespace
+
+void requestRecomputeChain(AppState& s, PanelKind target, bool forceStd) {
+    if (!s.hasWorkspace() || !s.active) return;
+    auto& chain = s.active->recomputeChain;
+    // Ignore while a chain is already active: the running chain will clear the
+    // staleness for its members anyway (a second request would only restart
+    // the same work mid-flight).
+    if (chain.active != PanelKind::None || !chain.pending.empty()) return;
+
+    // Upstream-first build with dedup (single current edge: T100 → Average).
+    std::vector<PanelKind> steps;
+    for (PanelKind up : staleUpstreams(s, target))
+        if (std::find(steps.begin(), steps.end(), up) == steps.end())
+            steps.push_back(up);
+    if (std::find(steps.begin(), steps.end(), target) == steps.end())
+        steps.push_back(target);
+    for (PanelKind k : steps)
+        chain.pending.push_back(k);
+    chain.t100RefreshDone = false;
+    chain.t100RecomputeStd = forceStd ||
+        (target == PanelKind::T100 && s.active->t100.stddevAvailable);
+    s.needsRedraw = true;   // the next frame's tick activates the first step
+}
+
+void tickRecomputeChain(AppState& s) {
+    if (!s.hasWorkspace() || !s.active) return;
+    auto& chain = s.active->recomputeChain;
+
+    // Step completion detection (the running step first). Observation only —
+    // the step was started at activation; calling startPanelCalc here would
+    // restart a batch that JUST finalized (calcInProgress flips false in the
+    // same frame's per-panel tick), producing an infinite 0→100→0 loop.
+    if (chain.active != PanelKind::None) {
+        switch (chain.active) {
+            case PanelKind::Average:
+            case PanelKind::Snr:
+            case PanelKind::Allan:
+                if (!panelCalcInProgress(s, chain.active))
+                    chain.active = PanelKind::None;   // batch finalized (+ upserted)
+                break;
+            case PanelKind::T100: {
+                auto& t100 = s.active->t100;
+                if (!chain.t100RefreshDone) {
+                    // Wait out a std batch that was already running: it reads
+                    // refX/refY on the main thread, so swapping the reference
+                    // mid-batch would mix old and new data.
+                    if (t100.calcStdInProgress) break;
+                    chain.t100RefreshDone = true;
+                    // Rebuild the reference + transmittance ONLY when the
+                    // artifact is actually stale. A fresh "Calculate std" click
+                    // must not pay for a full synchronous transmittance
+                    // rebuild against an unchanged reference. (The in-plot
+                    // Recompute always arrives stale; an upstream Average step
+                    // implies t100Outdated via the shared params/inputs.)
+                    if (t100Outdated(s)) {
+                        // Abort when the reference cannot be rebuilt or the
+                        // spectra are unreadable: the member stays stale, the
+                        // overlay persists, a later click retries — nothing is
+                        // upserted with half-fresh data.
+                        if ((t100.referenceSource == 2 &&
+                             !s.active->averageSpectrum.averageAvailable) ||
+                            (t100.referenceSource == 0 &&
+                             s.active->selectedFilenames.empty()) ||
+                            !s.active->spectrum.ensureSpectraFresh(
+                                t100.lastKnownSelection))
+                            break;
+                        // Fresh spectra first (above): the Spectrum panel's
+                        // async refresh leaves old-params data in the cache,
+                        // so a plain lazy recompute would silently use it.
+                        if (t100.referenceSource == 0)
+                            t100.setReferenceFromCurrentSpectrum();
+                        else if (t100.referenceSource == 2)
+                            t100.setReferenceFromAverage();
+                        t100.needsRecompute = true;
+                        t100.refreshTransmittanceCache();
+                    }
+                    // Once per step (the latch above): a stale rebuild is
+                    // followed by the requested std batch; a fresh click goes
+                    // straight to it.
+                    if (chain.t100RecomputeStd)
+                        t100.startStdCalculation();
+                }
+                if (!t100.calcStdInProgress)
+                    chain.active = PanelKind::None;   // std batch finalized
+                break;
+            }
+            default:
+                break;
+        }
+        if (chain.active != PanelKind::None) {
+            s.needsRedraw = true;   // idle-render gate: keep frames flowing (R2)
+            return;
+        }
+    }
+
+    // Start the next step (also the first, the frame after request).
+    if (!chain.pending.empty()) {
+        chain.active = chain.pending.front();
+        chain.pending.pop_front();
+        switch (chain.active) {
+            case PanelKind::Average:
+            case PanelKind::Snr:
+            case PanelKind::Allan:
+                startPanelCalc(s, chain.active);
+                break;
+            case PanelKind::T100:
+                chain.t100RefreshDone = false;
+                break;
+            default:
+                break;
+        }
+        s.needsRedraw = true;
+    }
+}
+
+bool artifactRecomputeBusy(const AppState& s, PanelKind kind) {
+    if (!s.hasWorkspace() || !s.active) return false;
+    const auto& chain = s.active->recomputeChain;
+    if (chain.active == kind) return true;
+    if (std::find(chain.pending.begin(), chain.pending.end(), kind) !=
+        chain.pending.end())
+        return true;
+    return panelCalcInProgress(s, kind);
+}
+
+bool chainTargetsPanel(const AppState& s, PanelKind kind) {
+    if (!s.hasWorkspace() || !s.active) return false;
+    const auto& chain = s.active->recomputeChain;
+    if (chain.active == kind) return true;
+    return std::find(chain.pending.begin(), chain.pending.end(), kind) !=
+           chain.pending.end();
+}
+
+std::vector<StaleDetail> panelStaleDetails(const AppState& s, PanelKind kind) {
+    std::vector<StaleDetail> out;
+    if (!s.hasWorkspace() || !s.active) return out;
+    const WorkspaceSession& sess = *s.active;
+    nlohmann::json cfg;
+    bool have = false;
+    switch (kind) {
+        case PanelKind::Average:
+            for (const auto& m : sess.workspace.averageSpectra.members)
+                if (m.id == "average") { cfg = parseConfig(m.config); have = true; break; }
+            break;
+        case PanelKind::Snr:
+            for (const auto& m : sess.workspace.snrSpectra.members)
+                if (m.id == "snr") { cfg = parseConfig(m.config); have = true; break; }
+            break;
+        case PanelKind::Allan:
+            for (const auto& m : sess.workspace.allanWerle.members)
+                if (m.id == "allan") { cfg = parseConfig(m.config); have = true; break; }
+            break;
+        case PanelKind::T100:
+            for (const auto& m : sess.workspace.t100.members)
+                if (m.id == "t100") { cfg = parseConfig(m.config); have = true; break; }
+            break;
+        default:
+            break;
+    }
+    if (!have) return out;
+    if (!configParamsMatch(cfg, sess))
+        out.push_back({"Spectrum settings", "K, apodization or X-correction changed"});
+    if (!configInputsEqual(cfg, checkedInputPaths(s)))
+        out.push_back({"Input files", "the checked file selection changed"});
+    if (kind == PanelKind::T100) {
+        auto ref = cfg.find("reference");
+        if (ref != cfg.end() && ref->is_object()) {
+            auto src = ref->find("source");
+            const std::string source = (src != ref->end() && src->is_string())
+                ? src->get<std::string>() : "";
+            if (source == "average")
+                out.push_back({"Reference", "the Average spectrum reference changed"});
+            else if (source == "file")
+                out.push_back({"Reference", "the source spectrum changed"});
+            // Data-grounded row (t100MemberFresh semantics): the referenced
+            // member itself is missing or stale.
+            auto path = ref->find("path");
+            if (path != ref->end() && path->is_string() &&
+                !path->get<std::string>().empty()) {
+                const std::string p = path->get<std::string>();
+                if (!memberPathExists(sess.workspace, p))
+                    out.push_back({"Reference", "the referenced member no longer exists"});
+                else if (memberPathIsStale(sess.workspace, p))
+                    out.push_back({"Reference", "the referenced member is stale"});
+            }
+        }
+    }
+    if (kind == PanelKind::Allan) {
+        auto cb = cfg.find("calcBase");
+        if (cb != cfg.end() && cb->is_string() &&
+            cb->get<std::string>() !=
+                (sess.allanVariance.calcBaseSelector == 0 ? "t100" : "spectrum"))
+            out.push_back({"Calc base", "the 100% T / Spectrum base changed"});
+        if (!cfgNumEq(cfg, "xRangeMin", sess.allanVariance.xRangeMin) ||
+            !cfgNumEq(cfg, "xRangeMax", sess.allanVariance.xRangeMax))
+            out.push_back({"X range", "the wavelength range changed"});
+        if (!cfgNumEq(cfg, "wavelengthDecimation", sess.allanVariance.wavelengthDecimation))
+            out.push_back({"Decimation", "the wavelength decimation changed"});
+    }
+    return out;
 }
 
 #endif // FTS_BUILD_HDF5

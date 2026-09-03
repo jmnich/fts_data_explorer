@@ -64,15 +64,23 @@ void AverageSpectrum::reset() {
 }
 
 void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
-#if FTS_BUILD_HDF5
-    // Staleness banner (§4.2): saved average no longer matches current
-    // settings/inputs and would be dropped at Save unless recomputed.
-    if (appState && averageOutdated(*appState)) {
-        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
-            "Saved result is stale - press Calculate to recompute.");
-        ImGui::Spacing();
-    }
-#endif
+    // Stale-data overlay shared with the experiment tabs (in-plot message +
+    // Recompute button; button hidden while the recompute chain is busy).
+    auto renderStaleIfNeeded = [this](const ImVec2& rMin, const ImVec2& rMax) {
+        if (!appState || !appState->hasWorkspace()) return;
+        if (!averageOutdated(*appState) &&
+            !chainTargetsPanel(*appState, PanelKind::Average))
+            return;
+        renderStaleDataOverlay(ImGui::GetWindowDrawList(), rMin, rMax,
+                               "Stale data: source changed.",
+                               panelStaleDetails(*appState, PanelKind::Average),
+                               "##staleRecomputeAvg",
+                               !artifactRecomputeBusy(*appState, PanelKind::Average),
+                               [this]() {
+                                   requestRecomputeChain(*appState, PanelKind::Average);
+                               });
+    };
+
     // ---- 1. Unified view/interaction phases (spectral_plot.h) — placed
     // BEFORE the no-data early return (C1): tickPrePlot owns the X-unit
     // switch detection + prev-latch sync, which must run even when no average
@@ -152,10 +160,13 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
     if (!averageAvailable || cachedAverageX.empty() || cachedAverageY.empty()) {
         ImVec2 avail = ImGui::GetContentRegionAvail();
         ImVec2 textSize = ImGui::CalcTextSize("No average spectrum available");
+        const ImVec2 contentMin = ImGui::GetCursorScreenPos();
         ImGui::SetCursorPos(ImVec2(
             (avail.x - textSize.x) * 0.5f,
             (avail.y - textSize.y) * 0.5f));
         ImGui::Text("No average spectrum available");
+        renderStaleIfNeeded(contentMin,
+                            ImVec2(contentMin.x + avail.x, contentMin.y + avail.y));
         return;
     }
 
@@ -170,6 +181,7 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
     }
 
     // ---- 4. BeginPlot ----
+    ImVec2 plotPos(0.0f, 0.0f), plotSize(0.0f, 0.0f);
     {
         ImVec4 avgGridCol = ImPlot::GetStyle().Colors[ImPlotCol_AxisGrid];
         avgGridCol.w *= appState->gridAlpha;
@@ -237,9 +249,17 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
         // Save current limits
         plot.captureLimits();
 
+        // Stale-warning rect: GetPlotPos/GetPlotSize lock the setup phase, so
+        // they must run AFTER every Setup* call (all PlotX already ran here).
+        plotPos = ImPlot::GetPlotPos();
+        plotSize = ImPlot::GetPlotSize();
         ImPlot::EndPlot();
     }
     ImPlot::PopStyleColor();
+
+    if (plotSize.x > 0.0f && plotSize.y > 0.0f)
+        renderStaleIfNeeded(plotPos,
+                            ImVec2(plotPos.x + plotSize.x, plotPos.y + plotSize.y));
 }
 
 void AverageSpectrum::startCalculation() {
@@ -430,10 +450,17 @@ void renderAveragePanel() {
         if (appState.active->dataLoaded) {
             // Button / progress bar (mutually exclusive)
             if (!appState.active->averageSpectrum.calcInProgress) {
+                // Same chain entry point as the in-plot Recompute button
+                // (chain = [Average]: no panel-to-panel upstreams). The busy
+                // snapshot is taken ONCE: the click itself starts the chain,
+                // so a second live evaluation would EndDisabled without a
+                // matching BeginDisabled.
+                const bool avgBusy = artifactRecomputeBusy(appState, PanelKind::Average);
+                if (avgBusy) ImGui::BeginDisabled();
                 if (ImGui::Button("Calculate average")) {
-                    appState.active->averageSpectrum.startCalculation();
-                    appState.needsRedraw = true;
+                    requestRecomputeChain(appState, PanelKind::Average);
                 }
+                if (avgBusy) ImGui::EndDisabled();
             } else {
                 ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.6f, 0.5f, 0.1f, 1.0f));
                 char pctBuf[48];

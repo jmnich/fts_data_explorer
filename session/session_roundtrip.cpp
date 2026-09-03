@@ -503,6 +503,13 @@ void checkMirrored(const L& a, const R& b) {
     checkT100Eq(a.t100, b.t100);
     checkExportEq(a.exportPanel, b.exportPanel);
 
+    // Stale-recompute chain (transient runtime state; both sides idle).
+    CHECK(a.recomputeChain.pending.empty() && b.recomputeChain.pending.empty());
+    CHECK(a.recomputeChain.active == PanelKind::None &&
+          b.recomputeChain.active == PanelKind::None);
+    CHECK(a.recomputeChain.t100RefreshDone == b.recomputeChain.t100RefreshDone);
+    CHECK(a.recomputeChain.t100RecomputeStd == b.recomputeChain.t100RecomputeStd);
+
     CHECK(a.showDeleteConfirmPopup == b.showDeleteConfirmPopup);
     CHECK(a.deleteConfirmIndex == b.deleteConfirmIndex);
     CHECK(a.skipDeleteConfirm == b.skipDeleteConfirm);
@@ -2075,6 +2082,54 @@ void test15_datasetRename() {
     std::remove(crossPath.c_str());
 }
 
+// Regression: the recompute chain's completion check must OBSERVE the batch,
+// never restart it. The bug called startPanelCalc before the completion test —
+// a batch that JUST finalized (calcInProgress flips false in the same frame's
+// per-panel tick) was immediately restarted, keeping the step active forever
+// (the 0->100->0 progress loop). The per-frame sleep mirrors the app's real
+// frame pacing (vsync); a tight busy loop would starve the pool workers and
+// falsely stall the batch.
+void test16_allanChainCompletesOnce() {
+    std::printf("test16: recompute chain completes once per request (no 0->100->0 loop)...\n");
+    AppState s;
+    makeSession(s, "A", "/tmp/fts_session_a.h5");
+    activateSession(s, 0);
+
+    const auto runFrames = [&s](int n) {
+        for (int frame = 0; frame < n; ++frame) {
+            if (s.active->allanVariance.calcInProgress)
+                s.active->allanVariance.tickCalculation();
+            tickRecomputeChain(s);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    };
+
+    requestRecomputeChain(s, PanelKind::Allan);
+    CHECK(s.active->recomputeChain.active == PanelKind::None);   // activates next tick
+    CHECK(s.active->recomputeChain.pending.size() == 1);
+    runFrames(200);
+    CHECK(s.active->recomputeChain.active == PanelKind::None);   // completed
+    CHECK(s.active->recomputeChain.pending.empty());
+    CHECK(!s.active->allanVariance.calcInProgress);              // NOT restarted
+
+    // A fresh request after completion runs exactly one more cycle.
+    requestRecomputeChain(s, PanelKind::Allan);
+    runFrames(200);
+    CHECK(s.active->recomputeChain.active == PanelKind::None);
+    CHECK(s.active->recomputeChain.pending.empty());
+    CHECK(!s.active->allanVariance.calcInProgress);
+
+    // T100 request without a reference/selection: the step aborts and the
+    // chain drains (member stays stale; nothing runs forever).
+    requestRecomputeChain(s, PanelKind::T100);
+    runFrames(200);
+    CHECK(s.active->recomputeChain.active == PanelKind::None);
+    CHECK(s.active->recomputeChain.pending.empty());
+    CHECK(!s.active->t100.calcStdInProgress);
+
+    std::printf("test16: chain lifecycle OK\n");
+}
+
 }  // namespace
 
 int main() {
@@ -2094,6 +2149,7 @@ int main() {
     test13_stalenessPersisted();
     test14_openTabPersistence();
     test15_datasetRename();
+    test16_allanChainCompletesOnce();
     std::printf("fts_session_roundtrip: all %d checks passed\n", g_checks);
     return 0;
 }

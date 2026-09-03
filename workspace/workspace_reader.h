@@ -7,6 +7,8 @@
 
 #include "interferogram_data.h"
 #include "hdf/workspace.h"
+#include "session/workspace_session.h"   // PanelKind
+#include "stale_overlay.h"               // StaleDetail (tooltip rows)
 
 struct AppState;
 class WorkspaceSession;
@@ -90,6 +92,35 @@ bool averageOutdated(const AppState& s);
 bool snrOutdated(const AppState& s);
 bool allanOutdated(const AppState& s);
 bool t100Outdated(const AppState& s);
+
+// ── Stale-recompute chain (single-dataset panels) ───────────────────────────
+// One recompute entry point for the four manual-recalc panels so a stale
+// upstream is recomputed first: T100 → Average when the T100 reference is the
+// Average artifact (SNR/Allan/Average have no panel-to-panel edges — their
+// workers refresh the per-file spectra inputs internally). `forceStd` (T100
+// only): true = always recompute the std-dev curve (the config-panel
+// "Calculate std" button); false = only when stddev was available at click
+// time (the in-plot Recompute refreshes what is shown). Ignored while a chain
+// is already active.
+void requestRecomputeChain(AppState& s, PanelKind target, bool forceStd = false);
+
+// Frame driver: watches the active step's batch completion and starts the
+// next. Called from pollAsyncComputations AFTER the per-panel ticks (their
+// finalize upserts the workspace member, so completion is observable the same
+// frame). Sets needsRedraw while a chain is active (idle-render gate).
+void tickRecomputeChain(AppState& s);
+
+// True while a recompute for `kind` is in flight (overlay + config-button
+// gating): the running chain targets it, or its own batch is running.
+bool artifactRecomputeBusy(const AppState& s, PanelKind kind);
+
+// True when the chain currently targets `kind` — the overlay stays visible
+// until the whole chain lands (no mid-std-batch flicker).
+bool chainTargetsPanel(const AppState& s, PanelKind kind);
+
+// Tooltip rows for a stale panel overlay: which checks failed (spectrum
+// settings / input files / reference / allan inputs).
+std::vector<StaleDetail> panelStaleDetails(const AppState& s, PanelKind kind);
 
 // Restore-on-open (§4.1): fill panel caches from matching workspace members.
 // Called at the end of openWorkspace; pure read, does not set dirty.

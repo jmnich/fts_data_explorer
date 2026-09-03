@@ -217,6 +217,33 @@ bool Spectrum::computeAndCacheSpectrum(const std::string& filePath, const std::s
     }
 }
 
+bool Spectrum::ensureSpectraFresh(const std::vector<std::string>& fileIds) {
+    if (!appState || !appState->active) return false;
+    bool allOk = true;
+    for (const std::string& fileId : fileIds) {
+        if (fileId.empty()) continue;
+        // fileId may be just a filename; find the full path in sortedFiles.
+        std::string fullPath = fileId;
+        for (const auto& sp : appState->active->sortedFiles) {
+            std::string fn = sp;
+            size_t ls = fn.find_last_of("/\\");
+            if (ls != std::string::npos) fn = fn.substr(ls + 1);
+            if (fn == fileId) { fullPath = sp; break; }
+        }
+        // Parallel to selectedFilenames, like renderSpectrumContents uses.
+        std::vector<double> primary;
+        for (size_t i = 0; i < appState->active->selectedFilenames.size(); ++i) {
+            if (appState->active->selectedFilenames[i] != fileId) continue;
+            if (i < appState->active->rawDataCache.size())
+                primary = appState->active->rawDataCache[i].primaryDetector;
+            break;
+        }
+        if (isSpectrumDirty(fileId, primary))
+            allOk = computeAndCacheSpectrum(fullPath, fileId) && allOk;
+    }
+    return allOk;
+}
+
 void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, std::vector<double>>>& primaryDetectors,
                                      const std::vector<InterferogramData>& rawDataCache) {
 

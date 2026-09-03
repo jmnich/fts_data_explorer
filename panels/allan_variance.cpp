@@ -131,22 +131,36 @@ static std::vector<double> getSliceData(const std::vector<double>& surfaceZ,
 }
 
 void AllanVariance::renderAllanContents(bool showTrackingCursor) {
-#if FTS_BUILD_HDF5
-    // Staleness banner (§4.2).
-    if (appState && allanOutdated(*appState)) {
-        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
-            "Saved result is stale - press Calculate to recompute.");
-        ImGui::Spacing();
-    }
-#endif
+    // Stale-data overlay shared with the experiment tabs (in-plot message +
+    // Recompute button; button hidden while the recompute chain is busy).
+    // Drawn over the 2D slice plot (the primary result view; the 3D surface's
+    // top-left already hosts the calc-base label).
+    auto renderStaleIfNeeded = [this](const ImVec2& rMin, const ImVec2& rMax) {
+        if (!appState || !appState->hasWorkspace()) return;
+        if (!allanOutdated(*appState) &&
+            !chainTargetsPanel(*appState, PanelKind::Allan))
+            return;
+        renderStaleDataOverlay(ImGui::GetWindowDrawList(), rMin, rMax,
+                               "Stale data: source changed.",
+                               panelStaleDetails(*appState, PanelKind::Allan),
+                               "##staleRecomputeAllan",
+                               !artifactRecomputeBusy(*appState, PanelKind::Allan),
+                               [this]() {
+                                   requestRecomputeChain(*appState, PanelKind::Allan);
+                               });
+    };
+
     if (!allanAvailable || cachedSurfaceWavelengths.empty() ||
         cachedSurfaceTaus.empty() || cachedSurfaceAllanVar.empty()) {
         ImVec2 avail = ImGui::GetContentRegionAvail();
         ImVec2 textSize = ImGui::CalcTextSize("No Allan variance available");
+        const ImVec2 contentMin = ImGui::GetCursorScreenPos();
         ImGui::SetCursorPos(ImVec2(
             (avail.x - textSize.x) * 0.5f,
             (avail.y - textSize.y) * 0.5f));
         ImGui::Text("No Allan variance available");
+        renderStaleIfNeeded(contentMin,
+                            ImVec2(contentMin.x + avail.x, contentMin.y + avail.y));
         return;
     }
 
@@ -342,6 +356,8 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
                                                numSurfaceTaus);
 
     if (plot2dHeight > 40.0f) {
+        // Plot rect for the stale-warning overlay (2D slice plot).
+        ImVec2 slicePlotPos(0.0f, 0.0f), slicePlotSize(0.0f, 0.0f);
         bool isFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
         if (isFocused && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
             shouldAutoscale = true;
@@ -546,9 +562,19 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
                 savedYMax = lim.Y.Max;
             }
 
+            // Stale-warning rect: GetPlotPos/GetPlotSize lock the setup phase,
+            // so they must run AFTER every Setup* call (all PlotX ran here).
+            slicePlotPos = ImPlot::GetPlotPos();
+            slicePlotSize = ImPlot::GetPlotSize();
+
             ImPlot::EndPlot();
         }
         ImPlot::PopStyleColor();
+
+        if (slicePlotSize.x > 0.0f && slicePlotSize.y > 0.0f)
+            renderStaleIfNeeded(slicePlotPos,
+                                ImVec2(slicePlotPos.x + slicePlotSize.x,
+                                       slicePlotPos.y + slicePlotSize.y));
     }
 
     if (sliderHeight > 20.0f && numSurfaceWavelengths > 0) {
@@ -707,11 +733,11 @@ bool AllanVariance::tickPhase0_AverageSpectrum() {
                         filePath.c_str(), e.what());
                 continue;   // do not enqueue a future for the failed file
             }
-            auto fut = appState->computationPool->enqueue([raw = std::move(raw), refLaser, K, xUnit,
-                                                               apodSelector, apodParams, axisCorr, hasPrecomp,
-                                                               xMethod = static_cast<SpectralToolbox::XCorrectionMethod>(appState->active->xCorrectionMethod),
-                                                               promThresh = appState->active->peakProminenceThreshold]() mutable {
-                if (hasPrecomp) {
+auto fut = appState->computationPool->enqueue([raw = std::move(raw), refLaser, K, xUnit,
+                                                   apodSelector, apodParams, axisCorr, hasPrecomp,
+                                                   xMethod = static_cast<SpectralToolbox::XCorrectionMethod>(appState->active->xCorrectionMethod),
+                                                   promThresh = appState->active->peakProminenceThreshold]() mutable {
+                    if (hasPrecomp) {
                     SpectralToolbox::ProcessedSpectrum ps;
                     ps.spectrumX = raw.referenceDetector;
                     for (double& f : ps.spectrumX)
@@ -1027,10 +1053,15 @@ void renderAllanPanel() {
                 if (ImGui::Button("Spectrum##AllanCalcBaseSpectrum")) { appState.active->allanVariance.calcBaseSelector = 1; appState.needsRedraw = true; }
                 ImGui::PopStyleColor(3);
 
+                const bool allanBusy = artifactRecomputeBusy(appState, PanelKind::Allan);
+                if (allanBusy) ImGui::BeginDisabled();
                 if (ImGui::Button("Calculate Allan")) {
-                    appState.active->allanVariance.startCalculation();
-                    appState.needsRedraw = true;
-            }
+                    // Same chain entry point as the in-plot Recompute button
+                    // (chain = [Allan]: no panel-to-panel upstreams — the
+                    // calc base's T% comes from its own internal average).
+                    requestRecomputeChain(appState, PanelKind::Allan);
+                }
+                if (allanBusy) ImGui::EndDisabled();
 
             ImGui::Separator();
 

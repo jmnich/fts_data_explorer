@@ -1375,6 +1375,10 @@ void AppLoop::pollAsyncComputations() {
             }
         }
 
+        // Stale-recompute chain: AFTER the per-panel ticks so a just-finalized
+        // batch (member upserted in finalize) is observed the same frame.
+        tickRecomputeChain(appState);
+
 }
 
 // Per-tab async polls (M2.3): workspace tabs are no-ops here — their

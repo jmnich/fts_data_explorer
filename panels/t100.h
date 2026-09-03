@@ -101,6 +101,13 @@ public:
 
     bool computeTransmittanceForFile(const std::string& fileId);
 
+    // Lazy transmittance recompute: wipe the per-file caches when
+    // needsRecompute is set, then fill every missing entry for
+    // lastKnownSelection (computeTransmittanceForFile, synchronous). Called by
+    // the render path before the plot and by the stale-recompute chain after
+    // re-copying the reference against freshly-ensured spectra.
+    void refreshTransmittanceCache();
+
     // Park/resume mirror support (M2.1): heavy members (caches, futures) are
     // moved, scalars copied. Every per-workspace field must appear in BOTH
     // directions (incl. the private calc state).

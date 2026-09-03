@@ -10,6 +10,7 @@
 #include "session_base.h"
 #include "spectral_pool.h"
 #include "spectral_plot.h"
+#include "stale_overlay.h"   // StaleDetail + renderStaleDataOverlay
 
 #include <imgui.h>   // ImVec4 (ComparatorCurve::color)
 
@@ -61,12 +62,8 @@ struct ArtifactMember {
     bool stale = false;
 };
 
-// One stale-source diagnostic row (tooltip-only): friendly source label +
-// why the member no longer matches the compute-time snapshot.
-struct StaleDetail {
-    std::string label;
-    std::string reason;
-};
+// Stale-data warning overlay state: the diagnostics rows are rendered by the
+// shared overlay renderer (panels/stale_overlay.h).
 
 struct ArtifactInfo {
     bool available = false;              // ≥1 member

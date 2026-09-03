@@ -40,14 +40,23 @@ void SnrSpectrum::reset() {
 }
 
 void SnrSpectrum::renderSnrContents(bool showTrackingCursor) {
-#if FTS_BUILD_HDF5
-    // Staleness banner (§4.2).
-    if (appState && snrOutdated(*appState)) {
-        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
-            "Saved result is stale - press Calculate to recompute.");
-        ImGui::Spacing();
-    }
-#endif
+    // Stale-data overlay shared with the experiment tabs (in-plot message +
+    // Recompute button; button hidden while the recompute chain is busy).
+    auto renderStaleIfNeeded = [this](const ImVec2& rMin, const ImVec2& rMax) {
+        if (!appState || !appState->hasWorkspace()) return;
+        if (!snrOutdated(*appState) &&
+            !chainTargetsPanel(*appState, PanelKind::Snr))
+            return;
+        renderStaleDataOverlay(ImGui::GetWindowDrawList(), rMin, rMax,
+                               "Stale data: source changed.",
+                               panelStaleDetails(*appState, PanelKind::Snr),
+                               "##staleRecomputeSnr",
+                               !artifactRecomputeBusy(*appState, PanelKind::Snr),
+                               [this]() {
+                                   requestRecomputeChain(*appState, PanelKind::Snr);
+                               });
+    };
+
     // Unified view/interaction phases (spectral_plot.h) — placed BEFORE the
     // no-data early return (C1): tickPrePlot owns the X-unit switch detection
     // + prev-latch sync, which must run even when no SNR is displayed.
@@ -93,10 +102,13 @@ void SnrSpectrum::renderSnrContents(bool showTrackingCursor) {
     if (!snrAvailable || cachedSnrX.empty() || cachedSnrY.empty()) {
         ImVec2 avail = ImGui::GetContentRegionAvail();
         ImVec2 textSize = ImGui::CalcTextSize("No SNR spectrum available");
+        const ImVec2 contentMin = ImGui::GetCursorScreenPos();
         ImGui::SetCursorPos(ImVec2(
             (avail.x - textSize.x) * 0.5f,
             (avail.y - textSize.y) * 0.5f));
         ImGui::Text("No SNR spectrum available");
+        renderStaleIfNeeded(contentMin,
+                            ImVec2(contentMin.x + avail.x, contentMin.y + avail.y));
         return;
     }
 
@@ -114,6 +126,7 @@ void SnrSpectrum::renderSnrContents(bool showTrackingCursor) {
         snrGridCol.w *= appState->gridAlpha;
         ImPlot::PushStyleColor(ImPlotCol_AxisGrid, snrGridCol);
     }
+    ImVec2 plotPos(0.0f, 0.0f), plotSize(0.0f, 0.0f);
     if (ImPlot::BeginPlot(workspacePlotId("SnrViewPlot").c_str(), ImVec2(-1, -1), f.plotFlags)) {
 
         plot.setupAxes(f);
@@ -153,9 +166,17 @@ void SnrSpectrum::renderSnrContents(bool showTrackingCursor) {
 
         plot.captureLimits();
 
+        // Stale-warning rect: GetPlotPos/GetPlotSize lock the setup phase, so
+        // they must run AFTER every Setup* call (all PlotX already ran here).
+        plotPos = ImPlot::GetPlotPos();
+        plotSize = ImPlot::GetPlotSize();
         ImPlot::EndPlot();
     }
     ImPlot::PopStyleColor();
+
+    if (plotSize.x > 0.0f && plotSize.y > 0.0f)
+        renderStaleIfNeeded(plotPos,
+                            ImVec2(plotPos.x + plotSize.x, plotPos.y + plotSize.y));
 }
 
 void SnrSpectrum::startCalculation() {
@@ -353,10 +374,16 @@ void renderSnrPanel() {
                 for (size_t i = 0; i < appState.active->filesSelectedForAveraging.size(); i++)
                     if (appState.active->filesSelectedForAveraging[i]) selCount++;
                 ImGui::Text("Selected: %d files", selCount);
+                // Same chain entry point as the in-plot Recompute button
+                // (chain = [Snr]: no panel-to-panel upstreams). Busy snapshot
+                // taken ONCE — the click starts the chain, so a second live
+                // evaluation would EndDisabled without a matching BeginDisabled.
+                const bool snrBusy = artifactRecomputeBusy(appState, PanelKind::Snr);
+                if (snrBusy) ImGui::BeginDisabled();
                 if (ImGui::Button("Calculate SNR##SnrCalcBtn")) {
-                    appState.active->snrSpectrum.startCalculation();
-                    appState.needsRedraw = true;
+                    requestRecomputeChain(appState, PanelKind::Snr);
                 }
+                if (snrBusy) ImGui::EndDisabled();
             } else {
                 ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.75f, 0.25f, 0.15f, 1.0f));
                 char pctBuf[48];

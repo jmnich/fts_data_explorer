@@ -88,6 +88,13 @@ public:
     // Loads raw data from disk via the active adapter. Returns false on failure.
     bool computeAndCacheSpectrum(const std::string& filePath, const std::string& fileId);
 
+    // Synchronously recompute the spectrum cache for `fileIds` wherever it is
+    // dirty (isSpectrumDirty): the stale-cache race guard for the T100
+    // recompute chain — the Spectrum panel's async refresh would otherwise
+    // leave old-params spectra visible (spectrum.cpp:493-495) and the T100
+    // refresh would silently recompute against them. No-op on fresh entries.
+    bool ensureSpectraFresh(const std::vector<std::string>& fileIds);
+
     // Park/resume mirror support (M2.1): heavy members (caches, futures) are
     // moved, scalars copied. Every per-workspace field must appear in BOTH
     // directions. Futures are moved, never copied.

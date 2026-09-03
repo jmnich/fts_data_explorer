@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <deque>
 #include <map>
 #include <memory>
 #include <string>
@@ -18,6 +19,11 @@
 #include "export.h"
 
 struct AppState;
+
+// The four manual-recalc panels, as a recompute-chain unit. Global (not
+// WorkspaceSession-scoped): panel code, the chain driver and the overlay
+// gating all reference it unqualified.
+enum class PanelKind : int { None = 0, Average, Snr, T100, Allan };
 
 // A workspace tab — THE canonical storage of every per-workspace field
 // (data_structures_audit.md §3.1b, Phase-5 M4.5 live-object model). AppState
@@ -111,6 +117,22 @@ public:
     AllanVariance allanVariance;
     T100Spectrum t100;
     ExportPanel exportPanel;
+
+    // ── stale-recompute chain ───────────────────────────────────────────────
+    // The four manual-recalc panels share one recompute entry point
+    // (requestRecomputeChain, workspace_reader.h) so a stale upstream is
+    // recomputed first: T100 → Average when the T100 reference is the Average
+    // artifact (SNR/Allan/Average have no panel-to-panel edges — their
+    // workers refresh the per-file spectra inputs internally). Driven frame by
+    // frame by tickRecomputeChain from pollAsyncComputations (after the
+    // per-panel ticks, so a just-finalized batch is observed the same frame).
+    struct RecomputeChain {
+        std::deque<PanelKind> pending;      // upstream-first; front = next
+        PanelKind active = PanelKind::None;
+        bool t100RefreshDone = false;       // one-shot latch for the T100 step
+        bool t100RecomputeStd = false;      // T100 step also recomputes std dev
+    };
+    RecomputeChain recomputeChain;
 
     // ── modal buffers ──────────────────────────────────────────────────────
     bool showDeleteConfirmPopup = false;
