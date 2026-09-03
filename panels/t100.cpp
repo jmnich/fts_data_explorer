@@ -114,10 +114,22 @@ void T100Spectrum::setReferenceFromCurrentSpectrum() {
     cachedTransX.clear();
     cachedTransY.clear();
     transmittanceAvailable = false;
-    plot.shouldAutoscale = true;
-    plot.firstLoadCompleted = false;
+    // The view is NEVER reset on recompute: after recalculation the same
+    // X/Y range is presented (user request); the first-load latch still
+    // fit-alls once when the plot first gets data.
     needsRecompute = true;
     clearStdDev();
+    // Recompute completion must render: the chain runs the refresh inside its
+    // frame-top tick, and the idle-render gate skips frames without
+    // needsRedraw ("does not redraw until mouse is moved"). Also covers the
+    // config-panel buttons (redundant there — belt and braces).
+    // pendingRedrawFrames keeps ONE follow-up frame flowing: ImPlot applies
+    // AutoFit/RangeFit at EndPlot — AFTER the plot drew — so the fitted Y
+    // range appears one frame late (same pattern as the Y-mode toggles).
+    if (appState) {
+        appState->needsRedraw = true;
+        appState->pendingRedrawFrames = 2;
+    }
 #if FTS_BUILD_HDF5
     wsUpsertT100FromPanel(*appState);
 #endif
@@ -181,10 +193,17 @@ void T100Spectrum::setReferenceFromCSV(const std::string& path) {
     cachedTransX.clear();
     cachedTransY.clear();
     transmittanceAvailable = false;
-    plot.shouldAutoscale = true;
-    plot.firstLoadCompleted = false;
+    // The view is NEVER reset on recompute: after recalculation the same
+    // X/Y range is presented (user request); the first-load latch still
+    // fit-alls once when the plot first gets data.
     needsRecompute = true;
     clearStdDev();
+    // Recompute completion must render (see setReferenceFromCurrentSpectrum).
+    if (appState) {
+        appState->needsRedraw = true;
+        // One follow-up frame for the EndPlot-time Y fit.
+        appState->pendingRedrawFrames = 2;
+    }
 #if FTS_BUILD_HDF5
     wsUpsertT100FromPanel(*appState);
 #endif
@@ -223,10 +242,17 @@ void T100Spectrum::setReferenceFromAverage() {
     cachedTransX.clear();
     cachedTransY.clear();
     transmittanceAvailable = false;
-    plot.shouldAutoscale = true;
-    plot.firstLoadCompleted = false;
+    // The view is NEVER reset on recompute: after recalculation the same
+    // X/Y range is presented (user request); the first-load latch still
+    // fit-alls once when the plot first gets data.
     needsRecompute = true;
     clearStdDev();
+    // Recompute completion must render (see setReferenceFromCurrentSpectrum).
+    if (appState) {
+        appState->needsRedraw = true;
+        // One follow-up frame for the EndPlot-time Y fit.
+        appState->pendingRedrawFrames = 2;
+    }
 #if FTS_BUILD_HDF5
     wsUpsertT100FromPanel(*appState);
 #endif
@@ -721,6 +747,11 @@ bool T100Spectrum::tickStdCalculation() {
         if (appState)
             wsUpsertT100FromPanel(*appState);
 #endif
+        // Std batch completion must render (see setReferenceFrom* note).
+        if (appState) {
+            appState->needsRedraw = true;
+            appState->pendingRedrawFrames = 2;   // EndPlot-time Y fit
+        }
         batchActive_ = false;
         calcStdInProgress = false;
         return true;
@@ -913,30 +944,30 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
         return;
     }
 
-    // When the std-dev plot first appears, BeginSubplots resets its shared
-    // ColLinkData to (0,1) whenever the row count changes (implot.cpp:
-    // "check for change in rows and cols") — the linked X window would be
-    // yanked to 0..1 on that frame and captureLimits would mirror it.
-    // Re-arm the TOP plot's current X window so its display settings are
-    // retained (bugfix: "X range shifts when std dev is displayed").
+    // When the std-dev plot appears or disappears, BeginSubplots resets its
+    // shared ColLinkData to (0,1) (implot.cpp: "check for change in rows and
+    // cols") — the linked X window would be yanked to 0..1 on that frame and
+    // captureLimits would mirror it. Re-arm the TOP plot's current X window
+    // on BOTH transitions: a recompute clears stddev (rows 2->1) and a
+    // subsequent std batch recreates it (rows 1->2) — without the
+    // disappearance re-arm, the first transition clobbers the retained zoom
+    // (bugfix: "X range shifts when std dev is displayed").
     if (stddevAvailable != stdWasAvailable_) {
         stdWasAvailable_ = stddevAvailable;
-        if (stddevAvailable) {
-            double x0 = plot.manualXMin, x1 = plot.manualXMax;
-            if (!(x0 < x1)) {
-                for (const auto& kv : cachedTransX) {
-                    if (kv.second.empty()) continue;
-                    const double lo = std::min(kv.second.front(), kv.second.back());
-                    const double hi = std::max(kv.second.front(), kv.second.back());
-                    if (!(x0 < x1)) { x0 = lo; x1 = hi; }
-                    else { x0 = std::min(x0, lo); x1 = std::max(x1, hi); }
-                }
+        double x0 = plot.manualXMin, x1 = plot.manualXMax;
+        if (!(x0 < x1)) {
+            for (const auto& kv : cachedTransX) {
+                if (kv.second.empty()) continue;
+                const double lo = std::min(kv.second.front(), kv.second.back());
+                const double hi = std::max(kv.second.front(), kv.second.back());
+                if (!(x0 < x1)) { x0 = lo; x1 = hi; }
+                else { x0 = std::min(x0, lo); x1 = std::max(x1, hi); }
             }
-            if (x0 < x1) {
-                plot.pendingNextXMin = x0;
-                plot.pendingNextXMax = x1;
-                plot.shouldAutoscale = false;
-            }
+        }
+        if (x0 < x1) {
+            plot.pendingNextXMin = x0;
+            plot.pendingNextXMax = x1;
+            plot.shouldAutoscale = false;
         }
     }
 
@@ -1124,10 +1155,9 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
     }
 
     // Std-dev plot: X comes from the subplot link (NO SetupAxisLimits — the
-    // old per-frame force-lock made this plot inert, N1), Y is always
-    // range-fit. Shift+drag remains a main-plot gesture; X interaction
-    // reaches this plot through LinkAllX. Y-mode/forced-Y apply to the MAIN
-    // plot only — this plot's Y is unconditionally AutoFit|RangeFit (H4).
+    // old per-frame force-lock made this plot inert, N1). Y follows the MAIN
+    // plot's Y mode (all/tight/force — see below). Shift+drag remains a
+    // main-plot gesture; X interaction reaches this plot through LinkAllX.
     // NoTitle (L1) + NoInputs on large data (H4: the LARGE-DATA contract is
     // per-panel, not per-plot; the indicator text stays on the main plot).
     const ImPlotFlags stdFlags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend |
@@ -1135,11 +1165,21 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
     if (stddevAvailable && ImPlot::BeginPlot(
             workspacePlotId("100% transmission line standard deviation").c_str(),
             ImVec2(-1, -1), stdFlags)) {
+        // Std-dev plot Y follows the MAIN plot's Y mode (all/tight) — the
+        // same setting applied to the transmittance curves (user request; the
+        // previous unconditional RangeFit ignored it). In FORCE mode the
+        // std-dev curve stays auto-fit: the forced range is in T% units
+        // (e.g. 95-105%) and is numerically meaningless for the std-dev
+        // curve (0-5%) — applying it would flatten the curve. X still comes
+        // from the subplot link (NO SetupAxisLimits — the old per-frame
+        // force-lock made this plot inert, N1).
+        ImPlotAxisFlags stdYFlags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
+        if (plot.yAxisMode == kYModeAll || plot.yAxisMode == kYModeForce)
+            stdYFlags |= ImPlotAxisFlags_AutoFit;                 // fit Y to all data
+        else if (plot.yAxisMode == kYModeTight)
+            stdYFlags |= ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_RangeFit; // fit to visible X
         ImPlot::SetupAxes(SpectralPlotView::defaultXLabel(plot.xUnitSelector),
-                          "Std Dev T(%)",
-                          ImPlotAxisFlags_NoTickMarks,
-                          ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks |
-                              ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_RangeFit);
+                          "Std Dev T(%)", ImPlotAxisFlags_NoTickMarks, stdYFlags);
 
         ImPlotSpec stdSpec;
         stdSpec.LineColor = ImVec4(0.1f, 0.6f, 0.7f, 1.0f);

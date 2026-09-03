@@ -1283,6 +1283,7 @@ void requestRecomputeChain(AppState& s, PanelKind target, bool forceStd) {
 void tickRecomputeChain(AppState& s) {
     if (!s.hasWorkspace() || !s.active) return;
     auto& chain = s.active->recomputeChain;
+    const PanelKind prevActive = chain.active;
 
     // Step completion detection (the running step first). Observation only —
     // the step was started at activation; calling startPanelCalc here would
@@ -1349,6 +1350,20 @@ void tickRecomputeChain(AppState& s) {
             s.needsRedraw = true;   // idle-render gate: keep frames flowing (R2)
             return;
         }
+    }
+
+    // A step just completed — the result frame MUST render. A sync step (the
+    // T100 reference/transmittance refresh) finalizes inside this tick with
+    // no batch running, so no poll sets needsRedraw: without this the fresh
+    // curves stay invisible until the next input event (idle-render gate —
+    // polls run every frame, renders only on needsRedraw). Also covers the
+    // abort paths (the overlay's button re-appears). pendingRedrawFrames
+    // keeps ONE follow-up frame flowing: ImPlot applies AutoFit/RangeFit at
+    // EndPlot — AFTER the plot drew — so the fitted Y range appears one
+    // frame late (same pattern as the Y-mode toggles, app_state.h).
+    if (prevActive != PanelKind::None) {
+        s.needsRedraw = true;
+        s.pendingRedrawFrames = 2;
     }
 
     // Start the next step (also the first, the frame after request).

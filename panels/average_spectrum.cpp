@@ -263,12 +263,10 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
 }
 
 void AverageSpectrum::startCalculation() {
-    // Refit the view on recompute (L7): a stale zoom window from the previous
-    // result must not survive into the new one.
-    plot.firstLoadCompleted = false;
-    plot.shouldAutoscale = true;
-    plot.manualXMin = 0.0;
-    plot.manualXMax = 0.0;
+    // The view is NEVER reset on recompute: after recalculation the same
+    // X/Y range is presented (user request). The first-load latch
+    // (firstLoadCompleted) still fit-alls once when the plot first gets
+    // data; everything after that — zoomed or autoscaled — survives.
     calcCommonX.clear();
     calcNumBins = 0;
     calcValidFiles = 0;

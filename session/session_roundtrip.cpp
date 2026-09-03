@@ -2130,6 +2130,63 @@ void test16_allanChainCompletesOnce() {
     std::printf("test16: chain lifecycle OK\n");
 }
 
+// Gate-faithful regression: the frame loop polls every frame but renders only
+// when needsRedraw survives to the gate — and needsRedraw is reset after
+// every rendered frame. A SYNC step (T100 refresh with no std batch) finalizes
+// inside the tick with no batch running, so nothing else forces a redraw; the
+// completion frame must request one or the fresh curves stay invisible until
+// the next input event ("does not redraw until mouse is moved").
+void test16b_t100SyncCompletionRenders() {
+    std::printf("test16b: sync chain completion requests a redraw (gate model)...\n");
+    AppState s;
+    makeSession(s, "A", "/tmp/fts_session_a.h5");
+    activateSession(s, 0);
+
+    requestRecomputeChain(s, PanelKind::T100);
+    CHECK(s.active->recomputeChain.pending.size() == 1);
+
+    bool completionRendered = false;
+    for (int frame = 0; frame < 20; ++frame) {
+        // Gate model: the previous frame rendered (reset) — polls + ticks run
+        // regardless; the render happens only if needsRedraw survives.
+        s.needsRedraw = false;
+        const PanelKind wasActive = s.active->recomputeChain.active;
+        tickRecomputeChain(s);
+        if (wasActive != PanelKind::None &&
+            s.active->recomputeChain.active == PanelKind::None)
+            completionRendered = s.needsRedraw;   // completion frame must render
+        if (!s.needsRedraw)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(s.active->recomputeChain.active == PanelKind::None);
+    CHECK(s.active->recomputeChain.pending.empty());
+    CHECK(completionRendered);
+    std::printf("test16b: sync completion render OK\n");
+
+    // Same gate model with the std batch (forceStd): the batch finalize and
+    // the chain completion must both land on rendered frames. The sleep runs
+    // EVERY frame (real vsync pacing) — sleeping only on idle frames would
+    // spin the batch frames tight and starve the pool workers.
+    requestRecomputeChain(s, PanelKind::T100, /*forceStd=*/true);
+    bool stdCompletionRendered = false;
+    for (int frame = 0; frame < 300; ++frame) {
+        s.needsRedraw = false;
+        const PanelKind wasActive = s.active->recomputeChain.active;
+        if (s.active->t100.calcStdInProgress)
+            s.active->t100.tickStdCalculation();
+        tickRecomputeChain(s);
+        if (wasActive != PanelKind::None &&
+            s.active->recomputeChain.active == PanelKind::None)
+            stdCompletionRendered = s.needsRedraw;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(s.active->recomputeChain.active == PanelKind::None);
+    CHECK(s.active->recomputeChain.pending.empty());
+    CHECK(!s.active->t100.calcStdInProgress);
+    CHECK(stdCompletionRendered);
+    std::printf("test16b: std-batch completion render OK\n");
+}
+
 }  // namespace
 
 int main() {
@@ -2150,6 +2207,7 @@ int main() {
     test14_openTabPersistence();
     test15_datasetRename();
     test16_allanChainCompletesOnce();
+    test16b_t100SyncCompletionRenders();
     std::printf("fts_session_roundtrip: all %d checks passed\n", g_checks);
     return 0;
 }

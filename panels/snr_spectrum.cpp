@@ -180,11 +180,9 @@ void SnrSpectrum::renderSnrContents(bool showTrackingCursor) {
 }
 
 void SnrSpectrum::startCalculation() {
-    // Refit the view on recompute (L7).
-    plot.firstLoadCompleted = false;
-    plot.shouldAutoscale = true;
-    plot.manualXMin = 0.0;
-    plot.manualXMax = 0.0;
+    // The view is NEVER reset on recompute: after recalculation the same
+    // X/Y range is presented (user request); the first-load latch still
+    // fit-alls once.
     calcCommonX.clear();
     calcNumBins = 0;
     calcValidFiles = 0;
