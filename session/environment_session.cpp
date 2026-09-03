@@ -1446,25 +1446,10 @@ void EnvironmentSession::renderYScaleButtons() {
 
 // Tracking cursor On/Off (spectrum-view scheme).
 void EnvironmentSession::renderCursorToggle() {
-    const ImVec4 colActive = ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive);
-    const ImVec4 colInactive(0.22f, 0.22f, 0.22f, 0.7f);
-    ImGui::TextUnformatted("Cursor");
-    ImGui::SameLine();
-    for (int m = 0; m < 2; ++m) {
-        const bool on = (m == 0);
-        const bool sel = (showTrackingCursor == on);
-        ImGui::PushStyleColor(ImGuiCol_Button, sel ? colActive : colInactive);
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, sel ? colActive : colInactive);
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, colActive);
-        if (ImGui::Button(on ? "On##EnvCursorOn" : "Off##EnvCursorOff")) {
-            if (showTrackingCursor != on) {
-                showTrackingCursor = on;
-                dirty = true;
-                appState.needsRedraw = true;
-            }
-        }
-        ImGui::PopStyleColor(3);
-        if (m < 1) ImGui::SameLine();
+    if (renderCursorTogglePair(showTrackingCursor,
+                           "On##EnvCursorOn", "Off##EnvCursorOff")) {
+        dirty = true;
+        appState.needsRedraw = true;
     }
 }
 
@@ -1885,11 +1870,7 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
         // box with color badges. Absorbance keeps badge + label + value;
         // Comparator shows badge + value only.
         if (showTrackingCursor && ImPlot::IsPlotHovered()) {
-            const ImPlotRect lim = ImPlot::GetPlotLimits();
-            ImPlotPoint mouse = ImPlot::GetPlotMousePos();
-            const double xLo = std::min(lim.X.Min, lim.X.Max);
-            const double xHi = std::max(lim.X.Min, lim.X.Max);
-            const double mx = std::min(std::max(mouse.x, xLo), xHi);
+            const double mx = clampedCursorX();
 
             char header[128];
             if (artifactSelector == 4 /* corrected: OPD axis */)
@@ -2277,7 +2258,12 @@ bool crossLoadExperiments(AppState& s, const std::string& path, std::string& err
                 }
                 if (any) {
                     env->applyYMode();   // sets dirty — reset below
-                    env->plot.shouldAutoscale = true;
+                    // Do NOT autoscale here: a restored X zoom is latched in
+                    // pendingNextX* by experimentApplyConfig (shouldAutoscale
+                    // stays false). Forcing it would discard the latch on the
+                    // first render (tickPrePlot cancels armed pending ranges).
+                    // No-zoom configs still autoscale via setupAxes' first-load
+                    // latch; Y re-fits every frame via the yAxisMode flags.
                 } else {
                     env->computed = false;
                 }

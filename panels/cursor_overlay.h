@@ -5,6 +5,10 @@
 // Used by the experiment tabs and all dataset-workspace panels so every
 // cursor looks identical.
 //
+// Also hosts the shared cursor-support helpers used by all panels:
+// clampedCursorX() (hover X clamped to the plot) and
+// renderCursorTogglePair() (the On/Off toggle row).
+//
 // The vertical line is drawn with PlotInfLines, whose vertical variant uses
 // a FitterX-only fitter (implot_items.cpp): it never contributes to Y
 // autofit/range-fit, so a visible cursor line cannot pin the Y axis.
@@ -45,15 +49,48 @@ inline size_t nearestIndex(const std::vector<double>& x, double xv) {
     return (std::fabs(xv - x[lo]) <= std::fabs(x[hi] - xv)) ? lo : hi;
 }
 
+// Mouse X clamped to the current plot's X limits. The header readout and the
+// overlay line share this value so they always agree. Must be called inside
+// BeginPlot/EndPlot.
+inline double clampedCursorX() {
+    const ImPlotRect lim = ImPlot::GetPlotLimits();
+    const double xLo = std::min(lim.X.Min, lim.X.Max);
+    const double xHi = std::max(lim.X.Min, lim.X.Max);
+    return std::min(std::max(ImPlot::GetPlotMousePos().x, xLo), xHi);
+}
+
+// Tracking-cursor On/Off toggle pair (same style as the navigation buttons).
+// Returns true when the value changed so the caller can redraw / persist.
+// Labels carry their own ## IDs, so every panel keeps a unique button ID.
+inline bool renderCursorTogglePair(bool& on, const char* onLabel, const char* offLabel) {
+    const ImVec4 btnColors[2] = {
+        ImVec4(0.22f, 0.22f, 0.22f, 0.7f),                // unselected
+        ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)   // selected
+    };
+    bool changed = false;
+    ImGui::TextUnformatted("Cursor");
+    ImGui::SameLine();
+    for (int m = 0; m < 2; ++m) {
+        const bool want = (m == 0);
+        const bool sel = (on == want);
+        ImGui::PushStyleColor(ImGuiCol_Button,        sel ? btnColors[1] : btnColors[0]);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  sel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
+        if (ImGui::Button(m == 0 ? onLabel : offLabel)) {
+            if (on != want) { on = want; changed = true; }
+        }
+        ImGui::PopStyleColor(3);
+        if (m < 1) ImGui::SameLine(0.0f, 0.0f);
+    }
+    return changed;
+}
+
 // Draws the cursor. Must be called inside BeginPlot/EndPlot, after the data
 // lines (the info box draws on top). Header is the white first line of the box.
 inline void renderCursorOverlay(const char* header,
                                 const std::vector<CursorCurve>& curves) {
-    const ImPlotRect lim = ImPlot::GetPlotLimits();
-    ImPlotPoint mouse = ImPlot::GetPlotMousePos();
-    const double xLo = std::min(lim.X.Min, lim.X.Max);
-    const double xHi = std::max(lim.X.Min, lim.X.Max);
-    const double mx = std::min(std::max(mouse.x, xLo), xHi);
+    const ImPlotPoint mouse = ImPlot::GetPlotMousePos();
+    const double mx = clampedCursorX();
 
     ImPlotSpec lineSpec;
     lineSpec.LineWeight = 2.0f;

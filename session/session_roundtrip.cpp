@@ -1569,6 +1569,14 @@ void test12_experimentPersistence() {
     abs->curves[0].refMember = "specRef";
     abs->curves[0].sampleKey = "/tmp/parity.h5";
     abs->curves[0].sampleMember = "specSmp";
+    // Computed absorbance: stored ratio results ride the bulk save, and a
+    // saved X zoom must survive reload (regression 2026-09-03: the load path
+    // forced shouldAutoscale, discarding the pending restore latch).
+    abs->curves[0].gridX = {1000.0, 1500.0, 2000.0, 2500.0, 3000.0};
+    abs->curves[0].ratioY = {0.8, 0.6, 0.4, 0.6, 0.8};
+    abs->computed = true;
+    abs->plot.manualXMin = 1500.0;
+    abs->plot.manualXMax = 2000.0;
     cmp->artifactSelector = 3;                  // 100% T
     cmp->comparatorKeys = {"/tmp/parity.h5", "/tmp/other.h5"};
     cmp->comparatorKeysExplicit = true;
@@ -1596,7 +1604,7 @@ void test12_experimentPersistence() {
     AppState s4;
     CHECK(crossLoadExperiments(s4, crossPath, err));
     CHECK(s4.experiments.size() == 3);   // absorbance + comparator + fresh absorbance
-    // The fresh Absorbance (never computed) restores its config too.
+    // The computed Absorbance restores its config + stored curves.
     EnvironmentSession* a2b = nullptr;
     for (auto& e : s4.experiments)
         if (e->type == EnvType::Absorbance && !e->curves.empty() &&
@@ -1606,8 +1614,18 @@ void test12_experimentPersistence() {
     CHECK(a2b->curves.size() == 1);
     CHECK(a2b->curves[0].refMember == "specRef");
     CHECK(a2b->curves[0].sampleMember == "specSmp");
-    CHECK(a2b->computed == false);
+    CHECK(a2b->computed == true);
+    CHECK(a2b->curves[0].gridX.size() == 5);      // stored results restored
+    CHECK(a2b->curves[0].curveY.size() == 5);     // applyYMode derived on load
     CHECK(a2b->dirty == false);
+    // X range restored + latched (regression 2026-09-03): the load path must
+    // NOT force autoscale when a saved zoom exists — the pending latch is
+    // applied by renderPlot on the first frame, mirroring the comparator.
+    CHECK(a2b->plot.manualXMin == 1500.0);
+    CHECK(a2b->plot.manualXMax == 2000.0);
+    CHECK(a2b->plot.pendingNextXMin == 1500.0);
+    CHECK(a2b->plot.pendingNextXMax == 2000.0);
+    CHECK(a2b->plot.shouldAutoscale == false);
     EnvironmentSession* c2 = nullptr;
     for (auto& e : s4.experiments)
         if (e->type == EnvType::Comparator) c2 = e.get();

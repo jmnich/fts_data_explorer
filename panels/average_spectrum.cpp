@@ -214,11 +214,7 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
 
         // ---- 12. Tracking cursor (shared overlay) ----
         if (showTrackingCursor && ImPlot::IsPlotHovered()) {
-            ImPlotPoint mousePos = ImPlot::GetPlotMousePos();
-            const ImPlotRect lim = ImPlot::GetPlotLimits();
-            const double xLo = std::min(lim.X.Min, lim.X.Max);
-            const double xHi = std::max(lim.X.Min, lim.X.Max);
-            const double mx = std::min(std::max(mousePos.x, xLo), xHi);
+            const double mx = clampedCursorX();
 
             char header[128];
             SpectralPlotView::formatCursorHeader(mx, plot.xUnitSelector, header, sizeof(header));
@@ -450,38 +446,10 @@ void renderAveragePanel() {
 
             ImGui::Separator();
 
-            const ImVec4 btnColors[2] = {
-                ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
-                ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
-            };
-
             // ---- Cursor toggle (SYNCHRONIZED with Spectrum) ----
-            ImGui::Text("Cursor");
-            ImGui::SameLine();
-            const bool cursorOn = appState.active->spectrum.showTrackingCursor;
-
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[cursorOn ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cursorOn ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("On##AvgCursorOn")) {
-                if (!cursorOn) {
-                    appState.active->spectrum.showTrackingCursor = true;
-                    appState.needsRedraw = true;
-                }
-            }
-            ImGui::PopStyleColor(3);
-            ImGui::SameLine(0.0f, 0.0f);
-
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[!cursorOn ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  !cursorOn ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("Off##AvgCursorOff")) {
-                if (cursorOn) {
-                    appState.active->spectrum.showTrackingCursor = false;
-                    appState.needsRedraw = true;
-                }
-            }
-            ImGui::PopStyleColor(3);
+            if (renderCursorTogglePair(appState.active->spectrum.showTrackingCursor,
+                                   "On##AvgCursorOn", "Off##AvgCursorOff"))
+                appState.needsRedraw = true;
 
             // ---- Y scale / X unit / Match X / Y Axis (INDEPENDENT) ----
             auto& avgPlot = appState.active->averageSpectrum.plot;

@@ -518,11 +518,7 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
 
             // Tracking cursor (shared overlay)
             if (showTrackingCursor && ImPlot::IsPlotHovered()) {
-                ImPlotPoint mousePos = ImPlot::GetPlotMousePos();
-                const ImPlotRect lim = ImPlot::GetPlotLimits();
-                const double xLo = std::min(lim.X.Min, lim.X.Max);
-                const double xHi = std::max(lim.X.Min, lim.X.Max);
-                const double mx = std::min(std::max(mousePos.x, xLo), xHi);
+                const double mx = clampedCursorX();
                 char header[128];
                 std::snprintf(header, sizeof(header), "tau: %.4e", mx);
 
@@ -1069,39 +1065,10 @@ void renderAllanPanel() {
                     if (ImGui::Button("THz##AllanXUnitTHz")) { appState.active->allanVariance.xUnitSelector = 2; appState.needsRedraw = true; }
                     ImGui::PopStyleColor(3);
 
-                    // Cursor On/Off
-                    ImGui::Text("Cursor");
-                    ImGui::SameLine();
-                    const bool cursorOn = appState.active->spectrum.showTrackingCursor;
-                    const ImVec4 cursorBtnColors[2] = {
-                        ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
-                        ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
-                    };
-                    ImGui::PushStyleColor(ImGuiCol_Button,        cursorBtnColors[cursorOn ? 1 : 0]);
-                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cursorOn ? cursorBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-                    ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cursorBtnColors[1]);
-                    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
-                    if (ImGui::Button("On##AllanCursorOn")) {
-                        if (!cursorOn) {
-                            appState.active->spectrum.showTrackingCursor = true;
-                            appState.needsRedraw = true;
-                        }
-                    }
-                    ImGui::PopStyleVar();
-                    ImGui::PopStyleColor(3);
-                    ImGui::SameLine(0.0f, 0.0f);
-                    ImGui::PushStyleColor(ImGuiCol_Button,        cursorBtnColors[!cursorOn ? 1 : 0]);
-                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  !cursorOn ? cursorBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-                    ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cursorBtnColors[1]);
-                    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
-                    if (ImGui::Button("Off##AllanCursorOff")) {
-                        if (cursorOn) {
-                            appState.active->spectrum.showTrackingCursor = false;
-                            appState.needsRedraw = true;
-                        }
-                    }
-                    ImGui::PopStyleVar();
-                    ImGui::PopStyleColor(3);
+                    // Cursor On/Off (SYNCHRONIZED with Spectrum)
+                    if (renderCursorTogglePair(appState.active->spectrum.showTrackingCursor,
+                                           "On##AllanCursorOn", "Off##AllanCursorOff"))
+                        appState.needsRedraw = true;
 
                     // X range min/max (stored in um, displayed in selected unit)
                     double displayMin = appState.active->allanVariance.xRangeMin;

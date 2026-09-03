@@ -1057,11 +1057,7 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
 
         // Tracking cursor (shared overlay): tracks ALL displayed T% curves.
         if (showTrackingCursor && ImPlot::IsPlotHovered() && !lastKnownSelection.empty()) {
-            ImPlotPoint mousePos = ImPlot::GetPlotMousePos();
-            const ImPlotRect lim = ImPlot::GetPlotLimits();
-            const double xLo = std::min(lim.X.Min, lim.X.Max);
-            const double xHi = std::max(lim.X.Min, lim.X.Max);
-            const double mx = std::min(std::max(mousePos.x, xLo), xHi);
+            const double mx = clampedCursorX();
 
             char header[128];
             SpectralPlotView::formatCursorHeader(mx, plot.xUnitSelector, header, sizeof(header));
@@ -1127,11 +1123,7 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
 
         // Tracking cursor for std dev plot (shared overlay)
         if (showTrackingCursor && ImPlot::IsPlotHovered()) {
-            ImPlotPoint mousePos = ImPlot::GetPlotMousePos();
-            const ImPlotRect lim = ImPlot::GetPlotLimits();
-            const double xLo = std::min(lim.X.Min, lim.X.Max);
-            const double xHi = std::max(lim.X.Min, lim.X.Max);
-            const double mx = std::min(std::max(mousePos.x, xLo), xHi);
+            const double mx = clampedCursorX();
 
             char header[128];
             SpectralPlotView::formatCursorHeader(mx, plot.xUnitSelector, header, sizeof(header));
@@ -1470,44 +1462,10 @@ void renderT100Panel() {
 
             // Navigation block (Cursor, X unit, Match X, Y Axis) - moved to bottom
             {
-                const ImVec4 cfgBtnColors[2] = {
-                    ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
-                    ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
-                };
-
-                // Cursor On/Off
-                ImGui::Text("Cursor");
-                ImGui::SameLine();
-                const bool cursorOn = appState.active->spectrum.showTrackingCursor;
-                ImVec4 cursorBtnColors[2] = {
-                    ImVec4(0.22f, 0.22f, 0.22f, 0.7f),
-                    ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
-                };
-                ImGui::PushStyleColor(ImGuiCol_Button,        cursorBtnColors[cursorOn ? 1 : 0]);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cursorOn ? cursorBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cursorBtnColors[1]);
-                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
-                if (ImGui::Button("On##T100CursorOn")) {
-                    if (!cursorOn) {
-                        appState.active->spectrum.showTrackingCursor = true;
-                        appState.needsRedraw = true;
-                    }
-                }
-                ImGui::PopStyleVar();
-                ImGui::PopStyleColor(3);
-                ImGui::SameLine(0.0f, 0.0f);
-                ImGui::PushStyleColor(ImGuiCol_Button,        cursorBtnColors[!cursorOn ? 1 : 0]);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  !cursorOn ? cursorBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cursorBtnColors[1]);
-                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
-                if (ImGui::Button("Off##T100CursorOff")) {
-                    if (cursorOn) {
-                        appState.active->spectrum.showTrackingCursor = false;
-                        appState.needsRedraw = true;
-                    }
-                }
-                ImGui::PopStyleVar();
-                ImGui::PopStyleColor(3);
+                // Cursor On/Off (SYNCHRONIZED with Spectrum)
+                if (renderCursorTogglePair(appState.active->spectrum.showTrackingCursor,
+                                       "On##T100CursorOn", "Off##T100CursorOff"))
+                    appState.needsRedraw = true;
 
                 auto& t100Plot = appState.active->t100.plot;
                 if (t100Plot.renderXUnitButtons("##T100"))

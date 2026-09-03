@@ -581,11 +581,7 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
              // affects Y autofit/range-fit) + per-spectrum markers + info box
              // with color badges.
              if (showTrackingCursor && ImPlot::IsPlotHovered()) {
-                 ImPlotPoint mousePos = ImPlot::GetPlotMousePos();
-                 const ImPlotRect lim = ImPlot::GetPlotLimits();
-                 const double xLo = std::min(lim.X.Min, lim.X.Max);
-                 const double xHi = std::max(lim.X.Min, lim.X.Max);
-                 const double mx = std::min(std::max(mousePos.x, xLo), xHi);
+                 const double mx = clampedCursorX();
 
                  char header[128];
                  SpectralPlotView::formatCursorHeader(mx, plot.xUnitSelector, header, sizeof(header));
@@ -799,39 +795,10 @@ void Spectrum::renderPanel(AppState& s) {
 
             // Navigation block: Cursor, Y scale, X unit, Y Axis (moved to bottom)
             {
-                // Shared button style colors for X-unit and Y-scale toggle buttons
-                const ImVec4 btnColors[2] = {
-                    ImVec4(0.22f, 0.22f, 0.22f, 0.7f), // unselected: visible gray
-                    ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive) // selected: highlight
-                };
-
-                // Tracking cursor toggle
-                ImGui::Text("Cursor");
-                ImGui::SameLine();
-                const bool cursorOn = s.active->spectrum.showTrackingCursor;
-
-                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[cursorOn ? 1 : 0]);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cursorOn ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-                if (ImGui::Button("On##CursorOn")) {
-                    if (!cursorOn) {
-                        s.active->spectrum.showTrackingCursor = true;
-                        s.needsRedraw = true;
-                    }
-                }
-                ImGui::PopStyleColor(3);
-                ImGui::SameLine(0.0f, 0.0f);
-
-                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[!cursorOn ? 1 : 0]);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  !cursorOn ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-                if (ImGui::Button("Off##CursorOff")) {
-                    if (cursorOn) {
-                        s.active->spectrum.showTrackingCursor = false;
-                        s.needsRedraw = true;
-                    }
-                }
-                ImGui::PopStyleColor(3);
+                // Tracking cursor toggle (shared On/Off pair)
+                if (renderCursorTogglePair(s.active->spectrum.showTrackingCursor,
+                                       "On##CursorOn", "Off##CursorOff"))
+                    s.needsRedraw = true;
 
                 // Y scale / X unit / Y axis (rendering only — no cache invalidation
                 // needed; the view's tickPrePlot handles the refits)

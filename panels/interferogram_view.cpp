@@ -506,11 +506,7 @@ void renderInterferogramPanel() {
                     // Tracking cursor (shared overlay): tracks all displayed
                     // reference detectors. Uses the workspace cursor flag.
                     if (cursorOn && ImPlot::IsPlotHovered()) {
-                        ImPlotPoint mouse = ImPlot::GetPlotMousePos();
-                        const ImPlotRect lim = ImPlot::GetPlotLimits();
-                        const double xLo = std::min(lim.X.Min, lim.X.Max);
-                        const double xHi = std::max(lim.X.Min, lim.X.Max);
-                        const double mx = std::min(std::max(mouse.x, xLo), xHi);
+                        const double mx = clampedCursorX();
                         char header[128];
                         if (appState.active->xAxisBase == 1)
                             std::snprintf(header, sizeof(header), "OPD: %.4f um", mx);
@@ -821,11 +817,7 @@ void renderInterferogramPanel() {
                     // Tracking cursor (shared overlay): tracks all displayed
                     // primary detectors. Uses the workspace cursor flag.
                     if (cursorOn && ImPlot::IsPlotHovered()) {
-                        ImPlotPoint mouse = ImPlot::GetPlotMousePos();
-                        const ImPlotRect lim = ImPlot::GetPlotLimits();
-                        const double xLo = std::min(lim.X.Min, lim.X.Max);
-                        const double xHi = std::max(lim.X.Min, lim.X.Max);
-                        const double mx = std::min(std::max(mouse.x, xLo), xHi);
+                        const double mx = clampedCursorX();
                         char header[128];
                         if (appState.active->xAxisBase == 1)
                             std::snprintf(header, sizeof(header), "OPD: %.4f um", mx);
@@ -1004,33 +996,9 @@ void renderInterferogramConfigPanel() {
 
             // Row 4b: Tracking cursor (off / on) — shares the workspace cursor
             // flag (Ctrl+Q / Spectrum panel toggle).
-            ImGui::Text("Cursor");
-            ImGui::SameLine();
-            const bool cursorOff = !appState.active->spectrum.showTrackingCursor;
-            const bool cursorOn  =  appState.active->spectrum.showTrackingCursor;
-
-            ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[cursorOff ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cursorOff ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
-            if (ImGui::Button("off##IfgCursorOff")) {
-                if (appState.active->spectrum.showTrackingCursor) {
-                    appState.active->spectrum.showTrackingCursor = false;
-                    appState.needsRedraw = true;
-                }
-            }
-            ImGui::PopStyleColor(3);
-            ImGui::SameLine(0.0f, 0.0f);
-
-            ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[cursorOn ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cursorOn ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
-            if (ImGui::Button("on##IfgCursorOn")) {
-                if (!appState.active->spectrum.showTrackingCursor) {
-                    appState.active->spectrum.showTrackingCursor = true;
-                    appState.needsRedraw = true;
-                }
-            }
-            ImGui::PopStyleColor(3);
+            if (renderCursorTogglePair(appState.active->spectrum.showTrackingCursor,
+                                   "on##IfgCursorOn", "off##IfgCursorOff"))
+                appState.needsRedraw = true;
 
             // Row 5: Downsample (off / on)
             ImGui::Text("Downsample");
