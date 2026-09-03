@@ -1,3 +1,4 @@
+#include "theme.h"
 #include "t100.h"
 #include "spectral_toolbox.h"
 #include "interferogram_data.h"
@@ -1059,8 +1060,9 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
         if (showTrackingCursor && ImPlot::IsPlotHovered() && !lastKnownSelection.empty()) {
             const double mx = clampedCursorX();
 
-            char header[128];
-            SpectralPlotView::formatCursorHeader(mx, plot.xUnitSelector, header, sizeof(header));
+            CursorHeaderSeg headerSegs[8];
+            const int nSegs = SpectralPlotView::formatCursorHeader(
+                mx, plot.xUnitSelector, headerSegs, 8);
 
             std::vector<CursorCurve> cursorCurves;
             for (size_t i = 0; i < lastKnownSelection.size(); ++i) {
@@ -1075,7 +1077,8 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
                 cc.color = getT100LineColor(i);
                 cursorCurves.push_back(std::move(cc));
             }
-            renderCursorOverlay(header, cursorCurves);
+            renderCursorOverlay(headerSegs, nSegs, cursorCurves,
+                                GetAccentBase(StringToAccentColor(appState->currentAccentColor)));
         }
 
         if (largeData) {
@@ -1125,8 +1128,9 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
         if (showTrackingCursor && ImPlot::IsPlotHovered()) {
             const double mx = clampedCursorX();
 
-            char header[128];
-            SpectralPlotView::formatCursorHeader(mx, plot.xUnitSelector, header, sizeof(header));
+            CursorHeaderSeg headerSegs[8];
+            const int nSegs = SpectralPlotView::formatCursorHeader(
+                mx, plot.xUnitSelector, headerSegs, 8);
 
             std::vector<CursorCurve> cursorCurves;
             if (!cachedStdX.empty() && !cachedStdY.empty()) {
@@ -1136,7 +1140,8 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
                 cc.color = ImVec4(0.1f, 0.6f, 0.7f, 1.0f);
                 cursorCurves.push_back(std::move(cc));
             }
-            renderCursorOverlay(header, cursorCurves);
+            renderCursorOverlay(headerSegs, nSegs, cursorCurves,
+                                GetAccentBase(StringToAccentColor(appState->currentAccentColor)));
         }
 
         ImPlot::EndPlot();

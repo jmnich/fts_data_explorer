@@ -218,7 +218,7 @@ execute_process(
     ERROR_VARIABLE XXD_ERR
 )
 if(NOT XXD_ERR STREQUAL "")
-    message(FATAL_ERROR "Failed to generate icon header: ${XXD_ERR}")
+    message(FATAL_ERROR "Failed to generate asset header: ${XXD_ERR}")
 endif()
 
 # Find required packages

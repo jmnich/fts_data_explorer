@@ -7,6 +7,7 @@
 
 #include "imgui.h"
 #include "implot.h"
+#include "cursor_overlay.h"
 
 #include <cstddef>
 #include <functional>
@@ -137,6 +138,8 @@ public:
     bool yForceActive() const { return yAxisMode == kYModeForce && forcedYMin < forcedYMax; }
 
     static const char* defaultXLabel(int unit);   // cm-1 / µm / THz labels
-    // "X: %.2f cm-1 / %.4f um / %.4f THz" — shared tracking-cursor header.
-    static void formatCursorHeader(double x, int unit, char* buf, std::size_t n);
+    // Tracking-cursor header split into segments (CursorHeaderSeg in
+    // cursor_overlay.h) so the overlay composes panel-specific headers.
+    // Returns the number of segments written (<= maxSegs).
+    static int formatCursorHeader(double x, int unit, CursorHeaderSeg* out, int maxSegs);
 };

@@ -55,13 +55,22 @@ const char* SpectralPlotView::defaultXLabel(int unit) {
                                  : "Frequency (THz)";
 }
 
-void SpectralPlotView::formatCursorHeader(double x, int unit, char* buf, std::size_t n) {
+int SpectralPlotView::formatCursorHeader(double x, int unit,
+                                         CursorHeaderSeg* out, int maxSegs) {
     using ST = SpectralToolbox::SpectrumXUnit;
     auto u = static_cast<ST>(unit);
     double cm1 = (u == ST::CmInv) ? x : SpectralToolbox::convertXValue(x, u, ST::CmInv);
     double um  = (u == ST::Um)    ? x : SpectralToolbox::convertXValue(x, u, ST::Um);
     double thz = (u == ST::THz)   ? x : SpectralToolbox::convertXValue(x, u, ST::THz);
-    std::snprintf(buf, n, "X: %.2f cm-1 / %.4f um / %.4f THz", cm1, um, thz);
+    if (maxSegs < 7) return 0;
+    out[0] = {"X: "};
+    std::snprintf(out[1].text, sizeof(out[1].text), "%.2f ", cm1);
+    out[2] = {"cm-1"};
+    std::snprintf(out[3].text, sizeof(out[3].text), " / %.4f ", um);
+    out[4] = {"um"};
+    std::snprintf(out[5].text, sizeof(out[5].text), " / %.4f ", thz);
+    out[6] = {"THz"};
+    return 7;
 }
 
 void SpectralPlotView::reset() {

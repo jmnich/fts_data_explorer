@@ -1,5 +1,6 @@
 // Interferogram View + Interferogram config panel (Phase-1 M1.2c).
 #include "panels.h"
+#include "theme.h"
 #include "app_state.h"
 #include "ui/window.h"
 #include "spectral_toolbox.h"
@@ -507,12 +508,16 @@ void renderInterferogramPanel() {
                     // reference detectors. Uses the workspace cursor flag.
                     if (cursorOn && ImPlot::IsPlotHovered()) {
                         const double mx = clampedCursorX();
-                        char header[128];
-                        if (appState.active->xAxisBase == 1)
-                            std::snprintf(header, sizeof(header), "OPD: %.4f um", mx);
-                        else
-                            std::snprintf(header, sizeof(header), "Index: %lld",
-                                          static_cast<long long>(mx));
+                        CursorHeaderSeg headerSegs[2];
+                        int nSegs = 1;
+                        if (appState.active->xAxisBase == 1) {
+                            std::snprintf(headerSegs[0].text, sizeof(headerSegs[0].text), "OPD: %.4f ", mx);
+                            headerSegs[1] = {"um"};
+                            nSegs = 2;
+                        } else {
+                            std::snprintf(headerSegs[0].text, sizeof(headerSegs[0].text),
+                                          "Index: %lld", static_cast<long long>(mx));
+                        }
                         std::vector<CursorCurve> cursorCurves;
                         for (size_t i = 0; i < appState.active->loadedData.size(); ++i) {
                             const auto& refData = appState.active->loadedData[i].referenceDetector;
@@ -523,7 +528,8 @@ void renderInterferogramPanel() {
                             cc.color = plotSpecs[i].LineColor;
                             cursorCurves.push_back(std::move(cc));
                         }
-                        renderCursorOverlay(header, cursorCurves);
+                        renderCursorOverlay(headerSegs, nSegs, cursorCurves,
+                                            GetAccentBase(StringToAccentColor(appState.currentAccentColor)));
                     }
                     
                     appState.active->last_ref_y_min = static_cast<float>(ImPlot::GetPlotLimits().Y.Min);
@@ -818,12 +824,16 @@ void renderInterferogramPanel() {
                     // primary detectors. Uses the workspace cursor flag.
                     if (cursorOn && ImPlot::IsPlotHovered()) {
                         const double mx = clampedCursorX();
-                        char header[128];
-                        if (appState.active->xAxisBase == 1)
-                            std::snprintf(header, sizeof(header), "OPD: %.4f um", mx);
-                        else
-                            std::snprintf(header, sizeof(header), "Index: %lld",
-                                          static_cast<long long>(mx));
+                        CursorHeaderSeg headerSegs[2];
+                        int nSegs = 1;
+                        if (appState.active->xAxisBase == 1) {
+                            std::snprintf(headerSegs[0].text, sizeof(headerSegs[0].text), "OPD: %.4f ", mx);
+                            headerSegs[1] = {"um"};
+                            nSegs = 2;
+                        } else {
+                            std::snprintf(headerSegs[0].text, sizeof(headerSegs[0].text),
+                                          "Index: %lld", static_cast<long long>(mx));
+                        }
                         std::vector<CursorCurve> cursorCurves;
                         for (size_t i = 0; i < appState.active->loadedData.size(); ++i) {
                             const auto& primData = appState.active->loadedData[i].primaryDetector;
@@ -834,7 +844,8 @@ void renderInterferogramPanel() {
                             cc.color = plotSpecs[i].LineColor;
                             cursorCurves.push_back(std::move(cc));
                         }
-                        renderCursorOverlay(header, cursorCurves);
+                        renderCursorOverlay(headerSegs, nSegs, cursorCurves,
+                                            GetAccentBase(StringToAccentColor(appState.currentAccentColor)));
                     }
                     
                     // Add "LARGE DATA" indicator for large datasets (>50k points)

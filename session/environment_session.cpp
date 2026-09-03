@@ -1867,20 +1867,25 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
 
         // Tracking cursor (shared overlay): full-height vertical line (never
         // affects Y autofit/range-fit), per-curve colored markers and an info
-        // box with color badges. Absorbance keeps badge + label + value;
-        // Comparator shows badge + value only.
+        // box with color badges. All curves show badge + value only (labels
+        // are never drawn in the box).
         if (showTrackingCursor && ImPlot::IsPlotHovered()) {
             const double mx = clampedCursorX();
 
-            char header[128];
-            if (artifactSelector == 4 /* corrected: OPD axis */)
-                std::snprintf(header, sizeof(header), "OPD: %.4f um", mx);
-            else if (artifactSelector == 5 /* raw: sample index */)
-                std::snprintf(header, sizeof(header), "Index: %lld",
-                              static_cast<long long>(mx));
-            else
-                SpectralPlotView::formatCursorHeader(mx, plot.xUnitSelector,
-                                                     header, sizeof(header));
+            CursorHeaderSeg headerSegs[8];
+            int nSegs = 0;
+            if (artifactSelector == 4 /* corrected: OPD axis */) {
+                std::snprintf(headerSegs[0].text, sizeof(headerSegs[0].text), "OPD: %.4f ", mx);
+                headerSegs[1] = {"um"};
+                nSegs = 2;
+            } else if (artifactSelector == 5 /* raw: sample index */) {
+                std::snprintf(headerSegs[0].text, sizeof(headerSegs[0].text),
+                              "Index: %lld", static_cast<long long>(mx));
+                nSegs = 1;
+            } else {
+                nSegs = SpectralPlotView::formatCursorHeader(
+                    mx, plot.xUnitSelector, headerSegs, 8);
+            }
 
             std::vector<CursorCurve> cursorCurves;
             cursorCurves.reserve(curves.size());
@@ -1889,7 +1894,6 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
                 cc.x = &curves[k].x;
                 cc.y = &curves[k].y;
                 cc.color = curveColors[k];
-                if (type != EnvType::Comparator) cc.label = curves[k].label;
                 if (plot.yScaleSelector == kYScaleDb)
                     cc.transform = [dBNormalize, dBRefMax](double v) {
                         return dBNormalize
@@ -1898,7 +1902,8 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
                     };
                 cursorCurves.push_back(std::move(cc));
             }
-            renderCursorOverlay(header, cursorCurves);
+            renderCursorOverlay(headerSegs, nSegs, cursorCurves,
+                                GetAccentBase(StringToAccentColor(appState.currentAccentColor)));
         }
 
         // Capture the current X limits every frame (the export "current plot

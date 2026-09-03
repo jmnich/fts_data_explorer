@@ -5,6 +5,7 @@
 #if FTS_BUILD_HDF5
 #include "workspace_reader.h"
 #endif
+#include "theme.h"
 #include "app_state.h"
 #include "implot3d.h"
 #include "imgui_internal.h"   // GetCurrentWindowRead()->SkipItems (hidden dock tab)
@@ -519,8 +520,9 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
             // Tracking cursor (shared overlay)
             if (showTrackingCursor && ImPlot::IsPlotHovered()) {
                 const double mx = clampedCursorX();
-                char header[128];
-                std::snprintf(header, sizeof(header), "tau: %.4e", mx);
+                CursorHeaderSeg headerSegs[1];
+                std::snprintf(headerSegs[0].text, sizeof(headerSegs[0].text),
+                              "tau: %.4e", mx);
 
                 std::vector<CursorCurve> cursorCurves;
                 if (!cachedSurfaceTaus.empty() && !sliceY.empty()) {
@@ -530,7 +532,8 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
                     cc.color = ImVec4(0.2f, 0.6f, 0.5f, 1.0f);
                     cursorCurves.push_back(std::move(cc));
                 }
-                renderCursorOverlay(header, cursorCurves);
+                renderCursorOverlay(headerSegs, 1, cursorCurves,
+                                    GetAccentBase(StringToAccentColor(appState->currentAccentColor)));
             }
 
             {

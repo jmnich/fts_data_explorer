@@ -14,6 +14,7 @@
 #include <vector>
 #include <limits>
 #include <chrono>
+#include "theme.h"
 #include "app_state.h"
 
 // Normalize a display buffer so max = 1 (linear/log10) or max = 0 dB (dB mode).
@@ -583,8 +584,9 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
              if (showTrackingCursor && ImPlot::IsPlotHovered()) {
                  const double mx = clampedCursorX();
 
-                 char header[128];
-                 SpectralPlotView::formatCursorHeader(mx, plot.xUnitSelector, header, sizeof(header));
+                 CursorHeaderSeg headerSegs[8];
+                 const int nSegs = SpectralPlotView::formatCursorHeader(
+                     mx, plot.xUnitSelector, headerSegs, 8);
 
                  const int ys = plot.yScaleSelector;
                  std::vector<CursorCurve> cursorCurves;
@@ -606,7 +608,8 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                      }
                      cursorCurves.push_back(std::move(cc));
                  }
-                 renderCursorOverlay(header, cursorCurves);
+                 renderCursorOverlay(headerSegs, nSegs, cursorCurves,
+                                     GetAccentBase(StringToAccentColor(appState->currentAccentColor)));
              }
 
             plot.captureLimits();

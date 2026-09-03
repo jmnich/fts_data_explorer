@@ -6,6 +6,7 @@
 #if FTS_BUILD_HDF5
 #include "workspace_reader.h"
 #endif
+#include "theme.h"
 #include "app_state.h"
 #include "imgui_internal.h"   // GetCurrentWindowRead()->SkipItems (hidden dock tab)
 #include <cmath>
@@ -216,8 +217,9 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
         if (showTrackingCursor && ImPlot::IsPlotHovered()) {
             const double mx = clampedCursorX();
 
-            char header[128];
-            SpectralPlotView::formatCursorHeader(mx, plot.xUnitSelector, header, sizeof(header));
+            CursorHeaderSeg headerSegs[8];
+            const int nSegs = SpectralPlotView::formatCursorHeader(
+                mx, plot.xUnitSelector, headerSegs, 8);
 
             std::vector<CursorCurve> cursorCurves;
             if (!cachedAverageX.empty() && !cachedAverageY.empty()) {
@@ -228,7 +230,8 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
                 cc.transform = [&toDisplayValue](double v) { return toDisplayValue(v); };
                 cursorCurves.push_back(std::move(cc));
             }
-            renderCursorOverlay(header, cursorCurves);
+            renderCursorOverlay(headerSegs, nSegs, cursorCurves,
+                                GetAccentBase(StringToAccentColor(appState->currentAccentColor)));
         }
 
         // Save current limits
