@@ -141,10 +141,10 @@ void populateSession(WorkspaceSession& s, const std::string& tag, const std::str
     s.showPeakIndicators = true;
     s.peakPositionsCache["record_0"] = {3, 4};
 
-    s.spectrum.xUnitSelector = 1;
+    s.spectrum.plot.xUnitSelector = 1;
     s.spectrum.refLaserTextbox = 1.55f;
     s.spectrum.Kpadding = 2;
-    s.spectrum.yAxisMode = 1;
+    s.spectrum.plot.yAxisMode = 1;
     s.spectrum.cachedSpectra["record_0"] = {0.1, 0.2};
     s.spectrum.cachedFrequencies["record_0"] = {100.0, 200.0};
     s.spectrum.lastSpectrumParams["record_0"] = {1, 1, 1, 1, 1, 1, 1, 1};
@@ -230,33 +230,32 @@ void checkWsEq(const Workspace& a, const Workspace& b) {
 }
 
 void checkSpectrumEq(const Spectrum& a, const Spectrum& b) {
-    CHECK(a.xUnitSelector == b.xUnitSelector);
-    CHECK(a.prevXUnitSelector == b.prevXUnitSelector);
-    CHECK(a.yScaleSelector == b.yScaleSelector);
+    CHECK(a.plot.xUnitSelector == b.plot.xUnitSelector);
+    CHECK(a.plot.prevXUnitSelector == b.plot.prevXUnitSelector);
+    CHECK(a.plot.yScaleSelector == b.plot.yScaleSelector);
     CHECK(a.refLaserTextbox == b.refLaserTextbox);
     CHECK(a.detectorSensitivity == b.detectorSensitivity);
     CHECK(std::strcmp(a.detectorSensitivityText, b.detectorSensitivityText) == 0);
     CHECK(a.Kpadding == b.Kpadding);
     CHECK(a.apodizationSelector == b.apodizationSelector);
     CHECK(a.apodizationParams.gaussSigma == b.apodizationParams.gaussSigma);
-    CHECK(a.yAxisMode == b.yAxisMode);
-    CHECK(a.forcedYMin == b.forcedYMin && a.forcedYMax == b.forcedYMax);
+    CHECK(a.plot.yAxisMode == b.plot.yAxisMode);
+    CHECK(a.plot.forcedYMin == b.plot.forcedYMin && a.plot.forcedYMax == b.plot.forcedYMax);
     CHECK(a.spectrumDirty == b.spectrumDirty);
-    CHECK(a.shouldAutoscale == b.shouldAutoscale);
-    CHECK(a.firstLoadCompleted == b.firstLoadCompleted);
-    CHECK(a.manualXMin == b.manualXMin && a.manualXMax == b.manualXMax);
-    CHECK(a.manualYMin == b.manualYMin && a.manualYMax == b.manualYMax);
-    CHECK(a.savedYMin == b.savedYMin && a.savedYMax == b.savedYMax);
+    CHECK(a.plot.shouldAutoscale == b.plot.shouldAutoscale);
+    CHECK(a.plot.firstLoadCompleted == b.plot.firstLoadCompleted);
+    CHECK(a.plot.manualXMin == b.plot.manualXMin && a.plot.manualXMax == b.plot.manualXMax);
+    CHECK(a.plot.savedYMin == b.plot.savedYMin && a.plot.savedYMax == b.plot.savedYMax);
     CHECK(a.showTrackingCursor == b.showTrackingCursor);
-    CHECK(a.isSelectingXRange == b.isSelectingXRange);
-    CHECK(a.selectionStartX == b.selectionStartX && a.selectionEndX == b.selectionEndX);
-    CHECK(a.pendingNextXMin == b.pendingNextXMin && a.pendingNextXMax == b.pendingNextXMax);
-    CHECK(a.xUnitSwitchedThisFrame == b.xUnitSwitchedThisFrame);
-    CHECK(a.convertedXMin == b.convertedXMin && a.convertedXMax == b.convertedXMax);
-    CHECK(a.leftArrowPressedLastFrame == b.leftArrowPressedLastFrame);
-    CHECK(a.rightArrowPressedLastFrame == b.rightArrowPressedLastFrame);
-    CHECK(a.leftArrowHandleFlag == b.leftArrowHandleFlag);
-    CHECK(a.rightArrowHandleFlag == b.rightArrowHandleFlag);
+    CHECK(a.plot.isSelectingXRange == b.plot.isSelectingXRange);
+    CHECK(a.plot.selectionStartX == b.plot.selectionStartX && a.plot.selectionEndX == b.plot.selectionEndX);
+    CHECK(a.plot.pendingNextXMin == b.plot.pendingNextXMin && a.plot.pendingNextXMax == b.plot.pendingNextXMax);
+    CHECK(a.plot.xUnitSwitchedThisFrame == b.plot.xUnitSwitchedThisFrame);
+    CHECK(a.plot.convertedXMin == b.plot.convertedXMin && a.plot.convertedXMax == b.plot.convertedXMax);
+    CHECK(a.plot.leftArrowPressedLastFrame == b.plot.leftArrowPressedLastFrame);
+    CHECK(a.plot.rightArrowPressedLastFrame == b.plot.rightArrowPressedLastFrame);
+    CHECK(a.plot.leftArrowHandleFlag == b.plot.leftArrowHandleFlag);
+    CHECK(a.plot.rightArrowHandleFlag == b.plot.rightArrowHandleFlag);
     CHECK(a.cachedSpectra == b.cachedSpectra);
     CHECK(a.cachedFrequencies == b.cachedFrequencies);
     CHECK(a.lastPrimaryDetectors == b.lastPrimaryDetectors);
@@ -273,24 +272,23 @@ void checkAverageEq(const AverageSpectrum& a, const AverageSpectrum& b) {
     CHECK(a.calcInProgress == b.calcInProgress);
     CHECK(a.progressTotal == b.progressTotal);
     CHECK(a.progressCurrent == b.progressCurrent);
-    CHECK(a.isSelectingXRange == b.isSelectingXRange);
-    CHECK(a.selectionStartX == b.selectionStartX && a.selectionEndX == b.selectionEndX);
-    CHECK(a.shouldAutoscale == b.shouldAutoscale);
-    CHECK(a.firstLoadCompleted == b.firstLoadCompleted);
-    CHECK(a.manualXMin == b.manualXMin && a.manualXMax == b.manualXMax);
-    CHECK(a.manualYMin == b.manualYMin && a.manualYMax == b.manualYMax);
-    CHECK(a.savedYMin == b.savedYMin && a.savedYMax == b.savedYMax);
-    CHECK(a.xUnitSelector == b.xUnitSelector && a.prevXUnitSelector == b.prevXUnitSelector);
-    CHECK(a.yScaleSelector == b.yScaleSelector);
-    CHECK(a.yAxisMode == b.yAxisMode && a.prevYAxisMode == b.prevYAxisMode);
-    CHECK(a.forcedYMin == b.forcedYMin && a.forcedYMax == b.forcedYMax);
-    CHECK(a.pendingNextXMin == b.pendingNextXMin && a.pendingNextXMax == b.pendingNextXMax);
-    CHECK(a.xUnitSwitchedThisFrame == b.xUnitSwitchedThisFrame);
-    CHECK(a.convertedXMin == b.convertedXMin && a.convertedXMax == b.convertedXMax);
-    CHECK(a.leftArrowPressedLastFrame == b.leftArrowPressedLastFrame);
-    CHECK(a.rightArrowPressedLastFrame == b.rightArrowPressedLastFrame);
-    CHECK(a.leftArrowHandleFlag == b.leftArrowHandleFlag);
-    CHECK(a.rightArrowHandleFlag == b.rightArrowHandleFlag);
+    CHECK(a.plot.isSelectingXRange == b.plot.isSelectingXRange);
+    CHECK(a.plot.selectionStartX == b.plot.selectionStartX && a.plot.selectionEndX == b.plot.selectionEndX);
+    CHECK(a.plot.shouldAutoscale == b.plot.shouldAutoscale);
+    CHECK(a.plot.firstLoadCompleted == b.plot.firstLoadCompleted);
+    CHECK(a.plot.manualXMin == b.plot.manualXMin && a.plot.manualXMax == b.plot.manualXMax);
+    CHECK(a.plot.savedYMin == b.plot.savedYMin && a.plot.savedYMax == b.plot.savedYMax);
+    CHECK(a.plot.xUnitSelector == b.plot.xUnitSelector && a.plot.prevXUnitSelector == b.plot.prevXUnitSelector);
+    CHECK(a.plot.yScaleSelector == b.plot.yScaleSelector);
+    CHECK(a.plot.yAxisMode == b.plot.yAxisMode && a.plot.prevYAxisMode == b.plot.prevYAxisMode);
+    CHECK(a.plot.forcedYMin == b.plot.forcedYMin && a.plot.forcedYMax == b.plot.forcedYMax);
+    CHECK(a.plot.pendingNextXMin == b.plot.pendingNextXMin && a.plot.pendingNextXMax == b.plot.pendingNextXMax);
+    CHECK(a.plot.xUnitSwitchedThisFrame == b.plot.xUnitSwitchedThisFrame);
+    CHECK(a.plot.convertedXMin == b.plot.convertedXMin && a.plot.convertedXMax == b.plot.convertedXMax);
+    CHECK(a.plot.leftArrowPressedLastFrame == b.plot.leftArrowPressedLastFrame);
+    CHECK(a.plot.rightArrowPressedLastFrame == b.plot.rightArrowPressedLastFrame);
+    CHECK(a.plot.leftArrowHandleFlag == b.plot.leftArrowHandleFlag);
+    CHECK(a.plot.rightArrowHandleFlag == b.plot.rightArrowHandleFlag);
     checkVecEq(a.calcCommonX, b.calcCommonX, "avg calcCommonX");
     CHECK(a.calcNumBins == b.calcNumBins);
     CHECK(a.calcValidFiles == b.calcValidFiles);
@@ -308,24 +306,23 @@ void checkSnrEq(const SnrSpectrum& a, const SnrSpectrum& b) {
     CHECK(a.calcInProgress == b.calcInProgress);
     CHECK(a.progressTotal == b.progressTotal);
     CHECK(a.progressCurrent == b.progressCurrent);
-    CHECK(a.isSelectingXRange == b.isSelectingXRange);
-    CHECK(a.selectionStartX == b.selectionStartX && a.selectionEndX == b.selectionEndX);
-    CHECK(a.shouldAutoscale == b.shouldAutoscale);
-    CHECK(a.firstLoadCompleted == b.firstLoadCompleted);
-    CHECK(a.manualXMin == b.manualXMin && a.manualXMax == b.manualXMax);
-    CHECK(a.manualYMin == b.manualYMin && a.manualYMax == b.manualYMax);
-    CHECK(a.savedYMin == b.savedYMin && a.savedYMax == b.savedYMax);
-    CHECK(a.xUnitSelector == b.xUnitSelector && a.prevXUnitSelector == b.prevXUnitSelector);
-    CHECK(a.yScaleSelector == b.yScaleSelector && a.prevYScaleSelector == b.prevYScaleSelector);
-    CHECK(a.yAxisMode == b.yAxisMode && a.prevYAxisMode == b.prevYAxisMode);
-    CHECK(a.forcedYMin == b.forcedYMin && a.forcedYMax == b.forcedYMax);
-    CHECK(a.pendingNextXMin == b.pendingNextXMin && a.pendingNextXMax == b.pendingNextXMax);
-    CHECK(a.xUnitSwitchedThisFrame == b.xUnitSwitchedThisFrame);
-    CHECK(a.convertedXMin == b.convertedXMin && a.convertedXMax == b.convertedXMax);
-    CHECK(a.leftArrowPressedLastFrame == b.leftArrowPressedLastFrame);
-    CHECK(a.rightArrowPressedLastFrame == b.rightArrowPressedLastFrame);
-    CHECK(a.leftArrowHandleFlag == b.leftArrowHandleFlag);
-    CHECK(a.rightArrowHandleFlag == b.rightArrowHandleFlag);
+    CHECK(a.plot.isSelectingXRange == b.plot.isSelectingXRange);
+    CHECK(a.plot.selectionStartX == b.plot.selectionStartX && a.plot.selectionEndX == b.plot.selectionEndX);
+    CHECK(a.plot.shouldAutoscale == b.plot.shouldAutoscale);
+    CHECK(a.plot.firstLoadCompleted == b.plot.firstLoadCompleted);
+    CHECK(a.plot.manualXMin == b.plot.manualXMin && a.plot.manualXMax == b.plot.manualXMax);
+    CHECK(a.plot.savedYMin == b.plot.savedYMin && a.plot.savedYMax == b.plot.savedYMax);
+    CHECK(a.plot.xUnitSelector == b.plot.xUnitSelector && a.plot.prevXUnitSelector == b.plot.prevXUnitSelector);
+    CHECK(a.plot.yScaleSelector == b.plot.yScaleSelector && a.plot.prevYScaleSelector == b.plot.prevYScaleSelector);
+    CHECK(a.plot.yAxisMode == b.plot.yAxisMode && a.plot.prevYAxisMode == b.plot.prevYAxisMode);
+    CHECK(a.plot.forcedYMin == b.plot.forcedYMin && a.plot.forcedYMax == b.plot.forcedYMax);
+    CHECK(a.plot.pendingNextXMin == b.plot.pendingNextXMin && a.plot.pendingNextXMax == b.plot.pendingNextXMax);
+    CHECK(a.plot.xUnitSwitchedThisFrame == b.plot.xUnitSwitchedThisFrame);
+    CHECK(a.plot.convertedXMin == b.plot.convertedXMin && a.plot.convertedXMax == b.plot.convertedXMax);
+    CHECK(a.plot.leftArrowPressedLastFrame == b.plot.leftArrowPressedLastFrame);
+    CHECK(a.plot.rightArrowPressedLastFrame == b.plot.rightArrowPressedLastFrame);
+    CHECK(a.plot.leftArrowHandleFlag == b.plot.leftArrowHandleFlag);
+    CHECK(a.plot.rightArrowHandleFlag == b.plot.rightArrowHandleFlag);
     checkVecEq(a.calcCommonX, b.calcCommonX, "snr calcCommonX");
     CHECK(a.calcNumBins == b.calcNumBins);
     CHECK(a.calcValidFiles == b.calcValidFiles);
@@ -381,23 +378,22 @@ void checkT100Eq(const T100Spectrum& a, const T100Spectrum& b) {
     CHECK(a.cachedTransX == b.cachedTransX);
     CHECK(a.cachedTransY == b.cachedTransY);
     CHECK(a.transmittanceAvailable == b.transmittanceAvailable);
-    CHECK(a.isSelectingXRange == b.isSelectingXRange);
-    CHECK(a.selectionStartX == b.selectionStartX && a.selectionEndX == b.selectionEndX);
-    CHECK(a.shouldAutoscale == b.shouldAutoscale);
-    CHECK(a.firstLoadCompleted == b.firstLoadCompleted);
-    CHECK(a.manualXMin == b.manualXMin && a.manualXMax == b.manualXMax);
-    CHECK(a.manualYMin == b.manualYMin && a.manualYMax == b.manualYMax);
-    CHECK(a.savedYMin == b.savedYMin && a.savedYMax == b.savedYMax);
-    CHECK(a.leftArrowPressedLastFrame == b.leftArrowPressedLastFrame);
-    CHECK(a.rightArrowPressedLastFrame == b.rightArrowPressedLastFrame);
-    CHECK(a.leftArrowHandleFlag == b.leftArrowHandleFlag);
-    CHECK(a.rightArrowHandleFlag == b.rightArrowHandleFlag);
-    CHECK(a.xUnitSelector == b.xUnitSelector && a.prevXUnitSelector == b.prevXUnitSelector);
-    CHECK(a.yAxisMode == b.yAxisMode && a.prevYAxisMode == b.prevYAxisMode);
-    CHECK(a.forcedYMin == b.forcedYMin && a.forcedYMax == b.forcedYMax);
-    CHECK(a.pendingNextXMin == b.pendingNextXMin && a.pendingNextXMax == b.pendingNextXMax);
-    CHECK(a.xUnitSwitchedThisFrame == b.xUnitSwitchedThisFrame);
-    CHECK(a.convertedXMin == b.convertedXMin && a.convertedXMax == b.convertedXMax);
+    CHECK(a.plot.isSelectingXRange == b.plot.isSelectingXRange);
+    CHECK(a.plot.selectionStartX == b.plot.selectionStartX && a.plot.selectionEndX == b.plot.selectionEndX);
+    CHECK(a.plot.shouldAutoscale == b.plot.shouldAutoscale);
+    CHECK(a.plot.firstLoadCompleted == b.plot.firstLoadCompleted);
+    CHECK(a.plot.manualXMin == b.plot.manualXMin && a.plot.manualXMax == b.plot.manualXMax);
+    CHECK(a.plot.savedYMin == b.plot.savedYMin && a.plot.savedYMax == b.plot.savedYMax);
+    CHECK(a.plot.leftArrowPressedLastFrame == b.plot.leftArrowPressedLastFrame);
+    CHECK(a.plot.rightArrowPressedLastFrame == b.plot.rightArrowPressedLastFrame);
+    CHECK(a.plot.leftArrowHandleFlag == b.plot.leftArrowHandleFlag);
+    CHECK(a.plot.rightArrowHandleFlag == b.plot.rightArrowHandleFlag);
+    CHECK(a.plot.xUnitSelector == b.plot.xUnitSelector && a.plot.prevXUnitSelector == b.plot.prevXUnitSelector);
+    CHECK(a.plot.yAxisMode == b.plot.yAxisMode && a.plot.prevYAxisMode == b.plot.prevYAxisMode);
+    CHECK(a.plot.forcedYMin == b.plot.forcedYMin && a.plot.forcedYMax == b.plot.forcedYMax);
+    CHECK(a.plot.pendingNextXMin == b.plot.pendingNextXMin && a.plot.pendingNextXMax == b.plot.pendingNextXMax);
+    CHECK(a.plot.xUnitSwitchedThisFrame == b.plot.xUnitSwitchedThisFrame);
+    CHECK(a.plot.convertedXMin == b.plot.convertedXMin && a.plot.convertedXMax == b.plot.convertedXMax);
     CHECK(a.needsRecompute == b.needsRecompute);
     CHECK(a.lastKnownSelection == b.lastKnownSelection);
     CHECK(std::strcmp(a.csvPathBuffer, b.csvPathBuffer) == 0);
@@ -836,7 +832,7 @@ void test7_blankSessionResume() {
     checkBackpointers(*s.sessions[1], s);
     CHECK(a->currentDatasetName == "A");            // A intact, inactive
     // The blank session's fields are ctor-default.
-    CHECK(s.active->spectrum.xUnitSelector == 0);
+    CHECK(s.active->spectrum.plot.xUnitSelector == 0);
     CHECK(s.active->averageSpectrum.averageAvailable == false);
 }
 
@@ -858,7 +854,7 @@ void test8_pool() {
     sess->workspace = makeFixtureWorkspace("poolA");
     sess->workspacePath = sess->path;
     sess->datasetInfo = workspaceDatasetInfo(sess->workspace);
-    sess->spectrum.xUnitSelector = 0;                 // cm-1
+    sess->spectrum.plot.xUnitSelector = 0;                 // cm-1
     sess->spectrum.refLaserTextbox = 1.55f;
     sess->spectrum.Kpadding = 2;
     const std::vector<double> xCm = {1000.0, 1500.0, 2000.0, 2500.0, 3000.0};
@@ -885,7 +881,7 @@ void test8_pool() {
     // Unit guard: panel unit um — the cache is display-unit, so the pool
     // must re-convert X back to cm-1 (audit §3.2). <=1 ULP.
     {
-        s.sessions[0]->spectrum.xUnitSelector = 1;   // um
+        s.sessions[0]->spectrum.plot.xUnitSelector = 1;   // um
         // Convert the panel cache in place the way the Spectrum panel does.
         for (double& x : s.sessions[0]->spectrum.cachedFrequencies["specA"])
             x = SpectralToolbox::convertXValue(x, ST::CmInv, ST::Um);
@@ -905,7 +901,7 @@ void test8_pool() {
             CHECK(std::fabs(pu2.spectrumX[i] - want) <= std::fabs(want) * 1e-15 + 1e-300);
         }
         // Restore cm-1 state for the next sub-test.
-        s.sessions[0]->spectrum.xUnitSelector = 0;
+        s.sessions[0]->spectrum.plot.xUnitSelector = 0;
         for (double& x : s.sessions[0]->spectrum.cachedFrequencies["specA"])
             x = SpectralToolbox::convertXValue(x, ST::Um, ST::CmInv);
     }
@@ -1151,7 +1147,7 @@ void test10_t100Parity() {
                 {0.8, 0.8, 0.8});                                // ratio 0.8
 
     EnvironmentSession* env = createExperiment(s, EnvType::Absorbance);
-    env->xUnitSelector = 0;
+    env->plot.xUnitSelector = 0;
     env->curves.push_back(AbsorbanceCurve{});
     AbsorbanceCurve& c = env->curves[0];
     c.refKey = "/tmp/parity.h5";
@@ -1248,7 +1244,7 @@ void test11_comparator() {
 
     // gatherCurves: average-spectrum artifact, both datasets, cm-1 display.
     EnvironmentSession cmp(EnvType::Comparator, "Comparator curves");
-    cmp.xUnitSelector = 0;   // cm-1
+    cmp.plot.xUnitSelector = 0;   // cm-1
     auto curves = cmp.gatherCurves(s);
     CHECK(curves.size() == 2);
     CHECK(curves[0].label == "cmp_a (avg of 2)");
@@ -1391,7 +1387,7 @@ void test12_experimentPersistence() {
     s.active->xCorrectionMethod = 0;               // default fingerprint params
     s.active->peakProminenceThreshold = 0.02f;     // (populateSession's 2/0.25 are
                                                    //  harness-wide defaults, not used here)
-    s.active->spectrum.xUnitSelector = 0;
+    s.active->spectrum.plot.xUnitSelector = 0;
     s.active->spectrum.refLaserTextbox = 1.55f;
     s.active->spectrum.Kpadding = 2;
     const std::vector<double> refX = {1000.0, 1250.0, 1500.0, 1750.0, 2000.0};
@@ -1423,7 +1419,7 @@ void test12_experimentPersistence() {
     env->curves[0].sampleKey = "/tmp/parity.h5";
     env->curves[0].sampleArtifact = static_cast<int>(ComparatorArtifact::RawSpectrum);
     env->curves[0].sampleMember = "specSmp";
-    env->xUnitSelector = 0;
+    env->plot.xUnitSelector = 0;
     env->comment = "my experiment";
     // Bugfix 2026-08-14: the strip key and plot id are RENAME-STABLE —
     // renaming neither shuffles the tab nor resets the plot's X range.
@@ -1577,17 +1573,17 @@ void test12_experimentPersistence() {
     cmp->comparatorKeys = {"/tmp/parity.h5", "/tmp/other.h5"};
     cmp->comparatorKeysExplicit = true;
     cmp->memberPicks["/tmp/parity.h5"] = "specRef";
-    cmp->xUnitSelector = 1;
-    cmp->yAxisMode = 2;
-    cmp->forcedYMin = -1.0;
-    cmp->forcedYMax = 5.0;
-    cmp->yScaleSelector = 1;
+    cmp->plot.xUnitSelector = 1;
+    cmp->plot.yAxisMode = 2;
+    cmp->plot.forcedYMin = -1.0;
+    cmp->plot.forcedYMax = 5.0;
+    cmp->plot.yScaleSelector = 1;
     cmp->showTrackingCursor = true;
     cmp->comment = "comparator experiment";
     // View X range persists like the workspace panels' view state (bugfix
     // 2026-08-14: the comparator's zoom window was lost on relaunch).
-    cmp->manualXMin = 1500.0;
-    cmp->manualXMax = 2000.0;
+    cmp->plot.manualXMin = 1500.0;
+    cmp->plot.manualXMax = 2000.0;
     // Tab-open state persists too (bugfix 2026-08-14): a closed-but-kept
     // experiment must not auto-reopen on project load.
     cmp->tabHidden = true;
@@ -1623,23 +1619,23 @@ void test12_experimentPersistence() {
     CHECK(c2->comparatorKeysExplicit == true);
     CHECK(c2->memberPicks.count("/tmp/parity.h5") == 1);
     CHECK(c2->memberPicks["/tmp/parity.h5"] == "specRef");
-    CHECK(c2->xUnitSelector == 1);
-    CHECK(c2->yAxisMode == 2);
-    CHECK(c2->forcedYMin == -1.0 && c2->forcedYMax == 5.0);
+    CHECK(c2->plot.xUnitSelector == 1);
+    CHECK(c2->plot.yAxisMode == 2);
+    CHECK(c2->plot.forcedYMin == -1.0 && c2->plot.forcedYMax == 5.0);
     // yScale was saved as 1 (log) but T100/IFG artifacts never allow log/dB —
     // the load path clamps it back to lin (defensive, mirrors the UI reset).
-    CHECK(c2->yScaleSelector == 0);
+    CHECK(c2->plot.yScaleSelector == 0);
     CHECK(c2->showTrackingCursor == true);
     CHECK(c2->comment == "comparator experiment");
     CHECK(c2->computed == false);
     CHECK(c2->dirty == false);
     // X range restored + latched for one-shot application on first render
     // (renderPlot consumes pendingNextXMin/Max; autoscale suppressed).
-    CHECK(c2->manualXMin == 1500.0);
-    CHECK(c2->manualXMax == 2000.0);
-    CHECK(c2->pendingNextXMin == 1500.0);
-    CHECK(c2->pendingNextXMax == 2000.0);
-    CHECK(c2->shouldAutoscale == false);
+    CHECK(c2->plot.manualXMin == 1500.0);
+    CHECK(c2->plot.manualXMax == 2000.0);
+    CHECK(c2->plot.pendingNextXMin == 1500.0);
+    CHECK(c2->plot.pendingNextXMax == 2000.0);
+    CHECK(c2->plot.shouldAutoscale == false);
     CHECK(c2->tabHidden == true);       // closed tab stays closed after reload
     CHECK(a2b->tabHidden == false);     // legacy/default: visible
     // Save→reload→save: the range persists idempotently in config.json.
@@ -1661,27 +1657,27 @@ void test12_experimentPersistence() {
         auto convert = [](double v) {
             return SpectralToolbox::convertXValue(v, ST::CmInv, ST::Um);
         };
-        c2->prevXUnitSelector = 0;       // cm-1
-        c2->xUnitSelector = 1;           // -> um
-        c2->shouldAutoscale = false;     // renderPlot has shown the window
-        c2->manualXMin = 2000.0;         // a cm-1 zoom window
-        c2->manualXMax = 4000.0;
-        c2->pendingNextXMin = 0.0;       // clear any leftover restore latch
-        c2->pendingNextXMax = -1.0;
+        c2->plot.prevXUnitSelector = 0;       // cm-1
+        c2->plot.xUnitSelector = 1;           // -> um
+        c2->plot.shouldAutoscale = false;     // renderPlot has shown the window
+        c2->plot.manualXMin = 2000.0;         // a cm-1 zoom window
+        c2->plot.manualXMax = 4000.0;
+        c2->plot.pendingNextXMin = 0.0;       // clear any leftover restore latch
+        c2->plot.pendingNextXMax = -1.0;
         c2->convertXInPlace();
         double wantL = std::min(convert(2000.0), convert(4000.0));
         double wantH = std::max(convert(2000.0), convert(4000.0));
-        CHECK(c2->manualXMin == wantL);          // window converted (ascending)
-        CHECK(c2->manualXMax == wantH);
-        CHECK(c2->pendingNextXMin == wantL);     // armed for the next plot frame
-        CHECK(c2->pendingNextXMax == wantH);
+        CHECK(c2->plot.manualXMin == wantL);          // window converted (ascending)
+        CHECK(c2->plot.manualXMax == wantH);
+        CHECK(c2->plot.pendingNextXMin == wantL);     // armed for the next plot frame
+        CHECK(c2->plot.pendingNextXMax == wantH);
         // The data array is converted too (absorbance gridX path).
         c2->curves.clear();
         AbsorbanceCurve ac;
         ac.gridX = {2000.0, 3000.0, 4000.0};
         c2->curves.push_back(ac);
-        c2->prevXUnitSelector = 0;
-        c2->xUnitSelector = 1;
+        c2->plot.prevXUnitSelector = 0;
+        c2->plot.xUnitSelector = 1;
         c2->convertXInPlace();
         CHECK(c2->curves[0].gridX[0] == convert(2000.0));
         CHECK(c2->curves[0].gridX[2] == convert(4000.0));
@@ -1758,7 +1754,7 @@ void test13_stalenessPersisted() {
     s.active->datasetInfo = workspaceDatasetInfo(s.active->workspace);
     s.active->xCorrectionMethod = 0;
     s.active->peakProminenceThreshold = 0.02f;
-    s.active->spectrum.xUnitSelector = 0;
+    s.active->spectrum.plot.xUnitSelector = 0;
     s.active->spectrum.refLaserTextbox = 1.55f;
     s.active->spectrum.Kpadding = 2;
 
@@ -1773,7 +1769,7 @@ void test13_stalenessPersisted() {
     env->curves[0].sampleKey = srcPath;
     env->curves[0].sampleArtifact = static_cast<int>(ComparatorArtifact::RawSpectrum);
     env->curves[0].sampleMember = "specSmp";
-    env->xUnitSelector = 0;
+    env->plot.xUnitSelector = 0;
     env->computeAbsorbance(s);
     CHECK(env->computed == true);
     CHECK(crossCreate(crossPath, err));

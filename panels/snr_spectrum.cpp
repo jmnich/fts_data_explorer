@@ -12,27 +12,6 @@
 #include <cstdio>
 #include <limits>
 
-static void SetupAxisTicksLimited(ImAxis axis, double min, double max, int maxTicks = 12) {
-    double range = max - min;
-    if (range <= 0.0) return;
-    double roughStep = range / (maxTicks - 1);
-    double exponent = std::floor(std::log10(roughStep));
-    double fraction = roughStep / std::pow(10.0, exponent);
-    double niceFraction;
-    if (fraction <= 1.0) niceFraction = 1.0;
-    else if (fraction <= 2.0) niceFraction = 2.0;
-    else if (fraction <= 5.0) niceFraction = 5.0;
-    else niceFraction = 10.0;
-    double step = niceFraction * std::pow(10.0, exponent);
-    double firstTick = std::ceil(min / step) * step;
-    std::vector<double> ticks;
-    ticks.reserve(maxTicks);
-    for (double tick = firstTick; tick <= max + step * 0.5; tick += step)
-        ticks.push_back(tick);
-    if (!ticks.empty())
-        ImPlot::SetupAxisTicks(axis, ticks.data(), ticks.size(), nullptr);
-}
-
 SnrSpectrum::SnrSpectrum()
     : appState(nullptr),
       fileCount(0),
@@ -40,34 +19,6 @@ SnrSpectrum::SnrSpectrum()
       calcInProgress(false),
       progressTotal(0),
       progressCurrent(0),
-      isSelectingXRange(false),
-      selectionStartX(0.0),
-      selectionEndX(0.0),
-      shouldAutoscale(true),
-      firstLoadCompleted(false),
-      manualXMin(0.0),
-      manualXMax(0.0),
-      manualYMin(0.0),
-      manualYMax(0.0),
-      savedYMin(0.0),
-      savedYMax(0.0),
-      leftArrowPressedLastFrame(false),
-      rightArrowPressedLastFrame(false),
-      leftArrowHandleFlag(false),
-      rightArrowHandleFlag(false),
-      xUnitSelector(0),
-      prevXUnitSelector(0),
-      yScaleSelector(0),
-      prevYScaleSelector(0),
-      yAxisMode(0),
-      prevYAxisMode(0),
-      forcedYMin(0.0),
-      forcedYMax(1.0),
-      pendingNextXMin(0.0),
-      pendingNextXMax(-1.0),
-      xUnitSwitchedThisFrame(false),
-      convertedXMin(0.0),
-      convertedXMax(0.0),
       calcNumBins(0),
       calcValidFiles(0)
 {}
@@ -84,27 +35,7 @@ void SnrSpectrum::reset() {
     calcNumBins = 0;
     calcValidFiles = 0;
     calcStats.clear();
-
-    isSelectingXRange = false;
-    selectionStartX = 0.0;
-    selectionEndX = 0.0;
-    shouldAutoscale = true;
-    firstLoadCompleted = false;
-    manualXMin = 0.0;
-    manualXMax = 0.0;
-    manualYMin = 0.0;
-    manualYMax = 0.0;
-    savedYMin = 0.0;
-    savedYMax = 0.0;
-    leftArrowPressedLastFrame = false;
-    rightArrowPressedLastFrame = false;
-    leftArrowHandleFlag = false;
-    rightArrowHandleFlag = false;
-    pendingNextXMin = 0.0;
-    pendingNextXMax = -1.0;
-    xUnitSwitchedThisFrame = false;
-    convertedXMin = 0.0;
-    convertedXMax = 0.0;
+    plot.reset();
 }
 
 void SnrSpectrum::renderSnrContents(bool showTrackingCursor) {
@@ -116,6 +47,48 @@ void SnrSpectrum::renderSnrContents(bool showTrackingCursor) {
         ImGui::Spacing();
     }
 #endif
+    // Unified view/interaction phases (spectral_plot.h) — placed BEFORE the
+    // no-data early return (C1): tickPrePlot owns the X-unit switch detection
+    // + prev-latch sync, which must run even when no SNR is displayed.
+    // Otherwise a unit switch made while the panel is empty leaves the latch
+    // stale and the batch result gets double-converted on arrival.
+    bool isFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
+
+    SpectralPlotFrame f;
+    f.windowFocused = isFocused;
+    f.yLabel = "SNR";
+    f.xDataRange = [this](double& x0, double& x1) -> bool {
+        if (cachedSnrX.empty()) return false;
+        x0 = std::min(cachedSnrX.front(), cachedSnrX.back());
+        x1 = std::max(cachedSnrX.front(), cachedSnrX.back());
+        return true;
+    };
+    f.yDataRange = [this](double& y0, double& y1) -> bool {
+        if (cachedSnrY.empty()) return false;
+        auto mmY = std::minmax_element(cachedSnrY.begin(), cachedSnrY.end());
+        y0 = *mmY.first;
+        y1 = *mmY.second;
+        return true;
+    };
+    f.onXUnitChanged = [this](int fromUnit, int toUnit) {
+        auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(fromUnit);
+        auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(toUnit);
+        // Convert cached SNR X data in-place (unit-independent Y stays unchanged)
+        if (snrAvailable && !cachedSnrX.empty()) {
+            for (double& x : cachedSnrX)
+                x = SpectralToolbox::convertXValue(x, oldU, newU);
+        }
+        // Mid-batch unit switch (N3): keep buffered worker results consistent.
+        for (auto& [fid, ps] : fileResults_)
+            for (double& x : ps.spectrumX)
+                x = SpectralToolbox::convertXValue(x, oldU, newU);
+        for (double& x : calcCommonX)
+            x = SpectralToolbox::convertXValue(x, oldU, newU);
+    };
+    f.onViewChanged = [this]() { appState->needsRedraw = true; };
+
+    plot.tickPrePlot(f);
+
     if (!snrAvailable || cachedSnrX.empty() || cachedSnrY.empty()) {
         ImVec2 avail = ImGui::GetContentRegionAvail();
         ImVec2 textSize = ImGui::CalcTextSize("No SNR spectrum available");
@@ -135,222 +108,14 @@ void SnrSpectrum::renderSnrContents(bool showTrackingCursor) {
         ImGui::Text("%s", buf);
     }
 
-    bool isFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
-    if (isFocused && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-        shouldAutoscale = true;
-        pendingNextXMin = 0.0;
-        pendingNextXMax = -1.0;
-        manualXMin = 0.0;
-        manualXMax = 0.0;
-    }
-    if (!isFocused) {
-        leftArrowPressedLastFrame = false;
-        rightArrowPressedLastFrame = false;
-        leftArrowHandleFlag = false;
-        rightArrowHandleFlag = false;
-    }
-
-    if (isFocused) {
-        if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) && !leftArrowPressedLastFrame) {
-            leftArrowPressedLastFrame = true;
-            leftArrowHandleFlag = true;
-        } else if (ImGui::IsKeyReleased(ImGuiKey_LeftArrow)) {
-            leftArrowPressedLastFrame = false;
-            leftArrowHandleFlag = false;
-        }
-        if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) && !rightArrowPressedLastFrame) {
-            rightArrowPressedLastFrame = true;
-            rightArrowHandleFlag = true;
-        } else if (ImGui::IsKeyReleased(ImGuiKey_RightArrow)) {
-            rightArrowPressedLastFrame = false;
-            rightArrowHandleFlag = false;
-        }
-    }
-
-    if (!shouldAutoscale && pendingNextXMin >= pendingNextXMax) {
-        double range = manualXMax - manualXMin;
-        if (range > 0.0 && manualXMin < manualXMax) {
-            if (leftArrowHandleFlag) {
-                double panAmount = range * 0.1;
-                double newMin = manualXMin - panAmount;
-                double newMax = manualXMax - panAmount;
-                ImPlot::SetNextAxisLimits(ImAxis_X1, newMin, newMax, ImPlotCond_Always);
-            }
-            if (rightArrowHandleFlag) {
-                double panAmount = range * 0.1;
-                double newMin = manualXMin + panAmount;
-                double newMax = manualXMax + panAmount;
-                ImPlot::SetNextAxisLimits(ImAxis_X1, newMin, newMax, ImPlotCond_Always);
-            }
-        }
-    }
-
-    // Hidden dock tabs set SkipItems: arming SetNextAxisLimits here would
-    // be discarded by ImPlot's hidden-window early return, losing the
-    // restored X range. Keep it armed until the panel is actually visible.
-    if (pendingNextXMin < pendingNextXMax && !ImGui::GetCurrentWindowRead()->SkipItems) {
-        ImPlot::SetNextAxisLimits(ImAxis_X1, pendingNextXMin, pendingNextXMax, ImPlotCond_Always);
-        manualXMin = pendingNextXMin;
-        manualXMax = pendingNextXMax;
-        shouldAutoscale = false;
-        pendingNextXMin = 0.0;
-        pendingNextXMax = -1.0;
-    }
-
-    if (xUnitSelector != prevXUnitSelector) {
-        if (!shouldAutoscale && manualXMin < manualXMax) {
-            auto oldUnit = static_cast<SpectralToolbox::SpectrumXUnit>(prevXUnitSelector);
-            auto newUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
-            double newMin = SpectralToolbox::convertXValue(manualXMin, oldUnit, newUnit);
-            double newMax = SpectralToolbox::convertXValue(manualXMax, oldUnit, newUnit);
-            if (newMin > newMax) std::swap(newMin, newMax);
-            ImPlot::SetNextAxisLimits(ImAxis_X1, newMin, newMax, ImPlotCond_Always);
-            xUnitSwitchedThisFrame = true;
-            convertedXMin = newMin;
-            convertedXMax = newMax;
-        }
-        // Convert cached SNR X data in-place (unit-independent Y stays unchanged)
-        if (snrAvailable && !cachedSnrX.empty()) {
-            auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(prevXUnitSelector);
-            auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
-            for (double& x : cachedSnrX)
-                x = SpectralToolbox::convertXValue(x, oldU, newU);
-        }
-        pendingNextXMin = 0.0;
-        pendingNextXMax = -1.0;
-        prevXUnitSelector = xUnitSelector;
-    }
-
-    if (yScaleSelector != prevYScaleSelector) {
-        if (yAxisMode != 2)
-            ImPlot::SetNextAxisToFit(ImAxis_Y1);
-        prevYScaleSelector = yScaleSelector;
-    }
-
-    if (yAxisMode != prevYAxisMode) {
-        if (yAxisMode == 0 || yAxisMode == 1)
-            ImPlot::SetNextAxisToFit(ImAxis_Y1);
-        else if (yAxisMode == 2 && forcedYMin < forcedYMax)
-            ImPlot::SetNextAxisLimits(ImAxis_Y1, forcedYMin, forcedYMax, ImPlotCond_Always);
-        prevYAxisMode = yAxisMode;
-    }
-
-    ImPlotFlags plot_flags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend;
     {
         ImVec4 snrGridCol = ImPlot::GetStyle().Colors[ImPlotCol_AxisGrid];
         snrGridCol.w *= appState->gridAlpha;
         ImPlot::PushStyleColor(ImPlotCol_AxisGrid, snrGridCol);
     }
-    if (ImPlot::BeginPlot(workspacePlotId("SnrViewPlot").c_str(), ImVec2(-1, -1), plot_flags)) {
+    if (ImPlot::BeginPlot(workspacePlotId("SnrViewPlot").c_str(), ImVec2(-1, -1), f.plotFlags)) {
 
-        ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoTickMarks;
-        ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
-
-        if (yAxisMode == 0)
-            y_flags |= ImPlotAxisFlags_AutoFit;
-        else if (yAxisMode == 1)
-            y_flags |= ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_RangeFit;
-
-        const char* xLabel = (xUnitSelector == 0) ? "Wavenumber (cm-1)"
-                           : (xUnitSelector == 1) ? "Wavelength (\xC2\xB5" "m)"
-                           : "Frequency (THz)";
-        const char* yLabel = "SNR";
-        ImPlot::SetupAxes(xLabel, yLabel, x_flags, y_flags);
-
-        if (yScaleSelector == 1)
-            ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Log10);
-
-        const bool effectiveForceY = (yAxisMode == 2) && (forcedYMin < forcedYMax);
-        if (effectiveForceY) {
-            double yMin = forcedYMin;
-            double yMax = forcedYMax;
-            if (yScaleSelector == 1 && yMin <= 0.0)
-                yMin = (yMax > 0.0 ? yMax * 1e-6 : 1e-6);
-            ImPlot::SetupAxisLimits(ImAxis_Y1, yMin, yMax, ImPlotCond_Always);
-        }
-
-        if (shouldAutoscale && !cachedSnrX.empty()) {
-            double xMin = std::min(cachedSnrX.front(), cachedSnrX.back());
-            double xMax = std::max(cachedSnrX.front(), cachedSnrX.back());
-
-            auto mmY = std::minmax_element(cachedSnrY.begin(), cachedSnrY.end());
-            double yMin = *mmY.first;
-            double yMax = *mmY.second;
-
-            if (xMin < xMax)
-                ImPlot::SetupAxisLimits(ImAxis_X1, xMin, xMax, ImPlotCond_Always);
-            if (!effectiveForceY) {
-                if (yScaleSelector == 1 && yMin <= 0.0)
-                    yMin = (yMax > 0.0 ? yMax * 1e-6 : 1e-6);
-                ImPlot::SetupAxisLimits(ImAxis_Y1, yMin, yMax, ImPlotCond_Always);
-            }
-            shouldAutoscale = false;
-        }
-
-        if (!firstLoadCompleted && !cachedSnrX.empty()) {
-            if (manualXMin == 0.0 && manualXMax == 0.0)
-                shouldAutoscale = true;
-            firstLoadCompleted = true;
-        }
-
-        if (xUnitSwitchedThisFrame) {
-            xUnitSwitchedThisFrame = false;
-            double dataXMin = std::min(cachedSnrX.front(), cachedSnrX.back());
-            double dataXMax = std::max(cachedSnrX.front(), cachedSnrX.back());
-            if (dataXMin < dataXMax) {
-                double clampedMin = std::max(convertedXMin, dataXMin);
-                double clampedMax = std::min(convertedXMax, dataXMax);
-                if (clampedMin < clampedMax) {
-                    ImPlot::SetupAxisLimits(ImAxis_X1, clampedMin, clampedMax, ImPlotCond_Always);
-                    manualXMin = clampedMin;
-                    manualXMax = clampedMax;
-                } else {
-                    ImPlot::SetupAxisLimits(ImAxis_X1, dataXMin, dataXMax, ImPlotCond_Always);
-                    manualXMin = dataXMin;
-                    manualXMax = dataXMax;
-                }
-            }
-        }
-
-        {
-            double xMin = manualXMin;
-            double xMax = manualXMax;
-            double yMin = savedYMin;
-            double yMax = savedYMax;
-            if (yMin >= yMax) {
-                auto mmY = std::minmax_element(cachedSnrY.begin(), cachedSnrY.end());
-                yMin = *mmY.first;
-                yMax = *mmY.second;
-            }
-            if (xMin >= xMax) {
-                xMin = std::min(cachedSnrX.front(), cachedSnrX.back());
-                xMax = std::max(cachedSnrX.front(), cachedSnrX.back());
-            }
-            if (xMin < xMax) SetupAxisTicksLimited(ImAxis_X1, xMin, xMax);
-            if (yMin < yMax) SetupAxisTicksLimited(ImAxis_Y1, yMin, yMax);
-        }
-
-        {
-            bool shift = ImGui::GetIO().KeyShift;
-            bool overPlot = ImPlot::IsPlotHovered();
-            if (isFocused && overPlot && shift && !isSelectingXRange) {
-                isSelectingXRange = true;
-                selectionStartX = 0.0;
-                selectionEndX = 0.0;
-            } else if (!shift && isSelectingXRange) {
-                isSelectingXRange = false;
-                if (selectionStartX != selectionEndX) {
-                    double sX = selectionStartX;
-                    double eX = selectionEndX;
-                    if (sX > eX) std::swap(sX, eX);
-                    pendingNextXMin = sX;
-                    pendingNextXMax = eX;
-                    manualXMin = sX;
-                    manualXMax = eX;
-                    shouldAutoscale = false;
-                }
-            }
-        }
+        plot.setupAxes(f);
 
         {
             const double* plotData = cachedSnrY.data();
@@ -362,33 +127,8 @@ void SnrSpectrum::renderSnrContents(bool showTrackingCursor) {
                              cachedSnrY.size(), spec);
         }
 
-        if (isSelectingXRange) {
-            ImPlotPoint mousePos = ImPlot::GetPlotMousePos();
-            double x_min_plot = ImPlot::GetPlotLimits().X.Min;
-            double x_max_plot = ImPlot::GetPlotLimits().X.Max;
-            double y_min_plot = ImPlot::GetPlotLimits().Y.Min;
-            double y_max_plot = ImPlot::GetPlotLimits().Y.Max;
-            if (selectionStartX == 0.0 && selectionEndX == 0.0)
-                selectionStartX = mousePos.x;
-            double constrainedMouseX = std::clamp(mousePos.x, x_min_plot, x_max_plot);
-            selectionEndX = constrainedMouseX;
-            double selection_left = std::min(selectionStartX, selectionEndX);
-            double selection_right = std::max(selectionStartX, selectionEndX);
-            selection_left = std::clamp(selection_left, x_min_plot, x_max_plot);
-            selection_right = std::clamp(selection_right, x_min_plot, x_max_plot);
-            double shade_x[2] = {selection_left, selection_right};
-            double shade_y1[2] = {y_min_plot, y_min_plot};
-            double shade_y2[2] = {y_max_plot, y_max_plot};
-            ImPlotSpec fillSpec;
-            fillSpec.FillColor = ImVec4(0.5f, 0.0f, 0.5f, 0.3f);
-            ImPlot::PlotShaded("##SnrSelectionFill", shade_x, shade_y1, shade_y2, 2, fillSpec);
-            double start_x[2] = {selectionStartX, selectionStartX};
-            double start_y[2] = {y_min_plot, y_max_plot};
-            double end_x[2] = {selectionEndX, selectionEndX};
-            double end_y[2] = {y_min_plot, y_max_plot};
-            ImPlot::PlotLine("##SnrSelectionStart", start_x, start_y, 2);
-            ImPlot::PlotLine("##SnrSelectionEnd", end_x, end_y, 2);
-        }
+        plot.tickInPlot(f);
+        plot.drawSelectionOverlay("##Snr");
 
         // Tracking cursor (shared overlay)
         if (showTrackingCursor && ImPlot::IsPlotHovered()) {
@@ -398,17 +138,8 @@ void SnrSpectrum::renderSnrContents(bool showTrackingCursor) {
             const double xHi = std::max(lim.X.Min, lim.X.Max);
             const double mx = std::min(std::max(mousePos.x, xLo), xHi);
 
-            using ST = SpectralToolbox::SpectrumXUnit;
-            auto unit = static_cast<ST>(xUnitSelector);
-            double cm1 = (unit == ST::CmInv) ? mx :
-                         SpectralToolbox::convertXValue(mx, unit, ST::CmInv);
-            double um  = (unit == ST::Um) ? mx :
-                         SpectralToolbox::convertXValue(mx, unit, ST::Um);
-            double thz = (unit == ST::THz) ? mx :
-                           SpectralToolbox::convertXValue(mx, unit, ST::THz);
             char header[128];
-            std::snprintf(header, sizeof(header), "X: %.2f cm-1 / %.4f um / %.4f THz",
-                          cm1, um, thz);
+            SpectralPlotView::formatCursorHeader(mx, plot.xUnitSelector, header, sizeof(header));
 
             std::vector<CursorCurve> cursorCurves;
             if (!cachedSnrX.empty() && !cachedSnrY.empty()) {
@@ -421,15 +152,7 @@ void SnrSpectrum::renderSnrContents(bool showTrackingCursor) {
             renderCursorOverlay(header, cursorCurves);
         }
 
-        {
-            const ImPlotRect lim = ImPlot::GetPlotLimits();
-            if (lim.X.Min < lim.X.Max && pendingNextXMin >= pendingNextXMax) {
-                manualXMin = lim.X.Min;
-                manualXMax = lim.X.Max;
-            }
-            savedYMin = lim.Y.Min;
-            savedYMax = lim.Y.Max;
-        }
+        plot.captureLimits();
 
         ImPlot::EndPlot();
     }
@@ -437,6 +160,11 @@ void SnrSpectrum::renderSnrContents(bool showTrackingCursor) {
 }
 
 void SnrSpectrum::startCalculation() {
+    // Refit the view on recompute (L7).
+    plot.firstLoadCompleted = false;
+    plot.shouldAutoscale = true;
+    plot.manualXMin = 0.0;
+    plot.manualXMax = 0.0;
     calcCommonX.clear();
     calcNumBins = 0;
     calcValidFiles = 0;
@@ -451,6 +179,7 @@ void SnrSpectrum::startCalculation() {
     batchActive_ = false;
     pendingFutures_.clear();
     pendingFileIds_.clear();
+    pendingUnits_.clear();
     fileResults_.clear();
     completedCount_ = 0;
     totalSubmitted_ = 0;
@@ -466,13 +195,14 @@ bool SnrSpectrum::tickCalculation() {
         totalSubmitted_ = 0;
         pendingFutures_.clear();
         pendingFileIds_.clear();
+        pendingUnits_.clear();
         fileResults_.clear();
         calcValidFiles = 0;
         calcStats.clear();
 
         double refLaser = appState->active->spectrum.refLaserTextbox;
         int K = appState->active->spectrum.Kpadding;
-        auto xUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
+        auto xUnit = static_cast<SpectralToolbox::SpectrumXUnit>(plot.xUnitSelector);
         int apodSelector = appState->active->spectrum.apodizationSelector;
         auto apodParams = appState->active->spectrum.apodizationParams;
 
@@ -522,6 +252,7 @@ bool SnrSpectrum::tickCalculation() {
             });
             pendingFutures_.push_back(std::move(fut));
             pendingFileIds_.push_back(filePath);
+            pendingUnits_.push_back(plot.xUnitSelector);   // N3: submit-time unit stamp
             totalSubmitted_++;
         }
         progressTotal = totalSubmitted_;
@@ -540,6 +271,14 @@ bool SnrSpectrum::tickCalculation() {
         if (fut.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
             try {
                 auto ps = fut.get();
+                // N3: results were computed in the submit-time unit — convert
+                // to the CURRENT unit before buffering.
+                if (fi < pendingUnits_.size() && pendingUnits_[fi] != plot.xUnitSelector) {
+                    auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(pendingUnits_[fi]);
+                    auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(plot.xUnitSelector);
+                    for (double& x : ps.spectrumX)
+                        x = SpectralToolbox::convertXValue(x, oldU, newU);
+                }
                 if (!ps.spectrumX.empty() && !ps.spectrumY.empty())
                     fileResults_[pendingFileIds_[fi]] = std::move(ps);
             } catch (const std::exception& e) {
@@ -577,6 +316,7 @@ bool SnrSpectrum::tickCalculation() {
         }
         fileResults_.clear();
         pendingFileIds_.clear();
+        pendingUnits_.clear();
         if (calcValidFiles > 1) {
             cachedSnrY.resize(calcNumBins, 0.0);
             for (size_t j = 0; j < calcNumBins; j++) {
@@ -663,123 +403,57 @@ void renderSnrPanel() {
             }
             ImGui::PopStyleColor(3);
 
-            ImGui::Text("Y scale");
-            ImGui::SameLine();
-            const bool snrLinSel = (appState.active->snrSpectrum.yScaleSelector == 0);
-            const bool snrLogSel = (appState.active->snrSpectrum.yScaleSelector == 1);
+            auto& snrPlot = appState.active->snrSpectrum.plot;
+            if (snrPlot.renderYScaleButtons("##Snr", /*withDb=*/false))
+                appState.needsRedraw = true;
 
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[snrLinSel ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  snrLinSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("lin##SnrYScaleLin")) { appState.active->snrSpectrum.yScaleSelector = 0; appState.needsRedraw = true; }
-            ImGui::PopStyleColor(3);
-            ImGui::SameLine();
+            if (snrPlot.renderXUnitButtons("##SnrXUnit"))
+                appState.needsRedraw = true;
 
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[snrLogSel ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  snrLogSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("log##SnrYScaleLog")) { appState.active->snrSpectrum.yScaleSelector = 1; appState.needsRedraw = true; }
-            ImGui::PopStyleColor(3);
-
-            ImGui::Text("X unit");
-            ImGui::SameLine();
-            const bool snrCmSel  = (appState.active->snrSpectrum.xUnitSelector == 0);
-            const bool snrUmSel  = (appState.active->snrSpectrum.xUnitSelector == 1);
-            const bool snrThzSel = (appState.active->snrSpectrum.xUnitSelector == 2);
-
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[snrCmSel ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  snrCmSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("cm-1##SnrXUnitCm")) { appState.active->snrSpectrum.xUnitSelector = 0; appState.needsRedraw = true; }
-            ImGui::PopStyleColor(3);
-            ImGui::SameLine();
-
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[snrUmSel ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  snrUmSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("\xC2\xB5""m##SnrXUnitUm")) { appState.active->snrSpectrum.xUnitSelector = 1; appState.needsRedraw = true; }
-            ImGui::PopStyleColor(3);
-            ImGui::SameLine();
-
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[snrThzSel ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  snrThzSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("THz##SnrXUnitTHz")) { appState.active->snrSpectrum.xUnitSelector = 2; appState.needsRedraw = true; }
-            ImGui::PopStyleColor(3);
-
-                // Match X to Spectrum View
-                if (ImGui::Button("Match X to Spectrum View##SnrMatchX")) {
-                    int newXUnit = appState.active->spectrum.xUnitSelector;
-                    int oldUnit = appState.active->snrSpectrum.prevXUnitSelector;
-                    double specMin = appState.active->spectrum.manualXMin;
-                    double specMax = appState.active->spectrum.manualXMax;
-
-                    if (specMin < specMax) {
-                        appState.active->snrSpectrum.manualXMin = specMin;
-                        appState.active->snrSpectrum.manualXMax = specMax;
-                        appState.active->snrSpectrum.pendingNextXMin = specMin;
-                        appState.active->snrSpectrum.pendingNextXMax = specMax;
-                        appState.active->snrSpectrum.shouldAutoscale = false;
-                    } else {
-                        appState.active->snrSpectrum.shouldAutoscale = true;
-                    }
-
-                    if (appState.active->snrSpectrum.snrAvailable && !appState.active->snrSpectrum.cachedSnrX.empty()) {
-                        auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(oldUnit);
-                        auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(newXUnit);
-                        for (double& x : appState.active->snrSpectrum.cachedSnrX)
-                            x = SpectralToolbox::convertXValue(x, oldU, newU);
-                    }
-
-                    appState.active->snrSpectrum.xUnitSelector = newXUnit;
-                    appState.active->snrSpectrum.prevXUnitSelector = newXUnit;
-                    appState.needsRedraw = true;
+            // Match X to Spectrum View: adopt the Spectrum panel's unit and
+            // zoom window, converting the panel's cached data along the way.
+            if (ImGui::Button("Match X to Spectrum View##SnrMatchX")) {
+                auto& snr  = appState.active->snrSpectrum;
+                auto& spec = appState.active->spectrum;
+                int prevUnit = 0;
+                if (snr.plot.adoptXUnit(spec.plot.xUnitSelector, prevUnit)) {
+                    auto fromU = static_cast<SpectralToolbox::SpectrumXUnit>(prevUnit);
+                    auto toU   = static_cast<SpectralToolbox::SpectrumXUnit>(snr.plot.xUnitSelector);
+                    if (snr.snrAvailable)
+                        for (double& x : snr.cachedSnrX)
+                            x = SpectralToolbox::convertXValue(x, fromU, toU);
+                    for (auto& [fid, ps] : snr.fileResults_)
+                        for (double& x : ps.spectrumX)
+                            x = SpectralToolbox::convertXValue(x, fromU, toU);
+                    for (double& x : snr.calcCommonX)
+                        x = SpectralToolbox::convertXValue(x, fromU, toU);
                 }
-
-            ImGui::Text("Y Axis");
-            ImGui::SameLine();
-            const bool snrAllSel   = (appState.active->snrSpectrum.yAxisMode == 0);
-            const bool snrTightSel = (appState.active->snrSpectrum.yAxisMode == 1);
-            const bool snrForceSel = (appState.active->snrSpectrum.yAxisMode == 2);
-
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[snrAllSel ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  snrAllSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("all##SnrYAxisAll")) { appState.active->snrSpectrum.yAxisMode = 0; appState.needsRedraw = true; }
-            ImGui::PopStyleColor(3);
-            ImGui::SameLine();
-
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[snrTightSel ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  snrTightSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("tight##SnrYAxisTight")) { appState.active->snrSpectrum.yAxisMode = 1; appState.needsRedraw = true; }
-            ImGui::PopStyleColor(3);
-            ImGui::SameLine();
-
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[snrForceSel ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  snrForceSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("force##SnrYAxisForce")) { appState.active->snrSpectrum.yAxisMode = 2; appState.needsRedraw = true; }
-            ImGui::PopStyleColor(3);
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("all: auto-fit Y to all data\n"
-                                  "tight: auto-fit Y to visible data only\n"
-                                  "force: lock Y to the given min/max");
+                snr.plot.copyXRangeFrom(spec.plot);
+                // Clamp the copied window to this panel's own data range (M1).
+                if (!snr.cachedSnrX.empty()) {
+                    const double lo = std::min(snr.cachedSnrX.front(), snr.cachedSnrX.back());
+                    const double hi = std::max(snr.cachedSnrX.front(), snr.cachedSnrX.back());
+                    snr.plot.clampPendingToRange(lo, hi);
+                }
+                appState.needsRedraw = true;
             }
 
-            if (appState.active->snrSpectrum.yAxisMode == 2) {
+            if (snrPlot.renderYModeButtons("##SnrYAxis"))
+                appState.needsRedraw = true;
+
+            if (snrPlot.yAxisMode == kYModeForce) {
                 ImGui::Text("min:");
                 ImGui::SameLine();
                 ImGui::SetNextItemWidth(80.0f);
-                if (ImGui::InputDouble("##SnrForcedYMin", &appState.active->snrSpectrum.forcedYMin, 0.0, 0.0, "%.6g"))
+                if (ImGui::InputDouble("##SnrForcedYMin", &appState.active->snrSpectrum.plot.forcedYMin, 0.0, 0.0, "%.6g"))
                     appState.needsRedraw = true;
                 ImGui::SameLine();
                 ImGui::Text("max:");
                 ImGui::SameLine();
                 ImGui::SetNextItemWidth(80.0f);
-                if (ImGui::InputDouble("##SnrForcedYMax", &appState.active->snrSpectrum.forcedYMax, 0.0, 0.0, "%.6g"))
+                if (ImGui::InputDouble("##SnrForcedYMax", &appState.active->snrSpectrum.plot.forcedYMax, 0.0, 0.0, "%.6g"))
                     appState.needsRedraw = true;
-                if (appState.active->snrSpectrum.forcedYMin >= appState.active->snrSpectrum.forcedYMax) {
+                if (appState.active->snrSpectrum.plot.forcedYMin >= appState.active->snrSpectrum.plot.forcedYMax) {
                     ImGui::SameLine();
                     ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "(min<max!)");
                 }

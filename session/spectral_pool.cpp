@@ -160,7 +160,7 @@ bool poolPrepare(AppState& s, const SpectralRef& ref, PoolInputs& out) {
         out.fromPanelCache = true;
         out.cached.spectrumY = specIt->second;
         out.cached.spectrumX.reserve(freqIt->second.size());
-        const auto srcU = static_cast<ST>(r.sp->xUnitSelector);
+        const auto srcU = static_cast<ST>(r.sp->plot.xUnitSelector);
         for (double f : freqIt->second)
             out.cached.spectrumX.push_back(SpectralToolbox::convertXValue(f, srcU, ST::CmInv));
         return true;

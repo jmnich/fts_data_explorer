@@ -18,59 +18,12 @@
 #include <limits>
 #include <chrono>
 
-static void SetupAxisTicksLimited(ImAxis axis, double min, double max, int maxTicks = 12) {
-    double range = max - min;
-    if (range <= 0.0) return;
-    double roughStep = range / (maxTicks - 1);
-    double exponent = std::floor(std::log10(roughStep));
-    double fraction = roughStep / std::pow(10.0, exponent);
-    double niceFraction;
-    if (fraction <= 1.0) niceFraction = 1.0;
-    else if (fraction <= 2.0) niceFraction = 2.0;
-    else if (fraction <= 5.0) niceFraction = 5.0;
-    else niceFraction = 10.0;
-    double step = niceFraction * std::pow(10.0, exponent);
-    double firstTick = std::ceil(min / step) * step;
-    std::vector<double> ticks;
-    ticks.reserve(maxTicks);
-    for (double tick = firstTick; tick <= max + step * 0.5; tick += step)
-        ticks.push_back(tick);
-    if (!ticks.empty())
-        ImPlot::SetupAxisTicks(axis, ticks.data(), ticks.size(), nullptr);
-}
-
 T100Spectrum::T100Spectrum()
     : appState(nullptr),
       refXUnit(0),
       referenceAvailable(false),
       referenceSource(0),
       transmittanceAvailable(false),
-      isSelectingXRange(false),
-      selectionStartX(0.0),
-      selectionEndX(0.0),
-      shouldAutoscale(true),
-      firstLoadCompleted(false),
-      manualXMin(0.0),
-      manualXMax(0.0),
-      manualYMin(0.0),
-      manualYMax(0.0),
-      savedYMin(0.0),
-      savedYMax(0.0),
-      leftArrowPressedLastFrame(false),
-      rightArrowPressedLastFrame(false),
-      leftArrowHandleFlag(false),
-      rightArrowHandleFlag(false),
-      xUnitSelector(0),
-      prevXUnitSelector(0),
-      yAxisMode(0),
-      prevYAxisMode(0),
-      forcedYMin(0.0),
-      forcedYMax(1.0),
-      pendingNextXMin(0.0),
-      pendingNextXMax(-1.0),
-      xUnitSwitchedThisFrame(false),
-      convertedXMin(0.0),
-      convertedXMax(0.0),
       needsRecompute(false),
       stddevAvailable(false),
       calcStdInProgress(false),
@@ -104,26 +57,6 @@ void T100Spectrum::reset() {
     transmittanceAvailable = false;
     lastKnownSelection.clear();
 
-    isSelectingXRange = false;
-    selectionStartX = 0.0;
-    selectionEndX = 0.0;
-    shouldAutoscale = true;
-    firstLoadCompleted = false;
-    manualXMin = 0.0;
-    manualXMax = 0.0;
-    manualYMin = 0.0;
-    manualYMax = 0.0;
-    savedYMin = 0.0;
-    savedYMax = 0.0;
-    leftArrowPressedLastFrame = false;
-    rightArrowPressedLastFrame = false;
-    leftArrowHandleFlag = false;
-    rightArrowHandleFlag = false;
-    pendingNextXMin = 0.0;
-    pendingNextXMax = -1.0;
-    xUnitSwitchedThisFrame = false;
-    convertedXMin = 0.0;
-    convertedXMax = 0.0;
     needsRecompute = false;
     csvPathBuffer[0] = '\0';
     energyRatioNumA[0] = '\0';
@@ -147,6 +80,7 @@ void T100Spectrum::reset() {
     ratioAvgA = ratioAvgB = ratioAvgC = 0.0;
     ratioSpreadA = ratioSpreadB = ratioSpreadC = 0.0;
     ratioStdDevA = ratioStdDevB = ratioStdDevC = 0.0;
+    stdWasAvailable_ = false;
 }
 
 void T100Spectrum::setReferenceFromCurrentSpectrum() {
@@ -162,7 +96,7 @@ void T100Spectrum::setReferenceFromCurrentSpectrum() {
 
     refX = freqIt->second;
     refY = specIt->second;
-    refXUnit = appState->active->spectrum.xUnitSelector;
+    refXUnit = appState->active->spectrum.plot.xUnitSelector;
     referenceAvailable = true;
     referenceSource = 0;
 
@@ -174,13 +108,13 @@ void T100Spectrum::setReferenceFromCurrentSpectrum() {
     }
 
     fprintf(stderr, "[t100] setReferenceFromCurrentSpectrum: refX.size=%zu refY.size=%zu refXUnit=%d spectrumXUnit=%d\n",
-            refX.size(), refY.size(), refXUnit, appState->active->spectrum.xUnitSelector);
+            refX.size(), refY.size(), refXUnit, appState->active->spectrum.plot.xUnitSelector);
 
     cachedTransX.clear();
     cachedTransY.clear();
     transmittanceAvailable = false;
-    shouldAutoscale = true;
-    firstLoadCompleted = false;
+    plot.shouldAutoscale = true;
+    plot.firstLoadCompleted = false;
     needsRecompute = true;
     clearStdDev();
 #if FTS_BUILD_HDF5
@@ -224,7 +158,7 @@ void T100Spectrum::setReferenceFromCSV(const std::string& path) {
 
     if (rawX.empty() || rawY.empty()) return;
 
-    int spectrumUnit = appState->active->spectrum.xUnitSelector;
+    int spectrumUnit = appState->active->spectrum.plot.xUnitSelector;
     if (csvUnit != spectrumUnit) {
         auto csvU = static_cast<SpectralToolbox::SpectrumXUnit>(csvUnit);
         auto specU = static_cast<SpectralToolbox::SpectrumXUnit>(spectrumUnit);
@@ -246,8 +180,8 @@ void T100Spectrum::setReferenceFromCSV(const std::string& path) {
     cachedTransX.clear();
     cachedTransY.clear();
     transmittanceAvailable = false;
-    shouldAutoscale = true;
-    firstLoadCompleted = false;
+    plot.shouldAutoscale = true;
+    plot.firstLoadCompleted = false;
     needsRecompute = true;
     clearStdDev();
 #if FTS_BUILD_HDF5
@@ -262,16 +196,16 @@ void T100Spectrum::setReferenceFromAverage() {
     std::vector<double> x = avg.cachedAverageX;
     std::vector<double> y = avg.cachedAverageY;
 
-    int spectrumUnit = appState->active->spectrum.xUnitSelector;
-    if (avg.xUnitSelector != spectrumUnit) {
-        auto avgU = static_cast<SpectralToolbox::SpectrumXUnit>(avg.xUnitSelector);
+    int spectrumUnit = appState->active->spectrum.plot.xUnitSelector;
+    if (avg.plot.xUnitSelector != spectrumUnit) {
+        auto avgU = static_cast<SpectralToolbox::SpectrumXUnit>(avg.plot.xUnitSelector);
         auto specU = static_cast<SpectralToolbox::SpectrumXUnit>(spectrumUnit);
         for (auto& v : x)
             v = SpectralToolbox::convertXValue(v, avgU, specU);
     }
 
     fprintf(stderr, "[t100] setReferenceFromAverage: x.size=%zu avgXUnit=%d spectrumUnit=%d\n",
-            x.size(), avg.xUnitSelector, spectrumUnit);
+            x.size(), avg.plot.xUnitSelector, spectrumUnit);
 
     refX = std::move(x);
     refY = std::move(y);
@@ -288,8 +222,8 @@ void T100Spectrum::setReferenceFromAverage() {
     cachedTransX.clear();
     cachedTransY.clear();
     transmittanceAvailable = false;
-    shouldAutoscale = true;
-    firstLoadCompleted = false;
+    plot.shouldAutoscale = true;
+    plot.firstLoadCompleted = false;
     needsRecompute = true;
     clearStdDev();
 #if FTS_BUILD_HDF5
@@ -326,7 +260,7 @@ bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
             SpectralToolbox::ProcessedSpectrum ps;
             if (appState->active->datasetInfo.hasPrecomputedSpectra) {
                 ps.spectrumX = raw.referenceDetector;
-                auto tgt = static_cast<SpectralToolbox::SpectrumXUnit>(appState->active->spectrum.xUnitSelector);
+                auto tgt = static_cast<SpectralToolbox::SpectrumXUnit>(appState->active->spectrum.plot.xUnitSelector);
                 for (double& f : ps.spectrumX)
                     f = SpectralToolbox::convertXValue(f, SpectralToolbox::SpectrumXUnit::CmInv, tgt);
                 ps.spectrumY = std::move(raw.primaryDetector);
@@ -335,7 +269,7 @@ bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
                 ps = SpectralToolbox::processSpectrumFromCorrectedAxis(
                     raw.primaryDetector, raw.opdAxis,
                     appState->active->spectrum.Kpadding,
-                    static_cast<SpectralToolbox::SpectrumXUnit>(appState->active->spectrum.xUnitSelector),
+                    static_cast<SpectralToolbox::SpectrumXUnit>(appState->active->spectrum.plot.xUnitSelector),
                     static_cast<ApodizationWindow>(appState->active->spectrum.apodizationSelector),
                     appState->active->spectrum.apodizationParams);
             } else {
@@ -343,7 +277,7 @@ bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
                     raw.primaryDetector, raw.referenceDetector,
                     appState->active->spectrum.refLaserTextbox,
                     appState->active->spectrum.Kpadding,
-                    static_cast<SpectralToolbox::SpectrumXUnit>(appState->active->spectrum.xUnitSelector),
+                    static_cast<SpectralToolbox::SpectrumXUnit>(appState->active->spectrum.plot.xUnitSelector),
                     static_cast<ApodizationWindow>(appState->active->spectrum.apodizationSelector),
                     appState->active->spectrum.apodizationParams,
                     static_cast<SpectralToolbox::XCorrectionMethod>(appState->active->xCorrectionMethod),
@@ -374,8 +308,8 @@ bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
     const auto& curSpec = useLocal ? localSpec : specIt->second;
 
     using ST = SpectralToolbox::SpectrumXUnit;
-    auto displayUnit = static_cast<ST>(xUnitSelector);
-    auto specU = static_cast<ST>(appState->active->spectrum.xUnitSelector);
+    auto displayUnit = static_cast<ST>(plot.xUnitSelector);
+    auto specU = static_cast<ST>(appState->active->spectrum.plot.xUnitSelector);
     auto refU = static_cast<ST>(refXUnit);
 
     std::vector<double> convertedRefX(refX.size());
@@ -469,7 +403,7 @@ bool T100Spectrum::computeTransmittanceFromVectors(
         return false;
 
     using ST = SpectralToolbox::SpectrumXUnit;
-    auto displayUnit = static_cast<ST>(xUnitSelector);
+    auto displayUnit = static_cast<ST>(plot.xUnitSelector);
     auto specU = static_cast<ST>(specXUnit);
     auto refU = static_cast<ST>(refXUnit);
 
@@ -560,6 +494,7 @@ void T100Spectrum::startStdCalculation() {
     batchActive_ = false;
     pendingFutures_.clear();
     pendingFileIds_.clear();
+    pendingUnits_.clear();
     stdFileResults_.clear();
     stdRatioResults_.clear();
     totalSubmitted_ = 0;
@@ -574,6 +509,7 @@ bool T100Spectrum::tickStdCalculation() {
         totalSubmitted_ = 0;
         pendingFutures_.clear();
         pendingFileIds_.clear();
+        pendingUnits_.clear();
         stdFileResults_.clear();
         stdRatioResults_.clear();
         calcStdValidFiles = 0;
@@ -584,7 +520,7 @@ bool T100Spectrum::tickStdCalculation() {
 
         double refLaser = appState->active->spectrum.refLaserTextbox;
         int K = appState->active->spectrum.Kpadding;
-        auto xUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
+        auto xUnit = static_cast<SpectralToolbox::SpectrumXUnit>(plot.xUnitSelector);
         int apodSelector = appState->active->spectrum.apodizationSelector;
         auto apodParams = appState->active->spectrum.apodizationParams;
 
@@ -639,6 +575,7 @@ bool T100Spectrum::tickStdCalculation() {
                 });
             pendingFutures_.push_back(std::move(fut));
             pendingFileIds_.push_back(filePath);
+            pendingUnits_.push_back(plot.xUnitSelector);   // N3: submit-time unit stamp
             totalSubmitted_++;
         }
         stdProgressTotal = totalSubmitted_;
@@ -657,6 +594,14 @@ bool T100Spectrum::tickStdCalculation() {
         if (fut.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
             try {
                 auto ps = fut.get();
+                // N3: results were computed in the submit-time unit — convert
+                // to the CURRENT unit before buffering.
+                if (fi < pendingUnits_.size() && pendingUnits_[fi] != plot.xUnitSelector) {
+                    auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(pendingUnits_[fi]);
+                    auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(plot.xUnitSelector);
+                    for (double& x : ps.spectrumX)
+                        x = SpectralToolbox::convertXValue(x, oldU, newU);
+                }
                 if (!ps.spectrumX.empty() && !ps.spectrumY.empty())
                     stdFileResults_[pendingFileIds_[fi]] = std::move(ps);
             } catch (const std::exception& e) {
@@ -685,13 +630,13 @@ bool T100Spectrum::tickStdCalculation() {
                     energyRatioNumA, energyRatioDenA,
                     energyRatioNumB, energyRatioDenB,
                     energyRatioNumC, energyRatioDenC,
-                    xUnitSelector, ps.spectrumX, ps.spectrumY);
+                    plot.xUnitSelector, ps.spectrumX, ps.spectrumY);
                 stdRatioResults_[fid] = er;
             }
 
             std::vector<double> transX, transY;
             if (!computeTransmittanceFromVectors(ps.spectrumX, ps.spectrumY,
-                    xUnitSelector, transX, transY))
+                    plot.xUnitSelector, transX, transY))
                 continue;
 
             if (firstValid) {
@@ -717,6 +662,7 @@ bool T100Spectrum::tickStdCalculation() {
         }
         stdFileResults_.clear();
         pendingFileIds_.clear();
+        pendingUnits_.clear();
 
         if (calcStdValidFiles >= 2) {
             cachedStdX = calcStdCommonX;
@@ -767,6 +713,28 @@ bool T100Spectrum::tickStdCalculation() {
     }
 
     return false;
+}
+
+void T100Spectrum::convertCachedXUnits(int fromUnit, int toUnit) {
+    auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(fromUnit);
+    auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(toUnit);
+    // Main transmittance curves (T% is unit-independent).
+    if (transmittanceAvailable && !cachedTransX.empty()) {
+        for (auto& [fid, vec] : cachedTransX)
+            for (double& x : vec)
+                x = SpectralToolbox::convertXValue(x, oldU, newU);
+    }
+    // Std-dev curve (R10).
+    if (stddevAvailable && !cachedStdX.empty()) {
+        for (double& x : cachedStdX)
+            x = SpectralToolbox::convertXValue(x, oldU, newU);
+    }
+    // Mid-batch unit switch (N3): keep buffered std worker results consistent.
+    for (auto& [fid, ps] : stdFileResults_)
+        for (double& x : ps.spectrumX)
+            x = SpectralToolbox::convertXValue(x, oldU, newU);
+    for (double& x : calcStdCommonX)
+        x = SpectralToolbox::convertXValue(x, oldU, newU);
 }
 
 static EnergyRatios computeEnergyRatios(const std::string& fileId,
@@ -898,106 +866,53 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
     }
 
     bool isFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
-    if (isFocused && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-        shouldAutoscale = true;
-        pendingNextXMin = 0.0;
-        pendingNextXMax = -1.0;
-        manualXMin = 0.0;
-        manualXMax = 0.0;
+
+    // Lazy-compute: recompute all if stale, then fill missing per-file caches.
+    // H1.1: runs BEFORE the frame build so every data-gated early return
+    // precedes tickPrePlot — an armed SetNextAxisLimits/SetNextAxisToFit that
+    // survives an early return leaks into the next frame's first visible plot
+    // (BeginSubplots returns false on SkipItems WITHOUT resetting ImPlot's
+    // NextPlotData). Runs before the plot (IMGUI_GUIDE §19) so setupAxes'
+    // suppliers see the freshly computed curves.
+    if (needsRecompute) {
+        cachedTransX.clear();
+        cachedTransY.clear();
+        transmittanceAvailable = false;
+        needsRecompute = false;
     }
-    if (!isFocused) {
-        leftArrowPressedLastFrame = false;
-        rightArrowPressedLastFrame = false;
-        leftArrowHandleFlag = false;
-        rightArrowHandleFlag = false;
+    for (const auto& fileId : lastKnownSelection) {
+        if (cachedTransX.find(fileId) == cachedTransX.end())
+            computeTransmittanceForFile(fileId);
     }
 
-    if (isFocused) {
-        if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) && !leftArrowPressedLastFrame) {
-            leftArrowPressedLastFrame = true;
-            leftArrowHandleFlag = true;
-        } else if (ImGui::IsKeyReleased(ImGuiKey_LeftArrow)) {
-            leftArrowPressedLastFrame = false;
-            leftArrowHandleFlag = false;
-        }
-        if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) && !rightArrowPressedLastFrame) {
-            rightArrowPressedLastFrame = true;
-            rightArrowHandleFlag = true;
-        } else if (ImGui::IsKeyReleased(ImGuiKey_RightArrow)) {
-            rightArrowPressedLastFrame = false;
-            rightArrowHandleFlag = false;
-        }
-    }
+    if (!transmittanceAvailable || cachedTransY.empty())
+        return;
 
-    if (!shouldAutoscale && pendingNextXMin >= pendingNextXMax) {
-        double range = manualXMax - manualXMin;
-        if (range > 0.0 && manualXMin < manualXMax) {
-            if (leftArrowHandleFlag) {
-                double panAmount = range * 0.1;
-                double newMin = manualXMin - panAmount;
-                double newMax = manualXMax - panAmount;
-                ImPlot::SetNextAxisLimits(ImAxis_X1, newMin, newMax, ImPlotCond_Always);
+    // When the std-dev plot first appears, BeginSubplots resets its shared
+    // ColLinkData to (0,1) whenever the row count changes (implot.cpp:
+    // "check for change in rows and cols") — the linked X window would be
+    // yanked to 0..1 on that frame and captureLimits would mirror it.
+    // Re-arm the TOP plot's current X window so its display settings are
+    // retained (bugfix: "X range shifts when std dev is displayed").
+    if (stddevAvailable != stdWasAvailable_) {
+        stdWasAvailable_ = stddevAvailable;
+        if (stddevAvailable) {
+            double x0 = plot.manualXMin, x1 = plot.manualXMax;
+            if (!(x0 < x1)) {
+                for (const auto& kv : cachedTransX) {
+                    if (kv.second.empty()) continue;
+                    const double lo = std::min(kv.second.front(), kv.second.back());
+                    const double hi = std::max(kv.second.front(), kv.second.back());
+                    if (!(x0 < x1)) { x0 = lo; x1 = hi; }
+                    else { x0 = std::min(x0, lo); x1 = std::max(x1, hi); }
+                }
             }
-            if (rightArrowHandleFlag) {
-                double panAmount = range * 0.1;
-                double newMin = manualXMin + panAmount;
-                double newMax = manualXMax + panAmount;
-                ImPlot::SetNextAxisLimits(ImAxis_X1, newMin, newMax, ImPlotCond_Always);
-            }
-        }
-    }
-
-        // Hidden dock tabs set SkipItems: arming SetNextAxisLimits here would
-        // be discarded by ImPlot's hidden-window early return, losing the
-        // restored X range. Keep it armed until the panel is actually visible.
-        if (pendingNextXMin < pendingNextXMax && !ImGui::GetCurrentWindowRead()->SkipItems) {
-            ImPlot::SetNextAxisLimits(ImAxis_X1, pendingNextXMin, pendingNextXMax, ImPlotCond_Always);
-            manualXMin = pendingNextXMin;
-            manualXMax = pendingNextXMax;
-            shouldAutoscale = false;
-            pendingNextXMin = 0.0;
-            pendingNextXMax = -1.0;
-        }
-
-    if (xUnitSelector != prevXUnitSelector) {
-        if (!shouldAutoscale && manualXMin < manualXMax) {
-            auto oldUnit = static_cast<SpectralToolbox::SpectrumXUnit>(prevXUnitSelector);
-            auto newUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
-            double newMin = SpectralToolbox::convertXValue(manualXMin, oldUnit, newUnit);
-            double newMax = SpectralToolbox::convertXValue(manualXMax, oldUnit, newUnit);
-            if (newMin > newMax) std::swap(newMin, newMax);
-            ImPlot::SetNextAxisLimits(ImAxis_X1, newMin, newMax, ImPlotCond_Always);
-            xUnitSwitchedThisFrame = true;
-            convertedXMin = newMin;
-            convertedXMax = newMax;
-        }
-        // Convert cached transmittance X data in-place (unit-independent T% stays unchanged)
-        if (transmittanceAvailable && !cachedTransX.empty()) {
-            auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(prevXUnitSelector);
-            auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
-            for (auto& [fid, vec] : cachedTransX) {
-                for (double& x : vec)
-                    x = SpectralToolbox::convertXValue(x, oldU, newU);
+            if (x0 < x1) {
+                plot.pendingNextXMin = x0;
+                plot.pendingNextXMax = x1;
+                plot.shouldAutoscale = false;
             }
         }
-        // Convert cached std dev X data in-place
-        if (stddevAvailable && !cachedStdX.empty()) {
-            auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(prevXUnitSelector);
-            auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
-            for (double& x : cachedStdX)
-                x = SpectralToolbox::convertXValue(x, oldU, newU);
-        }
-        pendingNextXMin = 0.0;
-        pendingNextXMax = -1.0;
-        prevXUnitSelector = xUnitSelector;
-    }
-
-    if (yAxisMode != prevYAxisMode) {
-        if (yAxisMode == 0 || yAxisMode == 1)
-            ImPlot::SetNextAxisToFit(ImAxis_Y1);
-        else if (yAxisMode == 2 && forcedYMin < forcedYMax)
-            ImPlot::SetNextAxisLimits(ImAxis_Y1, forcedYMin, forcedYMax, ImPlotCond_Always);
-        prevYAxisMode = yAxisMode;
     }
 
     // Compute max data size across all cached files for large-data flag
@@ -1006,6 +921,46 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
         if (kv.second.size() > maxDataSize)
             maxDataSize = kv.second.size();
     bool largeData = maxDataSize > 50000;
+
+    // Unified view/interaction phases (spectral_plot.h). T100 is always
+    // linear Y (T% around 100%) — log/dB are gated off.
+    SpectralPlotFrame f;
+    f.windowFocused = isFocused;
+    f.yScaleEnabled = false;
+    f.yLabel = "T(%)";
+    if (largeData) {
+        f.plotFlags |= ImPlotFlags_NoInputs;
+        f.enabled = false;
+    }
+    f.xDataRange = [this](double& x0, double& x1) -> bool {
+        bool have = false;
+        for (const auto& kv : cachedTransX) {
+            if (kv.second.empty()) continue;
+            double lmin = std::min(kv.second.front(), kv.second.back());
+            double lmax = std::max(kv.second.front(), kv.second.back());
+            if (!have) { x0 = lmin; x1 = lmax; have = true; }
+            else { x0 = std::min(x0, lmin); x1 = std::max(x1, lmax); }
+        }
+        return have;
+    };
+    f.yDataRange = [this](double& y0, double& y1) -> bool {
+        bool have = false;
+        for (const auto& kv : cachedTransY) {
+            if (kv.second.empty()) continue;
+            auto mmY = std::minmax_element(kv.second.begin(), kv.second.end());
+            if (!have) { y0 = *mmY.first; y1 = *mmY.second; have = true; }
+            else { y0 = std::min(y0, *mmY.first); y1 = std::max(y1, *mmY.second); }
+        }
+        return have;
+    };
+    f.onXUnitChanged = [this](int fromUnit, int toUnit) {
+        // Convert cached transmittance X data in-place (T% is unit-independent):
+        // main curves, std-dev curve and buffered std results (L3 shared helper).
+        convertCachedXUnits(fromUnit, toUnit);
+    };
+    f.onViewChanged = [this]() { appState->needsRedraw = true; };
+
+    plot.tickPrePlot(f);
 
     bool hasRatioConfig = (energyRatioNumA[0] != '\0' || energyRatioDenA[0] != '\0' ||
                            energyRatioNumB[0] != '\0' || energyRatioDenB[0] != '\0' ||
@@ -1034,179 +989,40 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
     }
 
     if (plotHeight < 100.0f) plotHeight = 100.0f;
+    // H4: the std-dev cell needs its own floor. With a short window or a tall
+    // energy-ratio table, `remaining` can go negative and leave stdPlotHeight
+    // ≤ 0 while plotHeight clamps to 100 — a negative row ratio breaks the
+    // BeginSubplots layout. (The BeginSubplots total height below re-reads
+    // these clamped values.)
+    if (stddevAvailable && stdPlotHeight < 60.0f) stdPlotHeight = 60.0f;
 
-    ImGui::BeginChild("##T100PlotArea", ImVec2(0, plotHeight), false, ImGuiWindowFlags_NoScrollbar);
+    // Grid push BEFORE the subplots (affects both the main and the std-dev
+    // plot — IMGUI_GUIDE §5).
+    {
+        ImVec4 t100GridCol = ImPlot::GetStyle().Colors[ImPlotCol_AxisGrid];
+        t100GridCol.w *= appState->gridAlpha;
+        ImPlot::PushStyleColor(ImPlotCol_AxisGrid, t100GridCol);
+    }
 
-    ImPlotFlags plot_flags = ImPlotFlags_NoLegend;
-    if (largeData)
-        plot_flags |= ImPlotFlags_NoInputs;
-    if (ImPlot::BeginPlot(workspacePlotId("100% transmission line").c_str(), ImVec2(-1, -1), plot_flags)) {
+    // Main + std-dev plot in a linked subplot (N1 fix): the std-dev plot was
+    // force-locked to the main plot's X every frame — now the link owns the X
+    // range and both plots stay fully interactive (wheel/pan/drag on either
+    // moves both; programmatic pan/zoom/ESC from the main view's pre-BeginPlot
+    // SetNextAxisLimits propagates through the link).
+    const int rows = stddevAvailable ? 2 : 1;
+    float rowRatios[2] = {plotHeight, stdPlotHeight};
+    if (ImPlot::BeginSubplots(workspacePlotId("T100Stack").c_str(), rows, 1,
+            ImVec2(-1, stddevAvailable
+                            ? plotHeight + stdPlotHeight +
+                                  ImGui::GetStyle().ItemSpacing.y
+                            : plotHeight),
+            ImPlotSubplotFlags_NoTitle | ImPlotSubplotFlags_LinkRows |
+                ImPlotSubplotFlags_LinkAllX | ImPlotSubplotFlags_NoLegend,
+            stddevAvailable ? rowRatios : nullptr)) {
+        if (ImPlot::BeginPlot(workspacePlotId("100% transmission line").c_str(),
+                              ImVec2(-1, -1), f.plotFlags)) {
 
-        // Lazy-compute: recompute all if stale, then fill missing per-file caches
-        if (needsRecompute) {
-            cachedTransX.clear();
-            cachedTransY.clear();
-            transmittanceAvailable = false;
-            needsRecompute = false;
-        }
-        for (const auto& fileId : lastKnownSelection) {
-            if (cachedTransX.find(fileId) == cachedTransX.end())
-                computeTransmittanceForFile(fileId);
-        }
-
-        if (!transmittanceAvailable || cachedTransY.empty()) {
-            ImPlot::EndPlot();
-            ImGui::EndChild();
-            return;
-        }
-
-        {
-            ImVec4 t100GridCol = ImPlot::GetStyle().Colors[ImPlotCol_AxisGrid];
-            t100GridCol.w *= appState->gridAlpha;
-            ImPlot::PushStyleColor(ImPlotCol_AxisGrid, t100GridCol);
-        }
-
-        ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoTickMarks;
-        ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
-
-        if (yAxisMode == 0)
-            y_flags |= ImPlotAxisFlags_AutoFit;
-        else if (yAxisMode == 1)
-            y_flags |= ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_RangeFit;
-
-        const char* xLabel = (xUnitSelector == 0) ? "Wavenumber (cm-1)"
-                           : (xUnitSelector == 1) ? "Wavelength (\xC2\xB5" "m)"
-                           : "Frequency (THz)";
-        const char* yLabel = "T(%)";
-        ImPlot::SetupAxes(xLabel, yLabel, x_flags, y_flags);
-
-        const bool effectiveForceY = (yAxisMode == 2) && (forcedYMin < forcedYMax);
-        if (effectiveForceY) {
-            ImPlot::SetupAxisLimits(ImAxis_Y1, forcedYMin, forcedYMax, ImPlotCond_Always);
-        }
-
-        if (shouldAutoscale) {
-            double globalXMin = 0.0, globalXMax = 0.0;
-            double globalYMin = 0.0, globalYMax = 0.0;
-            bool haveRange = false;
-
-            for (const auto& kv : cachedTransX) {
-                const auto& xv = kv.second;
-                if (xv.empty()) continue;
-                auto yit = cachedTransY.find(kv.first);
-                if (yit == cachedTransY.end() || yit->second.empty()) continue;
-
-                double localXMin = std::min(xv.front(), xv.back());
-                double localXMax = std::max(xv.front(), xv.back());
-                auto mmY = std::minmax_element(yit->second.begin(), yit->second.end());
-                double localYMin = *mmY.first;
-                double localYMax = *mmY.second;
-
-                if (!haveRange) {
-                    globalXMin = localXMin; globalXMax = localXMax;
-                    globalYMin = localYMin; globalYMax = localYMax;
-                    haveRange = true;
-                } else {
-                    globalXMin = std::min(globalXMin, localXMin);
-                    globalXMax = std::max(globalXMax, localXMax);
-                    globalYMin = std::min(globalYMin, localYMin);
-                    globalYMax = std::max(globalYMax, localYMax);
-                }
-            }
-
-            if (haveRange && globalXMin < globalXMax) {
-                ImPlot::SetupAxisLimits(ImAxis_X1, globalXMin, globalXMax, ImPlotCond_Always);
-            }
-            if (!effectiveForceY && haveRange) {
-                ImPlot::SetupAxisLimits(ImAxis_Y1, globalYMin, globalYMax, ImPlotCond_Always);
-            }
-            shouldAutoscale = false;
-        }
-
-        if (!firstLoadCompleted && !cachedTransX.empty()) {
-            if (manualXMin == 0.0 && manualXMax == 0.0)
-                shouldAutoscale = true;
-            firstLoadCompleted = true;
-        }
-
-        if (xUnitSwitchedThisFrame) {
-            xUnitSwitchedThisFrame = false;
-            double dataXMin = 0.0, dataXMax = 0.0;
-            bool first = true;
-            for (const auto& kv : cachedTransX) {
-                if (kv.second.empty()) continue;
-                double lmin = std::min(kv.second.front(), kv.second.back());
-                double lmax = std::max(kv.second.front(), kv.second.back());
-                if (first) { dataXMin = lmin; dataXMax = lmax; first = false; }
-                else { dataXMin = std::min(dataXMin, lmin); dataXMax = std::max(dataXMax, lmax); }
-            }
-            if (!first && dataXMin < dataXMax) {
-                double clampedMin = std::max(convertedXMin, dataXMin);
-                double clampedMax = std::min(convertedXMax, dataXMax);
-                if (clampedMin < clampedMax) {
-                    ImPlot::SetupAxisLimits(ImAxis_X1, clampedMin, clampedMax, ImPlotCond_Always);
-                    manualXMin = clampedMin;
-                    manualXMax = clampedMax;
-                } else {
-                    ImPlot::SetupAxisLimits(ImAxis_X1, dataXMin, dataXMax, ImPlotCond_Always);
-                    manualXMin = dataXMin;
-                    manualXMax = dataXMax;
-                }
-            }
-        }
-
-        // Axis tick limiting (use global min/max across all files)
-        {
-            double xMin = manualXMin;
-            double xMax = manualXMax;
-            double yMin = savedYMin;
-            double yMax = savedYMax;
-
-            if (yMin >= yMax) {
-                bool first = true;
-                for (const auto& kv : cachedTransY) {
-                    if (kv.second.empty()) continue;
-                    auto mmY = std::minmax_element(kv.second.begin(), kv.second.end());
-                    if (first) { yMin = *mmY.first; yMax = *mmY.second; first = false; }
-                    else { yMin = std::min(yMin, *mmY.first); yMax = std::max(yMax, *mmY.second); }
-                }
-            }
-            if (xMin >= xMax) {
-                bool first = true;
-                for (const auto& kv : cachedTransX) {
-                    if (kv.second.empty()) continue;
-                    double lmin = std::min(kv.second.front(), kv.second.back());
-                    double lmax = std::max(kv.second.front(), kv.second.back());
-                    if (first) { xMin = lmin; xMax = lmax; first = false; }
-                    else { xMin = std::min(xMin, lmin); xMax = std::max(xMax, lmax); }
-                }
-            }
-            if (xMin < xMax) SetupAxisTicksLimited(ImAxis_X1, xMin, xMax);
-            if (yMin < yMax) SetupAxisTicksLimited(ImAxis_Y1, yMin, yMax);
-        }
-
-        // X-range selection
-        {
-            bool shift = ImGui::GetIO().KeyShift;
-            bool overPlot = ImPlot::IsPlotHovered();
-            if (isFocused && overPlot && shift && !isSelectingXRange) {
-                isSelectingXRange = true;
-                selectionStartX = 0.0;
-                selectionEndX = 0.0;
-            } else if (!shift && isSelectingXRange) {
-                isSelectingXRange = false;
-                if (selectionStartX != selectionEndX) {
-                    double sX = selectionStartX;
-                    double eX = selectionEndX;
-                    if (sX > eX) std::swap(sX, eX);
-                    pendingNextXMin = sX;
-                    pendingNextXMax = eX;
-                    manualXMin = sX;
-                    manualXMax = eX;
-                    shouldAutoscale = false;
-                }
-            }
-        }
+            plot.setupAxes(f);
 
         // Plot each file's transmission curve
         for (size_t i = 0; i < lastKnownSelection.size(); i++) {
@@ -1236,34 +1052,8 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
             ImPlot::PlotLine("##HundredPctLine", guideX, guideY, 2, guideSpec);
         }
 
-        // X-range selection visualization
-        if (isSelectingXRange) {
-            ImPlotPoint mousePos = ImPlot::GetPlotMousePos();
-            double x_min_plot = ImPlot::GetPlotLimits().X.Min;
-            double x_max_plot = ImPlot::GetPlotLimits().X.Max;
-            double y_min_plot = ImPlot::GetPlotLimits().Y.Min;
-            double y_max_plot = ImPlot::GetPlotLimits().Y.Max;
-            if (selectionStartX == 0.0 && selectionEndX == 0.0)
-                selectionStartX = mousePos.x;
-            double constrainedMouseX = std::clamp(mousePos.x, x_min_plot, x_max_plot);
-            selectionEndX = constrainedMouseX;
-            double selection_left = std::min(selectionStartX, selectionEndX);
-            double selection_right = std::max(selectionStartX, selectionEndX);
-            selection_left = std::clamp(selection_left, x_min_plot, x_max_plot);
-            selection_right = std::clamp(selection_right, x_min_plot, x_max_plot);
-            double shade_x[2] = {selection_left, selection_right};
-            double shade_y1[2] = {y_min_plot, y_min_plot};
-            double shade_y2[2] = {y_max_plot, y_max_plot};
-            ImPlotSpec fillSpec;
-            fillSpec.FillColor = ImVec4(0.5f, 0.0f, 0.5f, 0.3f);
-            ImPlot::PlotShaded("##T100SelectionFill", shade_x, shade_y1, shade_y2, 2, fillSpec);
-            double start_x[2] = {selectionStartX, selectionStartX};
-            double start_y[2] = {y_min_plot, y_max_plot};
-            double end_x[2] = {selectionEndX, selectionEndX};
-            double end_y[2] = {y_min_plot, y_max_plot};
-            ImPlot::PlotLine("##T100SelectionStart", start_x, start_y, 2);
-            ImPlot::PlotLine("##T100SelectionEnd", end_x, end_y, 2);
-        }
+        plot.tickInPlot(f);
+        plot.drawSelectionOverlay("##T100");
 
         // Tracking cursor (shared overlay): tracks ALL displayed T% curves.
         if (showTrackingCursor && ImPlot::IsPlotHovered() && !lastKnownSelection.empty()) {
@@ -1273,17 +1063,8 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
             const double xHi = std::max(lim.X.Min, lim.X.Max);
             const double mx = std::min(std::max(mousePos.x, xLo), xHi);
 
-            using ST = SpectralToolbox::SpectrumXUnit;
-            auto unit = static_cast<ST>(xUnitSelector);
-            double cm1 = (unit == ST::CmInv) ? mx :
-                         SpectralToolbox::convertXValue(mx, unit, ST::CmInv);
-            double um  = (unit == ST::Um) ? mx :
-                         SpectralToolbox::convertXValue(mx, unit, ST::Um);
-            double thz = (unit == ST::THz) ? mx :
-                           SpectralToolbox::convertXValue(mx, unit, ST::THz);
             char header[128];
-            std::snprintf(header, sizeof(header), "X: %.2f cm-1 / %.4f um / %.4f THz",
-                          cm1, um, thz);
+            SpectralPlotView::formatCursorHeader(mx, plot.xUnitSelector, header, sizeof(header));
 
             std::vector<CursorCurve> cursorCurves;
             for (size_t i = 0; i < lastKnownSelection.size(); ++i) {
@@ -1308,20 +1089,69 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
             ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "LARGE DATA");
         }
 
-        {
+        plot.captureLimits();
+
+        ImPlot::EndPlot();
+    }
+
+    // Std-dev plot: X comes from the subplot link (NO SetupAxisLimits — the
+    // old per-frame force-lock made this plot inert, N1), Y is always
+    // range-fit. Shift+drag remains a main-plot gesture; X interaction
+    // reaches this plot through LinkAllX. Y-mode/forced-Y apply to the MAIN
+    // plot only — this plot's Y is unconditionally AutoFit|RangeFit (H4).
+    // NoTitle (L1) + NoInputs on large data (H4: the LARGE-DATA contract is
+    // per-panel, not per-plot; the indicator text stays on the main plot).
+    const ImPlotFlags stdFlags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend |
+                                 (largeData ? ImPlotFlags_NoInputs : 0);
+    if (stddevAvailable && ImPlot::BeginPlot(
+            workspacePlotId("100% transmission line standard deviation").c_str(),
+            ImVec2(-1, -1), stdFlags)) {
+        ImPlot::SetupAxes(SpectralPlotView::defaultXLabel(plot.xUnitSelector),
+                          "Std Dev T(%)",
+                          ImPlotAxisFlags_NoTickMarks,
+                          ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks |
+                              ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_RangeFit);
+
+        ImPlotSpec stdSpec;
+        stdSpec.LineColor = ImVec4(0.1f, 0.6f, 0.7f, 1.0f);
+        stdSpec.LineWeight = 2.0f;
+        ImPlot::PlotLine("##T100StdDevLine", cachedStdX.data(), cachedStdY.data(),
+                         cachedStdY.size(), stdSpec);
+
+        // Shift+drag X-range selection (bugfix: was main-plot-only). The
+        // committed pending range is applied pre-BeginPlot on the shared X
+        // (LinkAllX), so a drag on the std plot zooms both plots. f.enabled
+        // (false on large data) keeps this inert when NoInputs is set.
+        plot.tickInPlot(f);
+        plot.drawSelectionOverlay("##T100Std");
+
+        // Tracking cursor for std dev plot (shared overlay)
+        if (showTrackingCursor && ImPlot::IsPlotHovered()) {
+            ImPlotPoint mousePos = ImPlot::GetPlotMousePos();
             const ImPlotRect lim = ImPlot::GetPlotLimits();
-            if (lim.X.Min < lim.X.Max && pendingNextXMin >= pendingNextXMax) {
-                manualXMin = lim.X.Min;
-                manualXMax = lim.X.Max;
+            const double xLo = std::min(lim.X.Min, lim.X.Max);
+            const double xHi = std::max(lim.X.Min, lim.X.Max);
+            const double mx = std::min(std::max(mousePos.x, xLo), xHi);
+
+            char header[128];
+            SpectralPlotView::formatCursorHeader(mx, plot.xUnitSelector, header, sizeof(header));
+
+            std::vector<CursorCurve> cursorCurves;
+            if (!cachedStdX.empty() && !cachedStdY.empty()) {
+                CursorCurve cc;
+                cc.x = &cachedStdX;
+                cc.y = &cachedStdY;
+                cc.color = ImVec4(0.1f, 0.6f, 0.7f, 1.0f);
+                cursorCurves.push_back(std::move(cc));
             }
-            savedYMin = lim.Y.Min;
-            savedYMax = lim.Y.Max;
+            renderCursorOverlay(header, cursorCurves);
         }
 
         ImPlot::EndPlot();
-        ImPlot::PopStyleColor();
     }
-    ImGui::EndChild(); // ##T100PlotArea
+    ImPlot::EndSubplots();
+    }
+    ImPlot::PopStyleColor();
 
     if (showTable) {
         if (ImGui::BeginTable("##T100Ratios", 4,
@@ -1379,7 +1209,7 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
                     energyRatioNumA, energyRatioDenA,
                     energyRatioNumB, energyRatioDenB,
                     energyRatioNumC, energyRatioDenC,
-                    appState->active->spectrum.xUnitSelector,
+                    appState->active->spectrum.plot.xUnitSelector,
                     appState->active->spectrum.cachedFrequencies,
                     appState->active->spectrum.cachedSpectra);
 
@@ -1437,66 +1267,7 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
 
     ImGui::Spacing();
 
-    if (stddevAvailable && !cachedStdX.empty() && !cachedStdY.empty()) {
-        const char* xLabel = (xUnitSelector == 0) ? "Wavenumber (cm-1)"
-                            : (xUnitSelector == 1) ? "Wavelength (\xC2\xB5" "m)"
-                            : "Frequency (THz)";
-        {
-            ImVec4 t100SdGridCol = ImPlot::GetStyle().Colors[ImPlotCol_AxisGrid];
-            t100SdGridCol.w *= appState->gridAlpha;
-            ImPlot::PushStyleColor(ImPlotCol_AxisGrid, t100SdGridCol);
-        }
-        if (ImPlot::BeginPlot(workspacePlotId("100% transmission line standard deviation").c_str(), ImVec2(-1, stdPlotHeight),
-                              ImPlotFlags_NoLegend)) {
-            ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoTickMarks;
-            ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks | ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_RangeFit;
-
-            ImPlot::SetupAxes(xLabel, "Std Dev T(%)", x_flags, y_flags);
-
-            if (manualXMin < manualXMax)
-                ImPlot::SetupAxisLimits(ImAxis_X1, manualXMin, manualXMax, ImPlotCond_Always);
-
-            ImPlotSpec stdSpec;
-            stdSpec.LineColor = ImVec4(0.1f, 0.6f, 0.7f, 1.0f);
-            stdSpec.LineWeight = 2.0f;
-            ImPlot::PlotLine("##T100StdDevLine", cachedStdX.data(), cachedStdY.data(),
-                             cachedStdY.size(), stdSpec);
-
-            // Tracking cursor for std dev plot (shared overlay)
-            if (showTrackingCursor && ImPlot::IsPlotHovered()) {
-                ImPlotPoint mousePos = ImPlot::GetPlotMousePos();
-                const ImPlotRect lim = ImPlot::GetPlotLimits();
-                const double xLo = std::min(lim.X.Min, lim.X.Max);
-                const double xHi = std::max(lim.X.Min, lim.X.Max);
-                const double mx = std::min(std::max(mousePos.x, xLo), xHi);
-
-                using ST = SpectralToolbox::SpectrumXUnit;
-                auto unit = static_cast<ST>(xUnitSelector);
-                double cm1 = (unit == ST::CmInv) ? mx :
-                             SpectralToolbox::convertXValue(mx, unit, ST::CmInv);
-                double um  = (unit == ST::Um) ? mx :
-                             SpectralToolbox::convertXValue(mx, unit, ST::Um);
-                double thz = (unit == ST::THz) ? mx :
-                               SpectralToolbox::convertXValue(mx, unit, ST::THz);
-                char header[128];
-                std::snprintf(header, sizeof(header), "X: %.2f cm-1 / %.4f um / %.4f THz",
-                              cm1, um, thz);
-
-                std::vector<CursorCurve> cursorCurves;
-                if (!cachedStdX.empty() && !cachedStdY.empty()) {
-                    CursorCurve cc;
-                    cc.x = &cachedStdX;
-                    cc.y = &cachedStdY;
-                    cc.color = ImVec4(0.1f, 0.6f, 0.7f, 1.0f);
-                    cursorCurves.push_back(std::move(cc));
-                }
-                renderCursorOverlay(header, cursorCurves);
-            }
-
-            ImPlot::EndPlot();
-        }
-        ImPlot::PopStyleColor();
-    } else {
+    if (!(stddevAvailable && !cachedStdX.empty() && !cachedStdY.empty())) {
         float phHeight = ImGui::CalcTextSize("Std dev not calculated").y + 40.0f;
         ImGui::BeginChild("##StdDevPlaceholder", ImVec2(0, phHeight), false,
                           ImGuiWindowFlags_NoScrollbar);
@@ -1656,14 +1427,14 @@ void renderT100Panel() {
             ImGui::Separator();
 
             // Force Y min/max (shown when force mode)
-            if (appState.active->t100.yAxisMode == 2) {
+            if (appState.active->t100.plot.yAxisMode == kYModeForce) {
                 ImGui::Text("Force Y");
-                double vMin = appState.active->t100.forcedYMin;
-                double vMax = appState.active->t100.forcedYMax;
+                double vMin = appState.active->t100.plot.forcedYMin;
+                double vMax = appState.active->t100.plot.forcedYMax;
                 ImGui::SetNextItemWidth(100);
                 if (ImGui::InputDouble("Min##T100ForceYMin", &vMin, 0.0, 0.0, "%.4f")) {
                     if (vMax > vMin) {
-                        appState.active->t100.forcedYMin = vMin;
+                        appState.active->t100.plot.forcedYMin = vMin;
                         appState.needsRedraw = true;
                     }
                 }
@@ -1671,7 +1442,7 @@ void renderT100Panel() {
                 ImGui::SetNextItemWidth(100);
                 if (ImGui::InputDouble("Max##T100ForceYMax", &vMax, 0.0, 0.0, "%.4f")) {
                     if (vMax > vMin) {
-                        appState.active->t100.forcedYMax = vMax;
+                        appState.active->t100.plot.forcedYMax = vMax;
                         appState.needsRedraw = true;
                     }
                 }
@@ -1738,103 +1509,40 @@ void renderT100Panel() {
                 ImGui::PopStyleVar();
                 ImGui::PopStyleColor(3);
 
-                // X unit
-                ImGui::Text("X unit");
-                ImGui::SameLine();
-                int& sel = appState.active->t100.xUnitSelector;
-                ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[sel == 0 ? 1 : 0]);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  sel == 0 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
-                if (ImGui::Button("cm-1##T100XUnitCm")) {
-                    sel = 0;
+                auto& t100Plot = appState.active->t100.plot;
+                if (t100Plot.renderXUnitButtons("##T100"))
                     appState.needsRedraw = true;
-                }
-                ImGui::PopStyleColor(3);
-                ImGui::SameLine(0.0f, 0.0f);
-                ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[sel == 1 ? 1 : 0]);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  sel == 1 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
-                if (ImGui::Button("\xC2\xB5" "m##T100XUnitUm")) {
-                    sel = 1;
-                    appState.needsRedraw = true;
-                }
-                ImGui::PopStyleColor(3);
-                ImGui::SameLine(0.0f, 0.0f);
-                ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[sel == 2 ? 1 : 0]);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  sel == 2 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
-                if (ImGui::Button("THz##T100XUnitTHz")) {
-                    sel = 2;
-                    appState.needsRedraw = true;
-                }
-                ImGui::PopStyleColor(3);
 
-                // Match X to Spectrum View
+                // Match X to Spectrum View: adopt the Spectrum panel's unit and
+                // zoom window, converting the panel's cached data along the way
+                // (L3 shared helper — same conversion set as onXUnitChanged).
                 if (ImGui::Button("Match X to Spectrum View##T100MatchX")) {
-                    int newXUnit = appState.active->spectrum.xUnitSelector;
-                    int oldUnit = appState.active->t100.prevXUnitSelector;
-                    double specMin = appState.active->spectrum.manualXMin;
-                    double specMax = appState.active->spectrum.manualXMax;
-
-                    if (specMin < specMax) {
-                        appState.active->t100.manualXMin = specMin;
-                        appState.active->t100.manualXMax = specMax;
-                        appState.active->t100.pendingNextXMin = specMin;
-                        appState.active->t100.pendingNextXMax = specMax;
-                        appState.active->t100.shouldAutoscale = false;
-                    } else {
-                        appState.active->t100.shouldAutoscale = true;
+                    auto& t100 = appState.active->t100;
+                    auto& spec = appState.active->spectrum;
+                    int prevUnit = 0;
+                    if (t100.plot.adoptXUnit(spec.plot.xUnitSelector, prevUnit)) {
+                        t100.convertCachedXUnits(prevUnit, t100.plot.xUnitSelector);
                     }
-
-                    if (appState.active->t100.transmittanceAvailable && !appState.active->t100.cachedTransX.empty()) {
-                        auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(oldUnit);
-                        auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(newXUnit);
-                        for (auto& [fid, vec] : appState.active->t100.cachedTransX)
-                            for (double& x : vec)
-                                x = SpectralToolbox::convertXValue(x, oldU, newU);
+                    t100.plot.copyXRangeFrom(spec.plot);
+                    // Clamp the copied window to this panel's own data range (M1):
+                    // the Spectrum window may miss the transmittance curves' range.
+                    {
+                        double lo = 0.0, hi = 0.0;
+                        bool have = false;
+                        for (const auto& kv : t100.cachedTransX) {
+                            if (kv.second.empty()) continue;
+                            const double l = std::min(kv.second.front(), kv.second.back());
+                            const double h = std::max(kv.second.front(), kv.second.back());
+                            if (!have) { lo = l; hi = h; have = true; }
+                            else { lo = std::min(lo, l); hi = std::max(hi, h); }
+                        }
+                        if (have) t100.plot.clampPendingToRange(lo, hi);
                     }
-                    if (appState.active->t100.stddevAvailable && !appState.active->t100.cachedStdX.empty()) {
-                        auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(oldUnit);
-                        auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(newXUnit);
-                        for (double& x : appState.active->t100.cachedStdX)
-                            x = SpectralToolbox::convertXValue(x, oldU, newU);
-                    }
-
-                    appState.active->t100.xUnitSelector = newXUnit;
-                    appState.active->t100.prevXUnitSelector = newXUnit;
                     appState.needsRedraw = true;
                 }
 
-                // Y Axis
-                ImGui::Text("Y Axis");
-                ImGui::SameLine();
-                int& mode = appState.active->t100.yAxisMode;
-                ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[mode == 0 ? 1 : 0]);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  mode == 0 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
-                if (ImGui::Button("all##T100YAxisAll")) {
-                    mode = 0;
+                if (t100Plot.renderYModeButtons("##T100YAxis"))
                     appState.needsRedraw = true;
-                }
-                ImGui::PopStyleColor(3);
-                ImGui::SameLine(0.0f, 0.0f);
-                ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[mode == 1 ? 1 : 0]);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  mode == 1 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
-                if (ImGui::Button("tight##T100YAxisTight")) {
-                    mode = 1;
-                    appState.needsRedraw = true;
-                }
-                ImGui::PopStyleColor(3);
-                ImGui::SameLine(0.0f, 0.0f);
-                ImGui::PushStyleColor(ImGuiCol_Button,        cfgBtnColors[mode == 2 ? 1 : 0]);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  mode == 2 ? cfgBtnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   cfgBtnColors[1]);
-                if (ImGui::Button("force##T100YAxisForce")) {
-                    mode = 2;
-                    appState.needsRedraw = true;
-                }
-                ImGui::PopStyleColor(3);
             }
 
         } else {

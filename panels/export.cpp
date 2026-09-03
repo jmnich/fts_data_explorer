@@ -355,8 +355,8 @@ void ExportPanel::writeAvgSpectrumCsv(const std::string& dir)
     ofs << std::setprecision(15);
 
     const char* xLabel = "Wavenumber [cm-1]";
-    if (avg.xUnitSelector == 1) xLabel = "Wavelength [um]";
-    else if (avg.xUnitSelector == 2) xLabel = "Frequency [THz]";
+    if (avg.plot.xUnitSelector == 1) xLabel = "Wavelength [um]";
+    else if (avg.plot.xUnitSelector == 2) xLabel = "Frequency [THz]";
 
     ofs << xLabel << ",Magnitude [V]\n";
     size_t n = std::min(avg.cachedAverageX.size(), avg.cachedAverageY.size());
@@ -379,8 +379,8 @@ void ExportPanel::writeSnrSpectrumCsv(const std::string& dir)
     ofs << std::setprecision(15);
 
     const char* xLabel = "Wavenumber [cm-1]";
-    if (snr.xUnitSelector == 1) xLabel = "Wavelength [um]";
-    else if (snr.xUnitSelector == 2) xLabel = "Frequency [THz]";
+    if (snr.plot.xUnitSelector == 1) xLabel = "Wavelength [um]";
+    else if (snr.plot.xUnitSelector == 2) xLabel = "Frequency [THz]";
 
     ofs << xLabel << ",SNR\n";
     size_t n = std::min(snr.cachedSnrX.size(), snr.cachedSnrY.size());
@@ -437,8 +437,8 @@ void ExportPanel::writeSpectraCsv(const std::string& dir)
     ofs << std::setprecision(15);
 
     const char* xLabel = "Wavenumber [cm-1]";
-    if (appState->active->spectrum.xUnitSelector == 1) xLabel = "Wavelength [um]";
-    else if (appState->active->spectrum.xUnitSelector == 2) xLabel = "Frequency [THz]";
+    if (appState->active->spectrum.plot.xUnitSelector == 1) xLabel = "Wavelength [um]";
+    else if (appState->active->spectrum.plot.xUnitSelector == 2) xLabel = "Frequency [THz]";
 
     ofs << xLabel;
     for (size_t i = 0; i < nFiles; i++) {
@@ -585,8 +585,8 @@ void ExportPanel::writeT100TransCsv(const std::string& dir)
     ofs << std::setprecision(15);
 
     const char* xLabel = "Wavenumber [cm-1]";
-    if (t100.xUnitSelector == 1) xLabel = "Wavelength [um]";
-    else if (t100.xUnitSelector == 2) xLabel = "Frequency [THz]";
+    if (t100.plot.xUnitSelector == 1) xLabel = "Wavelength [um]";
+    else if (t100.plot.xUnitSelector == 2) xLabel = "Frequency [THz]";
 
     ofs << xLabel << ",T(%)\n";
     size_t n = std::min(xv.size(), yv.size());
@@ -620,14 +620,14 @@ void ExportPanel::writeT100AllTransCsv(const std::string& dir)
             for (double& f : ps.spectrumX)
                 f = SpectralToolbox::convertXValue(f,
                     SpectralToolbox::SpectrumXUnit::CmInv,
-                    static_cast<SpectralToolbox::SpectrumXUnit>(t100.xUnitSelector));
+                    static_cast<SpectralToolbox::SpectrumXUnit>(t100.plot.xUnitSelector));
             ps.spectrumY = std::move(raw.primaryDetector);
         } else if (appState->active->datasetInfo.axisIsCorrected) {
             for (auto& v : raw.opdAxis) v *= 1e6;
             ps = SpectralToolbox::processSpectrumFromCorrectedAxis(
                 raw.primaryDetector, raw.opdAxis,
                 appState->active->spectrum.Kpadding,
-                static_cast<SpectralToolbox::SpectrumXUnit>(t100.xUnitSelector),
+                static_cast<SpectralToolbox::SpectrumXUnit>(t100.plot.xUnitSelector),
                 static_cast<ApodizationWindow>(appState->active->spectrum.apodizationSelector),
                 appState->active->spectrum.apodizationParams);
         } else {
@@ -635,7 +635,7 @@ void ExportPanel::writeT100AllTransCsv(const std::string& dir)
                 raw.primaryDetector, raw.referenceDetector,
                 appState->active->spectrum.refLaserTextbox,
                 appState->active->spectrum.Kpadding,
-                static_cast<SpectralToolbox::SpectrumXUnit>(t100.xUnitSelector),
+                static_cast<SpectralToolbox::SpectrumXUnit>(t100.plot.xUnitSelector),
                 static_cast<ApodizationWindow>(appState->active->spectrum.apodizationSelector),
                 appState->active->spectrum.apodizationParams,
                 static_cast<SpectralToolbox::XCorrectionMethod>(appState->active->xCorrectionMethod),
@@ -644,7 +644,7 @@ void ExportPanel::writeT100AllTransCsv(const std::string& dir)
         if (ps.spectrumX.empty() || ps.spectrumY.empty()) continue;
         std::vector<double> tx, ty;
         if (appState->active->t100.computeTransmittanceFromVectors(
-                ps.spectrumX, ps.spectrumY, t100.xUnitSelector, tx, ty)) {
+                ps.spectrumX, ps.spectrumY, t100.plot.xUnitSelector, tx, ty)) {
             allTransX[i] = std::move(tx);
             allTransY[i] = std::move(ty);
             anyValid = true;
@@ -659,8 +659,8 @@ void ExportPanel::writeT100AllTransCsv(const std::string& dir)
     ofs << std::setprecision(15);
 
     const char* xLabel = "Wavenumber [cm-1]";
-    if (t100.xUnitSelector == 1) xLabel = "Wavelength [um]";
-    else if (t100.xUnitSelector == 2) xLabel = "Frequency [THz]";
+    if (t100.plot.xUnitSelector == 1) xLabel = "Wavelength [um]";
+    else if (t100.plot.xUnitSelector == 2) xLabel = "Frequency [THz]";
 
     ofs << xLabel;
     for (size_t i = 0; i < checkedFiles.size(); i++) {
@@ -703,8 +703,8 @@ void ExportPanel::writeT100StdDevCsv(const std::string& dir)
     ofs << std::setprecision(15);
 
     const char* xLabel = "Wavenumber [cm-1]";
-    if (t100.xUnitSelector == 1) xLabel = "Wavelength [um]";
-    else if (t100.xUnitSelector == 2) xLabel = "Frequency [THz]";
+    if (t100.plot.xUnitSelector == 1) xLabel = "Wavelength [um]";
+    else if (t100.plot.xUnitSelector == 2) xLabel = "Frequency [THz]";
 
     ofs << xLabel << ",Standard Deviation T(%)\n";
     size_t n = std::min(t100.cachedStdX.size(), t100.cachedStdY.size());
@@ -720,8 +720,8 @@ void ExportPanel::writeAbsorbanceCsv(const std::string& dir)
         return;
     std::string dsName = sanitizeFilename(appState->active->currentDatasetName);
     const char* xLabel = "Wavenumber [cm-1]";
-    if (t100.xUnitSelector == 1) xLabel = "Wavelength [um]";
-    else if (t100.xUnitSelector == 2) xLabel = "Frequency [THz]";
+    if (t100.plot.xUnitSelector == 1) xLabel = "Wavelength [um]";
+    else if (t100.plot.xUnitSelector == 2) xLabel = "Frequency [THz]";
 
     for (const auto& fileId : t100.lastKnownSelection) {
         auto xIt = t100.cachedTransX.find(fileId);
@@ -754,8 +754,8 @@ void ExportPanel::writeTransmittanceCsv(const std::string& dir)
         return;
     std::string dsName = sanitizeFilename(appState->active->currentDatasetName);
     const char* xLabel = "Wavenumber [cm-1]";
-    if (t100.xUnitSelector == 1) xLabel = "Wavelength [um]";
-    else if (t100.xUnitSelector == 2) xLabel = "Frequency [THz]";
+    if (t100.plot.xUnitSelector == 1) xLabel = "Wavelength [um]";
+    else if (t100.plot.xUnitSelector == 2) xLabel = "Frequency [THz]";
 
     for (const auto& fileId : t100.lastKnownSelection) {
         auto xIt = t100.cachedTransX.find(fileId);

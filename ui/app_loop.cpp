@@ -1106,7 +1106,7 @@ static void renderSpectrumViewPanel() {
         if (appState.active->dataLoaded && !appState.active->loadedData.empty()) {
             // Pre-load precomputed spectra into spectrum cache (always refresh)
             if (appState.active->datasetInfo.hasPrecomputedSpectra) {
-                auto targetUnit = static_cast<SpectralToolbox::SpectrumXUnit>(appState.active->spectrum.xUnitSelector);
+                auto targetUnit = static_cast<SpectralToolbox::SpectrumXUnit>(appState.active->spectrum.plot.xUnitSelector);
                 for (size_t i = 0; i < appState.active->loadedData.size(); i++) {
                     const std::string& fid = appState.active->selectedFilenames[i];
                     if (appState.active->spectrum.cachedFrequencies.find(fid) == appState.active->spectrum.cachedFrequencies.end()) {

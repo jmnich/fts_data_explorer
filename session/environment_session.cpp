@@ -536,7 +536,7 @@ EnvironmentSession* createExperiment(AppState& s, EnvType t) {
     std::snprintf(name, sizeof(name), "%s %d", experimentTypeName(t), counter);
     auto env = std::make_unique<EnvironmentSession>(t, name);
     if (s.configPtr) {
-        env->xUnitSelector = s.configPtr->envWindowXUnit;
+        env->plot.xUnitSelector = s.configPtr->envWindowXUnit;
         env->yMode = s.configPtr->envWindowYMode;
     }
     EnvironmentSession* raw = env.get();
@@ -689,7 +689,7 @@ void EnvironmentSession::captureSnapshots(AppState& s) {
 // status string and are skipped — never NaN, never a division by zero.
 void EnvironmentSession::computeAbsorbance(AppState& s) {
     using ST = SpectralToolbox::SpectrumXUnit;
-    const auto dst = static_cast<ST>(xUnitSelector);
+    const auto dst = static_cast<ST>(plot.xUnitSelector);
     bool any = false;
     captureSnapshots(s);
     for (auto& c : curves) {
@@ -781,24 +781,45 @@ void EnvironmentSession::applyYMode() {
 }
 
 void EnvironmentSession::convertXInPlace() {
-    auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(prevXUnitSelector);
-    auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
+    auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(plot.prevXUnitSelector);
+    auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(plot.xUnitSelector);
     for (auto& c : curves)
         for (double& x : c.gridX)
             x = SpectralToolbox::convertXValue(x, oldU, newU);
     // Keep the manual zoom window in the new unit.
-    if (!shouldAutoscale && manualXMin < manualXMax) {
-        manualXMin = SpectralToolbox::convertXValue(manualXMin, oldU, newU);
-        manualXMax = SpectralToolbox::convertXValue(manualXMax, oldU, newU);
-        if (manualXMin > manualXMax) std::swap(manualXMin, manualXMax);
+    if (!plot.shouldAutoscale && plot.hasManualX()) {
+        double newMin = SpectralToolbox::convertXValue(plot.manualXMin, oldU, newU);
+        double newMax = SpectralToolbox::convertXValue(plot.manualXMax, oldU, newU);
+        if (newMin > newMax) std::swap(newMin, newMax);
+        // N7: clamp the converted window to the data range — a window wider
+        // than the data would otherwise show empty space after the switch.
+        // The curves' gridX is already cached, so this is synchronous.
+        {
+            double dLo = std::numeric_limits<double>::max();
+            double dHi = std::numeric_limits<double>::lowest();
+            bool have = false;
+            for (const auto& c : curves)
+                for (double x : c.gridX) {
+                    dLo = std::min(dLo, x);
+                    dHi = std::max(dHi, x);
+                    have = true;
+                }
+            if (have) {
+                double cLo = std::max(newMin, dLo);
+                double cHi = std::min(newMax, dHi);
+                if (cLo < cHi) { newMin = cLo; newMax = cHi; }
+                else           { newMin = dLo; newMax = dHi; }
+            }
+        }
+        plot.manualXMin = newMin;
+        plot.manualXMax = newMax;
         // Re-apply the converted window so the SAME spectral region stays
         // visible in the new unit (mirrors the dataset-workspace spectrum
-        // panels, environment_session.cpp:1796 restore block consumes this):
-        // converting manualXMin/Max alone never reaches the plot — ImPlot
-        // keeps the old-unit limits and the per-frame mirror (renderPlot)
-        // overwrites them back.
-        pendingNextXMin = manualXMin;
-        pendingNextXMax = manualXMax;
+        // panels): converting manualXMin/Max alone never reaches the plot —
+        // ImPlot keeps the old-unit limits and the per-frame mirror
+        // (captureLimits) overwrites them back.
+        plot.pendingNextXMin = newMin;
+        plot.pendingNextXMax = newMax;
     }
     dirty = true;
 }
@@ -914,7 +935,7 @@ void EnvironmentSession::renderViewWindow() {
                 cc.color = tab20Color(ci);   // matches the Settings accent line
                 curves.push_back(std::move(cc));
             }
-            xLabel = xUnitLabel(xUnitSelector);
+            xLabel = xUnitLabel(plot.xUnitSelector);
             yLabel = (yMode == 0) ? "Transmittance [%]" : "Absorbance";
             hasGuideline = true;
             guideline = (yMode == 0) ? 100.0 : 0.0;
@@ -925,9 +946,9 @@ void EnvironmentSession::renderViewWindow() {
                          ? "OPD (um)"
                          : (artifact == ComparatorArtifact::RawInterferogram)
                               ? "Sample index"
-                              : xUnitLabel(xUnitSelector);
+                              : xUnitLabel(plot.xUnitSelector);
             yLabel = artifactLabel(artifact);
-            if (yScaleSelector == 2) yLabel += " (dB)";
+            if (plot.yScaleSelector == 2) yLabel += " (dB)";
         }
         renderPlot(curves, xLabel, yLabel, hasGuideline, guideline, true);
     }
@@ -1214,10 +1235,10 @@ void EnvironmentSession::renderComparatorConfig() {
             if (ImGui::Selectable(names[a], a == artifactSelector)) {
                 if (artifactSelector != a) {
                     artifactSelector = a;
-                    shouldAutoscale = true;
+                    plot.shouldAutoscale = true;
                     // T100/IFG have no log/dB scale — drop back to lin.
-                    if (yScaleSelector != 0 && a >= 3 /* T100 / IFG */)
-                        yScaleSelector = 0;
+                    if (plot.yScaleSelector != 0 && a >= 3 /* T100 / IFG */)
+                        plot.yScaleSelector = 0;
                     dirty = true;
                     appState.needsRedraw = true;
                 }
@@ -1318,7 +1339,10 @@ void EnvironmentSession::renderDatasetSelector() {
         ImGui::TextDisabled("No datasets available — open a workspace first.");
 }
 
-// X-unit toggle (cm-1 / um / THz) shared by both env types.
+// X-unit toggle (cm-1 / um / THz) shared by both env types. Env OWNS unit
+// switching (the plot's frame config has xUnitEnabled = false — the tick-time
+// conversion can never fire): this handler converts the cached data + zoom
+// window itself and syncs the prev latch.
 void EnvironmentSession::renderXUnitButtons() {
     const ImVec4 colActive = ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive);
     const ImVec4 colInactive(0.22f, 0.22f, 0.22f, 0.7f);
@@ -1326,20 +1350,19 @@ void EnvironmentSession::renderXUnitButtons() {
     ImGui::TextUnformatted("X unit");
     ImGui::SameLine();
     for (int u = 0; u < 3; ++u) {
-        ImGui::PushStyleColor(ImGuiCol_Button, xUnitSelector == u ? colActive : colInactive);
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, xUnitSelector == u ? colActive : colInactive);
+        ImGui::PushStyleColor(ImGuiCol_Button, plot.xUnitSelector == u ? colActive : colInactive);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, plot.xUnitSelector == u ? colActive : colInactive);
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, colActive);
         if (ImGui::Button(units[u])) {
-            if (xUnitSelector != u) {
-                prevXUnitSelector = xUnitSelector;
-                xUnitSelector = u;
+            if (plot.xUnitSelector != u) {
+                plot.prevXUnitSelector = plot.xUnitSelector;
+                plot.xUnitSelector = u;
                 convertXInPlace();
             }
         }
         ImGui::PopStyleColor(3);
         if (u < 2) ImGui::SameLine();
     }
-    if (xUnitSelector != prevXUnitSelector) prevXUnitSelector = xUnitSelector;
 }
 
 // T% / A toggle (Absorbance only): rewrites every curve's display Y in place.
@@ -1364,29 +1387,15 @@ void EnvironmentSession::renderYModeButtons() {
 // Y-axis ranging controls (all / tight / force) + forced min/max inputs —
 // the same scheme as the Spectrum/Average/SNR view panels.
 void EnvironmentSession::renderYAxisControls() {
-    const ImVec4 colActive = ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive);
-    const ImVec4 colInactive(0.22f, 0.22f, 0.22f, 0.7f);
-    const char* names[3] = {"all", "tight", "force"};
-    ImGui::TextUnformatted("Y axis");
-    ImGui::SameLine();
-    for (int m = 0; m < 3; ++m) {
-        ImGui::PushStyleColor(ImGuiCol_Button, yAxisMode == m ? colActive : colInactive);
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, yAxisMode == m ? colActive : colInactive);
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, colActive);
-        if (ImGui::Button(names[m])) {
-            if (yAxisMode != m) { yAxisMode = m; dirty = true; appState.needsRedraw = true; }
-        }
-        ImGui::PopStyleColor(3);
-        if (m < 2) ImGui::SameLine();
+    if (plot.renderYModeButtons("##EnvYAxis")) {
+        dirty = true;
+        appState.needsRedraw = true;
     }
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("all: fit Y to all data\ntight: fit Y to visible data\n"
-                          "force: lock Y to the given min/max");
-    if (yAxisMode == 2) {
+    if (plot.yAxisMode == kYModeForce) {
         ImGui::Text("min:");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(80.0f);
-        if (ImGui::InputDouble("##EnvForcedYMin", &forcedYMin, 0.0, 0.0, "%.6g")) {
+        if (ImGui::InputDouble("##EnvForcedYMin", &plot.forcedYMin, 0.0, 0.0, "%.6g")) {
             dirty = true;
             appState.needsRedraw = true;
         }
@@ -1394,11 +1403,11 @@ void EnvironmentSession::renderYAxisControls() {
         ImGui::Text("max:");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(80.0f);
-        if (ImGui::InputDouble("##EnvForcedYMax", &forcedYMax, 0.0, 0.0, "%.6g")) {
+        if (ImGui::InputDouble("##EnvForcedYMax", &plot.forcedYMax, 0.0, 0.0, "%.6g")) {
             dirty = true;
             appState.needsRedraw = true;
         }
-        if (forcedYMin >= forcedYMax) {
+        if (plot.forcedYMin >= plot.forcedYMax) {
             ImGui::SameLine();
             ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "(min<max!)");
         }
@@ -1417,12 +1426,12 @@ void EnvironmentSession::renderYScaleButtons() {
     ImGui::SameLine();
     for (int m = 0; m < 3; ++m) {
         if (m != 0 && !logDbAllowed) ImGui::BeginDisabled();
-        ImGui::PushStyleColor(ImGuiCol_Button, yScaleSelector == m ? colActive : colInactive);
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, yScaleSelector == m ? colActive : colInactive);
+        ImGui::PushStyleColor(ImGuiCol_Button, plot.yScaleSelector == m ? colActive : colInactive);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, plot.yScaleSelector == m ? colActive : colInactive);
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, colActive);
         if (ImGui::Button(names[m])) {
-            if (yScaleSelector != m) {
-                yScaleSelector = m;
+            if (plot.yScaleSelector != m) {
+                plot.yScaleSelector = m;
                 dirty = true;
                 appState.needsRedraw = true;
             }
@@ -1574,7 +1583,7 @@ void EnvironmentSession::renderExportWindow() {
 std::vector<ComparatorCurve> EnvironmentSession::gatherCurves(AppState& s) {
     using ST = SpectralToolbox::SpectrumXUnit;
     const auto artifact = static_cast<ComparatorArtifact>(artifactSelector);
-    const auto to = static_cast<ST>(xUnitSelector);
+    const auto to = static_cast<ST>(plot.xUnitSelector);
     std::vector<ComparatorCurve> curves;
 
     const auto isOpenSession = [&](const std::string& key) {
@@ -1702,21 +1711,58 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
         return;
     }
 
-    // Y-axis mode change: re-fit immediately (spectrum.cpp:568 pattern).
-    if (yAxisMode != prevYAxisMode) {
-        if (yAxisMode == 0 || yAxisMode == 1) ImPlot::SetNextAxisToFit(ImAxis_Y1);
-        else if (yAxisMode == 2 && forcedYMin < forcedYMax)
-            ImPlot::SetNextAxisLimits(ImAxis_Y1, forcedYMin, forcedYMax, ImPlotCond_Always);
-        prevYAxisMode = yAxisMode;
-    }
-    // Y-scale change: re-fit so the new scale's data is fully visible.
-    if (yScaleSelector != prevYScaleSelector) {
-        if (yAxisMode == 0 || yAxisMode == 1) ImPlot::SetNextAxisToFit(ImAxis_Y1);
-        prevYScaleSelector = yScaleSelector;
-    }
+    // Unified view/interaction phases (panels/spectral_plot.h). Env owns
+    // unit switching (xUnitEnabled = false — the Ranging-window button handler
+    // + convertXInPlace handle units; no tick-time conversion, R2).
+    SpectralPlotFrame f;
+    f.xLabel = xLabel.c_str();
+    f.yLabel = yLabel.c_str();
+    f.windowFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
+    // log/dB are gated off for T100 and Interferogram artifacts (non-positive
+    // values); Absorbance keeps the full lin/log/dB set.
+    f.yScaleEnabled = (type != EnvType::Comparator) || artifactSelector < 3;
+    f.xUnitEnabled  = false;   // ALWAYS: env owns unit switching (R2)
+    f.xDataRange = [&curves](double& x0, double& x1) -> bool {
+        bool have = false;
+        for (const auto& c : curves) {
+            if (c.x.empty()) continue;
+            // FTS data is monotonic — front/back suffice (L5, was a full O(n)
+            // scan per call).
+            double lo = std::min(c.x.front(), c.x.back());
+            double hi = std::max(c.x.front(), c.x.back());
+            if (!have) { x0 = lo; x1 = hi; have = true; }
+            else { x0 = std::min(x0, lo); x1 = std::max(x1, hi); }
+        }
+        if (have) {
+            // Preserve the first curve's axis direction (um is descending) —
+            // the supplier contract allows x0 > x1 and setupAxes passes it
+            // through as-is (R4).
+            if (curves.front().x.size() > 1 &&
+                curves.front().x.front() > curves.front().x.back())
+                std::swap(x0, x1);
+        }
+        return have;
+    };
+    f.yDataRange = [this, &curves](double& y0, double& y1) -> bool {
+        bool have = false;
+        for (const auto& c : curves) {
+            if (c.y.empty()) continue;
+            for (double v : c.y) {
+                if (plot.yScaleSelector == kYScaleDb)
+                    v = 10.0 * std::log10(std::max(v, 1e-300));
+                if (!have) { y0 = y1 = v; have = true; }
+                else { y0 = std::min(y0, v); y1 = std::max(y1, v); }
+            }
+        }
+        return have;
+    };
+    f.onXUnitChanged = nullptr;   // unit switching handled by the button path
+    f.onViewChanged  = [this]() { dirty = true; appState.needsRedraw = true; };
 
     // Legend row ABOVE the plot (workspace-viewer style: colored square
     // patches + labels, wrapping to the next line when the row overflows).
+    // H3: restored — the refactor dropped it, leaving Absorbance/Comparator
+    // curves without any identification except the tracking cursor.
     if (showLegend) {
         ImGui::BeginGroup();
         for (size_t k = 0; k < curves.size(); ++k) {
@@ -1758,10 +1804,11 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
         ImGui::Separator();
     }
 
+    plot.tickPrePlot(f);
+
     ImVec4 gridCol = ImPlot::GetStyle().Colors[ImPlotCol_AxisGrid];
     gridCol.w *= appState.gridAlpha;
     ImPlot::PushStyleColor(ImPlotCol_AxisGrid, gridCol);
-    const ImPlotFlags flags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend;
     // Plot rect for the stale-warning overlay. Captured at the END of the
     // plot block: GetPlotPos/GetPlotSize internally call SetupLock(), which
     // would invalidate every later Setup* call.
@@ -1772,86 +1819,8 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
     // renames; with instanceName in the id a rename recreated the plot and
     // reset the X range to fit-all.
     if (ImPlot::BeginPlot(("##envPlot" + stripKey).c_str(), ImVec2(-1, -1),
-                          flags)) {
-        ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoTickMarks;
-        ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
-        if (yAxisMode == 0) y_flags |= ImPlotAxisFlags_AutoFit;
-        else if (yAxisMode == 1) y_flags |= ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_RangeFit;
-        ImPlot::SetupAxes(xLabel.c_str(), yLabel.c_str(), x_flags, y_flags);
-
-        // Y-axis scale (spectrum-view scheme): log10 axis for log mode.
-        if (yScaleSelector == 1) ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Log10);
-
-        const bool forceY = (yAxisMode == 2) && (forcedYMin < forcedYMax);
-        if (forceY) {
-            // Log scale requires strictly positive Y limits (spectrum.cpp:638 pattern).
-            double yMin = forcedYMin;
-            double yMax = forcedYMax;
-            if (yScaleSelector == 1 && yMin <= 0.0)
-                yMin = (yMax > 0.0 ? yMax * 1e-6 : 1e-6);
-            ImPlot::SetupAxisLimits(ImAxis_Y1, yMin, yMax, ImPlotCond_Always);
-        }
-
-        if (shouldAutoscale) {
-            double x0 = 0.0, x1 = 0.0, y0 = 0.0, y1 = 0.0;
-            bool haveX = false, haveY = false;
-            for (const auto& c : curves) {
-                if (c.x.empty() || c.y.empty()) continue;
-                double lo = c.x.front(), hi = c.x.front();
-                for (double v : c.x) { lo = std::min(lo, v); hi = std::max(hi, v); }
-                if (!haveX) { x0 = lo; x1 = hi; haveX = true; }
-                else { x0 = std::min(x0, lo); x1 = std::max(x1, hi); }
-                if (!forceY) {
-                    double ymn = std::numeric_limits<double>::max();
-                    double ymx = std::numeric_limits<double>::lowest();
-                    for (double v : c.y) {
-                        if (yScaleSelector == 2) v = 10.0 * std::log10(std::max(v, 1e-300));
-                        ymn = std::min(ymn, v);
-                        ymx = std::max(ymx, v);
-                    }
-                    if (!haveY) { y0 = ymn; y1 = ymx; haveY = true; }
-                    else { y0 = std::min(y0, ymn); y1 = std::max(y1, ymx); }
-                }
-            }
-            if (haveX) {
-                // Preserve the first curve's axis direction (um is descending).
-                if (curves.front().x.size() > 1 &&
-                    curves.front().x.front() > curves.front().x.back())
-                    std::swap(x0, x1);
-                ImPlot::SetupAxisLimits(ImAxis_X1, x0, x1, ImPlotCond_Always);
-                if (!forceY && haveY) {
-                    if (yScaleSelector == 1 && y0 <= 0.0)
-                        y0 = (y1 > 0.0 ? y1 * 1e-6 : 1e-6);
-                    ImPlot::SetupAxisLimits(ImAxis_Y1, y0, y1, ImPlotCond_Always);
-                }
-            }
-            shouldAutoscale = false;
-        }
-
-        if (!shouldAutoscale && manualXMin < manualXMax) {
-            const double range = manualXMax - manualXMin;
-            if (leftArrowHandleFlag)
-                ImPlot::SetNextAxisLimits(ImAxis_X1, manualXMin - range * 0.1,
-                                          manualXMax - range * 0.1, ImPlotCond_Always);
-            if (rightArrowHandleFlag)
-                ImPlot::SetNextAxisLimits(ImAxis_X1, manualXMin + range * 0.1,
-                                          manualXMax + range * 0.1, ImPlotCond_Always);
-        }
-        // One-shot restored X range (bugfix 2026-08-14: comparator X range was
-        // lost on relaunch). SetupAxisLimits, NOT SetNextAxisLimits: the
-        // "next" API must be called before BeginPlot (its NextPlotData is
-        // consumed at BeginPlot start and wiped at EndPlot) — inside BeginPlot
-        // it silently never applies. Applied after the autoscale block so a
-        // saved manual range wins on the first frame even when the Absorbance
-        // results path re-armed shouldAutoscale on load.
-        if (pendingNextXMin < pendingNextXMax) {
-            ImPlot::SetupAxisLimits(ImAxis_X1, pendingNextXMin, pendingNextXMax,
-                                    ImPlotCond_Always);
-            manualXMin = pendingNextXMin;
-            manualXMax = pendingNextXMax;
-            pendingNextXMin = 0.0;
-            pendingNextXMax = -1.0;
-        }
+                          f.plotFlags)) {
+        plot.setupAxes(f);
 
         if (hasGuideline) ImPlot::PlotInfLines("##guideline", &guideline, 1);
 
@@ -1871,7 +1840,7 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
                 px = &dx;
                 py = &dy;
             }
-            if (yScaleSelector == 2) {
+            if (plot.yScaleSelector == kYScaleDb) {
                 // dB needs a writable buffer: copy only when not downsampled.
                 if (px == &c.x) { dy = c.y; py = &dy; }
                 for (double& v : dy) v = 10.0 * std::log10(std::max(v, 1e-300));
@@ -1888,92 +1857,11 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
         // have an OPD/sample X axis). Drawn before the interaction/cursor
         // blocks so the tracking-cursor info box stays on top.
         if (type == EnvType::Absorbance || artifactSelector < 4)
-            renderHitranMarkers(hitranGasEnabled, xUnitSelector,
+            renderHitranMarkers(hitranGasEnabled, plot.xUnitSelector,
                                 hitranThresholdLevel, hitranSmoothLevel);
 
-        // Interaction: ESC autoscale, arrows pan 10%, shift+drag range.
-        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) &&
-            ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-            shouldAutoscale = true;
-            manualXMin = manualXMax = 0.0;
-            pendingNextXMin = 0.0;
-            pendingNextXMax = -1.0;
-            // View change → unsaved change (bugfix 2026-08-14): without dirty
-            // a zoomed-then-reset view would never reach the saved config.
-            dirty = true;
-            appState.needsRedraw = true;
-        }
-        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows)) {
-            if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) && !leftArrowPressedLastFrame) {
-                leftArrowPressedLastFrame = true;
-                leftArrowHandleFlag = true;
-            } else if (ImGui::IsKeyReleased(ImGuiKey_LeftArrow)) {
-                leftArrowPressedLastFrame = false;
-                leftArrowHandleFlag = false;
-            }
-            if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) && !rightArrowPressedLastFrame) {
-                rightArrowPressedLastFrame = true;
-                rightArrowHandleFlag = true;
-            } else if (ImGui::IsKeyReleased(ImGuiKey_RightArrow)) {
-                rightArrowPressedLastFrame = false;
-                rightArrowHandleFlag = false;
-            }
-        } else {
-            leftArrowPressedLastFrame = false;
-            rightArrowPressedLastFrame = false;
-            leftArrowHandleFlag = false;
-            rightArrowHandleFlag = false;
-        }
-        // Shift+drag X-range select (interferogram-view pattern): live shaded
-        // rect + immediate zoom on shift release.
-        const bool shiftPressed = ImGui::GetIO().KeyShift;
-        if (ImPlot::IsPlotHovered() && shiftPressed && !isSelectingXRange) {
-            isSelectingXRange = true;
-            selectionStartX = selectionEndX = 0.0;
-        } else if (isSelectingXRange && !shiftPressed) {
-            isSelectingXRange = false;
-            if (selectionStartX != selectionEndX) {
-                const double lo = std::min(selectionStartX, selectionEndX);
-                const double hi = std::max(selectionStartX, selectionEndX);
-                ImPlot::SetupAxisLimits(ImAxis_X1, lo, hi, ImPlotCond_Always);
-                manualXMin = lo;
-                manualXMax = hi;
-                shouldAutoscale = false;
-                // View change → unsaved change (bugfix 2026-08-14): a zoom
-                // after the last save must re-dirty, or it is never persisted
-                // (dirty-gated saves) and the range is lost on relaunch.
-                dirty = true;
-                appState.needsRedraw = true;
-            }
-        }
-        if (isSelectingXRange) {
-            const ImPlotRect lim = ImPlot::GetPlotLimits();
-            // Clamp the selection to the CURRENT axis limits (bugfix
-            // 2026-08-14): dragging past the plot edge extrapolates
-            // GetPlotMousePos beyond the range; without the clamp the zoomed
-            // area extends out of bounds. min/max order handles descending
-            // axes (um) — std::clamp would be UB there.
-            const double xLo = std::min(lim.X.Min, lim.X.Max);
-            const double xHi = std::max(lim.X.Min, lim.X.Max);
-            ImPlotPoint mouse = ImPlot::GetPlotMousePos();
-            const double mx = std::min(std::max(mouse.x, xLo), xHi);
-            if (selectionStartX == 0.0 && selectionEndX == 0.0)
-                selectionStartX = mx;
-            selectionEndX = mx;
-            const double lo = std::min(selectionStartX, selectionEndX);
-            const double hi = std::max(selectionStartX, selectionEndX);
-            double shade_x[2] = {lo, hi};
-            double shade_y1[2] = {lim.Y.Min, lim.Y.Min};
-            double shade_y2[2] = {lim.Y.Max, lim.Y.Max};
-            ImPlotSpec fillSpec;
-            fillSpec.FillColor = ImVec4(0.5f, 0.0f, 0.5f, 0.3f);
-            ImPlot::PlotShaded("##SelFill", shade_x, shade_y1, shade_y2, 2, fillSpec);
-            double sx[2] = {selectionStartX, selectionStartX};
-            double sy[2] = {lim.Y.Min, lim.Y.Max};
-            ImPlot::PlotLine("##SelStart", sx, sy, 2);
-            double ex[2] = {selectionEndX, selectionEndX};
-            ImPlot::PlotLine("##SelEnd", ex, sy, 2);
-        }
+        plot.tickInPlot(f);
+        plot.drawSelectionOverlay(stripKey.c_str());
 
         // Tracking cursor (shared overlay): full-height vertical line (never
         // affects Y autofit/range-fit), per-curve colored markers and an info
@@ -1986,11 +1874,6 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
             const double xHi = std::max(lim.X.Min, lim.X.Max);
             const double mx = std::min(std::max(mouse.x, xLo), xHi);
 
-            using ST = SpectralToolbox::SpectrumXUnit;
-            const auto unit = static_cast<ST>(xUnitSelector);
-            double cm1 = (unit == ST::CmInv) ? mx : SpectralToolbox::convertXValue(mx, unit, ST::CmInv);
-            double um  = (unit == ST::Um)    ? mx : SpectralToolbox::convertXValue(mx, unit, ST::Um);
-            double thz = (unit == ST::THz)   ? mx : SpectralToolbox::convertXValue(mx, unit, ST::THz);
             char header[128];
             if (artifactSelector == 4 /* corrected: OPD axis */)
                 std::snprintf(header, sizeof(header), "OPD: %.4f um", mx);
@@ -1998,8 +1881,8 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
                 std::snprintf(header, sizeof(header), "Index: %lld",
                               static_cast<long long>(mx));
             else
-                std::snprintf(header, sizeof(header), "X: %.2f cm-1 / %.4f um / %.4f THz",
-                              cm1, um, thz);
+                SpectralPlotView::formatCursorHeader(mx, plot.xUnitSelector,
+                                                     header, sizeof(header));
 
             std::vector<CursorCurve> cursorCurves;
             cursorCurves.reserve(curves.size());
@@ -2009,7 +1892,7 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
                 cc.y = &curves[k].y;
                 cc.color = curveColors[k];
                 if (type != EnvType::Comparator) cc.label = curves[k].label;
-                if (yScaleSelector == 2)
+                if (plot.yScaleSelector == kYScaleDb)
                     cc.transform = [](double v) { return 10.0 * std::log10(std::max(v, 1e-300)); };
                 cursorCurves.push_back(std::move(cc));
             }
@@ -2017,23 +1900,20 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
         }
 
         // Capture the current X limits every frame (the export "current plot
-        // area" source; spectrum.cpp:1206 pattern) and mirror them into the
-        // persisted manual range (spectrum.cpp:1206-1211 pattern) so wheel
-        // zoom / native pan / arrow pan survive save+reopen. Skipped while a
-        // pending range (restore latch) is armed. A changed range dirties the
-        // experiment: every save path is dirty-gated (Ctrl+S / exit Save All /
-        // project switch), so without dirty a zoomed view never reaches the
-        // saved config (ESC / shift+drag precedent).
+        // area" source) and mirror them into the persisted manual range so
+        // wheel zoom / native pan survive save+reopen (captureLimits skips
+        // while a pending range/restore latch is armed). A changed range
+        // dirties the experiment (bugfix 2026-08-14): every save path is
+        // dirty-gated, so without dirty a wheel-zoomed view would never reach
+        // the saved config.
         {
+            const double mx0 = plot.manualXMin, mx1 = plot.manualXMax;
+            plot.captureLimits();
+            if (plot.manualXMin != mx0 || plot.manualXMax != mx1)
+                dirty = true;
             const ImPlotRect lim = ImPlot::GetPlotLimits();
             viewXMin = std::min(lim.X.Min, lim.X.Max);
             viewXMax = std::max(lim.X.Min, lim.X.Max);
-            if (lim.X.Min < lim.X.Max && pendingNextXMin >= pendingNextXMax) {
-                if (manualXMin != lim.X.Min || manualXMax != lim.X.Max)
-                    dirty = true;
-                manualXMin = lim.X.Min;
-                manualXMax = lim.X.Max;
-            }
         }
         // Stale-warning rect: GetPlotPos/GetPlotSize lock the setup phase, so
         // they must run AFTER every Setup* call (all PlotX already ran here).
@@ -2121,8 +2001,8 @@ void EnvironmentSession::exportCsv() {
         else if (art == ComparatorArtifact::RawInterferogram) xUnit = "index";
     }
     if (xUnit.empty())
-        xUnit = (xUnitSelector == 0) ? "cm-1"
-                                     : (xUnitSelector == 1) ? "\xC2\xB5" "m" : "THz";
+        xUnit = (plot.xUnitSelector == 0) ? "cm-1"
+                                     : (plot.xUnitSelector == 1) ? "\xC2\xB5" "m" : "THz";
     size_t hc = 0;
     for (const auto& c : curves) {
         ofs << (hc++ ? "," : "") << "\"" << c.label << " x [" << xUnit << "]\",\""
@@ -2158,12 +2038,12 @@ static nlohmann::json experimentConfigJson(const EnvironmentSession& env) {
     j["type"] = experimentTypeName(env.type);
     j["name"] = env.instanceName;
     j["comment"] = env.comment;
-    j["xUnit"] = env.xUnitSelector;
+    j["xUnit"] = env.plot.xUnitSelector;
     j["yMode"] = env.yMode;
-    j["yAxisMode"] = env.yAxisMode;
-    j["forcedYMin"] = env.forcedYMin;
-    j["forcedYMax"] = env.forcedYMax;
-    j["yScale"] = env.yScaleSelector;
+    j["yAxisMode"] = env.plot.yAxisMode;
+    j["forcedYMin"] = env.plot.forcedYMin;
+    j["forcedYMax"] = env.plot.forcedYMax;
+    j["yScale"] = env.plot.yScaleSelector;
     j["showCursor"] = env.showTrackingCursor;
     nlohmann::json hitranGases = nlohmann::json::array();
     for (bool b : env.hitranGasEnabled) hitranGases.push_back(b);
@@ -2175,8 +2055,8 @@ static nlohmann::json experimentConfigJson(const EnvironmentSession& env) {
     // View X range (bugfix 2026-08-14): manual zoom window, same convention
     // as the workspace panels' view state (§8.1 spectrumView etc.) — unit is
     // the saved xUnit; convertXInPlace keeps it in step with unit changes.
-    j["manualXMin"] = env.manualXMin;
-    j["manualXMax"] = env.manualXMax;
+    j["manualXMin"] = env.plot.manualXMin;
+    j["manualXMax"] = env.plot.manualXMax;
     // Tab-strip visibility (bugfix 2026-08-14): the open-tab set persists, so
     // a closed-but-kept experiment does not auto-reopen on project load.
     j["tabHidden"] = env.tabHidden;
@@ -2204,15 +2084,15 @@ static void experimentApplyConfig(EnvironmentSession& env, const nlohmann::json&
     env.comment = j.value("comment", "");
     std::snprintf(env.commentBuf, sizeof(env.commentBuf), "%s", env.comment.c_str());
     std::snprintf(env.nameBuf, sizeof(env.nameBuf), "%s", env.instanceName.c_str());
-    env.xUnitSelector = j.value("xUnit", 0);
-    env.prevXUnitSelector = env.xUnitSelector;
+    env.plot.xUnitSelector = j.value("xUnit", 0);
+    env.plot.prevXUnitSelector = env.plot.xUnitSelector;
     env.yMode = j.value("yMode", 0);
-    env.yAxisMode = j.value("yAxisMode", 0);
-    env.prevYAxisMode = env.yAxisMode;
-    env.forcedYMin = j.value("forcedYMin", 0.0);
-    env.forcedYMax = j.value("forcedYMax", 1.0);
-    env.yScaleSelector = j.value("yScale", 0);
-    env.prevYScaleSelector = env.yScaleSelector;
+    env.plot.yAxisMode = j.value("yAxisMode", 0);
+    env.plot.prevYAxisMode = env.plot.yAxisMode;
+    env.plot.forcedYMin = j.value("forcedYMin", 0.0);
+    env.plot.forcedYMax = j.value("forcedYMax", 1.0);
+    env.plot.yScaleSelector = j.value("yScale", 0);
+    env.plot.prevYScaleSelector = env.plot.yScaleSelector;
     env.showTrackingCursor = j.value("showCursor", false);
     auto hg = j.find("hitranGases");
     if (hg != j.end() && hg->is_array()) {
@@ -2227,12 +2107,12 @@ static void experimentApplyConfig(EnvironmentSession& env, const nlohmann::json&
     // Restored X range: latched for one-shot application on the first render
     // (renderPlot consumes pendingNextXMin/Max); legacy configs without the
     // keys keep the default autoscale (manualXMin/Max = 0.0).
-    env.manualXMin = j.value("manualXMin", 0.0);
-    env.manualXMax = j.value("manualXMax", 0.0);
-    if (env.manualXMin < env.manualXMax) {
-        env.pendingNextXMin = env.manualXMin;
-        env.pendingNextXMax = env.manualXMax;
-        env.shouldAutoscale = false;
+    env.plot.manualXMin = j.value("manualXMin", 0.0);
+    env.plot.manualXMax = j.value("manualXMax", 0.0);
+    if (env.plot.manualXMin < env.plot.manualXMax) {
+        env.plot.pendingNextXMin = env.plot.manualXMin;
+        env.plot.pendingNextXMax = env.plot.manualXMax;
+        env.plot.shouldAutoscale = false;
     }
     // Legacy configs without the key default to visible (today's behavior).
     env.tabHidden = j.value("tabHidden", false);
@@ -2255,7 +2135,7 @@ static void experimentApplyConfig(EnvironmentSession& env, const nlohmann::json&
         // log/dB are invalid for T100/IFG — never restore an invalid state
         // (defensive; the UI already resets on artifact switch).
         if (env.artifactSelector >= 3)
-            env.yScaleSelector = 0;
+            env.plot.yScaleSelector = 0;
         env.comparatorKeys = j.value("comparatorKeys", std::vector<std::string>{});
         env.comparatorKeysExplicit = j.value("comparatorKeysExplicit", false);
         auto mp = j.find("memberPicks");
@@ -2376,7 +2256,7 @@ bool crossLoadExperiments(AppState& s, const std::string& path, std::string& err
                 }
                 if (any) {
                     env->applyYMode();   // sets dirty — reset below
-                    env->shouldAutoscale = true;
+                    env->plot.shouldAutoscale = true;
                 } else {
                     env->computed = false;
                 }

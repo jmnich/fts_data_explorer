@@ -270,6 +270,7 @@ add_executable(fts_data_explorer
     core/app_state.cpp
     headless/headless.cpp
     panels/spectrum.cpp
+    panels/spectral_plot.cpp
     panels/average_spectrum.cpp
     panels/hitran_panel.cpp
     panels/snr_spectrum.cpp
@@ -397,6 +398,7 @@ add_executable(fts_session_roundtrip
     session/batch_engine.cpp
     ui/layout_persistence.cpp
     panels/spectrum.cpp
+    panels/spectral_plot.cpp
     panels/average_spectrum.cpp
     panels/hitran_panel.cpp
     panels/snr_spectrum.cpp

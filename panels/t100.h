@@ -11,6 +11,7 @@
 #include "imgui.h"
 #include "implot.h"
 #include "apodization.h"
+#include "spectral_plot.h"
 #include "spectral_toolbox.h"
 #include "running_stats.h"
 
@@ -32,36 +33,11 @@ public:
     std::map<std::string, std::vector<double>> cachedTransY;
     bool transmittanceAvailable;
 
-    bool isSelectingXRange;
-    double selectionStartX;
-    double selectionEndX;
-    bool shouldAutoscale;
-    bool firstLoadCompleted;
-    double manualXMin;
-    double manualXMax;
-    double manualYMin;
-    double manualYMax;
-    double savedYMin;
-    double savedYMax;
-
-    bool leftArrowPressedLastFrame;
-    bool rightArrowPressedLastFrame;
-    bool leftArrowHandleFlag;
-    bool rightArrowHandleFlag;
-
-    int xUnitSelector;
-    int prevXUnitSelector;
-    int yAxisMode;
-    int prevYAxisMode;
-    double forcedYMin;
-    double forcedYMax;
-
-    double pendingNextXMin;
-    double pendingNextXMax;
-
-    bool xUnitSwitchedThisFrame;
-    double convertedXMin;
-    double convertedXMax;
+    // Unified view/interaction state (zoom window, selectors, unit switch,
+    // shift+drag, arrow pan) — see spectral_plot.h for the phase contract.
+    // T100 is always linear Y (T% around 100%): the y-scale selector is gated
+    // off (yScaleEnabled = false in the frame config).
+    SpectralPlotView plot;
 
     bool needsRecompute;
 
@@ -91,10 +67,12 @@ public:
     // Parallel execution state
     std::vector<std::future<SpectralToolbox::ProcessedSpectrum>> pendingFutures_;
     std::vector<std::string> pendingFileIds_;   // parallel to pendingFutures_
+    std::vector<int> pendingUnits_;             // submit-time xUnit per future (N3)
     std::map<std::string, SpectralToolbox::ProcessedSpectrum> stdFileResults_;  // buffer
     std::map<std::string, EnergyRatios> stdRatioResults_;                        // buffer
     int totalSubmitted_{0};
     bool batchActive_{false};
+    bool stdWasAvailable_{false};   // stddevAvailable edge latch (X-window re-arm)
 
     T100Spectrum();
     void reset();
@@ -108,6 +86,12 @@ public:
     void startStdCalculation();
     bool tickStdCalculation();
     void clearStdDev();
+
+    // L3: one shared X-unit conversion over every cached X field (main
+    // curves, std-dev curve, buffered worker results, std common grid) —
+    // used by BOTH onXUnitChanged and the Match-X handler so the conversion
+    // sets can never drift apart.
+    void convertCachedXUnits(int fromUnit, int toUnit);
 
     bool computeTransmittanceFromVectors(const std::vector<double>& specX,
                                           const std::vector<double>& specY,

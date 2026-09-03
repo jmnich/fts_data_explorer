@@ -339,11 +339,11 @@ void applyPanelViewState(WorkspaceSession& ws, const nlohmann::json& vs) {
     ws.hitranThresholdLevel = std::clamp(topInt("hitranThreshold", 2), 0, 3);
     ws.hitranSmoothLevel = std::clamp(topInt("hitranSmooth", 3), 0, 3);
 
-    ws.spectrum.xUnitSelector = viewInt(vs, "spectrumView", "xUnit", ws.spectrum.xUnitSelector);
-    ws.spectrum.yScaleSelector = viewInt(vs, "spectrumView", "yScale", ws.spectrum.yScaleSelector);
-    ws.spectrum.yAxisMode = viewInt(vs, "spectrumView", "yAxisMode", ws.spectrum.yAxisMode);
-    ws.spectrum.forcedYMin = viewDouble(vs, "spectrumView", "forcedYMin", ws.spectrum.forcedYMin);
-    ws.spectrum.forcedYMax = viewDouble(vs, "spectrumView", "forcedYMax", ws.spectrum.forcedYMax);
+    ws.spectrum.plot.xUnitSelector = viewInt(vs, "spectrumView", "xUnit", ws.spectrum.plot.xUnitSelector);
+    ws.spectrum.plot.yScaleSelector = viewInt(vs, "spectrumView", "yScale", ws.spectrum.plot.yScaleSelector);
+    ws.spectrum.plot.yAxisMode = viewInt(vs, "spectrumView", "yAxisMode", ws.spectrum.plot.yAxisMode);
+    ws.spectrum.plot.forcedYMin = viewDouble(vs, "spectrumView", "forcedYMin", ws.spectrum.plot.forcedYMin);
+    ws.spectrum.plot.forcedYMax = viewDouble(vs, "spectrumView", "forcedYMax", ws.spectrum.plot.forcedYMax);
     ws.spectrum.detectorSensitivity = static_cast<float>(viewDouble(vs, "spectrumView",
         "detectorSensitivityKVPerW", ws.spectrum.detectorSensitivity));
     if (ws.spectrum.detectorSensitivity == 0.0f)
@@ -361,27 +361,27 @@ void applyPanelViewState(WorkspaceSession& ws, const nlohmann::json& vs) {
         auto ap = a->find("apodization");
         if (ap != a->end()) applyApodizationFromJson(*ap, ws.spectrum);
     }
-    ws.spectrum.prevXUnitSelector = ws.spectrum.xUnitSelector;
-    ws.spectrum.prevYScaleSelector = ws.spectrum.yScaleSelector;
-    ws.spectrum.prevYAxisMode = ws.spectrum.yAxisMode;
+    ws.spectrum.plot.prevXUnitSelector = ws.spectrum.plot.xUnitSelector;
+    ws.spectrum.plot.prevYScaleSelector = ws.spectrum.plot.yScaleSelector;
+    ws.spectrum.plot.prevYAxisMode = ws.spectrum.plot.yAxisMode;
 
-    ws.averageSpectrum.xUnitSelector = viewInt(vs, "averageView", "xUnit", ws.averageSpectrum.xUnitSelector);
-    ws.averageSpectrum.yScaleSelector = viewInt(vs, "averageView", "yScale", ws.averageSpectrum.yScaleSelector);
-    ws.averageSpectrum.yAxisMode = viewInt(vs, "averageView", "yAxisMode", ws.averageSpectrum.yAxisMode);
-    ws.averageSpectrum.forcedYMin = viewDouble(vs, "averageView", "forcedYMin", ws.averageSpectrum.forcedYMin);
-    ws.averageSpectrum.forcedYMax = viewDouble(vs, "averageView", "forcedYMax", ws.averageSpectrum.forcedYMax);
-    ws.averageSpectrum.prevXUnitSelector = ws.averageSpectrum.xUnitSelector;
-    ws.averageSpectrum.prevYScaleSelector = ws.averageSpectrum.yScaleSelector;
-    ws.averageSpectrum.prevYAxisMode = ws.averageSpectrum.yAxisMode;
+    ws.averageSpectrum.plot.xUnitSelector = viewInt(vs, "averageView", "xUnit", ws.averageSpectrum.plot.xUnitSelector);
+    ws.averageSpectrum.plot.yScaleSelector = viewInt(vs, "averageView", "yScale", ws.averageSpectrum.plot.yScaleSelector);
+    ws.averageSpectrum.plot.yAxisMode = viewInt(vs, "averageView", "yAxisMode", ws.averageSpectrum.plot.yAxisMode);
+    ws.averageSpectrum.plot.forcedYMin = viewDouble(vs, "averageView", "forcedYMin", ws.averageSpectrum.plot.forcedYMin);
+    ws.averageSpectrum.plot.forcedYMax = viewDouble(vs, "averageView", "forcedYMax", ws.averageSpectrum.plot.forcedYMax);
+    ws.averageSpectrum.plot.prevXUnitSelector = ws.averageSpectrum.plot.xUnitSelector;
+    ws.averageSpectrum.plot.prevYScaleSelector = ws.averageSpectrum.plot.yScaleSelector;
+    ws.averageSpectrum.plot.prevYAxisMode = ws.averageSpectrum.plot.yAxisMode;
 
-    ws.snrSpectrum.xUnitSelector = viewInt(vs, "snrView", "xUnit", ws.snrSpectrum.xUnitSelector);
-    ws.snrSpectrum.yScaleSelector = viewInt(vs, "snrView", "yScale", ws.snrSpectrum.yScaleSelector);
-    ws.snrSpectrum.yAxisMode = viewInt(vs, "snrView", "yAxisMode", ws.snrSpectrum.yAxisMode);
-    ws.snrSpectrum.forcedYMin = viewDouble(vs, "snrView", "forcedYMin", ws.snrSpectrum.forcedYMin);
-    ws.snrSpectrum.forcedYMax = viewDouble(vs, "snrView", "forcedYMax", ws.snrSpectrum.forcedYMax);
-    ws.snrSpectrum.prevXUnitSelector = ws.snrSpectrum.xUnitSelector;
-    ws.snrSpectrum.prevYScaleSelector = ws.snrSpectrum.yScaleSelector;
-    ws.snrSpectrum.prevYAxisMode = ws.snrSpectrum.yAxisMode;
+    ws.snrSpectrum.plot.xUnitSelector = viewInt(vs, "snrView", "xUnit", ws.snrSpectrum.plot.xUnitSelector);
+    ws.snrSpectrum.plot.yScaleSelector = viewInt(vs, "snrView", "yScale", ws.snrSpectrum.plot.yScaleSelector);
+    ws.snrSpectrum.plot.yAxisMode = viewInt(vs, "snrView", "yAxisMode", ws.snrSpectrum.plot.yAxisMode);
+    ws.snrSpectrum.plot.forcedYMin = viewDouble(vs, "snrView", "forcedYMin", ws.snrSpectrum.plot.forcedYMin);
+    ws.snrSpectrum.plot.forcedYMax = viewDouble(vs, "snrView", "forcedYMax", ws.snrSpectrum.plot.forcedYMax);
+    ws.snrSpectrum.plot.prevXUnitSelector = ws.snrSpectrum.plot.xUnitSelector;
+    ws.snrSpectrum.plot.prevYScaleSelector = ws.snrSpectrum.plot.yScaleSelector;
+    ws.snrSpectrum.plot.prevYAxisMode = ws.snrSpectrum.plot.yAxisMode;
 
     ws.allanVariance.xUnitSelector = viewInt(vs, "allanView", "xUnit", ws.allanVariance.xUnitSelector);
     // Clamped to the UI range (1..): a saved 0/negative decimation would make
@@ -393,13 +393,13 @@ void applyPanelViewState(WorkspaceSession& ws, const nlohmann::json& vs) {
     ws.allanVariance.xRangeMax = viewDouble(vs, "allanView", "xRangeMax", ws.allanVariance.xRangeMax);
     ws.allanVariance.calcBaseSelector = viewInt(vs, "allanView", "calcBase", ws.allanVariance.calcBaseSelector);
 
-    ws.t100.xUnitSelector = viewInt(vs, "t100View", "xUnit", ws.t100.xUnitSelector);
-    ws.t100.yAxisMode = viewInt(vs, "t100View", "yAxisMode", ws.t100.yAxisMode);
-    ws.t100.forcedYMin = viewDouble(vs, "t100View", "forcedYMin", ws.t100.forcedYMin);
-    ws.t100.forcedYMax = viewDouble(vs, "t100View", "forcedYMax", ws.t100.forcedYMax);
+    ws.t100.plot.xUnitSelector = viewInt(vs, "t100View", "xUnit", ws.t100.plot.xUnitSelector);
+    ws.t100.plot.yAxisMode = viewInt(vs, "t100View", "yAxisMode", ws.t100.plot.yAxisMode);
+    ws.t100.plot.forcedYMin = viewDouble(vs, "t100View", "forcedYMin", ws.t100.plot.forcedYMin);
+    ws.t100.plot.forcedYMax = viewDouble(vs, "t100View", "forcedYMax", ws.t100.plot.forcedYMax);
     ws.t100.referenceSource = viewInt(vs, "t100View", "referenceSource", ws.t100.referenceSource);
-    ws.t100.prevXUnitSelector = ws.t100.xUnitSelector;
-    ws.t100.prevYAxisMode = ws.t100.yAxisMode;
+    ws.t100.plot.prevXUnitSelector = ws.t100.plot.xUnitSelector;
+    ws.t100.plot.prevYAxisMode = ws.t100.plot.yAxisMode;
 
     auto t = vs.find("t100View");
     if (t != vs.end() && t->is_object()) {
@@ -421,19 +421,19 @@ void applyPanelViewState(WorkspaceSession& ws, const nlohmann::json& vs) {
     }
 
     // X zoom restore (decision: saved units + ranges get restored on reopen).
-    restorePanelZoom(vs, "spectrumView", ws.spectrum.manualXMin, ws.spectrum.manualXMax,
-                     ws.spectrum.pendingNextXMin, ws.spectrum.pendingNextXMax, ws.spectrum.shouldAutoscale);
-    restorePanelZoom(vs, "averageView", ws.averageSpectrum.manualXMin, ws.averageSpectrum.manualXMax,
-                     ws.averageSpectrum.pendingNextXMin, ws.averageSpectrum.pendingNextXMax,
-                     ws.averageSpectrum.shouldAutoscale);
-    restorePanelZoom(vs, "snrView", ws.snrSpectrum.manualXMin, ws.snrSpectrum.manualXMax,
-                     ws.snrSpectrum.pendingNextXMin, ws.snrSpectrum.pendingNextXMax,
-                     ws.snrSpectrum.shouldAutoscale);
+    restorePanelZoom(vs, "spectrumView", ws.spectrum.plot.manualXMin, ws.spectrum.plot.manualXMax,
+                     ws.spectrum.plot.pendingNextXMin, ws.spectrum.plot.pendingNextXMax, ws.spectrum.plot.shouldAutoscale);
+    restorePanelZoom(vs, "averageView", ws.averageSpectrum.plot.manualXMin, ws.averageSpectrum.plot.manualXMax,
+                     ws.averageSpectrum.plot.pendingNextXMin, ws.averageSpectrum.plot.pendingNextXMax,
+                     ws.averageSpectrum.plot.shouldAutoscale);
+    restorePanelZoom(vs, "snrView", ws.snrSpectrum.plot.manualXMin, ws.snrSpectrum.plot.manualXMax,
+                     ws.snrSpectrum.plot.pendingNextXMin, ws.snrSpectrum.plot.pendingNextXMax,
+                     ws.snrSpectrum.plot.shouldAutoscale);
     restorePanelZoom(vs, "allanView", ws.allanVariance.manualXMin, ws.allanVariance.manualXMax,
                      ws.allanVariance.pendingNextXMin, ws.allanVariance.pendingNextXMax,
                      ws.allanVariance.shouldAutoscale);
-    restorePanelZoom(vs, "t100View", ws.t100.manualXMin, ws.t100.manualXMax,
-                     ws.t100.pendingNextXMin, ws.t100.pendingNextXMax, ws.t100.shouldAutoscale);
+    restorePanelZoom(vs, "t100View", ws.t100.plot.manualXMin, ws.t100.plot.manualXMax,
+                     ws.t100.plot.pendingNextXMin, ws.t100.plot.pendingNextXMax, ws.t100.plot.shouldAutoscale);
 }
 
 void applyPanelViewState(AppState& s, const nlohmann::json& vs) {
@@ -478,7 +478,7 @@ bool persistedSpectrumParams(const Workspace& ws, Spectrum& out,
     auto vsIt = apps->find(kAppName);
     if (vsIt == apps->end() || !vsIt->is_object()) return false;
     const nlohmann::json& vs = *vsIt;
-    out.xUnitSelector = viewInt(vs, "spectrumView", "xUnit", out.xUnitSelector);
+    out.plot.xUnitSelector = viewInt(vs, "spectrumView", "xUnit", out.plot.xUnitSelector);
     out.refLaserTextbox = viewDouble(vs, "spectrumView", "refLaserUm",
                                      out.refLaserTextbox);
     out.Kpadding = viewInt(vs, "spectrumView", "zeroPadK", out.Kpadding);
@@ -512,13 +512,13 @@ nlohmann::json viewStateJson(const WorkspaceSession& ws) {
     j["hitranThreshold"] = ws.hitranThresholdLevel;
     j["hitranSmooth"] = ws.hitranSmoothLevel;
     j["spectrumView"] = {
-        {"xUnit", ws.spectrum.xUnitSelector},
-        {"yScale", ws.spectrum.yScaleSelector},
-        {"yAxisMode", ws.spectrum.yAxisMode},
-        {"forcedYMin", ws.spectrum.forcedYMin},
-        {"forcedYMax", ws.spectrum.forcedYMax},
-        {"manualXMin", ws.spectrum.manualXMin},
-        {"manualXMax", ws.spectrum.manualXMax},
+        {"xUnit", ws.spectrum.plot.xUnitSelector},
+        {"yScale", ws.spectrum.plot.yScaleSelector},
+        {"yAxisMode", ws.spectrum.plot.yAxisMode},
+        {"forcedYMin", ws.spectrum.plot.forcedYMin},
+        {"forcedYMax", ws.spectrum.plot.forcedYMax},
+        {"manualXMin", ws.spectrum.plot.manualXMin},
+        {"manualXMax", ws.spectrum.plot.manualXMax},
         {"detectorSensitivityKVPerW", ws.spectrum.detectorSensitivity},
         {"refLaserUm", ws.spectrum.refLaserTextbox},
         {"zeroPadK", ws.spectrum.Kpadding},
@@ -526,22 +526,22 @@ nlohmann::json viewStateJson(const WorkspaceSession& ws) {
                                             ws.spectrum.apodizationParams)}
     };
     j["averageView"] = {
-        {"xUnit", ws.averageSpectrum.xUnitSelector},
-        {"yScale", ws.averageSpectrum.yScaleSelector},
-        {"yAxisMode", ws.averageSpectrum.yAxisMode},
-        {"forcedYMin", ws.averageSpectrum.forcedYMin},
-        {"forcedYMax", ws.averageSpectrum.forcedYMax},
-        {"manualXMin", ws.averageSpectrum.manualXMin},
-        {"manualXMax", ws.averageSpectrum.manualXMax}
+        {"xUnit", ws.averageSpectrum.plot.xUnitSelector},
+        {"yScale", ws.averageSpectrum.plot.yScaleSelector},
+        {"yAxisMode", ws.averageSpectrum.plot.yAxisMode},
+        {"forcedYMin", ws.averageSpectrum.plot.forcedYMin},
+        {"forcedYMax", ws.averageSpectrum.plot.forcedYMax},
+        {"manualXMin", ws.averageSpectrum.plot.manualXMin},
+        {"manualXMax", ws.averageSpectrum.plot.manualXMax}
     };
     j["snrView"] = {
-        {"xUnit", ws.snrSpectrum.xUnitSelector},
-        {"yScale", ws.snrSpectrum.yScaleSelector},
-        {"yAxisMode", ws.snrSpectrum.yAxisMode},
-        {"forcedYMin", ws.snrSpectrum.forcedYMin},
-        {"forcedYMax", ws.snrSpectrum.forcedYMax},
-        {"manualXMin", ws.snrSpectrum.manualXMin},
-        {"manualXMax", ws.snrSpectrum.manualXMax}
+        {"xUnit", ws.snrSpectrum.plot.xUnitSelector},
+        {"yScale", ws.snrSpectrum.plot.yScaleSelector},
+        {"yAxisMode", ws.snrSpectrum.plot.yAxisMode},
+        {"forcedYMin", ws.snrSpectrum.plot.forcedYMin},
+        {"forcedYMax", ws.snrSpectrum.plot.forcedYMax},
+        {"manualXMin", ws.snrSpectrum.plot.manualXMin},
+        {"manualXMax", ws.snrSpectrum.plot.manualXMax}
     };
     j["allanView"] = {
         {"xUnit", ws.allanVariance.xUnitSelector},
@@ -554,13 +554,13 @@ nlohmann::json viewStateJson(const WorkspaceSession& ws) {
         {"manualXMax", ws.allanVariance.manualXMax}
     };
     j["t100View"] = {
-        {"xUnit", ws.t100.xUnitSelector},
-        {"yAxisMode", ws.t100.yAxisMode},
-        {"forcedYMin", ws.t100.forcedYMin},
-        {"forcedYMax", ws.t100.forcedYMax},
+        {"xUnit", ws.t100.plot.xUnitSelector},
+        {"yAxisMode", ws.t100.plot.yAxisMode},
+        {"forcedYMin", ws.t100.plot.forcedYMin},
+        {"forcedYMax", ws.t100.plot.forcedYMax},
         {"referenceSource", ws.t100.referenceSource},
-        {"manualXMin", ws.t100.manualXMin},
-        {"manualXMax", ws.t100.manualXMax},
+        {"manualXMin", ws.t100.plot.manualXMin},
+        {"manualXMax", ws.t100.plot.manualXMax},
         {"energyRatios", nlohmann::json::array({
             {{"num", std::string(ws.t100.energyRatioNumA)}, {"den", std::string(ws.t100.energyRatioDenA)}},
             {{"num", std::string(ws.t100.energyRatioNumB)}, {"den", std::string(ws.t100.energyRatioDenB)}},
@@ -726,7 +726,7 @@ std::vector<std::string> checkedInputPaths(const AppState& s) {
 
 nlohmann::json spectrumParamsJson(const AppState& s) {
     nlohmann::json j;
-    j["xUnit"] = xUnitString(s.active->spectrum.xUnitSelector);
+    j["xUnit"] = xUnitString(s.active->spectrum.plot.xUnitSelector);
     j["refLaserUm"] = s.active->spectrum.refLaserTextbox;
     j["zeroPadK"] = s.active->spectrum.Kpadding;
     j["xCorrectionMethod"] = s.active->xCorrectionMethod == 0 ? "hilbert" : "peaks";
@@ -865,7 +865,7 @@ void wsMirrorSpectrum(AppState& s, const std::string& ifgId,
 
 nlohmann::json makeAverageConfig(const AppState& s, const std::vector<std::string>& inputs, int count) {
     nlohmann::json cfg = spectrumParamsJson(s);
-    cfg["xUnit"] = xUnitString(s.active->averageSpectrum.xUnitSelector);
+    cfg["xUnit"] = xUnitString(s.active->averageSpectrum.plot.xUnitSelector);
     cfg["inputs"] = inputs;
     cfg["count"] = count;
     return cfg;
@@ -873,7 +873,7 @@ nlohmann::json makeAverageConfig(const AppState& s, const std::vector<std::strin
 
 nlohmann::json makeSnrConfig(const AppState& s, const std::vector<std::string>& inputs, int fileCount) {
     nlohmann::json cfg = spectrumParamsJson(s);
-    cfg["xUnit"] = xUnitString(s.active->snrSpectrum.xUnitSelector);
+    cfg["xUnit"] = xUnitString(s.active->snrSpectrum.plot.xUnitSelector);
     cfg["inputs"] = inputs;
     cfg["fileCount"] = fileCount;
     return cfg;
@@ -1008,7 +1008,7 @@ void seedPanelsFromWorkspace(WorkspaceSession& sess) {
         if (!m || !spectrumMemberFresh(ws, sess, *m)) continue;
         auto memberUnit = static_cast<SpectralToolbox::SpectrumXUnit>(
             xUnitFromString(configXUnit(parseConfig(m->config))));
-        auto uiUnit = static_cast<SpectralToolbox::SpectrumXUnit>(sess.spectrum.xUnitSelector);
+        auto uiUnit = static_cast<SpectralToolbox::SpectrumXUnit>(sess.spectrum.plot.xUnitSelector);
         std::vector<double> freqs = m->x;
         for (double& f : freqs)
             f = SpectralToolbox::convertXValue(f, memberUnit, uiUnit);
@@ -1044,13 +1044,13 @@ void seedPanelsFromWorkspace(WorkspaceSession& sess) {
     }
     // Without this the render path would convert the already-converted seed
     // arrays in place on the next unit switch (spectrum.cpp:490-518).
-    sess.spectrum.prevXUnitSelector = sess.spectrum.xUnitSelector;
+    sess.spectrum.plot.prevXUnitSelector = sess.spectrum.plot.xUnitSelector;
 
     // Average.
     for (const auto& m : ws.averageSpectra.members) {
         if (m.id != "average" || !panelMemberFresh(sess, m, checkedInputPaths(sess))) continue;
         auto unit = xUnitFromString(configXUnit(parseConfig(m.config)));
-        auto ui = sess.averageSpectrum.xUnitSelector;
+        auto ui = sess.averageSpectrum.plot.xUnitSelector;
         std::vector<double> x = m.x;
         for (double& v : x)
             v = SpectralToolbox::convertXValue(v, static_cast<SpectralToolbox::SpectrumXUnit>(unit),
@@ -1067,7 +1067,7 @@ void seedPanelsFromWorkspace(WorkspaceSession& sess) {
     for (const auto& m : ws.snrSpectra.members) {
         if (m.id != "snr" || !panelMemberFresh(sess, m, checkedInputPaths(sess))) continue;
         auto unit = xUnitFromString(configXUnit(parseConfig(m.config)));
-        auto ui = sess.snrSpectrum.xUnitSelector;
+        auto ui = sess.snrSpectrum.plot.xUnitSelector;
         std::vector<double> x = m.x;
         for (double& v : x)
             v = SpectralToolbox::convertXValue(v, static_cast<SpectralToolbox::SpectrumXUnit>(unit),

@@ -10,6 +10,7 @@
 #include "imgui.h"
 #include "implot.h"
 #include "apodization.h"
+#include "spectral_plot.h"
 #include "spectral_toolbox.h"
 #include "running_stats.h"
 
@@ -29,38 +30,9 @@ public:
     int progressTotal;
     int progressCurrent;
 
-    bool isSelectingXRange;
-    double selectionStartX;
-    double selectionEndX;
-    bool shouldAutoscale;
-    bool firstLoadCompleted;
-    double manualXMin;
-    double manualXMax;
-    double manualYMin;
-    double manualYMax;
-    double savedYMin;
-    double savedYMax;
-
-    bool leftArrowPressedLastFrame;
-    bool rightArrowPressedLastFrame;
-    bool leftArrowHandleFlag;
-    bool rightArrowHandleFlag;
-
-    int xUnitSelector;
-    int prevXUnitSelector;
-    int yScaleSelector;
-    int prevYScaleSelector;
-    int yAxisMode;
-    int prevYAxisMode;
-    double forcedYMin;
-    double forcedYMax;
-
-    double pendingNextXMin;
-    double pendingNextXMax;
-
-    bool xUnitSwitchedThisFrame;
-    double convertedXMin;
-    double convertedXMax;
+    // Unified view/interaction state (zoom window, selectors, unit switch,
+    // shift+drag, arrow pan) — see spectral_plot.h for the phase contract.
+    SpectralPlotView plot;
 
     std::vector<double> calcCommonX;
     size_t calcNumBins;
@@ -70,6 +42,7 @@ public:
     // Parallel execution state
     std::vector<std::future<SpectralToolbox::ProcessedSpectrum>> pendingFutures_;
     std::vector<std::string> pendingFileIds_;   // parallel to pendingFutures_
+    std::vector<int> pendingUnits_;             // submit-time xUnit per future (N3)
     std::map<std::string, SpectralToolbox::ProcessedSpectrum> fileResults_;  // buffer
     std::atomic<int> completedCount_{0};
     int totalSubmitted_{0};

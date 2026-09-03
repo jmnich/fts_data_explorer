@@ -37,27 +37,6 @@ static double normalizeValue(double val, double maxVal, int yScaleSelector) {
         : val / maxVal;
 }
 
-static void SetupAxisTicksLimited(ImAxis axis, double min, double max, int maxTicks = 12) {
-    double range = max - min;
-    if (range <= 0.0) return;
-    double roughStep = range / (maxTicks - 1);
-    double exponent = std::floor(std::log10(roughStep));
-    double fraction = roughStep / std::pow(10.0, exponent);
-    double niceFraction;
-    if (fraction <= 1.0) niceFraction = 1.0;
-    else if (fraction <= 2.0) niceFraction = 2.0;
-    else if (fraction <= 5.0) niceFraction = 5.0;
-    else niceFraction = 10.0;
-    double step = niceFraction * std::pow(10.0, exponent);
-    double firstTick = std::ceil(min / step) * step;
-    std::vector<double> ticks;
-    ticks.reserve(maxTicks);
-    for (double tick = firstTick; tick <= max + step * 0.5; tick += step)
-        ticks.push_back(tick);
-    if (!ticks.empty())
-        ImPlot::SetupAxisTicks(axis, ticks.data(), ticks.size(), nullptr);
-}
-
 AverageSpectrum::AverageSpectrum()
     : appState(nullptr),
       averageCount(0),
@@ -65,34 +44,6 @@ AverageSpectrum::AverageSpectrum()
       calcInProgress(false),
       progressTotal(0),
       progressCurrent(0),
-      isSelectingXRange(false),
-      selectionStartX(0.0),
-      selectionEndX(0.0),
-      shouldAutoscale(true),
-      firstLoadCompleted(false),
-      manualXMin(0.0),
-      manualXMax(0.0),
-      manualYMin(0.0),
-      manualYMax(0.0),
-      savedYMin(0.0),
-      savedYMax(0.0),
-      leftArrowPressedLastFrame(false),
-      rightArrowPressedLastFrame(false),
-      leftArrowHandleFlag(false),
-      rightArrowHandleFlag(false),
-      xUnitSelector(0),
-      prevXUnitSelector(0),
-      yScaleSelector(0),
-      prevYScaleSelector(0),
-      yAxisMode(0),
-      prevYAxisMode(0),
-      forcedYMin(0.0),
-      forcedYMax(1.0),
-      pendingNextXMin(0.0),
-      pendingNextXMax(-1.0),
-      xUnitSwitchedThisFrame(false),
-      convertedXMin(0.0),
-      convertedXMax(0.0),
       calcNumBins(0),
       calcValidFiles(0)
 {}
@@ -108,27 +59,7 @@ void AverageSpectrum::reset() {
     calcCommonX.clear();
     calcNumBins = 0;
     calcValidFiles = 0;
-
-    isSelectingXRange = false;
-    selectionStartX = 0.0;
-    selectionEndX = 0.0;
-    shouldAutoscale = true;
-    firstLoadCompleted = false;
-    manualXMin = 0.0;
-    manualXMax = 0.0;
-    manualYMin = 0.0;
-    manualYMax = 0.0;
-    savedYMin = 0.0;
-    savedYMax = 0.0;
-    leftArrowPressedLastFrame = false;
-    rightArrowPressedLastFrame = false;
-    leftArrowHandleFlag = false;
-    rightArrowHandleFlag = false;
-    pendingNextXMin = 0.0;
-    pendingNextXMax = -1.0;
-    xUnitSwitchedThisFrame = false;
-    convertedXMin = 0.0;
-    convertedXMax = 0.0;
+    plot.reset();
 }
 
 void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
@@ -141,7 +72,82 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
         ImGui::Spacing();
     }
 #endif
-    // ---- 1. Placeholder when no average data available ----
+    // ---- 1. Unified view/interaction phases (spectral_plot.h) — placed
+    // BEFORE the no-data early return (C1): tickPrePlot owns the X-unit
+    // switch detection + prev-latch sync, which must run even when no average
+    // is displayed. Otherwise a unit switch made while the panel is empty
+    // leaves the latch stale, the batch result arrives already in the NEW
+    // unit, and the next frame converts it a second time.
+    bool isFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
+
+    // Display-space Y transform: V→W conversion when a sensitivity is set,
+    // else max-normalization (linear/log10/dB).
+    auto toDisplay = [&](double raw) -> double {
+        if (appState->active->spectrum.detectorSensitivity > 0.0f) {
+            if (plot.yScaleSelector == kYScaleDb)
+                return 10.0 * std::log10(std::max(raw / appState->active->spectrum.detectorSensitivity, 1e-300));
+            return raw / (appState->active->spectrum.detectorSensitivity * 1000.0);
+        }
+        return raw;
+    };
+    auto toDisplayValue = [&](double v) -> double {
+        if (appState->active->spectrum.detectorSensitivity > 0.0f)
+            return toDisplay(v);
+        if (cachedAverageY.empty()) return 0.0;
+        double maxVal = *std::max_element(cachedAverageY.begin(), cachedAverageY.end());
+        return normalizeValue(v, maxVal, plot.yScaleSelector);
+    };
+
+    SpectralPlotFrame f;
+    f.windowFocused = isFocused;
+    f.yLabel = (plot.yScaleSelector == kYScaleDb)
+        ? ((appState->active->spectrum.detectorSensitivity > 0.0f) ? "dBm" : "dB")
+        : "";
+    f.xDataRange = [this](double& x0, double& x1) -> bool {
+        if (cachedAverageX.empty()) return false;
+        x0 = std::min(cachedAverageX.front(), cachedAverageX.back());
+        x1 = std::max(cachedAverageX.front(), cachedAverageX.back());
+        return true;
+    };
+    f.onXUnitChanged = [this](int fromUnit, int toUnit) {
+        auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(fromUnit);
+        auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(toUnit);
+        // Convert cached average X data in-place (unit-independent Y unchanged).
+        if (averageAvailable && !cachedAverageX.empty()) {
+            for (double& x : cachedAverageX)
+                x = SpectralToolbox::convertXValue(x, oldU, newU);
+        }
+        // Mid-batch unit switch (N3): already-buffered worker results were
+        // converted to the old unit at poll time — keep them consistent.
+        for (auto& [fid, ps] : fileResults_)
+            for (double& x : ps.spectrumX)
+                x = SpectralToolbox::convertXValue(x, oldU, newU);
+        for (double& x : calcCommonX)
+            x = SpectralToolbox::convertXValue(x, oldU, newU);
+    };
+    f.onViewChanged = [this]() { appState->needsRedraw = true; };
+    f.yDataRange = [this, &toDisplayValue](double& y0, double& y1) -> bool {
+        if (cachedAverageY.empty()) return false;
+        // Hoist max_element out of the per-point loop (C2): calling
+        // toDisplayValue per point re-scanned the whole buffer each point
+        // (O(n²) on the autoscale frame).
+        const bool normalize = appState->active->spectrum.detectorSensitivity <= 0.0f;
+        const double maxVal = normalize
+            ? *std::max_element(cachedAverageY.begin(), cachedAverageY.end()) : 0.0;
+        y0 = std::numeric_limits<double>::max();
+        y1 = std::numeric_limits<double>::lowest();
+        for (double v : cachedAverageY) {
+            double d = normalize ? normalizeValue(v, maxVal, plot.yScaleSelector)
+                                 : toDisplayValue(v);
+            y0 = std::min(y0, d);
+            y1 = std::max(y1, d);
+        }
+        return true;
+    };
+
+    plot.tickPrePlot(f);
+
+    // ---- 2. Placeholder when no average data available ----
     if (!averageAvailable || cachedAverageX.empty() || cachedAverageY.empty()) {
         ImVec2 avail = ImGui::GetContentRegionAvail();
         ImVec2 textSize = ImGui::CalcTextSize("No average spectrum available");
@@ -152,7 +158,7 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
         return;
     }
 
-    // ---- 2. Top-right "Average of N" ----
+    // ---- 3. Top-right "Average of N" ----
     {
         char buf[64];
         std::snprintf(buf, sizeof(buf), "Average of %d", averageCount);
@@ -162,277 +168,17 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
         ImGui::Text("%s", buf);
     }
 
-    // ---- 3. ESC handler ----
-    bool isFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
-    if (isFocused && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-        shouldAutoscale = true;
-        pendingNextXMin = 0.0;
-        pendingNextXMax = -1.0;
-        manualXMin = 0.0;
-        manualXMax = 0.0;
-    }
-    if (!isFocused) {
-        leftArrowPressedLastFrame = false;
-        rightArrowPressedLastFrame = false;
-        leftArrowHandleFlag = false;
-        rightArrowHandleFlag = false;
-    }
-
-    // ---- 4. Arrow key pan ----
-    if (isFocused) {
-        if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) && !leftArrowPressedLastFrame) {
-            leftArrowPressedLastFrame = true;
-            leftArrowHandleFlag = true;
-        } else if (ImGui::IsKeyReleased(ImGuiKey_LeftArrow)) {
-            leftArrowPressedLastFrame = false;
-            leftArrowHandleFlag = false;
-        }
-        if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) && !rightArrowPressedLastFrame) {
-            rightArrowPressedLastFrame = true;
-            rightArrowHandleFlag = true;
-        } else if (ImGui::IsKeyReleased(ImGuiKey_RightArrow)) {
-            rightArrowPressedLastFrame = false;
-            rightArrowHandleFlag = false;
-        }
-    }
-
-    if (!shouldAutoscale && pendingNextXMin >= pendingNextXMax) {
-        double range = manualXMax - manualXMin;
-        if (range > 0.0 && manualXMin < manualXMax) {
-            if (leftArrowHandleFlag) {
-                double panAmount = range * 0.1;
-                double newMin = manualXMin - panAmount;
-                double newMax = manualXMax - panAmount;
-                ImPlot::SetNextAxisLimits(ImAxis_X1, newMin, newMax, ImPlotCond_Always);
-            }
-            if (rightArrowHandleFlag) {
-                double panAmount = range * 0.1;
-                double newMin = manualXMin + panAmount;
-                double newMax = manualXMax + panAmount;
-                ImPlot::SetNextAxisLimits(ImAxis_X1, newMin, newMax, ImPlotCond_Always);
-            }
-        }
-    }
-
-    // Hidden dock tabs set SkipItems: arming SetNextAxisLimits here would
-    // be discarded by ImPlot's hidden-window early return, losing the
-    // restored X range. Keep it armed until the panel is actually visible.
-    if (pendingNextXMin < pendingNextXMax && !ImGui::GetCurrentWindowRead()->SkipItems) {
-        ImPlot::SetNextAxisLimits(ImAxis_X1, pendingNextXMin, pendingNextXMax, ImPlotCond_Always);
-        manualXMin = pendingNextXMin;
-        manualXMax = pendingNextXMax;
-        shouldAutoscale = false;
-        pendingNextXMin = 0.0;
-        pendingNextXMax = -1.0;
-    }
-
-    // ---- 5. X-unit change: convert limits ----
-    if (xUnitSelector != prevXUnitSelector) {
-        if (!shouldAutoscale && manualXMin < manualXMax) {
-            auto oldUnit = static_cast<SpectralToolbox::SpectrumXUnit>(prevXUnitSelector);
-            auto newUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
-            double newMin = SpectralToolbox::convertXValue(manualXMin, oldUnit, newUnit);
-            double newMax = SpectralToolbox::convertXValue(manualXMax, oldUnit, newUnit);
-            if (newMin > newMax) std::swap(newMin, newMax);
-            ImPlot::SetNextAxisLimits(ImAxis_X1, newMin, newMax, ImPlotCond_Always);
-            xUnitSwitchedThisFrame = true;
-            convertedXMin = newMin;
-            convertedXMax = newMax;
-        }
-        // Convert cached average X data in-place (unit-independent Y stays unchanged)
-        if (averageAvailable && !cachedAverageX.empty()) {
-            auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(prevXUnitSelector);
-            auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
-            for (double& x : cachedAverageX)
-                x = SpectralToolbox::convertXValue(x, oldU, newU);
-        }
-        pendingNextXMin = 0.0;
-        pendingNextXMax = -1.0;
-        prevXUnitSelector = xUnitSelector;
-    }
-
-    // ---- 6. Y-scale change: re-fit Y ----
-    if (yScaleSelector != prevYScaleSelector) {
-        if (yAxisMode != 2)
-            ImPlot::SetNextAxisToFit(ImAxis_Y1);
-        prevYScaleSelector = yScaleSelector;
-    }
-
-    // ---- 7. Y-axis mode change ----
-    if (yAxisMode != prevYAxisMode) {
-        if (yAxisMode == 0 || yAxisMode == 1)
-            ImPlot::SetNextAxisToFit(ImAxis_Y1);
-        else if (yAxisMode == 2 && forcedYMin < forcedYMax)
-            ImPlot::SetNextAxisLimits(ImAxis_Y1, forcedYMin, forcedYMax, ImPlotCond_Always);
-        prevYAxisMode = yAxisMode;
-    }
-
-    // ---- 8. BeginPlot ----
-    ImPlotFlags plot_flags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend;
+    // ---- 4. BeginPlot ----
     {
         ImVec4 avgGridCol = ImPlot::GetStyle().Colors[ImPlotCol_AxisGrid];
         avgGridCol.w *= appState->gridAlpha;
         ImPlot::PushStyleColor(ImPlotCol_AxisGrid, avgGridCol);
     }
-    if (ImPlot::BeginPlot(workspacePlotId("AverageViewPlot").c_str(), ImVec2(-1, -1), plot_flags)) {
+    if (ImPlot::BeginPlot(workspacePlotId("AverageViewPlot").c_str(), ImVec2(-1, -1), f.plotFlags)) {
 
-        ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoTickMarks;
-        ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
+        plot.setupAxes(f);
 
-        if (yAxisMode == 0)
-            y_flags |= ImPlotAxisFlags_AutoFit;
-        else if (yAxisMode == 1)
-            y_flags |= ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_RangeFit;
-
-        const char* xLabel = (xUnitSelector == 0) ? "Wavenumber (cm-1)"
-                           : (xUnitSelector == 1) ? "Wavelength (\xC2\xB5" "m)"
-                                                 : "Frequency (THz)";
-        const char* yLabel = "";
-        if (yScaleSelector == 2)
-            yLabel = (appState->active->spectrum.detectorSensitivity > 0.0f) ? "dBm" : "dB";
-        ImPlot::SetupAxes(xLabel, yLabel, x_flags, y_flags);
-
-        if (yScaleSelector == 1)
-            ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Log10);
-
-        // Helper: V→W conversion only. When sensitivity == 0, caller normalizes.
-        auto toDisplay = [&](double raw) -> double {
-            if (appState->active->spectrum.detectorSensitivity > 0.0f) {
-                if (yScaleSelector == 2)
-                    return 10.0 * std::log10(std::max(raw / appState->active->spectrum.detectorSensitivity, 1e-300));
-                return raw / (appState->active->spectrum.detectorSensitivity * 1000.0);
-            }
-            return raw;
-        };
-
-        const bool effectiveForceY = (yAxisMode == 2) && (forcedYMin < forcedYMax);
-        if (effectiveForceY) {
-            double yMin = forcedYMin;
-            double yMax = forcedYMax;
-            if (yScaleSelector == 1 && yMin <= 0.0)
-                yMin = (yMax > 0.0 ? yMax * 1e-6 : 1e-6);
-            ImPlot::SetupAxisLimits(ImAxis_Y1, yMin, yMax, ImPlotCond_Always);
-        }
-
-        // Autoscale
-        if (shouldAutoscale && !cachedAverageX.empty()) {
-            double xMin = std::min(cachedAverageX.front(), cachedAverageX.back());
-            double xMax = std::max(cachedAverageX.front(), cachedAverageX.back());
-
-            double yMin, yMax;
-            if (appState->active->spectrum.detectorSensitivity > 0.0f) {
-                yMin = std::numeric_limits<double>::max();
-                yMax = std::numeric_limits<double>::lowest();
-                for (double v : cachedAverageY) {
-                    double d = toDisplay(v);
-                    yMin = std::min(yMin, d);
-                    yMax = std::max(yMax, d);
-                }
-            } else {
-                double maxVal = *std::max_element(cachedAverageY.begin(), cachedAverageY.end());
-                yMin = std::numeric_limits<double>::max();
-                yMax = std::numeric_limits<double>::lowest();
-                for (double v : cachedAverageY) {
-                    double d = normalizeValue(v, maxVal, yScaleSelector);
-                    yMin = std::min(yMin, d);
-                    yMax = std::max(yMax, d);
-                }
-            }
-
-            if (xMin < xMax)
-                ImPlot::SetupAxisLimits(ImAxis_X1, xMin, xMax, ImPlotCond_Always);
-            if (!effectiveForceY) {
-                if (yScaleSelector == 1 && yMin <= 0.0)
-                    yMin = (yMax > 0.0 ? yMax * 1e-6 : 1e-6);
-                ImPlot::SetupAxisLimits(ImAxis_Y1, yMin, yMax, ImPlotCond_Always);
-            }
-            shouldAutoscale = false;
-        }
-
-        if (!firstLoadCompleted && !cachedAverageX.empty()) {
-            if (manualXMin == 0.0 && manualXMax == 0.0)
-                shouldAutoscale = true;
-            firstLoadCompleted = true;
-        }
-
-        // Clamp converted X limits to actual data range after unit switch
-        if (xUnitSwitchedThisFrame) {
-            xUnitSwitchedThisFrame = false;
-            double dataXMin = std::min(cachedAverageX.front(), cachedAverageX.back());
-            double dataXMax = std::max(cachedAverageX.front(), cachedAverageX.back());
-            if (dataXMin < dataXMax) {
-                double clampedMin = std::max(convertedXMin, dataXMin);
-                double clampedMax = std::min(convertedXMax, dataXMax);
-                if (clampedMin < clampedMax) {
-                    ImPlot::SetupAxisLimits(ImAxis_X1, clampedMin, clampedMax, ImPlotCond_Always);
-                    manualXMin = clampedMin;
-                    manualXMax = clampedMax;
-                } else {
-                    ImPlot::SetupAxisLimits(ImAxis_X1, dataXMin, dataXMax, ImPlotCond_Always);
-                    manualXMin = dataXMin;
-                    manualXMax = dataXMax;
-                }
-            }
-        }
-
-        // ---- 9. Ticks setup (from current view range) ----
-        {
-            double xMin = manualXMin;
-            double xMax = manualXMax;
-            double yMin = savedYMin;
-            double yMax = savedYMax;
-            if (yMin >= yMax) {
-                if (appState->active->spectrum.detectorSensitivity > 0.0f) {
-                    yMin = std::numeric_limits<double>::max();
-                    yMax = std::numeric_limits<double>::lowest();
-                    for (double v : cachedAverageY) {
-                        double d = toDisplay(v);
-                        yMin = std::min(yMin, d);
-                        yMax = std::max(yMax, d);
-                    }
-                } else {
-                    double maxVal = *std::max_element(cachedAverageY.begin(), cachedAverageY.end());
-                    yMin = std::numeric_limits<double>::max();
-                    yMax = std::numeric_limits<double>::lowest();
-                    for (double v : cachedAverageY) {
-                        double d = normalizeValue(v, maxVal, yScaleSelector);
-                        yMin = std::min(yMin, d);
-                        yMax = std::max(yMax, d);
-                    }
-                }
-            }
-            if (xMin >= xMax) {
-                xMin = std::min(cachedAverageX.front(), cachedAverageX.back());
-                xMax = std::max(cachedAverageX.front(), cachedAverageX.back());
-            }
-            if (xMin < xMax) SetupAxisTicksLimited(ImAxis_X1, xMin, xMax);
-            if (yMin < yMax) SetupAxisTicksLimited(ImAxis_Y1, yMin, yMax);
-        }
-
-        // ---- 10. Shift+drag X-range selection ----
-        {
-            bool shift = ImGui::GetIO().KeyShift;
-            bool overPlot = ImPlot::IsPlotHovered();
-            if (isFocused && overPlot && shift && !isSelectingXRange) {
-                isSelectingXRange = true;
-                selectionStartX = 0.0;
-                selectionEndX = 0.0;
-            } else if (!shift && isSelectingXRange) {
-                isSelectingXRange = false;
-                if (selectionStartX != selectionEndX) {
-                    double sX = selectionStartX;
-                    double eX = selectionEndX;
-                    if (sX > eX) std::swap(sX, eX);
-                    pendingNextXMin = sX;
-                    pendingNextXMax = eX;
-                    manualXMin = sX;
-                    manualXMax = eX;
-                    shouldAutoscale = false;
-                }
-            }
-        }
-
-        // ---- 11. Plot the average line (yellow) ----
+        // ---- 10. Plot the average line (yellow) ----
         {
             const double* plotData = cachedAverageY.data();
             std::vector<double> displayBuf;
@@ -444,7 +190,7 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
             } else {
                 displayBuf.resize(cachedAverageY.size());
                 std::copy(cachedAverageY.begin(), cachedAverageY.end(), displayBuf.begin());
-                normalizeBuffer(displayBuf, cachedAverageY, yScaleSelector);
+                normalizeBuffer(displayBuf, cachedAverageY, plot.yScaleSelector);
                 plotData = displayBuf.data();
             }
 
@@ -455,42 +201,18 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
                              cachedAverageY.size(), spec);
         }
 
-        // ---- 12. Selection visualization ----
-        if (isSelectingXRange) {
-            ImPlotPoint mousePos = ImPlot::GetPlotMousePos();
-            double x_min_plot = ImPlot::GetPlotLimits().X.Min;
-            double x_max_plot = ImPlot::GetPlotLimits().X.Max;
-            double y_min_plot = ImPlot::GetPlotLimits().Y.Min;
-            double y_max_plot = ImPlot::GetPlotLimits().Y.Max;
-            if (selectionStartX == 0.0 && selectionEndX == 0.0)
-                selectionStartX = mousePos.x;
-            double constrainedMouseX = std::clamp(mousePos.x, x_min_plot, x_max_plot);
-            selectionEndX = constrainedMouseX;
-            double selection_left = std::min(selectionStartX, selectionEndX);
-            double selection_right = std::max(selectionStartX, selectionEndX);
-            selection_left = std::clamp(selection_left, x_min_plot, x_max_plot);
-            selection_right = std::clamp(selection_right, x_min_plot, x_max_plot);
-            double shade_x[2] = {selection_left, selection_right};
-            double shade_y1[2] = {y_min_plot, y_min_plot};
-            double shade_y2[2] = {y_max_plot, y_max_plot};
-            ImPlotSpec fillSpec;
-            fillSpec.FillColor = ImVec4(0.5f, 0.0f, 0.5f, 0.3f);
-            ImPlot::PlotShaded("##AvgSelectionFill", shade_x, shade_y1, shade_y2, 2, fillSpec);
-            double start_x[2] = {selectionStartX, selectionStartX};
-            double start_y[2] = {y_min_plot, y_max_plot};
-            double end_x[2] = {selectionEndX, selectionEndX};
-            double end_y[2] = {y_min_plot, y_max_plot};
-            ImPlot::PlotLine("##AvgSelectionStart", start_x, start_y, 2);
-            ImPlot::PlotLine("##AvgSelectionEnd", end_x, end_y, 2);
-        }
-
         // HITRAN gas-band markers (drawn before the cursor so the tracking
         // cursor info box stays on top).
-        renderHitranMarkers(appState->active->hitranGasEnabled, xUnitSelector,
+        renderHitranMarkers(appState->active->hitranGasEnabled, plot.xUnitSelector,
                             appState->active->hitranThresholdLevel,
                             appState->active->hitranSmoothLevel);
 
-        // ---- 13. Tracking cursor (shared overlay) ----
+        // Shift+drag X-range selection (bugfix: was missing here — only SNR
+        // had the interaction phases, so dragging never armed a zoom).
+        plot.tickInPlot(f);
+        plot.drawSelectionOverlay("##Avg");
+
+        // ---- 12. Tracking cursor (shared overlay) ----
         if (showTrackingCursor && ImPlot::IsPlotHovered()) {
             ImPlotPoint mousePos = ImPlot::GetPlotMousePos();
             const ImPlotRect lim = ImPlot::GetPlotLimits();
@@ -498,46 +220,23 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
             const double xHi = std::max(lim.X.Min, lim.X.Max);
             const double mx = std::min(std::max(mousePos.x, xLo), xHi);
 
-            using ST = SpectralToolbox::SpectrumXUnit;
-            auto unit = static_cast<ST>(xUnitSelector);
-            double cm1 = (unit == ST::CmInv) ? mx :
-                         SpectralToolbox::convertXValue(mx, unit, ST::CmInv);
-            double um  = (unit == ST::Um) ? mx :
-                         SpectralToolbox::convertXValue(mx, unit, ST::Um);
-            double thz = (unit == ST::THz) ? mx :
-                          SpectralToolbox::convertXValue(mx, unit, ST::THz);
             char header[128];
-            std::snprintf(header, sizeof(header), "X: %.2f cm-1 / %.4f um / %.4f THz",
-                          cm1, um, thz);
+            SpectralPlotView::formatCursorHeader(mx, plot.xUnitSelector, header, sizeof(header));
 
-            const int ys = yScaleSelector;
             std::vector<CursorCurve> cursorCurves;
             if (!cachedAverageX.empty() && !cachedAverageY.empty()) {
                 CursorCurve cc;
                 cc.x = &cachedAverageX;
                 cc.y = &cachedAverageY;
                 cc.color = ImVec4(0.6f, 0.5f, 0.1f, 1.0f);
-                if (appState->active->spectrum.detectorSensitivity > 0.0f) {
-                    cc.transform = [toDisplay](double v) { return toDisplay(v); };
-                } else {
-                    double maxVal = *std::max_element(cachedAverageY.begin(), cachedAverageY.end());
-                    cc.transform = [maxVal, ys](double v) { return normalizeValue(v, maxVal, ys); };
-                }
+                cc.transform = [&toDisplayValue](double v) { return toDisplayValue(v); };
                 cursorCurves.push_back(std::move(cc));
             }
             renderCursorOverlay(header, cursorCurves);
         }
 
         // Save current limits
-        {
-            const ImPlotRect lim = ImPlot::GetPlotLimits();
-            if (lim.X.Min < lim.X.Max && pendingNextXMin >= pendingNextXMax) {
-                manualXMin = lim.X.Min;
-                manualXMax = lim.X.Max;
-            }
-            savedYMin = lim.Y.Min;
-            savedYMax = lim.Y.Max;
-        }
+        plot.captureLimits();
 
         ImPlot::EndPlot();
     }
@@ -545,6 +244,12 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
 }
 
 void AverageSpectrum::startCalculation() {
+    // Refit the view on recompute (L7): a stale zoom window from the previous
+    // result must not survive into the new one.
+    plot.firstLoadCompleted = false;
+    plot.shouldAutoscale = true;
+    plot.manualXMin = 0.0;
+    plot.manualXMax = 0.0;
     calcCommonX.clear();
     calcNumBins = 0;
     calcValidFiles = 0;
@@ -558,6 +263,7 @@ void AverageSpectrum::startCalculation() {
     batchActive_ = false;
     pendingFutures_.clear();
     pendingFileIds_.clear();
+    pendingUnits_.clear();
     fileResults_.clear();
     completedCount_ = 0;
     totalSubmitted_ = 0;
@@ -573,12 +279,13 @@ bool AverageSpectrum::tickCalculation() {
         totalSubmitted_ = 0;
         pendingFutures_.clear();
         pendingFileIds_.clear();
+        pendingUnits_.clear();
         fileResults_.clear();
         calcValidFiles = 0;
 
         double refLaser = appState->active->spectrum.refLaserTextbox;
         int K = appState->active->spectrum.Kpadding;
-        auto xUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
+        auto xUnit = static_cast<SpectralToolbox::SpectrumXUnit>(plot.xUnitSelector);
         int apodSelector = appState->active->spectrum.apodizationSelector;
         auto apodParams = appState->active->spectrum.apodizationParams;
 
@@ -628,6 +335,7 @@ bool AverageSpectrum::tickCalculation() {
             });
             pendingFutures_.push_back(std::move(fut));
             pendingFileIds_.push_back(filePath);
+            pendingUnits_.push_back(plot.xUnitSelector);   // N3: submit-time unit stamp
             totalSubmitted_++;
         }
         progressTotal = totalSubmitted_;
@@ -646,6 +354,15 @@ bool AverageSpectrum::tickCalculation() {
         if (fut.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
             try {
                 auto ps = fut.get();
+                // N3: results were computed in the submit-time unit — convert
+                // to the CURRENT unit before buffering, so a mid-batch X-unit
+                // switch lands everything in one consistent unit.
+                if (fi < pendingUnits_.size() && pendingUnits_[fi] != plot.xUnitSelector) {
+                    auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(pendingUnits_[fi]);
+                    auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(plot.xUnitSelector);
+                    for (double& x : ps.spectrumX)
+                        x = SpectralToolbox::convertXValue(x, oldU, newU);
+                }
                 if (!ps.spectrumX.empty() && !ps.spectrumY.empty())
                     fileResults_[pendingFileIds_[fi]] = std::move(ps);
             } catch (const std::exception& e) {
@@ -683,6 +400,7 @@ bool AverageSpectrum::tickCalculation() {
         }
         fileResults_.clear();
         pendingFileIds_.clear();
+        pendingUnits_.clear();
         if (calcValidFiles > 0) {
             for (size_t j = 0; j < calcNumBins; j++)
                 cachedAverageY[j] /= calcValidFiles;
@@ -765,134 +483,62 @@ void renderAveragePanel() {
             }
             ImGui::PopStyleColor(3);
 
-            // ---- Y scale selector (INDEPENDENT) ----
-            ImGui::Text("Y scale");
-            ImGui::SameLine();
-            const bool linSel = (appState.active->averageSpectrum.yScaleSelector == 0);
-            const bool logSel = (appState.active->averageSpectrum.yScaleSelector == 1);
-            const bool dbSel  = (appState.active->averageSpectrum.yScaleSelector == 2);
+            // ---- Y scale / X unit / Match X / Y Axis (INDEPENDENT) ----
+            auto& avgPlot = appState.active->averageSpectrum.plot;
+            if (avgPlot.renderYScaleButtons("##AvgYScale", true))
+                appState.needsRedraw = true;
 
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[linSel ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  linSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("lin##AvgYScaleLin")) { appState.active->averageSpectrum.yScaleSelector = 0; appState.needsRedraw = true; }
-            ImGui::PopStyleColor(3);
-            ImGui::SameLine();
+            if (avgPlot.renderXUnitButtons("##AvgXUnit"))
+                appState.needsRedraw = true;
 
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[logSel ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  logSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("log##AvgYScaleLog")) { appState.active->averageSpectrum.yScaleSelector = 1; appState.needsRedraw = true; }
-            ImGui::PopStyleColor(3);
-            ImGui::SameLine();
-
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[dbSel ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  dbSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("dB##AvgYScaleDb")) { appState.active->averageSpectrum.yScaleSelector = 2; appState.needsRedraw = true; }
-            ImGui::PopStyleColor(3);
-
-            // ---- X unit selector (INDEPENDENT) ----
-            ImGui::Text("X unit");
-            ImGui::SameLine();
-            const bool cmSel  = (appState.active->averageSpectrum.xUnitSelector == 0);
-            const bool umSel  = (appState.active->averageSpectrum.xUnitSelector == 1);
-            const bool thzSel = (appState.active->averageSpectrum.xUnitSelector == 2);
-
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[cmSel ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cmSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("cm-1##AvgXUnitCm")) { appState.active->averageSpectrum.xUnitSelector = 0; appState.needsRedraw = true; }
-            ImGui::PopStyleColor(3);
-            ImGui::SameLine();
-
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[umSel ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  umSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("\xC2\xB5""m##AvgXUnitUm")) { appState.active->averageSpectrum.xUnitSelector = 1; appState.needsRedraw = true; }
-            ImGui::PopStyleColor(3);
-            ImGui::SameLine();
-
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[thzSel ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  thzSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("THz##AvgXUnitTHz")) { appState.active->averageSpectrum.xUnitSelector = 2; appState.needsRedraw = true; }
-            ImGui::PopStyleColor(3);
-
-                // Match X to Spectrum View
-                if (ImGui::Button("Match X to Spectrum View##AvgMatchX")) {
-                    int newXUnit = appState.active->spectrum.xUnitSelector;
-                    int oldUnit = appState.active->averageSpectrum.prevXUnitSelector;
-                    double specMin = appState.active->spectrum.manualXMin;
-                    double specMax = appState.active->spectrum.manualXMax;
-
-                    if (specMin < specMax) {
-                        appState.active->averageSpectrum.manualXMin = specMin;
-                        appState.active->averageSpectrum.manualXMax = specMax;
-                        appState.active->averageSpectrum.pendingNextXMin = specMin;
-                        appState.active->averageSpectrum.pendingNextXMax = specMax;
-                        appState.active->averageSpectrum.shouldAutoscale = false;
-                    } else {
-                        appState.active->averageSpectrum.shouldAutoscale = true;
-                    }
-
-                    if (appState.active->averageSpectrum.averageAvailable && !appState.active->averageSpectrum.cachedAverageX.empty()) {
-                        auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(oldUnit);
-                        auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(newXUnit);
-                        for (double& x : appState.active->averageSpectrum.cachedAverageX)
-                            x = SpectralToolbox::convertXValue(x, oldU, newU);
-                    }
-
-                    appState.active->averageSpectrum.xUnitSelector = newXUnit;
-                    appState.active->averageSpectrum.prevXUnitSelector = newXUnit;
-                    appState.needsRedraw = true;
+            // Match X to Spectrum View: adopt the Spectrum panel's unit and
+            // zoom window, converting the panel's cached data along the way
+            // (the view's tick-time unit block must NOT fire again — adoptXUnit
+            // syncs the prev latch).
+            if (ImGui::Button("Match X to Spectrum View##AvgMatchX")) {
+                auto& avg = appState.active->averageSpectrum;
+                auto& spec = appState.active->spectrum;
+                int prevUnit = 0;
+                if (avg.plot.adoptXUnit(spec.plot.xUnitSelector, prevUnit)) {
+                    auto fromU = static_cast<SpectralToolbox::SpectrumXUnit>(prevUnit);
+                    auto toU   = static_cast<SpectralToolbox::SpectrumXUnit>(avg.plot.xUnitSelector);
+                    if (avg.averageAvailable)
+                        for (double& x : avg.cachedAverageX)
+                            x = SpectralToolbox::convertXValue(x, fromU, toU);
+                    for (auto& [fid, ps] : avg.fileResults_)
+                        for (double& x : ps.spectrumX)
+                            x = SpectralToolbox::convertXValue(x, fromU, toU);
+                    for (double& x : avg.calcCommonX)
+                        x = SpectralToolbox::convertXValue(x, fromU, toU);
                 }
-
-            // ---- Y Axis mode selector (INDEPENDENT) ----
-            ImGui::Text("Y Axis");
-            ImGui::SameLine();
-            const bool allSel   = (appState.active->averageSpectrum.yAxisMode == 0);
-            const bool tightSel = (appState.active->averageSpectrum.yAxisMode == 1);
-            const bool forceSel = (appState.active->averageSpectrum.yAxisMode == 2);
-
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[allSel ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("all##AvgYAxisAll")) { appState.active->averageSpectrum.yAxisMode = 0; appState.needsRedraw = true; }
-            ImGui::PopStyleColor(3);
-            ImGui::SameLine();
-
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[tightSel ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  tightSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("tight##AvgYAxisTight")) { appState.active->averageSpectrum.yAxisMode = 1; appState.needsRedraw = true; }
-            ImGui::PopStyleColor(3);
-            ImGui::SameLine();
-
-            ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[forceSel ? 1 : 0]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  forceSel ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-            if (ImGui::Button("force##AvgYAxisForce")) { appState.active->averageSpectrum.yAxisMode = 2; appState.needsRedraw = true; }
-            ImGui::PopStyleColor(3);
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("all: auto-fit Y to all data\n"
-                                  "tight: auto-fit Y to visible data only\n"
-                                  "force: lock Y to the given min/max");
+                avg.plot.copyXRangeFrom(spec.plot);
+                // Clamp the copied window to this panel's own data range (M1):
+                // a zoomed-out Spectrum window can miss a narrower average and
+                // would otherwise open mostly empty.
+                if (!avg.cachedAverageX.empty()) {
+                    const double lo = std::min(avg.cachedAverageX.front(), avg.cachedAverageX.back());
+                    const double hi = std::max(avg.cachedAverageX.front(), avg.cachedAverageX.back());
+                    avg.plot.clampPendingToRange(lo, hi);
+                }
+                appState.needsRedraw = true;
             }
 
-            if (appState.active->averageSpectrum.yAxisMode == 2) {
+            if (avgPlot.renderYModeButtons("##AvgYAxis"))
+                appState.needsRedraw = true;
+
+            if (avgPlot.yAxisMode == kYModeForce) {
                 ImGui::Text("min:");
                 ImGui::SameLine();
                 ImGui::SetNextItemWidth(80.0f);
-                if (ImGui::InputDouble("##AvgForcedYMin", &appState.active->averageSpectrum.forcedYMin, 0.0, 0.0, "%.6g"))
+                if (ImGui::InputDouble("##AvgForcedYMin", &appState.active->averageSpectrum.plot.forcedYMin, 0.0, 0.0, "%.6g"))
                     appState.needsRedraw = true;
                 ImGui::SameLine();
                 ImGui::Text("max:");
                 ImGui::SameLine();
                 ImGui::SetNextItemWidth(80.0f);
-                if (ImGui::InputDouble("##AvgForcedYMax", &appState.active->averageSpectrum.forcedYMax, 0.0, 0.0, "%.6g"))
+                if (ImGui::InputDouble("##AvgForcedYMax", &appState.active->averageSpectrum.plot.forcedYMax, 0.0, 0.0, "%.6g"))
                     appState.needsRedraw = true;
-                if (appState.active->averageSpectrum.forcedYMin >= appState.active->averageSpectrum.forcedYMax) {
+                if (appState.active->averageSpectrum.plot.forcedYMin >= appState.active->averageSpectrum.plot.forcedYMax) {
                     ImGui::SameLine();
                     ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "(min<max!)");
                 }

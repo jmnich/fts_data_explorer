@@ -308,42 +308,42 @@ static void applyJsonConfig(AppState& state, const json& j) {
         std::string xMethod = jsonVal<std::string>(s, "xCorrectionMethod", "Hilbert");
         state.active->xCorrectionMethod = (xMethod == "PeakFinding") ? 1 : 0;
         state.active->peakProminenceThreshold = jsonVal<float>(s, "peakProminence", 0.02f);
-        state.active->spectrum.xUnitSelector   = jsonXUnitToInt(jsonVal<std::string>(s, "xUnit", "cm-1"));
-        state.active->spectrum.yScaleSelector  = jsonYScaleToInt(jsonVal<std::string>(s, "yScale", "lin"));
-        state.active->spectrum.yAxisMode       = jsonYAxisModeToInt(jsonVal<std::string>(s, "yAxisMode", "all"));
-        state.active->spectrum.forcedYMin      = jsonVal<double>(s, "forcedYMin", 0.0);
-        state.active->spectrum.forcedYMax      = jsonVal<double>(s, "forcedYMax", 1.0);
+        state.active->spectrum.plot.xUnitSelector   = jsonXUnitToInt(jsonVal<std::string>(s, "xUnit", "cm-1"));
+        state.active->spectrum.plot.yScaleSelector  = jsonYScaleToInt(jsonVal<std::string>(s, "yScale", "lin"));
+        state.active->spectrum.plot.yAxisMode       = jsonYAxisModeToInt(jsonVal<std::string>(s, "yAxisMode", "all"));
+        state.active->spectrum.plot.forcedYMin      = jsonVal<double>(s, "forcedYMin", 0.0);
+        state.active->spectrum.plot.forcedYMax      = jsonVal<double>(s, "forcedYMax", 1.0);
 
         // Sync prev fields
-        state.active->spectrum.prevXUnitSelector = state.active->spectrum.xUnitSelector;
-        state.active->spectrum.prevYScaleSelector = state.active->spectrum.yScaleSelector;
-        state.active->spectrum.prevYAxisMode = state.active->spectrum.yAxisMode;
+        state.active->spectrum.plot.prevXUnitSelector = state.active->spectrum.plot.xUnitSelector;
+        state.active->spectrum.plot.prevYScaleSelector = state.active->spectrum.plot.yScaleSelector;
+        state.active->spectrum.plot.prevYAxisMode = state.active->spectrum.plot.yAxisMode;
     }
 
     // Average settings
     if (j.contains("average")) {
         const auto& s = j["average"];
-        state.active->averageSpectrum.xUnitSelector = jsonXUnitToInt(jsonVal<std::string>(s, "xUnit", "cm-1"));
-        state.active->averageSpectrum.yScaleSelector = jsonYScaleToInt(jsonVal<std::string>(s, "yScale", "lin"));
-        state.active->averageSpectrum.yAxisMode    = jsonYAxisModeToInt(jsonVal<std::string>(s, "yAxisMode", "all"));
-        state.active->averageSpectrum.forcedYMin   = jsonVal<double>(s, "forcedYMin", 0.0);
-        state.active->averageSpectrum.forcedYMax   = jsonVal<double>(s, "forcedYMax", 1.0);
-        state.active->averageSpectrum.prevXUnitSelector = state.active->averageSpectrum.xUnitSelector;
-        state.active->averageSpectrum.prevYScaleSelector = state.active->averageSpectrum.yScaleSelector;
-        state.active->averageSpectrum.prevYAxisMode = state.active->averageSpectrum.yAxisMode;
+        state.active->averageSpectrum.plot.xUnitSelector = jsonXUnitToInt(jsonVal<std::string>(s, "xUnit", "cm-1"));
+        state.active->averageSpectrum.plot.yScaleSelector = jsonYScaleToInt(jsonVal<std::string>(s, "yScale", "lin"));
+        state.active->averageSpectrum.plot.yAxisMode    = jsonYAxisModeToInt(jsonVal<std::string>(s, "yAxisMode", "all"));
+        state.active->averageSpectrum.plot.forcedYMin   = jsonVal<double>(s, "forcedYMin", 0.0);
+        state.active->averageSpectrum.plot.forcedYMax   = jsonVal<double>(s, "forcedYMax", 1.0);
+        state.active->averageSpectrum.plot.prevXUnitSelector = state.active->averageSpectrum.plot.xUnitSelector;
+        state.active->averageSpectrum.plot.prevYScaleSelector = state.active->averageSpectrum.plot.yScaleSelector;
+        state.active->averageSpectrum.plot.prevYAxisMode = state.active->averageSpectrum.plot.yAxisMode;
     }
 
     // SNR settings
     if (j.contains("snr")) {
         const auto& s = j["snr"];
-        state.active->snrSpectrum.xUnitSelector = jsonXUnitToInt(jsonVal<std::string>(s, "xUnit", "cm-1"));
-        state.active->snrSpectrum.yScaleSelector = jsonYScaleToInt(jsonVal<std::string>(s, "yScale", "lin"));
-        state.active->snrSpectrum.yAxisMode     = jsonYAxisModeToInt(jsonVal<std::string>(s, "yAxisMode", "all"));
-        state.active->snrSpectrum.forcedYMin    = jsonVal<double>(s, "forcedYMin", 0.0);
-        state.active->snrSpectrum.forcedYMax    = jsonVal<double>(s, "forcedYMax", 1.0);
-        state.active->snrSpectrum.prevXUnitSelector = state.active->snrSpectrum.xUnitSelector;
-        state.active->snrSpectrum.prevYScaleSelector = state.active->snrSpectrum.yScaleSelector;
-        state.active->snrSpectrum.prevYAxisMode = state.active->snrSpectrum.yAxisMode;
+        state.active->snrSpectrum.plot.xUnitSelector = jsonXUnitToInt(jsonVal<std::string>(s, "xUnit", "cm-1"));
+        state.active->snrSpectrum.plot.yScaleSelector = jsonYScaleToInt(jsonVal<std::string>(s, "yScale", "lin"));
+        state.active->snrSpectrum.plot.yAxisMode     = jsonYAxisModeToInt(jsonVal<std::string>(s, "yAxisMode", "all"));
+        state.active->snrSpectrum.plot.forcedYMin    = jsonVal<double>(s, "forcedYMin", 0.0);
+        state.active->snrSpectrum.plot.forcedYMax    = jsonVal<double>(s, "forcedYMax", 1.0);
+        state.active->snrSpectrum.plot.prevXUnitSelector = state.active->snrSpectrum.plot.xUnitSelector;
+        state.active->snrSpectrum.plot.prevYScaleSelector = state.active->snrSpectrum.plot.yScaleSelector;
+        state.active->snrSpectrum.plot.prevYAxisMode = state.active->snrSpectrum.plot.yAxisMode;
     }
 
     // Allan settings
@@ -360,12 +360,12 @@ static void applyJsonConfig(AppState& state, const json& j) {
     // T100 settings
     if (j.contains("t100")) {
         const auto& s = j["t100"];
-        state.active->t100.xUnitSelector = jsonXUnitToInt(jsonVal<std::string>(s, "xUnit", "cm-1"));
-        state.active->t100.prevXUnitSelector = state.active->t100.xUnitSelector;
-        state.active->t100.yAxisMode     = jsonYAxisModeToInt(jsonVal<std::string>(s, "yAxisMode", "all"));
-        state.active->t100.prevYAxisMode = state.active->t100.yAxisMode;
-        state.active->t100.forcedYMin    = jsonVal<double>(s, "forcedYMin", 0.0);
-        state.active->t100.forcedYMax    = jsonVal<double>(s, "forcedYMax", 100.0);
+        state.active->t100.plot.xUnitSelector = jsonXUnitToInt(jsonVal<std::string>(s, "xUnit", "cm-1"));
+        state.active->t100.plot.prevXUnitSelector = state.active->t100.plot.xUnitSelector;
+        state.active->t100.plot.yAxisMode     = jsonYAxisModeToInt(jsonVal<std::string>(s, "yAxisMode", "all"));
+        state.active->t100.plot.prevYAxisMode = state.active->t100.plot.yAxisMode;
+        state.active->t100.plot.forcedYMin    = jsonVal<double>(s, "forcedYMin", 0.0);
+        state.active->t100.plot.forcedYMax    = jsonVal<double>(s, "forcedYMax", 100.0);
 
         std::string refSrc = jsonVal<std::string>(s, "referenceSource", "File");
         if (refSrc == "CSV")     state.active->t100.referenceSource = 1;
@@ -920,8 +920,8 @@ static void handleCompare(const HeadlessConfig& cfg) {
 
     // X-unit label follows the average panel's selector (matches export.cpp).
     const char* xLabel = "Wavenumber [cm-1]";
-    if (appState.active->averageSpectrum.xUnitSelector == 1) xLabel = "Wavelength [um]";
-    else if (appState.active->averageSpectrum.xUnitSelector == 2) xLabel = "Frequency [THz]";
+    if (appState.active->averageSpectrum.plot.xUnitSelector == 1) xLabel = "Wavelength [um]";
+    else if (appState.active->averageSpectrum.plot.xUnitSelector == 2) xLabel = "Frequency [THz]";
 
     if (ot == "Comparator ratio") {
         std::string path = cfg.outputDir + "/" + slug + "_comparator_ratio.csv";

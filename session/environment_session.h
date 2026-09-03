@@ -9,6 +9,7 @@
 
 #include "session_base.h"
 #include "spectral_pool.h"
+#include "spectral_plot.h"
 
 #include <imgui.h>   // ImVec4 (ComparatorCurve::color)
 
@@ -129,17 +130,12 @@ public:
     // Key: sourceKey + "\x1f" + artifact + "\x1f" + memberId (two curves may
     // reference the same source with different members).
     std::map<std::string, MemberSnapshot> storedFingerprints;
-    int xUnitSelector = 0;               // 0 cm-1, 1 um, 2 THz
-    int prevXUnitSelector = 0;
+    // Unified view/interaction state (zoom window, selectors, unit switch,
+    // shift+drag, arrow pan) — see panels/spectral_plot.h for the phase
+    // contract. Unit switching is owned by the env's own button handler
+    // (xUnitEnabled = false in the frame config — no tick-time conversion).
+    SpectralPlotView plot;
     int yMode = 0;                       // Absorbance only: 0 T%, 1 A
-    // Plot ranging (spectrum-view scheme, both types): 0 all, 1 tight, 2 force.
-    int yAxisMode = 0;
-    int prevYAxisMode = -1;
-    double forcedYMin = 0.0, forcedYMax = 1.0;
-    // Y scale (spectrum-view scheme): 0 lin, 1 log10, 2 dB. log/dB are gated
-    // off for T100 and Interferogram artifacts (non-positive values).
-    int yScaleSelector = 0;
-    int prevYScaleSelector = -1;
     // Tracking cursor (spectrum-view scheme): marks ALL displayed curves.
     bool showTrackingCursor = false;
     // HITRAN gas-marker settings (spectral artifacts only). enabled[i] <->
@@ -173,16 +169,6 @@ public:
     // re-run the synchronous compute.
     bool resultsDirty_ = false;
 
-    // T100-pattern plot interaction (t100.h subset).
-    bool isSelectingXRange = false;
-    double selectionStartX = 0.0;
-    double selectionEndX = 0.0;
-    bool shouldAutoscale = true;
-    double manualXMin = 0.0, manualXMax = 0.0;
-    double manualYMin = 0.0, manualYMax = 0.0;
-    bool leftArrowPressedLastFrame = false, rightArrowPressedLastFrame = false;
-    bool leftArrowHandleFlag = false, rightArrowHandleFlag = false;
-    double pendingNextXMin = 0.0, pendingNextXMax = -1.0;
     // Last-rendered plot X limits (captured each frame in renderPlot) — the
     // "current plot area" source for the export X-range mode.
     double viewXMin = 0.0, viewXMax = 0.0;

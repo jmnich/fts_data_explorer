@@ -40,117 +40,29 @@ static double normalizeValue(double val, double maxVal, int yScaleSelector) {
         : val / maxVal;
 }
 
-static void SetupAxisTicksLimited(ImAxis axis, double min, double max, int maxTicks = 12) {
-    double range = max - min;
-    if (range <= 0.0) return;
-
-    double roughStep = range / (maxTicks - 1);
-    double exponent = std::floor(std::log10(roughStep));
-    double fraction = roughStep / std::pow(10.0, exponent);
-
-    double niceFraction;
-    if (fraction <= 1.0) niceFraction = 1.0;
-    else if (fraction <= 2.0) niceFraction = 2.0;
-    else if (fraction <= 5.0) niceFraction = 5.0;
-    else niceFraction = 10.0;
-
-    double step = niceFraction * std::pow(10.0, exponent);
-    double firstTick = std::ceil(min / step) * step;
-
-    std::vector<double> ticks;
-    ticks.reserve(maxTicks);
-    for (double tick = firstTick; tick <= max + step * 0.5; tick += step) {
-        ticks.push_back(tick);
-    }
-
-    if (!ticks.empty()) {
-        ImPlot::SetupAxisTicks(axis, ticks.data(), ticks.size(), nullptr);
-    }
-}
-
 Spectrum::Spectrum()
     : appState(nullptr),
       spectrumDirty(true),
-      isSelectingXRange(false),
-      selectionStartX(0.0),
-      selectionEndX(0.0),
-      shouldAutoscale(true),
-      firstLoadCompleted(false),
-      manualXMin(0.0),
-      manualXMax(0.0),
-       manualYMin(0.0),
-       manualYMax(0.0),
-       savedYMin(0.0),
-       savedYMax(0.0),
-       showTrackingCursor(false),
-      leftArrowPressedLastFrame(false),
-      rightArrowPressedLastFrame(false),
-      leftArrowHandleFlag(false),
-      rightArrowHandleFlag(false),
-      xUnitSelector(0), // Default to cm-1
-      prevXUnitSelector(0),
-      yScaleSelector(0), // Default linear Y-axis
-      prevYScaleSelector(0),
+      showTrackingCursor(false),
       refLaserTextbox(1.550f), // Default value
       detectorSensitivity(0.0f), // Default: no V→W conversion
       Kpadding(2), // Default zero-pad factor (matches test17)
       apodizationSelector(0),
-      apodizationParams(),
-      yAxisMode(0), // Default: auto-fit to all data
-      prevYAxisMode(0),
-      forcedYMin(0.0),
-      forcedYMax(1.0),
-      pendingNextXMin(0.0),
-      pendingNextXMax(-1.0), // sentinel: invalid range -> no pending value
-       xUnitSwitchedThisFrame(false),
-        convertedXMin(0.0),
-        convertedXMax(0.0) {
+      apodizationParams() {
        strcpy(detectorSensitivityText, "NA");
        }
 
 void Spectrum::resetSpectrumWindow() {
-    // Reset X-range selection state
-    isSelectingXRange = false;
-    selectionStartX = 0.0;
-    selectionEndX = 0.0;
-    
-    // Reset zoom state
-    shouldAutoscale = true;
-    firstLoadCompleted = false;
-    manualXMin = 0.0;
-    manualXMax = 0.0;
-    manualYMin = 0.0;
-    manualYMax = 0.0;
-    savedYMin = 0.0;
-    savedYMax = 0.0;
+    plot.reset();
     showTrackingCursor = false;
-    
-    // Reset arrow key state
-    leftArrowPressedLastFrame = false;
-    rightArrowPressedLastFrame = false;
-    leftArrowHandleFlag = false;
-    rightArrowHandleFlag = false;
-    
+
     // Reset UI controls
-    xUnitSelector = 0; // Reset to cm-1
-    prevXUnitSelector = 0;
-    yScaleSelector = 0; // Reset to linear
-    prevYScaleSelector = 0;
     refLaserTextbox = 1.550; // Reset to default value
     detectorSensitivity = 0.0f; // Reset to no conversion
     strcpy(detectorSensitivityText, "NA");
     Kpadding = 2; // Reset to default zero-pad factor
     apodizationSelector = 0;
     apodizationParams = ApodizationParams();
-    yAxisMode = 0; // Reset to auto-fit to all data
-    prevYAxisMode = 0;
-    forcedYMin = 0.0;
-    forcedYMax = 1.0;
-    pendingNextXMin = 0.0;
-    pendingNextXMax = -1.0;
-    xUnitSwitchedThisFrame = false;
-    convertedXMin = 0.0;
-    convertedXMax = 0.0;
     lastSpectrumParams.clear();
 }
 
@@ -256,7 +168,7 @@ bool Spectrum::computeAndCacheSpectrum(const std::string& filePath, const std::s
     try {
         auto raw = workspaceRead(appState->active->workspace, filePath);
 
-        auto targetUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
+        auto targetUnit = static_cast<SpectralToolbox::SpectrumXUnit>(plot.xUnitSelector);
 
         if (appState->active->datasetInfo.hasPrecomputedSpectra) {
             std::vector<double> freqs = raw.referenceDetector;
@@ -270,7 +182,7 @@ bool Spectrum::computeAndCacheSpectrum(const std::string& filePath, const std::s
             auto ps = SpectralToolbox::processSpectrumFromCorrectedAxis(
                 raw.primaryDetector, raw.opdAxis,
                 Kpadding,
-                static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector),
+                static_cast<SpectralToolbox::SpectrumXUnit>(plot.xUnitSelector),
                 static_cast<ApodizationWindow>(apodizationSelector),
                 apodizationParams);
             cachedFrequencies[fileId] = std::move(ps.spectrumX);
@@ -389,314 +301,90 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
         // Plot all spectra for selected files
         bool isSpectrumWindowFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
 
-        // Handle ESC key to reset zoom (must be outside BeginPlot to work when plot is not rendered).
-        // On press: enable autoscale AND clear any pending manual X range so the pre-BeginPlot
-        // pan/select block doesn't keep re-applying the previous zoom.
-        if (isSpectrumWindowFocused && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-            shouldAutoscale   = true;
-            pendingNextXMin   = 0.0;
-            pendingNextXMax   = -1.0; // invalidate pending range
-            manualXMin        = 0.0;
-            manualXMax        = 0.0;
-        }
-
-        // Reset arrow key state when window loses focus
-        if (!isSpectrumWindowFocused) {
-            leftArrowPressedLastFrame = false;
-            rightArrowPressedLastFrame = false;
-            leftArrowHandleFlag = false;
-            rightArrowHandleFlag = false;
-        }
-
-        // Arrow key pan: computed here, applied via SetNextAxisLimits BEFORE BeginPlot
-        // (ImPlot requires axis-limits setup before BeginPlot to avoid SetupLocked asserts).
-        if (isSpectrumWindowFocused) {
-            if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) && !leftArrowPressedLastFrame) {
-                leftArrowPressedLastFrame = true;
-                leftArrowHandleFlag = true;
+        // Helper: convert raw magnitude to display value (V→W only).
+        // When detectorSensitivity == 0, caller applies normalization.
+        auto toDisplay = [&](double raw) -> double {
+            if (detectorSensitivity > 0.0f) {
+                if (plot.yScaleSelector == kYScaleDb)
+                    return 10.0 * std::log10(std::max(raw / detectorSensitivity, 1e-300));
+                return raw / (detectorSensitivity * 1000.0);
             }
-            else if (ImGui::IsKeyReleased(ImGuiKey_LeftArrow)) {
-                leftArrowPressedLastFrame = false;
-                leftArrowHandleFlag = false;
-            }
+            return raw;
+        };
 
-            if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) && !rightArrowPressedLastFrame) {
-                rightArrowPressedLastFrame = true;
-                rightArrowHandleFlag = true;
+        // Unified view/interaction phases (spectral_plot.h): ESC, arrow pan,
+        // pending consume, X-unit switch, Y-scale/Y-mode refit — all BEFORE
+        // BeginPlot (ImPlot requires axis-limits setup before BeginPlot to
+        // avoid SetupLocked asserts).
+        SpectralPlotFrame f;
+        f.windowFocused = isSpectrumWindowFocused;
+        f.yLabel = (plot.yScaleSelector == kYScaleDb)
+            ? ((detectorSensitivity > 0.0f) ? "dBm" : "dB") : "";
+        f.xDataRange = [this, &primaryDetectors](double& x0, double& x1) -> bool {
+            bool have = false;
+            for (const auto& entry : primaryDetectors) {
+                auto cfIt = cachedFrequencies.find(entry.first);
+                if (cfIt == cachedFrequencies.end() || cfIt->second.empty())
+                    continue;
+                const auto& freqs = cfIt->second;
+                // Sorted ascending for cm-1/THz, descending for um — normalize
+                // ascending for the display axes.
+                double lo = std::min(freqs.front(), freqs.back());
+                double hi = std::max(freqs.front(), freqs.back());
+                if (!have) { x0 = lo; x1 = hi; have = true; }
+                else { x0 = std::min(x0, lo); x1 = std::max(x1, hi); }
             }
-            else if (ImGui::IsKeyReleased(ImGuiKey_RightArrow)) {
-                rightArrowPressedLastFrame = false;
-                rightArrowHandleFlag = false;
-            }
-        }
-
-        // Convert arrow-handle flags into pending next-plot X limits, applied before BeginPlot.
-        if (isSpectrumWindowFocused) {
-            if (leftArrowHandleFlag || rightArrowHandleFlag) {
-                // Translate by 10% of the current visible range (fall back to stored manualX*).
-                double currentXMin = (manualXMin < manualXMax) ? manualXMin : 0.0;
-                double currentXMax = (manualXMin < manualXMax) ? manualXMax : 1.0;
-                const double currentRange = currentXMax - currentXMin;
-                const double translationAmount = currentRange * 0.1;
-                if (leftArrowHandleFlag) {
-                    pendingNextXMin = currentXMin - translationAmount;
-                    pendingNextXMax = currentXMax - translationAmount;
-                    manualXMin       = pendingNextXMin;
-                    manualXMax       = pendingNextXMax;
-                    shouldAutoscale  = false;
-                    leftArrowHandleFlag = false;
-                }
-                if (rightArrowHandleFlag) {
-                    pendingNextXMin = currentXMin + translationAmount;
-                    pendingNextXMax = currentXMax + translationAmount;
-                    manualXMin       = pendingNextXMin;
-                    manualXMax       = pendingNextXMax;
-                    shouldAutoscale  = false;
-                    rightArrowHandleFlag = false;
-                }
-            }
-        }
-
-        // Pre-apply axis limits BEFORE BeginPlot.
-        // NOTE: ImPlotCond_Once means "once per runtime session" - after the first call
-        // it is silently ignored forever, so it CANNOT be used for ESC / pan / select.
-        // We use ImPlotCond_Always here, which is safe because each branch consumes its
-        // trigger immediately (pending is invalidated), so the call only fires for a
-        // single frame - leaving ImPlot's mouse pan/zoom free on all subsequent frames.
-        // ESC / first-load auto-scale is handled inside BeginPlot below, where it can
-        // inspect freshly-computed cached spectrum data. SetNextAxisToFit is not used
-        // because its effect is unreliable in this setup (silently suppressed by
-        // ImPlot's internal auto-fit state after user zoom/pan interactions).
-
-        // Hidden dock tabs set SkipItems: arming SetNextAxisLimits here would
-        // be discarded by ImPlot's hidden-window early return, losing the
-        // restored X range. Keep it armed until the panel is actually visible.
-        if (!shouldAutoscale && pendingNextXMin < pendingNextXMax &&
-            !ImGui::GetCurrentWindowRead()->SkipItems) {
-            // Arrow-key pan or shift-drag X-range selection: apply once, then consume.
-            ImPlot::SetNextAxisLimits(ImAxis_X1, pendingNextXMin, pendingNextXMax, ImPlotCond_Always);
-            pendingNextXMin = 0.0;
-            pendingNextXMax = -1.0; // invalidate
-        }
-
-        // When the X unit changes, convert the current manual X limits to the new unit
-        // so the user keeps looking at the equivalent spectral region (e.g. 1-30 um
-        // becomes 333-10000 cm-1). When shouldAutoscale is set, the auto-scale block
-        // inside BeginPlot will compute fresh limits from the new data, so conversion
-        // is unnecessary. The stale pending range is discarded - it was computed in
-        // the old unit and is meaningless in the new one.
-        if (xUnitSelector != prevXUnitSelector) {
-            if (!shouldAutoscale && manualXMin < manualXMax) {
-                auto oldUnit = static_cast<SpectralToolbox::SpectrumXUnit>(prevXUnitSelector);
-                auto newUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
-                double newMin = SpectralToolbox::convertXValue(manualXMin, oldUnit, newUnit);
-                double newMax = SpectralToolbox::convertXValue(manualXMax, oldUnit, newUnit);
-                if (newMin > newMax) std::swap(newMin, newMax);
-                ImPlot::SetNextAxisLimits(ImAxis_X1, newMin, newMax, ImPlotCond_Always);
-                // Stash for post-computation clamping to the data range
-                xUnitSwitchedThisFrame = true;
-                convertedXMin = newMin;
-                convertedXMax = newMax;
-            }
-            // Convert cached frequency data in-place (unit-independent Y stays unchanged)
-            {
-                auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(prevXUnitSelector);
-                auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
-                for (auto& [fid, freqs] : cachedFrequencies) {
-                    for (double& x : freqs) {
-                        x = SpectralToolbox::convertXValue(x, oldU, newU);
+            return have;
+        };
+        f.yDataRange = [this, &primaryDetectors, &toDisplay](double& y0, double& y1) -> bool {
+            bool have = false;
+            for (const auto& entry : primaryDetectors) {
+                auto csIt = cachedSpectra.find(entry.first);
+                if (csIt == cachedSpectra.end() || csIt->second.empty())
+                    continue;
+                const auto& spec = csIt->second;
+                // Hoist max_element out of the per-point loop (C2): scanning
+                // the whole spectrum per point is O(n²) on the autoscale
+                // frame (~10^10 ops for 100k points).
+                const bool normalize = detectorSensitivity <= 0.0f;
+                const double maxVal = normalize
+                    ? *std::max_element(spec.begin(), spec.end()) : 0.0;
+                for (double v : spec) {
+                    double d;
+                    if (detectorSensitivity > 0.0f) {
+                        d = toDisplay(v);
+                    } else {
+                        d = normalizeValue(v, maxVal, plot.yScaleSelector);
                     }
+                    if (!have) { y0 = y1 = d; have = true; }
+                    else { y0 = std::min(y0, d); y1 = std::max(y1, d); }
                 }
-                // Discard in-flight async results (they would overwrite with old-unit data)
-                pendingSpectra_.clear();
             }
-            pendingNextXMin = 0.0;
-            pendingNextXMax = -1.0;
-            prevXUnitSelector = xUnitSelector;
-        }
-
-        // When the Y scale (lin/log) selector changes, re-fit Y only - keep the
-        // current X range intact so the user keeps looking at the same spectral region.
-        if (yScaleSelector != prevYScaleSelector) {
-            if (yAxisMode != 2) {
-                ImPlot::SetNextAxisToFit(ImAxis_Y1);
+            return have;
+        };
+        f.onXUnitChanged = [this](int fromUnit, int toUnit) {
+            auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(fromUnit);
+            auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(toUnit);
+            // Convert cached frequency data in-place (unit-independent Y stays unchanged)
+            for (auto& [fid, freqs] : cachedFrequencies) {
+                for (double& x : freqs) {
+                    x = SpectralToolbox::convertXValue(x, oldU, newU);
+                }
             }
-            prevYScaleSelector = yScaleSelector;
-        }
+            // Discard in-flight async results (they would overwrite with old-unit data)
+            pendingSpectra_.clear();
+        };
+        f.onViewChanged = [this]() { appState->needsRedraw = true; };
 
-        // When the Y-axis mode changes, apply the new behavior immediately.
-        // Mode 0 (all) / 1 (tight): re-fit Y to the relevant data range.
-        // Mode 2 (force): apply user-supplied limits if valid.
-        if (yAxisMode != prevYAxisMode) {
-            if (yAxisMode == 0 || yAxisMode == 1) {
-                ImPlot::SetNextAxisToFit(ImAxis_Y1);
-            } else if (yAxisMode == 2 && forcedYMin < forcedYMax) {
-                ImPlot::SetNextAxisLimits(ImAxis_Y1, forcedYMin, forcedYMax, ImPlotCond_Always);
-            }
-            prevYAxisMode = yAxisMode;
-        }
+        plot.tickPrePlot(f);
 
-        // Match Interferogram panel behavior: NoTitle only, no NoLegend to ensure full interactions
-        ImPlotFlags plot_flags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend;
-
-        bool plotRendered = false;
         {
             ImVec4 specGridCol = ImPlot::GetStyle().Colors[ImPlotCol_AxisGrid];
             specGridCol.w *= appState->gridAlpha;
             ImPlot::PushStyleColor(ImPlotCol_AxisGrid, specGridCol);
         }
-        if (ImPlot::BeginPlot(workspacePlotId("Spectrum").c_str(), ImVec2(-1, -1), plot_flags)) {
-            plotRendered = true;
-
-            // Setup axes with conditional auto-fit behavior (no labels to match Interferogram panel style)
-            // Implement Auto-fit Y-axis (AFY) feature like in Interferogram panel
-            ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoTickMarks;
-            ImPlotAxisFlags y_flags = ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
-
-            if (yAxisMode == 0) {
-                y_flags |= ImPlotAxisFlags_AutoFit; // Auto-fit Y-axis to all data
-            } else if (yAxisMode == 1) {
-                y_flags |= ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_RangeFit; // Auto-fit Y-axis to visible data only
-            }
-            // yAxisMode == 2 (force): no auto-fit flag, Y axis is locked to forcedYMin/forcedYMax below
-            // Note: When AFY is disabled, we don't lock the Y-axis here because it prevents all interactions
-            // Instead, we handle the Y-axis locking separately after checking for manual limits
-
-            const char* xLabel = (xUnitSelector == 0) ? "Wavenumber (cm-1)"
-                               : (xUnitSelector == 1) ? "Wavelength (\xC2\xB5" "m)"
-                                                     : "Frequency (THz)";
-            const char* yLabel = "";
-            if (yScaleSelector == 2)
-                yLabel = (detectorSensitivity > 0.0f) ? "dBm" : "dB";
-            ImPlot::SetupAxes(xLabel, yLabel, x_flags, y_flags);
-
-            // Apply Y-axis scale (log10 / linear) selected in the Spectrum panel.
-            if (yScaleSelector == 1) {
-                ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Log10);
-            }
-
-            // Helper: convert raw magnitude to display value (V→W only).
-            // When detectorSensitivity == 0, caller applies normalization.
-            auto toDisplay = [&](double raw) -> double {
-                if (detectorSensitivity > 0.0f) {
-                    if (yScaleSelector == 2)
-                        return 10.0 * std::log10(std::max(raw / detectorSensitivity, 1e-300));
-                    return raw / (detectorSensitivity * 1000.0);
-                }
-                return raw;
-            };
-
-            // (ESC fit-to-all and arrow-pan / shift-select are handled here and
-            //  before BeginPlot via SetNextAxisLimits - see the pre-BeginPlot block above.
-            //  SetupAxisLimits with ImPlotCond_Once is intentionally NOT used here because
-            //  ImPlotCond_Once means "once per runtime session" - it would be silently
-            //  ignored after the first call, breaking ESC and shift-select zoom.)
-
-            // Forced Y-axis limits: when enabled, lock the Y axis and skip the
-            // Y portion of auto-scale so the user's forced range is respected.
-            const bool effectiveForceY = (yAxisMode == 2) && (forcedYMin < forcedYMax);
-            if (effectiveForceY) {
-                // In log mode, ensure the lower bound stays positive.
-                double yMin = forcedYMin;
-                double yMax = forcedYMax;
-                if (yScaleSelector == 1 && yMin <= 0.0) {
-                    yMin = (yMax > 0.0 ? yMax * 1e-6 : 1e-6);
-                }
-                ImPlot::SetupAxisLimits(ImAxis_Y1, yMin, yMax, ImPlotCond_Always);
-            }
-
-            // Apply auto-scale when requested (ESC key or initial load).
-            // X-axis is always reset on ESC; Y-axis is only reset when not forced.
-            // The range is computed from cached spectrum data, which is valid because
-            // the spectrum computation loop above runs before this point.
-            if (shouldAutoscale) {
-                double globalXMin = 0.0;
-                double globalXMax = 0.0;
-                double globalYMin = 0.0;
-                double globalYMax = 0.0;
-                bool   haveRange  = false;
-
-                for (size_t i = 0; i < primaryDetectors.size(); i++) {
-                    const std::string& fileId = primaryDetectors[i].first;
-                    auto cfIt = cachedFrequencies.find(fileId);
-                    auto csIt = cachedSpectra.find(fileId);
-                    if (cfIt == cachedFrequencies.end() || csIt == cachedSpectra.end())
-                        continue;
-                    const auto& freqs = cfIt->second;
-                    const auto& spec  = csIt->second;
-                    if (freqs.empty() || spec.empty())
-                        continue;
-
-                    // Sorted ascending for cm-1/THz, descending for um.
-                    // Use min/max of front/back to handle both directions.
-                    const double localXMin = std::min(freqs.front(), freqs.back());
-                    const double localXMax = std::max(freqs.front(), freqs.back());
-                    double localYMin, localYMax;
-                    if (detectorSensitivity > 0.0f) {
-                        localYMin = std::numeric_limits<double>::max();
-                        localYMax = std::numeric_limits<double>::lowest();
-                        for (double v : spec) {
-                            double d = toDisplay(v);
-                            localYMin = std::min(localYMin, d);
-                            localYMax = std::max(localYMax, d);
-                        }
-                    } else {
-                        double maxVal = *std::max_element(spec.begin(), spec.end());
-                        localYMin = std::numeric_limits<double>::max();
-                        localYMax = std::numeric_limits<double>::lowest();
-                        for (double v : spec) {
-                            double d = normalizeValue(v, maxVal, yScaleSelector);
-                            localYMin = std::min(localYMin, d);
-                            localYMax = std::max(localYMax, d);
-                        }
-                    }
-
-                    if (!haveRange) {
-                        globalXMin = localXMin; globalXMax = localXMax;
-                        globalYMin = localYMin; globalYMax = localYMax;
-                        haveRange  = true;
-                    } else {
-                        globalXMin = std::min(globalXMin, localXMin);
-                        globalXMax = std::max(globalXMax, localXMax);
-                        globalYMin = std::min(globalYMin, localYMin);
-                        globalYMax = std::max(globalYMax, localYMax);
-                    }
-                }
-
-                if (haveRange && globalXMin < globalXMax) {
-                    ImPlot::SetupAxisLimits(ImAxis_X1, globalXMin, globalXMax, ImPlotCond_Always);
-                }
-
-                if (!effectiveForceY && haveRange) {
-                    // Log scale requires strictly positive Y limits; magnitude can be 0,
-                    // so floor the lower bound to a small positive value when log mode is on.
-                    double yMin = globalYMin;
-                    if (yScaleSelector == 1 && yMin <= 0.0) {
-                        yMin = (globalYMax > 0.0 ? globalYMax * 1e-6 : 1e-6);
-                    }
-                    ImPlot::SetupAxisLimits(ImAxis_Y1, yMin, globalYMax, ImPlotCond_Always);
-                }
-
-                shouldAutoscale = false;
-            }
-
-            // When AFY is disabled, we want X-axis only interactions
-            // But we can't lock Y-axis completely as it breaks all interactions
-            // Instead, we'll rely on the user to manually control Y-axis when needed
-            // and provide visual feedback through the legend.
-            // Skipped entirely when force mode is on (axis already locked above).
-            if (!effectiveForceY && yAxisMode != 0 && yAxisMode != 1 && !shouldAutoscale) {
-                // Apply manual Y-axis limits if set, but only once to allow user interactions
-                if (manualYMin != manualYMax) {
-                    ImPlot::SetupAxisLimits(ImAxis_Y1, manualYMin, manualYMax, ImPlotCond_Once);
-                }
-            }
-            
-            // Note: Ctrl+Y shortcut for toggling AFY is handled in main.cpp
-            // The autoFitYAxis parameter is passed from the main application state
-
-            // (Arrow-key pan and X-range selection are now handled before BeginPlot
-            //  using SetNextAxisLimits, to avoid the ImPlot SetupLocked assert.)
+        if (ImPlot::BeginPlot(workspacePlotId("Spectrum").c_str(), ImVec2(-1, -1), f.plotFlags)) {
+            plot.setupAxes(f);
 
             // First pass: compute or submit dirty files.
             // Strategy to avoid one-frame blink:
@@ -761,7 +449,7 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                             // Precomputed spectra: copy raw data directly, no FFT
                             cachedSpectra[fileId]     = rawData.primaryDetector;
                             // File stores wavenumber in cm-1; convert to target unit
-                            auto targetUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
+                            auto targetUnit = static_cast<SpectralToolbox::SpectrumXUnit>(plot.xUnitSelector);
                             auto freqs = rawData.referenceDetector;
                             for (double& f : freqs)
                                 f = SpectralToolbox::convertXValue(f,
@@ -778,13 +466,13 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                                 opdUm[j] = rawData.opdAxis[j] * 1e6;
                             ps = SpectralToolbox::processSpectrumFromCorrectedAxis(
                                 rawData.primaryDetector, opdUm,
-                                Kpadding, static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector),
+                                Kpadding, static_cast<SpectralToolbox::SpectrumXUnit>(plot.xUnitSelector),
                                 static_cast<ApodizationWindow>(apodizationSelector),
                                 apodizationParams);
                         } else {
                             ps = SpectralToolbox::processSpectrum(
                                 rawData.primaryDetector, rawData.referenceDetector, refLaserTextbox,
-                                Kpadding, static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector),
+                                Kpadding, static_cast<SpectralToolbox::SpectrumXUnit>(plot.xUnitSelector),
                                 static_cast<ApodizationWindow>(apodizationSelector),
                                 apodizationParams,
                                 static_cast<SpectralToolbox::XCorrectionMethod>(appState->active->xCorrectionMethod),
@@ -817,7 +505,7 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                                  axisCorr,
                                  refLaser = refLaserTextbox,
                                  K = Kpadding,
-                                 xUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector),
+                                 xUnit = static_cast<SpectralToolbox::SpectrumXUnit>(plot.xUnitSelector),
                                  apodWin = static_cast<ApodizationWindow>(apodizationSelector),
                                  apodParams = apodizationParams,
                                  xMethod = static_cast<SpectralToolbox::XCorrectionMethod>(appState->active->xCorrectionMethod),
@@ -844,134 +532,7 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
             // Poll pending async computations and retrieve ready results
             pollPendingSpectra();
 
-            // After a unit switch, clamp converted X-axis limits to the actual data range.
-            // Must run AFTER cache population but BEFORE IsPlotHovered/PlotLine, which
-            // both call ImPlot's SetupLock() and lock axis setup.
-            if (xUnitSwitchedThisFrame) {
-                xUnitSwitchedThisFrame = false;
-                double dataXMin = std::numeric_limits<double>::max();
-                double dataXMax = std::numeric_limits<double>::lowest();
-                for (const auto& entry : primaryDetectors) {
-                    auto it = cachedFrequencies.find(entry.first);
-                    if (it != cachedFrequencies.end() && !it->second.empty()) {
-                        // Sorted ascending for cm-1/THz, descending for um.
-                        // Use min/max of front/back to handle both.
-                        double localMin = std::min(it->second.front(), it->second.back());
-                        double localMax = std::max(it->second.front(), it->second.back());
-                        dataXMin = std::min(dataXMin, localMin);
-                        dataXMax = std::max(dataXMax, localMax);
-                    }
-                }
-                if (dataXMin < dataXMax) {
-                    double clampedMin = std::max(convertedXMin, dataXMin);
-                    double clampedMax = std::min(convertedXMax, dataXMax);
-                    if (clampedMin < clampedMax) {
-                        ImPlot::SetupAxisLimits(ImAxis_X1, clampedMin, clampedMax, ImPlotCond_Always);
-                        manualXMin = clampedMin;
-                        manualXMax = clampedMax;
-                    } else {
-                        ImPlot::SetupAxisLimits(ImAxis_X1, dataXMin, dataXMax, ImPlotCond_Always);
-                        manualXMin = dataXMin;
-                        manualXMax = dataXMax;
-                    }
-                }
-            }
-
-            {
-                double xMin = manualXMin;
-                double xMax = manualXMax;
-                double yMin = savedYMin;
-                double yMax = savedYMax;
-                if (yMin >= yMax) {
-                    for (const auto& entry : primaryDetectors) {
-                        auto csIt = cachedSpectra.find(entry.first);
-                        if (csIt == cachedSpectra.end() || csIt->second.empty())
-                            continue;
-                        double localYMin, localYMax;
-                        if (detectorSensitivity > 0.0f) {
-                            localYMin = std::numeric_limits<double>::max();
-                            localYMax = std::numeric_limits<double>::lowest();
-                            for (double v : csIt->second) {
-                                double d = toDisplay(v);
-                                localYMin = std::min(localYMin, d);
-                                localYMax = std::max(localYMax, d);
-                            }
-                        } else {
-                            double maxVal = *std::max_element(csIt->second.begin(), csIt->second.end());
-                            localYMin = std::numeric_limits<double>::max();
-                            localYMax = std::numeric_limits<double>::lowest();
-                            for (double v : csIt->second) {
-                                double d = normalizeValue(v, maxVal, yScaleSelector);
-                                localYMin = std::min(localYMin, d);
-                                localYMax = std::max(localYMax, d);
-                            }
-                        }
-                        if (yMin >= yMax) {
-                            yMin = localYMin; yMax = localYMax;
-                        } else {
-                            yMin = std::min(yMin, localYMin);
-                            yMax = std::max(yMax, localYMax);
-                        }
-                    }
-                }
-                if (xMin >= xMax) {
-                    for (const auto& entry : primaryDetectors) {
-                        auto cfIt = cachedFrequencies.find(entry.first);
-                        if (cfIt != cachedFrequencies.end() && !cfIt->second.empty()) {
-                            double localXMin = std::min(cfIt->second.front(), cfIt->second.back());
-                            double localXMax = std::max(cfIt->second.front(), cfIt->second.back());
-                            if (xMin >= xMax) {
-                                xMin = localXMin; xMax = localXMax;
-                            } else {
-                                xMin = std::min(xMin, localXMin);
-                                xMax = std::max(xMax, localXMax);
-                            }
-                        }
-                    }
-                }
-                if (xMin < xMax) {
-                    SetupAxisTicksLimited(ImAxis_X1, xMin, xMax);
-                }
-                if (yMin < yMax) {
-                    SetupAxisTicksLimited(ImAxis_Y1, yMin, yMax);
-                }
-            }
-
-            // X-range selection: still detect shift-drag here (for visualization),
-            // but record the result in pendingNextXMin/Max for pre-BeginPlot application.
-            // Positioned AFTER axis setup to avoid ImPlot's SetupLocked assertion.
-            bool shiftPressed = ImGui::GetIO().KeyShift;
-            bool isOverPlot = ImPlot::IsPlotHovered();
-
-            if (isSpectrumWindowFocused && isOverPlot && shiftPressed && !isSelectingXRange) {
-                // Start selection when Shift is pressed over plot
-                isSelectingXRange = true;
-                selectionStartX = 0.0;
-                selectionEndX = 0.0;
-            } else if (!shiftPressed && isSelectingXRange) {
-                isSelectingXRange = false;
-                if (selectionStartX != selectionEndX) {
-                    double sX = selectionStartX;
-                    double eX = selectionEndX;
-                    if (sX > eX) std::swap(sX, eX);
-                    pendingNextXMin = sX;
-                    pendingNextXMax = eX;
-                    manualXMin = sX;
-                    manualXMax = eX;
-                    shouldAutoscale = false;
-                }
-            }
-            // Simple heuristic: if we have data but no valid zoom range, reset to auto-scale
-            // Only apply this on first load to allow manual interactions after initial display
-            if (!primaryDetectors.empty() && !firstLoadCompleted) {
-                const auto& firstDetector = primaryDetectors[0].second;
-                if (!firstDetector.empty()) {
-                    if (manualXMin == 0.0 && manualXMax == 0.0) {
-                        shouldAutoscale = true;
-                        firstLoadCompleted = true; // Mark that first load is complete
-                    }
-                }
-            }
+            // Plot each spectrum (panel-side display transforms stay here).
 
             // Second pass: plot each spectrum (show "Computing..." placeholder if pending)
             for (size_t i = 0; i < primaryDetectors.size(); i++) {
@@ -1001,69 +562,18 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                     static std::vector<double> normBuffer;
                     normBuffer.resize(spectrum.size());
                     std::copy(spectrum.begin(), spectrum.end(), normBuffer.begin());
-                    normalizeBuffer(normBuffer, spectrum, yScaleSelector);
+                    normalizeBuffer(normBuffer, spectrum, plot.yScaleSelector);
                     plotData = normBuffer.data();
                 }
                 ImPlot::PlotLine(fileId.c_str(), frequencies.data(), plotData, spectrum.size(), plotSpecs[i]);
             }
 
-            // Handle X-range selection visualization
-            if (isSelectingXRange) {
-                // Get current mouse position in plot coordinates
-                ImPlotPoint mousePos = ImPlot::GetPlotMousePos();
-                
-                // Get current plot limits to constrain selection within valid range
-                double x_min = ImPlot::GetPlotLimits().X.Min;
-                double x_max = ImPlot::GetPlotLimits().X.Max;
-                
-                // Initialize start position if not set
-                if (selectionStartX == 0.0 && selectionEndX == 0.0) {
-                    selectionStartX = mousePos.x;
-                }
-                
-                // Constrain mouse position to valid X-axis range to prevent axis stretching
-                double constrainedMouseX = std::clamp(mousePos.x, x_min, x_max);
-                selectionEndX = constrainedMouseX;
-                
-                // Get Y limits for drawing vertical lines
-                double y_min = ImPlot::GetPlotLimits().Y.Min;
-                double y_max = ImPlot::GetPlotLimits().Y.Max;
-                
-                // Ensure proper ordering (left to right)
-                double selection_left = std::min(selectionStartX, selectionEndX);
-                double selection_right = std::max(selectionStartX, selectionEndX);
-                
-                // Constrain selection to current plot limits to prevent invalid ranges
-                selection_left = std::clamp(selection_left, x_min, x_max);
-                selection_right = std::clamp(selection_right, x_min, x_max);
-                
-                // Create arrays for shaded region - need X array and two Y arrays (bottom and top)
-                double shade_x[2] = {selection_left, selection_right};
-                double shade_y1[2] = {y_min, y_min};  // Bottom edge
-                double shade_y2[2] = {y_max, y_max};  // Top edge
-                
-                // Create spec for dark purple translucent fill
-                ImPlotSpec fillSpec;
-                fillSpec.FillColor = ImVec4(0.5f, 0.0f, 0.5f, 0.3f); // Dark purple with 30% opacity
-                
-                // Draw translucent dark purple fill between selection lines
-                ImPlot::PlotShaded("##SelectionFill", shade_x, shade_y1, shade_y2, 2, fillSpec);
-                
-                // Create arrays for vertical line points
-                double start_x[2] = {selectionStartX, selectionStartX};
-                double start_y[2] = {y_min, y_max};
-                double end_x[2] = {selectionEndX, selectionEndX};
-                double end_y[2] = {y_min, y_max};
-                
-                // Draw vertical line at start position
-                ImPlot::PlotLine("##SelectionStart", start_x, start_y, 2);
-                
-                // Draw vertical line at end position
-                ImPlot::PlotLine("##SelectionEnd", end_x, end_y, 2);
-            }
+            plot.tickInPlot(f);
+            plot.drawSelectionOverlay("##Spectrum");
+
             // HITRAN gas-band markers (drawn before the cursor so the
             // tracking-cursor info box stays on top).
-            renderHitranMarkers(appState->active->hitranGasEnabled, xUnitSelector,
+            renderHitranMarkers(appState->active->hitranGasEnabled, plot.xUnitSelector,
                                 appState->active->hitranThresholdLevel,
                                 appState->active->hitranSmoothLevel);
 
@@ -1077,16 +587,10 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                  const double xHi = std::max(lim.X.Min, lim.X.Max);
                  const double mx = std::min(std::max(mousePos.x, xLo), xHi);
 
-                 using ST = SpectralToolbox::SpectrumXUnit;
-                 auto unit = static_cast<ST>(xUnitSelector);
-                 double cm1 = (unit == ST::CmInv) ? mx : SpectralToolbox::convertXValue(mx, unit, ST::CmInv);
-                 double um  = (unit == ST::Um)    ? mx : SpectralToolbox::convertXValue(mx, unit, ST::Um);
-                 double thz = (unit == ST::THz)   ? mx : SpectralToolbox::convertXValue(mx, unit, ST::THz);
                  char header[128];
-                 std::snprintf(header, sizeof(header), "X: %.2f cm-1 / %.4f um / %.4f THz",
-                               cm1, um, thz);
+                 SpectralPlotView::formatCursorHeader(mx, plot.xUnitSelector, header, sizeof(header));
 
-                 const int ys = yScaleSelector;
+                 const int ys = plot.yScaleSelector;
                  std::vector<CursorCurve> cursorCurves;
                  for (size_t i = 0; i < primaryDetectors.size(); ++i) {
                      const std::string& fileId = primaryDetectors[i].first;
@@ -1109,15 +613,7 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                  renderCursorOverlay(header, cursorCurves);
              }
 
-            if (plotRendered) {
-                const ImPlotRect lim = ImPlot::GetPlotLimits();
-                if (lim.X.Min < lim.X.Max && pendingNextXMin >= pendingNextXMax) {
-                    manualXMin = lim.X.Min;
-                    manualXMax = lim.X.Max;
-                }
-                savedYMin = lim.Y.Min;
-                savedYMax = lim.Y.Max;
-            }
+            plot.captureLimits();
             ImPlot::EndPlot();
         }
         ImPlot::PopStyleColor();
@@ -1337,145 +833,34 @@ void Spectrum::renderPanel(AppState& s) {
                 }
                 ImGui::PopStyleColor(3);
 
-                // Y scale selector (lin / log / dB) - rendering only, no cache invalidation needed
-                ImGui::Text("Y scale");
-                ImGui::SameLine();
+                // Y scale / X unit / Y axis (rendering only — no cache invalidation
+                // needed; the view's tickPrePlot handles the refits)
+                auto& specPlot = s.active->spectrum.plot;
+                if (specPlot.renderYScaleButtons("##YScaleDb", /*withDb=*/true))
+                    s.needsRedraw = true;
+                if (specPlot.renderXUnitButtons("##XUnitCm"))
+                    s.needsRedraw = true;
+                if (specPlot.renderYModeButtons("##YAxisAll"))
+                    s.needsRedraw = true;
 
-                const bool linSelected = (s.active->spectrum.yScaleSelector == 0);
-                const bool logSelected = (s.active->spectrum.yScaleSelector == 1);
-
-                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[linSelected ? 1 : 0]);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  linSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-                if (ImGui::Button("lin##YScaleLin")) {
-                    if (!linSelected) {
-                        s.active->spectrum.yScaleSelector = 0;
+                // Forced-Y inputs (L6): renderYModeButtons exposes "force" but
+                // the min/max fields were missing here (unlike Average/SNR/T100).
+                if (specPlot.yAxisMode == kYModeForce) {
+                    ImGui::Text("min:");
+                    ImGui::SameLine();
+                    ImGui::SetNextItemWidth(80.0f);
+                    if (ImGui::InputDouble("##SpecForcedYMin", &specPlot.forcedYMin, 0.0, 0.0, "%.6g"))
                         s.needsRedraw = true;
-                    }
-                }
-                ImGui::PopStyleColor(3);
-
-                ImGui::SameLine();
-
-                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[logSelected ? 1 : 0]);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  logSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-                if (ImGui::Button("log##YScaleLog")) {
-                    if (!logSelected) {
-                        s.active->spectrum.yScaleSelector = 1;
+                    ImGui::SameLine();
+                    ImGui::Text("max:");
+                    ImGui::SameLine();
+                    ImGui::SetNextItemWidth(80.0f);
+                    if (ImGui::InputDouble("##SpecForcedYMax", &specPlot.forcedYMax, 0.0, 0.0, "%.6g"))
                         s.needsRedraw = true;
+                    if (specPlot.forcedYMin >= specPlot.forcedYMax) {
+                        ImGui::SameLine();
+                        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "(min<max!)");
                     }
-                }
-                ImGui::PopStyleColor(3);
-
-                ImGui::SameLine();
-
-                const bool dbSelected = (s.active->spectrum.yScaleSelector == 2);
-                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[dbSelected ? 1 : 0]);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  dbSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-                if (ImGui::Button("dB##YScaleDb")) {
-                    if (!dbSelected) {
-                        s.active->spectrum.yScaleSelector = 2;
-                        s.needsRedraw = true;
-                    }
-                }
-                ImGui::PopStyleColor(3);
-
-                // X unit selector (cm-1 / µm / THz) - changing unit invalidates spectrum cache
-                ImGui::Text("X unit");
-                ImGui::SameLine();
-
-                const bool cmSelected  = (s.active->spectrum.xUnitSelector == 0);
-                const bool umSelected  = (s.active->spectrum.xUnitSelector == 1);
-                const bool thzSelected = (s.active->spectrum.xUnitSelector == 2);
-
-                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[cmSelected ? 1 : 0]);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  cmSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-                if (ImGui::Button("cm-1##XUnitCm")) {
-                    if (!cmSelected) {
-                        s.active->spectrum.xUnitSelector = 0;
-                        s.needsRedraw = true;
-                    }
-                }
-                ImGui::PopStyleColor(3);
-
-                ImGui::SameLine();
-
-                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[umSelected ? 1 : 0]);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  umSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-                if (ImGui::Button("\xC2\xB5""m##XUnitUm")) {
-                    if (!umSelected) {
-                        s.active->spectrum.xUnitSelector = 1;
-                        s.needsRedraw = true;
-                    }
-                }
-                ImGui::PopStyleColor(3);
-
-                ImGui::SameLine();
-
-                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[thzSelected ? 1 : 0]);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  thzSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-                if (ImGui::Button("THz##XUnitTHz")) {
-                    if (!thzSelected) {
-                        s.active->spectrum.xUnitSelector = 2;
-                        s.needsRedraw = true;
-                    }
-                }
-                ImGui::PopStyleColor(3);
-
-                // Y-axis mode selector (all / tight / force) - matching X-unit / Y-scale button style
-                ImGui::Text("Y Axis");
-                ImGui::SameLine();
-
-                const bool allSelected   = (s.active->spectrum.yAxisMode == 0);
-                const bool tightSelected = (s.active->spectrum.yAxisMode == 1);
-                const bool forceSelected = (s.active->spectrum.yAxisMode == 2);
-
-                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[allSelected ? 1 : 0]);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  allSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-                if (ImGui::Button("all##YAxisAll")) {
-                    if (!allSelected) {
-                        s.active->spectrum.yAxisMode = 0;
-                        s.needsRedraw = true;
-                    }
-                }
-                ImGui::PopStyleColor(3);
-
-                ImGui::SameLine();
-
-                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[tightSelected ? 1 : 0]);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  tightSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-                if (ImGui::Button("tight##YAxisTight")) {
-                    if (!tightSelected) {
-                        s.active->spectrum.yAxisMode = 1;
-                        s.needsRedraw = true;
-                    }
-                }
-                ImGui::PopStyleColor(3);
-
-                ImGui::SameLine();
-
-                ImGui::PushStyleColor(ImGuiCol_Button,        btnColors[forceSelected ? 1 : 0]);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  forceSelected ? btnColors[1] : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   btnColors[1]);
-                if (ImGui::Button("force##YAxisForce")) {
-                    if (!forceSelected) {
-                        s.active->spectrum.yAxisMode = 2;
-                        s.needsRedraw = true;
-                    }
-                }
-                ImGui::PopStyleColor(3);
-
-                if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("all: auto-fit Y to all data\n"
-                                      "tight: auto-fit Y to visible data only\n"
-                                      "force: lock Y to the given min/max");
                 }
             }
 
