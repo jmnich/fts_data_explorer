@@ -146,6 +146,29 @@ static void drawWelcomeBackgroundScatter(ImDrawList* drawList, const ImVec2& vpS
     }
 }
 
+// Truncate text to fit maxTextWidth px, keeping equal-length head and tail
+// portions separated by "...". Only for the welcome-screen list rows.
+static std::string truncateToWidth(const std::string& text, float maxTextWidth) {
+    if (text.empty() || ImGui::CalcTextSize(text.c_str()).x <= maxTextWidth)
+        return text;
+    const char* ellipsis = "...";
+    const float ellipsisW = ImGui::CalcTextSize(ellipsis).x;
+    const float innerW = maxTextWidth - ellipsisW;
+    if (innerW <= 0.0f) return ellipsis;
+    const size_t half = text.length() / 2;
+    size_t lo = 0, hi = half;
+    while (lo < hi) {
+        const size_t mid = lo + (hi - lo + 1) / 2;
+        const std::string candidate = text.substr(0, mid) + text.substr(text.length() - mid);
+        if (ImGui::CalcTextSize(candidate.c_str()).x <= innerW)
+            lo = mid;
+        else
+            hi = mid - 1;
+    }
+    if (lo == 0) return ellipsis;
+    return text.substr(0, lo) + ellipsis + text.substr(text.length() - lo);
+}
+
 void renderWelcomeScreen(AppState& appState, AppConfig& config,
                          const std::string& configFilePath, bool showPopup) {
     // Keep the recent list clean: drop stale/non-.h5 entries (files deleted on
@@ -286,6 +309,15 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                     continue;
                 }
                 ImGui::SameLine();
+
+                {
+                    float availW = ImGui::GetContentRegionAvail().x;
+                    float maxTextW = availW - 2.0f * ImGui::GetStyle().FramePadding.x;
+                    if (!exists)
+                        maxTextW -= ImGui::CalcTextSize("(unreachable)").x +
+                                    ImGui::GetStyle().ItemInnerSpacing.x;
+                    displayName = truncateToWidth(displayName, maxTextW);
+                }
 
                 if (!exists) {
                     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.15f, 0.15f, 0.5f));
@@ -429,6 +461,14 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                 }
                 ImGui::SameLine();
                 std::string displayName = std::filesystem::path(path).filename().string();
+                {
+                    float availW = ImGui::GetContentRegionAvail().x;
+                    float maxTextW = availW - 2.0f * ImGui::GetStyle().FramePadding.x;
+                    if (!exists)
+                        maxTextW -= ImGui::CalcTextSize("(unreachable)").x +
+                                    ImGui::GetStyle().ItemInnerSpacing.x;
+                    displayName = truncateToWidth(displayName, maxTextW);
+                }
                 if (exists) {
                     if (ImGui::Button(displayName.c_str(), ImVec2(-FLT_MIN, 0))) {
                         requestWorkspaceDiscard(appState, PendingWorkspaceAction::OpenPath, path);
@@ -456,8 +496,8 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
     ImGui::Separator();
     ImGui::Spacing();
 
-    // [New Multi-Workspace…]: empty .cross.h5; only the Session tab exists —
-    // start populating via its column (a).
+    // [New Multi-Workspace…]: empty multi-workspace .h5; only the Session tab
+    // exists — start populating via its column (a).
     if (ImGui::Button("New Multi-Workspace...", ImVec2(-FLT_MIN, 0))) {
         std::string defaultFolder;
         if (std::filesystem::is_directory(config.lastWorkingDirectory))
@@ -466,7 +506,7 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
             defaultFolder = std::filesystem::path(config.lastMultiWorkspacePath).parent_path().string();
         std::string path = FileBrowser::showFileSaveDialog(
             "New Multi-Workspace", "HDF5 files", "*.h5",
-            defaultFolder, "workspace.cross.h5", glfwGetCurrentContext());
+            defaultFolder, "workspace.h5", glfwGetCurrentContext());
         if (!path.empty()) {
             ensureSessionTab(appState);
             std::string err;
@@ -488,7 +528,7 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
         }
     }
     if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Creates an empty .cross.h5. Datasets are embedded from "
+        ImGui::SetTooltip("Creates an empty multi-workspace .h5. Datasets are embedded from "
                           "the Session tab's column (a).");
 
     ImGui::EndChild();   // ##welcomeRight

@@ -456,7 +456,7 @@ void renderCreateMultiWorkspaceButton() {
         ImGui::PushStyleColor(ImGuiCol_Button, GetAccentMuted(ac));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, GetAccentHovered(ac));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, GetAccentActive(ac));
-        if (ImGui::Button("Create Multi-Workspace...", ImVec2(240, 0))) {
+        if (ImGui::Button("Create Multi-Workspace...", ImVec2(-FLT_MIN, 0))) {
             std::string defaultFolder;
             if (appState.active && std::filesystem::is_directory(appState.active->currentDirectory))
                 defaultFolder = appState.active->currentDirectory;
@@ -465,7 +465,7 @@ void renderCreateMultiWorkspaceButton() {
                     appState.configPtr->lastMultiWorkspacePath).parent_path().string();
             std::string path = FileBrowser::showFileSaveDialog(
                 "New Multi-Workspace", "HDF5 files", "*.h5",
-                defaultFolder, "workspace.cross.h5", glfwGetCurrentContext());
+                defaultFolder, "workspace.h5", glfwGetCurrentContext());
             if (!path.empty()) {
                 // Embed a copy of the most relevant open dataset from disk.
                 const std::string srcPath = appState.sessions[src]->path;
@@ -482,11 +482,11 @@ void renderCreateMultiWorkspaceButton() {
         }
         ImGui::PopStyleColor(3);
         if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Creates an empty .cross.h5 and embeds the currently "
+            ImGui::SetTooltip("Creates an empty multi-workspace .h5 and embeds the currently "
                               "open dataset into it.");
     } else if (refEmbedded) {
         ImGui::BeginDisabled(true);
-        ImGui::Button("Create Multi-Workspace...", ImVec2(240, 0));
+        ImGui::Button("Create Multi-Workspace...", ImVec2(-FLT_MIN, 0));
         ImGui::EndDisabled();
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("The reference tab is embedded in a multi-workspace. "
