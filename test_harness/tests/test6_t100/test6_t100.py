@@ -96,7 +96,7 @@ def main():
     comparisons = comps + [guard_comp]
     all_pass = all(c["status"]=="pass" for c in comparisons)
     status = "pass" if all_pass else "fail"
-    summary = f"wrms={comps[0]['weighted_rms_rel_pct']}% max={comps[0]['max_abs_rel_pct']}% self={guard_max:.3g}"
+    summary = f"wrms={comps[0]['unweighted_rms_rel_pct']}% max={comps[0]['max_abs_rel_pct']}% self={guard_max:.3g}"
     save_overlay_residual("test6_t100", root,
                           cpp_x, cpp_y1, py_x, py_y,
                           eval_window=EVAL, title="test6 100% T (file1 vs file0)",

@@ -24,7 +24,7 @@ from _common.pipeline import (
     hilbert_x_axis, process_spectrum, apply_window, NORTON_BEER_COEFFS,
     allan_variance, transmittance, stddev_curves, snr_spectrum, mean_spectrum,
 )
-from _common.compare import relative_error, ComparisonError, residual_metrics, snr_weights, compare
+from _common.compare import relative_error, ComparisonError, residual_metrics, compare
 from _common.h5io import strip_derivatives, validate_h5
 
 
@@ -91,17 +91,14 @@ def test_relative_error_guards():
 
 
 def test_residual_metrics():
-    """residual_metrics weighted/unweighted basic sanity."""
+    """residual_metrics unweighted RMS + max basic sanity."""
     a = np.array([1.0, 2.0, 3.0, 4.0])
     b = np.array([1.0, 2.0, 3.0, 4.0])
     m = residual_metrics(a, b)
-    assert m["weighted_rms_rel_pct"] == 0.0, "identical curves → 0 RMS"
+    assert m["unweighted_rms_rel_pct"] == 0.0, "identical curves → 0 RMS"
     assert m["n_bins"] == 4, "n_bins"
-    # weights
-    w = snr_weights(b)
-    assert w.shape == b.shape, "weights shape"
-    assert w[3] == 1.0, "max |r| → weight 1.0"
-    print("  OK: residual_metrics + snr_weights sanity")
+    assert m.get("weighted_rms_rel_pct") is None, "no weighted RMS anymore"
+    print("  OK: residual_metrics (unweighted RMS + max) sanity")
 
 
 def test_abs_only():
@@ -115,8 +112,8 @@ def test_abs_only():
     c = comps[0]
     assert c["status"] == "pass", "abs gates pass for 0.01 offset"
     assert c["abs_rms"] is not None and c["max_abs"] is not None, "abs fields"
-    assert c.get("weighted_rms_rel_pct") is None, "no relative metrics at all"
-    assert c.get("unweighted_rms_rel_pct") is None, "no unweighted rel either"
+    assert c.get("unweighted_rms_rel_pct") is None, "no relative metrics at all"
+    assert c.get("max_abs_rel_pct") is None, "no relative max either"
     # relative error of 1% offset would be huge near zero crossings — the
     # whole point of abs-only; verify the abs_rms gate flips on/off when set
     tight = compare(x, cand, x, ref, None, None,

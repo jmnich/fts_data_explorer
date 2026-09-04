@@ -100,9 +100,9 @@ A test script writes `output/<testdir>/result.json` and exits with:
   "output_type": "Spectra from selected files",
   "comparisons": [
     { "name": "headless_vs_python", "status": "pass",
-      "weighted_rms_rel_pct": 0.08, "unweighted_rms_rel_pct": 0.21,
-      "max_abs_rel_pct": 1.1, "threshold_wrms_pct": 0.5,
-      "threshold_max_pct": 5.0, "n_bins": 8000, "n_weighted_bins": 6400 }
+      "unweighted_rms_rel_pct": 0.08,
+      "max_abs_rel_pct": 1.1, "threshold_rms_pct": 0.5,
+      "threshold_max_pct": 5.0, "n_bins": 8000 }
   ],
   "artifacts": ["compare.png", "work.h5"]
 }
@@ -112,7 +112,7 @@ A `status` field contradicting the exit code is classified `error` (D1). Tests
 may also print a one-line JSON summary to stdout (log only, never trusted over
 the file).
 
-## 5. Residual metric + signal-weighted tolerance
+## 5. Residual metric + pass/fail gates
 
 For a pair of curves on a common grid `{x_i}`, reference `r_i` and candidate
 `c_i`:
@@ -121,20 +121,26 @@ For a pair of curves on a common grid `{x_i}`, reference `r_i` and candidate
 |--------|-----------|
 | Relative error | `e_i = (c_i − r_i) / r_i` (guarded, ε = 1e-15) |
 | Absolute error | `a_i = c_i − r_i` (fallback where `r_i ≈ 0`) |
-| RMS relative (%) | `sqrt(mean(e_i²))·100` |
+| RMS relative (%) | `sqrt(mean(e_i²))·100` — **the RMS gate** |
 | Max \|relative\| (%) | `max(|e_i|)·100` |
-| **SNR-weighted RMS** | **primary pass/fail metric** (below) |
+| Max \|absolute\| | `max(|a_i|)` in native units (gate where relative max is unstable) |
 
-### SNR weighting (primary pass/fail)
+### Pass/fail gates
 
-Per-bin weight `w_i ∈ [0,1]`:
-- When an SNR reference is available: `w_i = clamp(SNR_i / SNR_max, 0, 1)`.
-- Otherwise: `w_i = clamp(|r_i| / max_j |r_j|, 0, 1)` (optionally raised to power
-  `p`, default `p = 1`).
+PASS requires **both** gates within tolerance:
+1. **Unweighted RMS** (`unweighted_rms_rel_pct`, also called the AC RMS — the
+   RMS of the residual over the eval window) ≤ `unweighted_rms_rel_pct`
+   threshold.
+2. **Max** — either the relative max (`max_abs_rel_pct` ≤ threshold) or, where
+   the relative max is mathematically unstable (noise-floor bins, ratio
+   metrics, -log10 transforms), the absolute max (`max_abs` ≤ threshold).
 
-`weighted_rms_rel_pct = 100 · sqrt( Σᵢ wᵢ eᵢ² / Σᵢ wᵢ )`, summed over bins where
-`wᵢ > 0`. Unweighted RMS and max are always reported for transparency, but the
-weighted RMS drives PASS/FAIL.
+There is **no weighting** — no SNR- or magnitude-weighted RMS. The original
+motivation for weighting (unweighted RMS over the full 333–10000 cm-1 window
+was dominated by noise-floor bins) was removed by the evaluation-window policy:
+comparisons run only in signal-strong bands, and the SNR hard mask excludes
+unstable bins outright. Weighted vs unweighted RMS differ by ≤1.4x on the
+clean windows, so the weighting machinery (`snr_weights`) was deleted.
 
 ### Guarding degenerate bins
 
@@ -142,10 +148,10 @@ weighted RMS drives PASS/FAIL.
 - `c_i == 0, r_i != 0`: relative error `= −1` (full miss), must fail max bound.
 - `nan` in either curve: **fail with diagnostic** (a defect, not a tolerance).
 
-### Thresholds (starting points; calibrated in Phase 05, locked in Phase 12)
+### Thresholds (calibrated per test from observed residuals; see each description.md)
 
-| Comparison | Weighted RMS rel. | Max \|rel.\| |
-|-----------|-------------------|--------------|
+| Comparison | RMS rel. (unweighted) | Max \|rel.\| |
+|-----------|-----------------------|--------------|
 | headless vs Python reference | ≤ 0.5 % | ≤ 5 % |
 | headless vs golden `.h5` | ≤ 0.5 % | ≤ 5 % |
 | Python reference vs golden (sanity) | ≤ 0.5 % | ≤ 5 % |
@@ -251,12 +257,13 @@ spectrum residuals.
 
 **AC RMS**: the RMS of the residual (an AC signal around zero) over the eval
 window — this is `unweighted_rms_rel_pct` in the comparison dict (computed by
-`compare()` only inside `eval_window`). The HTML report surfaces it as the
-"AC RMS %" column next to the SNR-weighted RMS. Tests that predate the
-band-policy (calibrated on 333–10000 cm-1) were re-calibrated after the
-restriction: residuals tighten dramatically once noise-floor bins are
-excluded (e.g. test6's self-100% line went from `max=100%` relative noise to
-bit-exact 0.0).
+`compare()` only inside `eval_window`) and is **the RMS pass/fail gate**. The
+HTML report shows it as the "RMS %" column with its threshold. Tests that
+predate the band-policy (calibrated on 333–10000 cm-1) were re-calibrated
+after the restriction: residuals tighten dramatically once noise-floor bins
+are excluded (e.g. test6's self-100% line went from `max=100%` relative noise
+to bit-exact 0.0). The former SNR-weighted RMS was removed entirely — the
+band policy and SNR hard mask make it redundant (see §5).
 
 ## 6. Reference-Python standard
 
@@ -295,7 +302,7 @@ Each test directory contains a `description.md`:
 (or a subset; the orchestrator runs only the declared set)
 
 ## Thresholds
-weighted_rms_rel_pct: <value>
+unweighted_rms_rel_pct: <value>
 max_abs_rel_pct: <value>
 
 ## Timeout

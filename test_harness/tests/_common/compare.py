@@ -1,8 +1,8 @@
-"""Residual metrics + signal-weighted tolerance (§9 of the overview).
+"""Residual metrics + pass/fail gates (§5 of test_instruction.md).
 
-Implements the canonical correctness criteria: relative/absolute error, RMS,
-max, and the SNR-weighted RMS that drives PASS/FAIL. Guards degenerate bins
-(§9.4) and raises on nan (a defect, not a tolerance question).
+Implements the canonical correctness criteria: relative/absolute error,
+unweighted RMS (the RMS gate), and max (relative or absolute). Guards
+degenerate bins and raises on nan (a defect, not a tolerance question).
 """
 
 from __future__ import annotations
@@ -16,30 +16,6 @@ MAX_BINS = 200000  # D15 — eval-grid cap with decimation
 class ComparisonError(Exception):
     """Raised when a comparison is defective (e.g. nan in a curve)."""
     pass
-
-
-def snr_weights(reference: np.ndarray, snr_curve: np.ndarray | None = None,
-                power: float = 1.0) -> np.ndarray:
-    """Per-bin weight w_i in [0,1] (§9.3).
-
-    When an SNR curve is available: w_i = clamp(SNR_i / SNR_max, 0, 1).
-    Otherwise: w_i = clamp(|r_i| / max|r|, 0, 1), optionally raised to `power`.
-    """
-    if snr_curve is not None and snr_curve.size == reference.size:
-        snr_max = np.max(snr_curve)
-        if snr_max > 0:
-            w = np.clip(snr_curve / snr_max, 0.0, 1.0)
-        else:
-            w = np.zeros_like(snr_curve)
-    else:
-        max_abs = np.max(np.abs(reference)) if reference.size else 0.0
-        if max_abs > 0:
-            w = np.clip(np.abs(reference) / max_abs, 0.0, 1.0)
-        else:
-            w = np.zeros_like(reference)
-    if power != 1.0:
-        w = w ** power
-    return w
 
 
 def relative_error(candidate: np.ndarray, reference: np.ndarray,
@@ -64,19 +40,17 @@ def relative_error(candidate: np.ndarray, reference: np.ndarray,
 
 
 def residual_metrics(candidate: np.ndarray, reference: np.ndarray,
-                     weights: np.ndarray | None = None,
                      eps: float = EPSILON) -> dict:
-    """Compute weighted/unweighted RMS and max relative + absolute error (§9.1).
+    """Compute RMS and max relative + absolute error over valid bins.
 
-    Returns: weighted_rms_rel_pct, unweighted_rms_rel_pct, max_abs_rel_pct,
-    max_abs (absolute |c-r|), n_bins, n_weighted_bins.
+    Returns: unweighted_rms_rel_pct, max_abs_rel_pct, max_abs (absolute
+    |c-r|), n_bins.
     """
     rel = relative_error(candidate, reference, eps)
     abs_rel = np.abs(rel)
     valid = ~np.isnan(rel)
     n_bins = int(np.sum(valid))
 
-    # Unweighted (over valid bins only)
     if n_bins > 0:
         unweighted_rms = float(np.sqrt(np.mean(rel[valid] ** 2))) * 100.0
         max_abs_rel = float(np.max(abs_rel[valid])) * 100.0
@@ -86,28 +60,11 @@ def residual_metrics(candidate: np.ndarray, reference: np.ndarray,
         max_abs_rel = 0.0
         max_abs_err = 0.0
 
-    # Weighted
-    if weights is not None and n_bins > 0:
-        w = weights[valid]
-        e2 = rel[valid] ** 2
-        wsum = np.sum(w)
-        if wsum > 0:
-            weighted_rms = float(np.sqrt(np.sum(w * e2) / wsum)) * 100.0
-            n_weighted = int(np.sum(w > 0))
-        else:
-            weighted_rms = unweighted_rms
-            n_weighted = 0
-    else:
-        weighted_rms = unweighted_rms
-        n_weighted = n_bins
-
     return {
-        "weighted_rms_rel_pct": round(weighted_rms, 6),
         "unweighted_rms_rel_pct": round(unweighted_rms, 6),
         "max_abs_rel_pct": round(max_abs_rel, 6),
         "max_abs": round(max_abs_err, 9),
         "n_bins": n_bins,
-        "n_weighted_bins": n_weighted,
     }
 
 
@@ -135,8 +92,8 @@ def _one_comparison(name: str, cand_x: np.ndarray, cand_y: np.ndarray,
                     abs_only: bool = False) -> list[dict]:
     """Run one (A)/(B)/(C) comparison on a common grid.
 
-    snr_ref: optional (snr_x, snr_y) SNR curve; resampled onto the same eval
-    grid as the curves so the SNR weighting engages (per §9.3).
+    snr_ref: optional (snr_x, snr_y) SNR curve, resampled onto the eval grid
+    for the hard mask only (no weighting).
     regions: optional list of ``{name, window, thresholds}`` dicts. Each region
     produces an additional comparison dict with name ``<name>__<region_name>``
     and its own thresholds, evaluated on the region window. The full-window
@@ -200,7 +157,7 @@ def _compute_comparison(name: str, cand_x: np.ndarray, cand_y: np.ndarray,
         xmax = min(xmax, eval_window[1])
     if xmin >= xmax:
         return {"name": name, "status": "error",
-                "summary": "no overlap", "n_bins": 0, "n_weighted_bins": 0}
+                "summary": "no overlap", "n_bins": 0}
     # Finer of the two grids within [xmin, xmax]
     def _in(x):
         m = (x >= xmin) & (x <= xmax)
@@ -209,7 +166,7 @@ def _compute_comparison(name: str, cand_x: np.ndarray, cand_y: np.ndarray,
     grid = c_in if c_in.size >= r_in.size else r_in
     if grid.size == 0:
         return {"name": name, "status": "error",
-                "summary": "empty grid", "n_bins": 0, "n_weighted_bins": 0}
+                "summary": "empty grid", "n_bins": 0}
     # D15: cap the eval grid with decimation
     if grid.size > MAX_BINS:
         step = int(np.ceil(grid.size / MAX_BINS))
@@ -225,7 +182,7 @@ def _compute_comparison(name: str, cand_x: np.ndarray, cand_y: np.ndarray,
             if not np.any(keep):
                 return {"name": name, "status": "error",
                         "summary": f"no bins with SNR >= {snr_mask_threshold}",
-                        "n_bins": 0, "n_weighted_bins": 0}
+                        "n_bins": 0}
             grid = grid[keep]
             cand_on = cand_on[keep]
             ref_on = ref_on[keep]
@@ -238,7 +195,7 @@ def _compute_comparison(name: str, cand_x: np.ndarray, cand_y: np.ndarray,
         if np.any(np.isnan(diff)):
             return {"name": name, "status": "error",
                     "summary": "nan in curve (defect, not a tolerance)",
-                    "n_bins": 0, "n_weighted_bins": 0}
+                    "n_bins": 0}
         abs_rms = float(np.sqrt(np.mean(diff ** 2)))
         max_abs = float(np.max(np.abs(diff)))
         thr_rms = thresholds.get("abs_rms")
@@ -254,16 +211,12 @@ def _compute_comparison(name: str, cand_x: np.ndarray, cand_y: np.ndarray,
         if thr_rms is not None:
             result["threshold_abs_rms"] = thr_rms
         return result
-    if snr_ref is not None:
-        weights = snr_weights(ref_on, snr_on)
-    else:
-        weights = snr_weights(ref_on)
     try:
-        m = residual_metrics(cand_on, ref_on, weights)
+        m = residual_metrics(cand_on, ref_on)
     except ComparisonError as e:
         return {"name": name, "status": "error", "summary": str(e),
-                "n_bins": 0, "n_weighted_bins": 0}
-    thr_wrms = thresholds.get("weighted_rms_rel_pct", 0.5)
+                "n_bins": 0}
+    thr_rms = thresholds.get("unweighted_rms_rel_pct", 0.5)
     thr_max = thresholds.get("max_abs_rel_pct", 5.0)
     thr_max_abs = thresholds.get("max_abs", None)
     # When threshold_max_abs is set, use the absolute max for pass/fail instead
@@ -272,16 +225,15 @@ def _compute_comparison(name: str, cand_x: np.ndarray, cand_y: np.ndarray,
         max_ok = m["max_abs"] <= thr_max_abs
     else:
         max_ok = m["max_abs_rel_pct"] <= thr_max
-    status = "pass" if (m["weighted_rms_rel_pct"] <= thr_wrms and max_ok) else "fail"
+    status = "pass" if (m["unweighted_rms_rel_pct"] <= thr_rms and max_ok) else "fail"
     result = {
         "name": name, "status": status,
-        "weighted_rms_rel_pct": m["weighted_rms_rel_pct"],
         "unweighted_rms_rel_pct": m["unweighted_rms_rel_pct"],
         "max_abs_rel_pct": m["max_abs_rel_pct"],
         "max_abs": m["max_abs"],
-        "threshold_wrms_pct": thr_wrms,
+        "threshold_rms_pct": thr_rms,
         "threshold_max_pct": thr_max,
-        "n_bins": m["n_bins"], "n_weighted_bins": m["n_weighted_bins"],
+        "n_bins": m["n_bins"],
     }
     if thr_max_abs is not None:
         result["threshold_max_abs"] = thr_max_abs
@@ -301,8 +253,8 @@ def compare(headless_x: np.ndarray, headless_y: np.ndarray,
     """Run the three-way comparison (A)/(B)/(C) per §3 of the overview.
 
     declared: subset of ["A","B","C"] to run; default = all available.
-    snr_ref: optional (snr_x, snr_y) SNR curve used as the quality signal for
-    weighting (§9.3); resampled onto each comparison's eval grid.
+    snr_ref: optional (snr_x, snr_y) SNR curve, resampled onto each
+    comparison's eval grid for the hard mask only (no weighting).
     regions: optional list of ``{name, window, thresholds}`` dicts. When given,
     each (A)/(B)/(C) comparison emits the full-window result plus one per
     region (name suffixed ``__<region_name>``), each with its own thresholds.

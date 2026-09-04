@@ -65,7 +65,7 @@ def main():
     comps = compare(cpp_x, cpp_ys[0], grid, py_std, None, None, thresholds, eval_window=EVAL, declared=["A"], regions=REGIONS)
     all_pass = all(c["status"]=="pass" for c in comps)
     status = "pass" if all_pass else "fail"
-    summary = f"wrms={comps[0]['weighted_rms_rel_pct']}% max={comps[0]['max_abs_rel_pct']}%"
+    summary = f"wrms={comps[0]['unweighted_rms_rel_pct']}% max={comps[0]['max_abs_rel_pct']}%"
     save_overlay_residual("test7_t100_stddev", root,
                           cpp_x, cpp_ys[0], grid, py_std,
                           eval_window=EVAL, title="test7 100% T stddev",

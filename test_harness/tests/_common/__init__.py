@@ -7,7 +7,7 @@ Public API (re-exported here for convenience):
   pipeline:  hilbert_x_axis, x_axis_from_peaks, process_spectrum, apply_window,
              mean_spectrum, snr_spectrum, allan_variance, transmittance,
              stddev_curves, common_grid
-  compare:   snr_weights, relative_error, residual_metrics, common_grid_resample,
+  compare:   relative_error, residual_metrics, common_grid_resample,
              compare, ComparisonError
   h5io:      strip_derivatives, validate_h5, read_golden_member, list_members,
              golden_checksum
@@ -24,7 +24,7 @@ from .pipeline import (
     common_grid,
 )
 from .compare import (
-    ComparisonError, snr_weights, relative_error, residual_metrics,
+    ComparisonError, relative_error, residual_metrics,
     common_grid_resample, compare,
 )
 from .h5io import (
@@ -40,7 +40,7 @@ __all__ = [
     "hilbert_x_axis", "x_axis_from_peaks", "process_spectrum", "apply_window",
     "mean_spectrum", "snr_spectrum", "allan_variance", "transmittance",
     "stddev_curves", "common_grid",
-    "ComparisonError", "snr_weights", "relative_error", "residual_metrics",
+    "ComparisonError", "relative_error", "residual_metrics",
     "common_grid_resample", "compare",
     "strip_derivatives", "validate_h5", "read_golden_member", "list_members",
     "golden_checksum",

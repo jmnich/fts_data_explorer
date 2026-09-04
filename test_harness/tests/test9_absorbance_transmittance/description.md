@@ -19,7 +19,7 @@ signal in this dataset)
 ## Comparisons declared
 - [x] A: headless vs Python reference (transmittance + absorbance)
 ## Tolerance (absolute-only evaluation, max-abs gate only)
-weighted_rms_rel_pct: none — test9 uses `compare(abs_only=True)`: no relative
+unweighted_rms_rel_pct: none — test9 uses `compare(abs_only=True)`: no relative
 metrics at all, and NO RMS gate of any kind. The single pass/fail gate is
 max_abs:
 - max_abs: 2e-4 (T fraction), 1e-4 (A)

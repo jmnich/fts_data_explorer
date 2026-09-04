@@ -170,7 +170,7 @@ def main():
     # 7. Result
     all_pass = all(c["status"] == "pass" for c in comparisons)
     status = "pass" if all_pass else "fail"
-    summary = f"wrms={comparisons[0]['weighted_rms_rel_pct']}% max={comparisons[0]['max_abs_rel_pct']}%"
+    summary = f"wrms={comparisons[0]['unweighted_rms_rel_pct']}% max={comparisons[0]['max_abs_rel_pct']}%"
     _write_result(workdir, status, summary, comparisons, t0)
     return 0 if all_pass else 1
 
@@ -203,7 +203,7 @@ def _save_plot(workdir, py_x, py_y, cpp_x, cpp_y, comp):
              label="Python", lw=0.7)
     ax1.plot(cpp_x[mask], cpp_y[mask], label="C++ headless", ls="--", lw=0.7, alpha=0.85)
     ax1.set_yscale("log"); ax1.legend(); ax1.set_xlabel("cm-1"); ax1.set_ylabel("Magnitude")
-    ax1.set_title(f"test1 single spectrum — {comp['status']} (wrms {comp['weighted_rms_rel_pct']}%)")
+    ax1.set_title(f"test1 single spectrum — {comp['status']} (wrms {comp['unweighted_rms_rel_pct']}%)")
     # residual — same convention as the metric: (candidate - reference) / reference
     py_m = (py_x >= cm_lo) & (py_x <= cm_hi)
     py_xm, py_ym = py_x[py_m], py_y[py_m]

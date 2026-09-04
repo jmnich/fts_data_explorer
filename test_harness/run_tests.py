@@ -490,15 +490,19 @@ def _build_html_report(records: list[dict], verdict: str,
         use_abs = any(c.get("threshold_max_abs") is not None for c in r["comparisons"])
         max_hdr = "Max (abs)" if use_abs else "Max %"
         thr_max_hdr = "Threshold Max (abs)" if use_abs else "Threshold Max %"
-        # Absolute-only tests (abs_only mode) report abs_rms instead of the
-        # weighted relative RMS — pick the header/values per comparison.
-        has_rel = any(c.get("weighted_rms_rel_pct") is not None for c in r["comparisons"])
+        # Single RMS column: unweighted RMS for relative tests, abs_rms for
+        # absolute-only tests (abs_only mode, e.g. test9).
         has_abs_rms = any(c.get("abs_rms") is not None for c in r["comparisons"])
-        rms_hdr = "Abs RMS" if (has_abs_rms and not has_rel) else "Weighted RMS %"
-        thr_rms_hdr = "Threshold Abs RMS" if (has_abs_rms and not has_rel) else "Threshold RMS %"
+        has_rms = any(c.get("unweighted_rms_rel_pct") is not None for c in r["comparisons"])
+        if has_abs_rms and not has_rms:
+            rms_hdr, thr_rms_hdr = "Abs RMS", "Threshold Abs RMS"
+            rms_key, thr_rms_key = "abs_rms", "threshold_abs_rms"
+        else:
+            rms_hdr, thr_rms_hdr = "RMS %", "Threshold RMS %"
+            rms_key, thr_rms_key = "unweighted_rms_rel_pct", "threshold_rms_pct"
         p.append('<table><thead><tr>'
                  '<th>Subtest</th><th>Result</th>'
-                 f'<th class="num">{html.escape(rms_hdr)}</th><th class="num">AC RMS %</th>'
+                 f'<th class="num">{html.escape(rms_hdr)}</th>'
                  f'<th class="num">{html.escape(thr_rms_hdr)}</th>'
                  f'<th class="num">{html.escape(max_hdr)}</th><th class="num">{html.escape(thr_max_hdr)}</th>'
                  '</tr></thead><tbody>')
@@ -509,18 +513,13 @@ def _build_html_report(records: list[dict], verdict: str,
             else:
                 max_val = _fmt_num(c.get("max_abs_rel_pct"))
                 thr_max = _fmt_num(c.get("threshold_max_pct"))
-            rms_val = (c.get("weighted_rms_rel_pct")
-                       if c.get("weighted_rms_rel_pct") is not None
-                       else c.get("abs_rms"))
-            thr_rms = (c.get("threshold_wrms_pct")
-                       if c.get("threshold_wrms_pct") is not None
-                       else c.get("threshold_abs_rms"))
+            rms_val = c.get(rms_key)
+            thr_rms = c.get(thr_rms_key)
             p.append(
                 f'<tr class="subtest">'
                 f'<td>{html.escape(c.get("name", ""))}</td>'
                 f'<td>{_status_badge(c.get("status", "").upper())}</td>'
                 f'<td class="num">{html.escape(_fmt_num(rms_val))}</td>'
-                f'<td class="num">{html.escape(_fmt_num(c.get("unweighted_rms_rel_pct")))}</td>'
                 f'<td class="num">{html.escape(_fmt_num(thr_rms))}</td>'
                 f'<td class="num">{html.escape(max_val)}</td>'
                 f'<td class="num">{html.escape(thr_max)}</td>'

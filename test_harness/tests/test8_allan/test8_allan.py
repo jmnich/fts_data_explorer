@@ -118,27 +118,26 @@ def main():
              & (np.abs(cpp_surface) > 1e-15)) & w_in_band[:, None]
     if np.any(valid):
         cs = cpp_surface[valid]; ps = py_surface[valid]
-        # Weighted RMS (magnitude weighting)
+        # Unweighted RMS over the band-valid bins
         max_abs = np.max(np.abs(cs))
-        w = np.clip(np.abs(cs) / max_abs, 0, 1) if max_abs > 0 else np.ones_like(cs)
         with np.errstate(divide="ignore", invalid="ignore"):
             rel = np.where(np.abs(cs) > 1e-15, (ps - cs) / cs, 0.0)
-        wrms = np.sqrt(np.sum(w * rel**2) / np.sum(w)) * 100 if np.sum(w) > 0 else 0
+        wrms = np.sqrt(np.mean(rel**2)) * 100
         maxrel = np.max(np.abs(rel)) * 100
         # Absolute max error — Allan variance spans many orders of magnitude,
         # so relative max blows up at small-variance bins. Use absolute for
         # pass/fail; report relative for transparency.
         max_abs_err = float(np.max(np.abs(ps - cs)))
-        thr_w = ALLAN_THR["weighted_rms_rel_pct"]
+        thr_w = ALLAN_THR["unweighted_rms_rel_pct"]
         thr_m = ALLAN_THR["max_abs_rel_pct"]
-        thr_max_abs = max_abs * MAX_ABS_FRACTION  # 10% of peak Allan variance
+        thr_max_abs = max_abs * MAX_ABS_FRACTION  # fraction of peak Allan variance
         status = "pass" if (wrms <= thr_w and max_abs_err <= thr_max_abs) else "fail"
         comparisons.append({"name": "allan_surface", "status": status,
-            "weighted_rms_rel_pct": round(wrms, 6), "max_abs_rel_pct": round(maxrel, 6),
+            "unweighted_rms_rel_pct": round(wrms, 6), "max_abs_rel_pct": round(maxrel, 6),
             "max_abs": round(max_abs_err, 9),
-            "threshold_wrms_pct": thr_w, "threshold_max_pct": thr_m,
+            "threshold_rms_pct": thr_w, "threshold_max_pct": thr_m,
             "threshold_max_abs": round(thr_max_abs, 9),
-            "n_bins": int(np.sum(valid)), "n_weighted_bins": int(np.sum(w > 0))})
+            "n_bins": int(np.sum(valid))})
     else:
         comparisons.append({"name": "allan_surface", "status": "error", "summary": "no valid bins"})
     # Exact axis check: the CSV wavelengths must match the Python reference

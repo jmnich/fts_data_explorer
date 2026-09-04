@@ -116,8 +116,8 @@ def main():
     comparisons = comps + comps_r
     all_pass = all(c["status"]=="pass" for c in comparisons)
     status = "pass" if all_pass else "fail"
-    summary = (f"sample={comps[0]['status']} (wrms {comps[0]['weighted_rms_rel_pct']}%) "
-               f"ref={comps_r[0]['status']} (wrms {comps_r[0]['weighted_rms_rel_pct']}%)")
+    summary = (f"sample={comps[0]['status']} (wrms {comps[0]['unweighted_rms_rel_pct']}%) "
+               f"ref={comps_r[0]['status']} (wrms {comps_r[0]['unweighted_rms_rel_pct']}%)")
     save_overlay_residual("test10_comparator", root,
                           cpp_x, cpp_sample, ref_x, sample_on_ref,
                           eval_window=EVAL, suffix="sample",

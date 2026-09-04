@@ -16,7 +16,7 @@ from _common.pipeline import hilbert_x_axis, x_axis_from_peaks
 from _common.h5io import strip_derivatives, validate_h5
 from _common.headless import run_binary, load_csv
 from _common.report_images import save_ifg_burst_residual
-from _common.compare import compare, residual_metrics, snr_weights
+from _common.compare import compare, residual_metrics
 from _common import thresholds as thr
 
 DATASET = "wust_mini"
@@ -123,24 +123,23 @@ def main():
         rel_diff = opd_diff / opd_range if opd_range > 0 else opd_diff
         opd_rel_limit = OPD_REL_LIMIT[method]
         opd_thr_max_abs = opd_range * opd_rel_limit if opd_range > 0 else opd_rel_limit
-        opd_thr_wrms_pct = opd_rel_limit * 100.0  # % — companion wrms cap
-        # Real weighted RMS of the OPD-axis relative error (was a 0.0 placeholder).
+        opd_thr_wrms_pct = opd_rel_limit * 100.0  # % — companion RMS cap
+        # Real RMS of the OPD-axis relative error (was a 0.0 placeholder).
         # Reuses the canonical residual_metrics so the value matches compare().
         n = min(len(cpp_opd), len(py_opd))
         cand_axis = cpp_opd[:n]
         ref_axis = py_opd[:n]
-        w = snr_weights(ref_axis)
-        opd_metrics = residual_metrics(cand_axis, ref_axis, w)
-        opd_pass = (opd_metrics["weighted_rms_rel_pct"] <= opd_thr_wrms_pct
+        opd_metrics = residual_metrics(cand_axis, ref_axis)
+        opd_pass = (opd_metrics["unweighted_rms_rel_pct"] <= opd_thr_wrms_pct
                     and opd_diff <= opd_thr_max_abs)
         prim_pass = prim_diff < PRIMARY_IDENTITY_MAX_ABS  # raw data, float32 precision
         status = "pass" if (opd_pass and prim_pass) else "fail"
         comparisons.append({
             "name": f"opd_{method}", "status": status,
-            "weighted_rms_rel_pct": opd_metrics["weighted_rms_rel_pct"],
+            "unweighted_rms_rel_pct": opd_metrics["unweighted_rms_rel_pct"],
             "max_abs_rel_pct": opd_metrics["max_abs_rel_pct"],
             "max_abs": opd_metrics["max_abs"],
-            "threshold_wrms_pct": opd_thr_wrms_pct,
+            "threshold_rms_pct": opd_thr_wrms_pct,
             "threshold_max_abs": opd_thr_max_abs,
             "opd_max_abs_diff": float(opd_diff),
             "opd_rel_diff_pct": round(rel_diff * 100, 6),

@@ -22,11 +22,11 @@ must stay ≈100% in-window (self-reference guard).
 - [x] A: headless vs Python reference (file 1 vs file 0)
 - [x] self_reference: raw_0 line vs itself ≈ 100% (|T−100| ≤ 1e-3 in-window)
 ## Tolerance
-weighted_rms_rel_pct: 0.001
+unweighted_rms_rel_pct (AC RMS): 0.001
 max_abs_rel_pct: 1.0 (cap; not used for pass/fail)
 max_abs: 0.01 (absolute max |c-r| in T %, drives pass/fail)
 
-Observed in 2000–4000 cm-1: wrms 3.8e-05%, max-abs 0.00023 (T %) → 26x /
+Observed in 2000–4000 cm-1: RMS 3.8e-05%, max-abs 0.00023 (T %) → 26x /
 44x headroom. The residual is at the genuine FFTW-vs-scipy noise floor.
 
 ## History

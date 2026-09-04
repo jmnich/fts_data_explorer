@@ -19,12 +19,12 @@ residual, so the band policy does not apply to it.
 - [x] A: headless vs Python reference (surface weighted, band-restricted)
 - [x] axis: taus/wavelengths exact match (full 1–30 um)
 ## Tolerance
-weighted_rms_rel_pct: 1.0
+unweighted_rms_rel_pct (AC RMS): 1.0
 max_abs_rel_pct: 1.0 (cap; not used for pass/fail)
 max_abs: 1% of band peak Allan variance (absolute, drives pass/fail)
 
-Observed in the 2.5–5 um band: wrms 0.0507%, max-abs err 0.00318 vs band
-peak 21.13 → 20x (wrms) / 66x (max-abs) headroom.
+Observed in the 2.5–5 um band: RMS 0.2245%, max-abs err 0.00318 vs band
+peak 21.13 → 4.5x (RMS) / 66x (max-abs) headroom.
 
 Rationale: Allan variance spans many orders of magnitude, so the relative
 max blows up at small-variance bins. The absolute max (fraction of the band

@@ -19,16 +19,16 @@ sorted file). Comparison is on the interpolated evaluation grid (defense-in-dept
 ## Comparisons declared
 - [x] A: headless vs Python reference
 ## Tolerance
-weighted_rms_rel_pct: 0.001
+unweighted_rms_rel_pct (AC RMS): 0.001
 max_abs_rel_pct: 1.0 (cap; not used for pass/fail)
 max_abs: 1e-7 (absolute max |c-r|, drives pass/fail)
 
-Observed in 2000–4000 cm-1: wrms 0.000128%, max-abs 3e-9 V → 8x / 33x
+Observed in 2000–4000 cm-1: RMS 0.00017%, max-abs 3e-9 V → 5.9x / 33x
 headroom.
 
 ## Region-locked comparisons
 Strong-signal region 2050-2250 cm-1, A-only. Averaging smooths residuals
-(observed 0.000046% wrms / 0.000075% max), so the strong-region threshold
+(observed 0.000046% RMS / 0.000075% max), so the strong-region threshold
 matches test1.
 
 | Comparison | Region | Weighted RMS % | Max |rel| % |

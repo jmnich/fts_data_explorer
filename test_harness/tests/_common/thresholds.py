@@ -11,8 +11,8 @@ Conventions
     The thresholds dict passed to :func:`_common.compare.compare` for the
     full-window (A)/(B)/(C) comparison. Keys understood by ``compare``:
 
-    ``weighted_rms_rel_pct``  signal-weighted RMS of the per-bin relative
-                              error, in percent (the primary gate).
+    ``unweighted_rms_rel_pct``  RMS of the per-bin relative error over the
+                              eval window, in percent (the RMS gate).
     ``max_abs_rel_pct``       cap on the max relative error, percent. Used
                               for pass/fail only when ``max_abs`` is absent.
     ``max_abs``               absolute max |candidate - reference|, in the
@@ -60,16 +60,16 @@ THRESHOLDS: dict[str, dict] = {
     # versions, C (python vs golden) is the tightest sanity guard.
     "test1_single_spectrum": {
         "full_window": {
-            "weighted_rms_rel_pct": 0.001,   # observed 8.7e-05% (12x headroom)
+            "unweighted_rms_rel_pct": 0.001,   # observed 0.000119% (8.4x)
             "max_abs_rel_pct": 1.0,          # rel cap (not the gate)
             "max_abs": 1e-7,                 # V — observed 3e-9 (33x)
         },
         "regions": {
             "strong_2050_2250": {
                 "window": STRONG_REGION_WINDOW,
-                "thresholds_a": {"weighted_rms_rel_pct": 0.0005, "max_abs": 1e-7},
-                "thresholds_b": {"weighted_rms_rel_pct": 0.0002, "max_abs": 1e-7},
-                "thresholds_c": {"weighted_rms_rel_pct": 0.0001, "max_abs": 1e-7},
+                "thresholds_a": {"unweighted_rms_rel_pct": 0.0005, "max_abs": 1e-7},
+                "thresholds_b": {"unweighted_rms_rel_pct": 0.0002, "max_abs": 1e-7},
+                "thresholds_c": {"unweighted_rms_rel_pct": 0.0001, "max_abs": 1e-7},
             },
         },
     },
@@ -89,7 +89,7 @@ THRESHOLDS: dict[str, dict] = {
         # Burst-window resampled primary (compare() dict, absolute gate).
         "resampled_primary": {
             "max_abs": 5e-4,               # V — ~10x the observed ~4.8e-5
-            "weighted_rms_rel_pct": 1.0,  # % — companion wrms cap (not the gate)
+            "unweighted_rms_rel_pct": 1.0,  # % — companion RMS cap (not the gate)
         },
     },
 
@@ -98,14 +98,14 @@ THRESHOLDS: dict[str, dict] = {
     # to observed residuals: worst variant laser1310 0.000105% full-window wrms.
     "test3_single_spectrum_params": {
         "full_window": {
-            "weighted_rms_rel_pct": 0.001,   # observed 0.000105% (9.5x)
+            "unweighted_rms_rel_pct": 0.001,   # observed 0.000106% (laser1310, 9.4x)
             "max_abs_rel_pct": 1.0,
             "max_abs": 1e-7,                 # V — observed 7e-9 (14x)
         },
         "regions": {
             "strong_2050_2250": {
                 "window": STRONG_REGION_WINDOW,
-                "thresholds_a": {"weighted_rms_rel_pct": 0.001, "max_abs": 1e-7},
+                "thresholds_a": {"unweighted_rms_rel_pct": 0.001, "max_abs": 1e-7},   # region: observed 0.000146% (6.8x)
             },
         },
     },
@@ -115,14 +115,14 @@ THRESHOLDS: dict[str, dict] = {
     # residuals; observed 0.000128% full-window wrms.
     "test4_average_spectrum": {
         "full_window": {
-            "weighted_rms_rel_pct": 0.001,   # observed 0.000128% (8x)
+            "unweighted_rms_rel_pct": 0.001,   # observed 0.00017% (5.9x)
             "max_abs_rel_pct": 1.0,
             "max_abs": 1e-7,                 # V — observed 3e-9 (33x)
         },
         "regions": {
             "strong_2050_2250": {
                 "window": STRONG_REGION_WINDOW,
-                "thresholds_a": {"weighted_rms_rel_pct": 0.0005, "max_abs": 1e-7},
+                "thresholds_a": {"unweighted_rms_rel_pct": 0.0005, "max_abs": 1e-7},
             },
         },
     },
@@ -133,7 +133,7 @@ THRESHOLDS: dict[str, dict] = {
     # RunningStats): observed 0.0232% wrms / 0.143 max-abs (SNR units).
     "test5_snr": {
         "full_window": {
-            "weighted_rms_rel_pct": 0.1,     # observed 0.0232% (4.3x)
+            "unweighted_rms_rel_pct": 0.1,     # observed 0.0221% (4.5x)
             "max_abs_rel_pct": 1.0,
             "max_abs": 0.5,                  # SNR units — observed 0.143 (3.5x)
         },
@@ -141,7 +141,7 @@ THRESHOLDS: dict[str, dict] = {
             "strong_2050_2250": {
                 "window": STRONG_REGION_WINDOW,
                 "thresholds_a": {
-                    "weighted_rms_rel_pct": 0.1,   # observed 0.0282% (3.5x)
+                    "unweighted_rms_rel_pct": 0.1,   # observed 0.0280% (3.6x)
                     "max_abs_rel_pct": 1.0,
                     "max_abs": 0.5,                # observed 0.130 (3.8x)
                 },
@@ -157,7 +157,7 @@ THRESHOLDS: dict[str, dict] = {
     # a scalar self-reference check (reference-setup integrity).
     "test6_t100": {
         "full_window": {
-            "weighted_rms_rel_pct": 0.001,   # observed 3.8e-05% (26x)
+            "unweighted_rms_rel_pct": 0.001,   # observed 3.8e-05% (26x)
             "max_abs_rel_pct": 1.0,
             "max_abs": 0.01,                 # T % — observed 0.00023 (44x)
         },
@@ -170,14 +170,14 @@ THRESHOLDS: dict[str, dict] = {
     # 0.00128 max-abs (T %).
     "test7_t100_stddev": {
         "full_window": {
-            "weighted_rms_rel_pct": 0.1,     # observed 0.0206% (5x)
+            "unweighted_rms_rel_pct": 0.1,     # observed 0.0221% (4.5x)
             "max_abs_rel_pct": 1.0,
             "max_abs": 0.005,                # T % — observed 0.00128 (4x)
         },
         "regions": {
             "strong_2050_2250": {
                 "window": STRONG_REGION_WINDOW,
-                "thresholds_a": {"weighted_rms_rel_pct": 0.1, "max_abs": 0.001},
+                "thresholds_a": {"unweighted_rms_rel_pct": 0.1, "max_abs": 0.001},
             },
         },
     },
@@ -189,7 +189,7 @@ THRESHOLDS: dict[str, dict] = {
     # (computed at run time); observed max-abs err is 1.5e-4 of the band peak.
     "test8_allan": {
         "full_window": {
-            "weighted_rms_rel_pct": 1.0,     # observed 0.0507% (20x)
+            "unweighted_rms_rel_pct": 1.0,     # observed 0.2245% (4.5x)
             "max_abs_rel_pct": 1.0,          # cap; not the gate
         },
         "max_abs_fraction_of_peak": 0.01,    # observed 1.5e-4 (66x)
@@ -224,7 +224,7 @@ THRESHOLDS: dict[str, dict] = {
     # well-behaved away from zero.
     "test10_comparator": {
         "full_window": {
-            "weighted_rms_rel_pct": 0.01,    # observed 0.0021% (sample) / 0.0017% (ref)
+            "unweighted_rms_rel_pct": 0.01,    # observed 0.0033% (sample) / 0.0028% (ref) — ~3x
             "max_abs_rel_pct": 0.05,         # observed 0.0147% / 0.0144%
         },
     },

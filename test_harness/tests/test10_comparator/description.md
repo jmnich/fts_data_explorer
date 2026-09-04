@@ -23,11 +23,11 @@ transmits below ~1000 cm-1; 2000–4000 cm-1 has no signal in this dataset)
 - [x] A: headless vs Python reference — sample_average
 - [x] A: headless vs Python reference — reference_average
 ## Tolerance
-weighted_rms_rel_pct: 0.01
+unweighted_rms_rel_pct (AC RMS): 0.01
 max_abs_rel_pct: 0.05
 
-Observed in 200–700 cm-1: sample wrms 0.0021% / max 0.0147%;
-reference wrms 0.0017% / max 0.0144% → ~5x / 3.4x headroom.
+Observed in 200–700 cm-1: sample RMS 0.0033% / max 0.0147%;
+reference RMS 0.0028% / max 0.0144% → ~3x / 3.4x headroom.
 
 ## History
 Previously -cmp emitted a derived "Comparator ratio" (avg(sample)/avg(reference))

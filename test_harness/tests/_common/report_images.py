@@ -111,7 +111,7 @@ def save_overlay_residual(test_name: str, root: str | Path,
     if status:
         head += f" — {status}"
     if metrics:
-        wrms = metrics.get("weighted_rms_rel_pct")
+        wrms = metrics.get("unweighted_rms_rel_pct")
         mx = metrics.get("max_abs_rel_pct")
         if wrms is not None and mx is not None:
             head += f" (wrms {wrms}%, max {mx}%)"
@@ -220,7 +220,7 @@ def save_ifg_burst_residual(test_name: str, root: str | Path,
         head += f" — {status}"
     if metrics:
         # Prefer the canonical wrms/max pair; fall back to opd_rel_diff_pct
-        wrms = metrics.get("weighted_rms_rel_pct")
+        wrms = metrics.get("unweighted_rms_rel_pct")
         mx = metrics.get("max_abs_rel_pct")
         if wrms is not None and mx is not None:
             head += f" (wrms {wrms}%, max {mx}%)"
@@ -309,7 +309,7 @@ def save_multi_overlay(test_name: str, root: str | Path,
             head += f" [{st}]"
         m = p.get("metrics")
         if m:
-            head += f" wrms={m.get('weighted_rms_rel_pct', '?')}%"
+            head += f" wrms={m.get('unweighted_rms_rel_pct', '?')}%"
         ax.set_title(head, fontsize=9)
         ax.set_xmargin(0)
         if residual and cx.size and rx.size:

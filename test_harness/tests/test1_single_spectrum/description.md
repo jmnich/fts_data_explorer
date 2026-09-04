@@ -26,12 +26,12 @@ headless `-w` on the stripped input exports `work_spectra.csv`;
       classified `error`, not `fail`)
 
 ## Tolerance
-weighted_rms_rel_pct: 0.001 (A, full window)
+unweighted_rms_rel_pct (AC RMS): 0.001 (A, full window)
 max_abs_rel_pct: 1.0 (cap; not used for pass/fail)
 max_abs: 1e-7 (absolute max |c-r|, drives pass/fail)
 
-Observed in 2000–4000 cm-1: A wrms 8.7e-05%, max-abs 3e-9 V; B bit-exact
-(0.0); C wrms 8.7e-05%. The noisy bins outside the band (which drove the
+Observed in 2000–4000 cm-1: A RMS 0.000119%, max-abs 3e-9 V; B bit-exact
+(0.0); C RMS 0.000119%. The noisy bins outside the band (which drove the
 old full-window max to 1.87% relative) are excluded by the band policy.
 
 ## Region-locked comparisons
@@ -48,13 +48,13 @@ golden) is the tightest sanity guard (two independent implementations agreeing).
 | C (Python vs golden) | 2050-2250 | 0.0001 | 0.005 |
 
 Calibration (observed in 2050-2250 cm-1):
-- A: wrms 0.000012%, max 0.000034% (42x / 147x headroom)
-- B: wrms 0.0 (bit-exact)
-- C: wrms 0.000012%, max 0.000034% (8x / 147x headroom)
+- A: RMS 0.000012%, max 0.000034% (42x / 147x headroom)
+- B: RMS 0.0 (bit-exact)
+- C: RMS 0.000012%, max 0.000034% (8x / 147x headroom)
 
 ## Calibration
-Observed in 2000–4000 cm-1: A weighted_rms_rel_pct = 0.000087%, max-abs
-3e-9 V. Thresholds: wrms 0.001% (12x headroom), max-abs 1e-7 V (33x). The
+Observed in 2000–4000 cm-1: A unweighted_rms_rel_pct = 0.000119%, max-abs
+3e-9 V. Thresholds: RMS 0.001% (8.4x headroom), max-abs 1e-7 V (33x). The
 weighted RMS is the primary metric; the relative max is no longer
 noise-dominated since the eval window excludes the noisy regions.
 

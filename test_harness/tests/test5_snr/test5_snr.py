@@ -7,7 +7,7 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 from _common.pipeline import process_spectrum, snr_spectrum
-from _common.compare import compare, snr_weights
+from _common.compare import compare
 from _common.test_helpers import read_raw_ifg, list_members, write_result, strip_and_validate
 from _common.headless import run_binary, load_csv, find_exported_csv
 from _common.report_images import save_overlay_residual
@@ -52,15 +52,13 @@ def main():
     # Grid = first file's spectrum X (matches C++ chooseCommonGrid)
     grid = spectra[0][0]
     _, py_snr = snr_spectrum(spectra, grid)
-    # SNR-weighted: use the SNR curve itself as quality signal, on the same
-    # grid as the comparison's reference (compare() resamples it internally).
     thresholds = THRESHOLDS
     comps = compare(cpp_x, cpp_ys[0], grid, py_snr, None, None, thresholds,
-                    eval_window=EVAL, snr_ref=(grid, py_snr), declared=["A"],
+                    eval_window=EVAL, declared=["A"],
                     regions=REGIONS)
     all_pass = all(c["status"]=="pass" for c in comps)
     status = "pass" if all_pass else "fail"
-    summary = f"wrms={comps[0]['weighted_rms_rel_pct']}% max={comps[0]['max_abs_rel_pct']}% n_w={comps[0]['n_weighted_bins']}"
+    summary = f"wrms={comps[0]['unweighted_rms_rel_pct']}% max={comps[0]['max_abs_rel_pct']}%"
     save_overlay_residual("test5_snr", root,
                           cpp_x, cpp_ys[0], grid, py_snr,
                           eval_window=EVAL, title="test5 SNR spectrum",
