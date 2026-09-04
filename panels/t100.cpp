@@ -850,6 +850,71 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
         }
     }
 
+    bool isFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
+
+    // Compute max data size across all cached files for large-data flag
+    size_t maxDataSize = 0;
+    for (const auto& kv : cachedTransY)
+        if (kv.second.size() > maxDataSize)
+            maxDataSize = kv.second.size();
+    bool largeData = maxDataSize > 50000;
+
+    // Unified view/interaction phases (spectral_plot.h). T100 is always
+    // linear Y (T% around 100%) — log/dB are gated off.
+    // Built BEFORE the no-data early return (C1 — same as Average/SNR): the
+    // X-unit switch detection + prev-latch sync must run even when nothing is
+    // displayed, or a switch made on an empty panel leaves the latch stale
+    // and the view state inconsistent (new unit + old-unit window). The
+    // hidden-tab arming guards keep an armed range from leaking into the next
+    // visible plot.
+    SpectralPlotFrame f;
+    f.windowFocused = isFocused;
+    f.yScaleEnabled = false;
+    f.yLabel = "T(%)";
+    if (largeData) {
+        f.plotFlags |= ImPlotFlags_NoInputs;
+        f.enabled = false;
+    }
+    f.xDataRange = [this](double& x0, double& x1) -> bool {
+        bool have = false;
+        for (const auto& kv : cachedTransX) {
+            if (kv.second.empty()) continue;
+            double lmin = std::min(kv.second.front(), kv.second.back());
+            double lmax = std::max(kv.second.front(), kv.second.back());
+            if (!have) { x0 = lmin; x1 = lmax; have = true; }
+            else { x0 = std::min(x0, lmin); x1 = std::max(x1, lmax); }
+        }
+        return have;
+    };
+    f.yDataRange = [this](double& y0, double& y1) -> bool {
+        bool have = false;
+        for (const auto& kv : cachedTransY) {
+            if (kv.second.empty()) continue;
+            auto mmY = std::minmax_element(kv.second.begin(), kv.second.end());
+            if (!have) { y0 = *mmY.first; y1 = *mmY.second; have = true; }
+            else { y0 = std::min(y0, *mmY.first); y1 = std::max(y1, *mmY.second); }
+        }
+        return have;
+    };
+    f.onXUnitChanged = [this](int fromUnit, int toUnit) {
+        // Convert cached transmittance X data in-place (T% is unit-independent):
+        // main curves, std-dev curve and buffered std results (L3 shared helper).
+        convertCachedXUnits(fromUnit, toUnit);
+    };
+    f.onViewChanged = [this]() { appState->needsRedraw = true; };
+
+    // Lazy-compute: recompute all if stale, then fill missing per-file caches.
+    // H1.1: runs BEFORE the frame build so every data-gated early return
+    // precedes tickPrePlot — an armed SetNextAxisLimits/SetNextAxisToFit that
+    // survives an early return leaks into the next frame's first visible plot
+    // (BeginSubplots returns false on SkipItems WITHOUT resetting ImPlot's
+    // NextPlotData). Runs before the plot (IMGUI_GUIDE §19) so setupAxes'
+    // suppliers see the freshly computed curves.
+    refreshTransmittanceCache();
+
+    plot.tickPrePlot(f);
+
+
     if (!referenceAvailable) {
         ImVec2 avail = ImGui::GetContentRegionAvail();
         const char* msg = "No reference spectrum loaded";
@@ -925,17 +990,6 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
         ImGui::Separator();
     }
 
-    bool isFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
-
-    // Lazy-compute: recompute all if stale, then fill missing per-file caches.
-    // H1.1: runs BEFORE the frame build so every data-gated early return
-    // precedes tickPrePlot — an armed SetNextAxisLimits/SetNextAxisToFit that
-    // survives an early return leaks into the next frame's first visible plot
-    // (BeginSubplots returns false on SkipItems WITHOUT resetting ImPlot's
-    // NextPlotData). Runs before the plot (IMGUI_GUIDE §19) so setupAxes'
-    // suppliers see the freshly computed curves.
-    refreshTransmittanceCache();
-
     if (!transmittanceAvailable || cachedTransY.empty()) {
         const ImVec2 avail = ImGui::GetContentRegionAvail();
         const ImVec2 contentMin = ImGui::GetCursorScreenPos();
@@ -970,53 +1024,6 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
             plot.shouldAutoscale = false;
         }
     }
-
-    // Compute max data size across all cached files for large-data flag
-    size_t maxDataSize = 0;
-    for (const auto& kv : cachedTransY)
-        if (kv.second.size() > maxDataSize)
-            maxDataSize = kv.second.size();
-    bool largeData = maxDataSize > 50000;
-
-    // Unified view/interaction phases (spectral_plot.h). T100 is always
-    // linear Y (T% around 100%) — log/dB are gated off.
-    SpectralPlotFrame f;
-    f.windowFocused = isFocused;
-    f.yScaleEnabled = false;
-    f.yLabel = "T(%)";
-    if (largeData) {
-        f.plotFlags |= ImPlotFlags_NoInputs;
-        f.enabled = false;
-    }
-    f.xDataRange = [this](double& x0, double& x1) -> bool {
-        bool have = false;
-        for (const auto& kv : cachedTransX) {
-            if (kv.second.empty()) continue;
-            double lmin = std::min(kv.second.front(), kv.second.back());
-            double lmax = std::max(kv.second.front(), kv.second.back());
-            if (!have) { x0 = lmin; x1 = lmax; have = true; }
-            else { x0 = std::min(x0, lmin); x1 = std::max(x1, lmax); }
-        }
-        return have;
-    };
-    f.yDataRange = [this](double& y0, double& y1) -> bool {
-        bool have = false;
-        for (const auto& kv : cachedTransY) {
-            if (kv.second.empty()) continue;
-            auto mmY = std::minmax_element(kv.second.begin(), kv.second.end());
-            if (!have) { y0 = *mmY.first; y1 = *mmY.second; have = true; }
-            else { y0 = std::min(y0, *mmY.first); y1 = std::max(y1, *mmY.second); }
-        }
-        return have;
-    };
-    f.onXUnitChanged = [this](int fromUnit, int toUnit) {
-        // Convert cached transmittance X data in-place (T% is unit-independent):
-        // main curves, std-dev curve and buffered std results (L3 shared helper).
-        convertCachedXUnits(fromUnit, toUnit);
-    };
-    f.onViewChanged = [this]() { appState->needsRedraw = true; };
-
-    plot.tickPrePlot(f);
 
     bool hasRatioConfig = (energyRatioNumA[0] != '\0' || energyRatioDenA[0] != '\0' ||
                            energyRatioNumB[0] != '\0' || energyRatioDenB[0] != '\0' ||

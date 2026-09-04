@@ -206,25 +206,48 @@ void SpectralPlotView::tickPrePlot(const SpectralPlotFrame& f) {
     // new one. Data conversion + async invalidation is the panel's job via
     // onXUnitChanged (fired exactly once per change).
     if (f.xUnitEnabled && xUnitSelector != prevXUnitSelector) {
+        // Hidden dock tabs (SkipItems): the armed SetNextAxisLimits below is
+        // discarded by ImPlot's hidden-window early return. The converted
+        // window then sits in convertedXMin/Max until the tab is visible, but
+        // manualX keeps the OLD-unit values and the persisted view state goes
+        // inconsistent (e.g. um unit + cm-1 window → wrong region on reopen).
+        // Fix: write the converted window through to manualX immediately and
+        // defer the actual application via the pending latch (armed AFTER the
+        // stale-pending clear below).
+        bool deferPendingApply = false;
         if (!shouldAutoscale && manualXMin < manualXMax) {
             auto oldUnit = static_cast<SpectralToolbox::SpectrumXUnit>(prevXUnitSelector);
             auto newUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
             double newMin = SpectralToolbox::convertXValue(manualXMin, oldUnit, newUnit);
             double newMax = SpectralToolbox::convertXValue(manualXMax, oldUnit, newUnit);
             if (newMin > newMax) std::swap(newMin, newMax);
-            // Hidden dock tabs (SkipItems): a SetNext* armed here would be
-            // discarded by ImPlot's hidden-window early return and leak into
-            // the next frame's first visible plot. Skip ONLY the ImPlot call —
-            // the state sync below must always run; the converted window is
-            // still clamped/applied by setupAxes once the tab is visible.
-            if (!ImGui::GetCurrentWindowRead()->SkipItems)
-                ImPlot::SetNextAxisLimits(ImAxis_X1, newMin, newMax, ImPlotCond_Always);
-            xUnitSwitchedThisFrame = true;
-            convertedXMin = newMin;
-            convertedXMax = newMax;
+            // A window edge at 0 inverts to +/-inf (e.g. 0 cm-1 -> um). The
+            // mirrored ImPlot default [0,1] is the classic case: an empty
+            // plot mirrored it before any data existed, and converting it
+            // yields an unusable window. Refit to the data in the new unit
+            // instead of arming garbage limits; without data, the first-load
+            // latch autoscales when it arrives (intersection guard below).
+            if (!std::isfinite(newMin) || !std::isfinite(newMax)) {
+                shouldAutoscale = true;
+                xUnitSwitchedThisFrame = false;
+            } else {
+                manualXMin = newMin;
+                manualXMax = newMax;
+                if (!ImGui::GetCurrentWindowRead()->SkipItems)
+                    ImPlot::SetNextAxisLimits(ImAxis_X1, newMin, newMax, ImPlotCond_Always);
+                else
+                    deferPendingApply = true;
+                xUnitSwitchedThisFrame = true;
+                convertedXMin = newMin;
+                convertedXMax = newMax;
+            }
         }
         pendingNextXMin = 0.0;
         pendingNextXMax = -1.0;
+        if (deferPendingApply) {
+            pendingNextXMin = manualXMin;
+            pendingNextXMax = manualXMax;
+        }
         if (f.onXUnitChanged) f.onXUnitChanged(prevXUnitSelector, xUnitSelector);
         prevXUnitSelector = xUnitSelector;
         if (f.onViewChanged) f.onViewChanged();
@@ -298,7 +321,16 @@ void SpectralPlotView::setupAxes(const SpectralPlotFrame& f) {
     if (!firstLoadCompleted && f.xDataRange) {
         double x0 = 0.0, x1 = 0.0;
         if (f.xDataRange(x0, x1)) {
-            if (!hasManualX())
+            // A manual window that MISSES the data entirely is garbage — e.g.
+            // the ImPlot default [0,1] mirrored before any data existed, then
+            // "converted" to [10000, inf] by a unit switch made on an empty
+            // plot. Clamping it back in (or letting it persist) would pin the
+            // plot to an empty region forever; autoscale instead (same
+            // philosophy as clampPendingToRange's empty-intersection fallback).
+            const double lo = std::min(x0, x1);
+            const double hi = std::max(x0, x1);
+            if (!hasManualX() ||
+                !(xViewLo() <= hi && xViewHi() >= lo))
                 shouldAutoscale = true;
             firstLoadCompleted = true;
         }
