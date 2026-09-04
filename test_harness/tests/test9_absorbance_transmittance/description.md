@@ -13,7 +13,9 @@ with referenceSource=Average.
 headless -w "Transmittance from selected files" and "Absorbance from selected files";
 pipeline.transmittance recomputes; compare (A) on the evaluation grid.
 ## Evaluation window
-333–10000 cm-1
+200–700 cm-1 (ceramicLPF signal band, `LPF_SIGNAL_WINDOW_CM` — the LPF
+transmits below ~1000 cm-1, so the 2000–4000 cm-1 default band has no
+signal in this dataset)
 ## Comparisons declared
 - [x] A: headless vs Python reference (transmittance + absorbance)
 ## Tolerance
@@ -37,9 +39,9 @@ excluded entirely.
 | Absorbance | >= 70 | -log10(T) is unstable at T≈1 even in high-SNR bins; the higher threshold excludes those bins |
 
 ## Calibration
-Observed with the SNR mask (ceramicLPF, first file vs average):
-- Transmittance (SNR>=30, 51 bins): wrms 0.173%, max 0.541% (3x / 4x headroom)
-- Absorbance (SNR>=70, 11 bins): wrms 12.2%, max 29.0% (4x / 3.5x headroom)
+Observed with the SNR mask (ceramicLPF, first file vs average, 200–700 cm-1):
+- Transmittance (SNR>=30, 178 bins): wrms 0.301%, max 0.0178 (1.7x / 2.8x headroom)
+- Absorbance (SNR>=70, 29 bins): wrms 16.5%, max 0.0022 (3x / 4.5x headroom)
 
 The old full-window thresholds (35% / 10000% for T, 110% / 100000% for A) were
 dominated by unstable noise-floor / T≈0 / T≈1 bins and are retired.

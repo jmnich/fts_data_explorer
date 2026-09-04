@@ -9,6 +9,10 @@ demand and degrade gracefully when matplotlib is unavailable.
 Layout convention: a two-panel figure — top overlay (candidate vs reference,
 log-Y where sensible), bottom residual ((candidate - reference) / reference
 in percent) — so the same visual idiom is used across all tests.
+
+Residual axes are autoscaled to the full extent of the windowed data
+(``autoscale_residual_ylim``): symmetric about zero, covering every plotted
+point — data is never clipped.
 """
 
 from __future__ import annotations
@@ -35,6 +39,25 @@ def _import_mpl():
         return plt
     except ImportError:
         return None
+
+
+def autoscale_residual_ylim(ax, y, *, pad: float = 1.1,
+                            fallback: float = 1.0) -> None:
+    """Full-range symmetric Y autoscale for a residual axis, from the data.
+
+    Covers the complete extent of the finite plotted data within the X window
+    — never clips — made symmetric about zero with ``pad`` margin. Degenerates
+    to ``fallback`` when the data is empty or constant (bit-exact residuals).
+    """
+    y = np.asarray(y, dtype=float)
+    y = y[np.isfinite(y)]
+    if y.size == 0:
+        ax.set_ylim(-fallback, fallback)
+        return
+    amp = float(np.max(np.abs(y))) * pad
+    if amp <= 0.0:
+        amp = fallback
+    ax.set_ylim(-amp, amp)
 
 
 def save_overlay_residual(test_name: str, root: str | Path,
@@ -99,7 +122,7 @@ def save_overlay_residual(test_name: str, root: str | Path,
         rd = np.where(np.abs(ref_interp) > 1e-15,
                       (cy - ref_interp) / ref_interp * 100.0, np.nan)
     ax2.plot(cx, rd, lw=0.5, color="tab:red")
-    ax2.set_ylim(-5, 5)
+    autoscale_residual_ylim(ax2, rd)
     ax2.set_xlabel(x_label)
     ax2.set_ylabel("rel. diff %")
     ax2.axhline(0, color="grey", lw=0.4)
@@ -114,8 +137,6 @@ def save_ifg_burst_residual(test_name: str, root: str | Path,
                             cand_x: np.ndarray, cand_y: np.ndarray,
                             ref_x: np.ndarray, ref_y: np.ndarray,
                             *, burst_frac: float = 0.05,
-                            ref_axis_x: np.ndarray | None = None,
-                            cand_axis_x: np.ndarray | None = None,
                             suffix: str = "compare",
                             title: str | None = None,
                             y_label: str = "Primary [V]",
@@ -129,12 +150,11 @@ def save_ifg_burst_residual(test_name: str, root: str | Path,
     ``(candidate - reference)`` in signal units — interferograms cross zero, so
     relative error is meaningless near the wings.
 
+    Two panels: burst-window overlay + primary residual (absolute difference).
+
     ``cand_x``/``cand_y`` and ``ref_x``/``ref_y`` must be equal-length arrays
     (same sample count); the caller is responsible for truncating to a common
-    length before calling. When ``cand_axis_x`` / ``ref_axis_x`` are provided
-    (e.g. the corrected OPD axis), they must also match ``cand_x`` in length;
-    a third panel shows the axis residual ``(cand_axis - ref_axis)`` in the
-    same X units.
+    length before calling.
 
     Returns the path written, or None if matplotlib is unavailable / the curves
     are empty.
@@ -171,16 +191,8 @@ def save_ifg_burst_residual(test_name: str, root: str | Path,
     if cx.size == 0 or rx.size == 0:
         return None
 
-    has_axis = (cand_axis_x is not None and ref_axis_x is not None
-               and cand_axis_x.size == cand_x.size
-               and ref_axis_x.size == ref_x.size)
-
-    if has_axis:
-        fig, (ax1, ax2, ax3) = plt.subplots(
-            3, 1, figsize=(14, 11), gridspec_kw={"height_ratios": [3, 1, 1]})
-    else:
-        fig, (ax1, ax2) = plt.subplots(
-            2, 1, figsize=(14, 9), gridspec_kw={"height_ratios": [2, 1]})
+    fig, (ax1, ax2) = plt.subplots(
+        2, 1, figsize=(14, 9), gridspec_kw={"height_ratios": [2, 1]})
 
     ax1.plot(rx, ry, label="Python reference", lw=0.7)
     ax1.plot(cx, cy, label="C++ headless", ls="--", lw=0.7, alpha=0.85)
@@ -208,21 +220,12 @@ def save_ifg_burst_residual(test_name: str, root: str | Path,
     # Interpolating the reference onto the candidate OPD grid makes this the
     # signal impact of the X-correction difference, not a raw-data sanity check.
     ax2.plot(cx, cy - ri, lw=0.5, color="tab:red")
+    autoscale_residual_ylim(ax2, cy - ri, fallback=1e-3)
     ax2.set_xlabel(x_label)
     ax2.set_ylabel(f"abs. diff ({y_label})")
     ax2.set_title("Primary residual — post-correction, OPD-aligned", fontsize=9)
     ax2.axhline(0, color="grey", lw=0.4)
     ax2.set_xmargin(0)
-
-    if has_axis:
-        cax = cand_axis_x[lo_i:hi_i]
-        rax = ref_axis_x[lo_i:hi_i]
-        ax3.plot(cx, cax - rax, lw=0.5, color="tab:purple")
-        ax3.set_xlabel(x_label)
-        ax3.set_ylabel(f"axis abs. diff ({x_label})")
-        ax3.set_title("OPD-axis residual — per-sample axis difference", fontsize=9)
-        ax3.axhline(0, color="grey", lw=0.4)
-        ax3.set_xmargin(0)
 
     fig.tight_layout()
     fig.savefig(out_path, dpi=120)
@@ -307,7 +310,7 @@ def save_multi_overlay(test_name: str, root: str | Path,
                     rd = np.where(np.abs(ref_interp) > 1e-15,
                                   (cy - ref_interp) / ref_interp * 100.0, np.nan)
                 rax.plot(cx, rd, lw=0.5, color="tab:red")
-                rax.set_ylim(-5, 5)
+                autoscale_residual_ylim(rax, rd)
                 rax.set_ylabel("rel. diff %")
             rax.set_xlabel(x_label)
             rax.axhline(0, color="grey", lw=0.4)
@@ -336,8 +339,9 @@ def save_allan_surface(test_name: str, root: str | Path,
     """Save a side-by-side Allan-Werle surface comparison + ratio surface.
 
     Three subplots: C++ surface, Python surface, and the ratio
-    ``(cpp - py) / cpp`` (clamped to ±200% for readability) as a residual
-    sanity-check. The numeric metric in result.json remains authoritative.
+    ``(cpp - py) / cpp`` as a residual sanity-check, with the color scale
+    fitted to the data extent (never clips). The numeric metric in result.json
+    remains authoritative.
     """
     plt = _import_mpl()
     if plt is None:
@@ -357,14 +361,18 @@ def save_allan_surface(test_name: str, root: str | Path,
             ax.set_title(f"{label}", fontsize=9)
             ax.set_xmargin(0)
             fig.colorbar(im, ax=ax, label="log10|Allan var|")
-    # Ratio/residual surface
+    # Ratio/residual surface — limits from the data extent (never clips).
     if cpp_surface.size and py_surface.size and cpp_surface.shape == py_surface.shape:
         with np.errstate(divide="ignore", invalid="ignore"):
             ratio = np.where(np.abs(cpp_surface) > 1e-15,
                               (cpp_surface - py_surface) / cpp_surface * 100.0, np.nan)
-        ratio = np.clip(np.nan_to_num(ratio, nan=0.0), -200.0, 200.0)
+        finite = ratio[np.isfinite(ratio)]
+        rmax = float(np.max(np.abs(finite))) * 1.05 if finite.size else 200.0
+        if rmax <= 0.0:
+            rmax = 1.0
+        ratio = np.nan_to_num(ratio, nan=0.0)
         im = axes[2].pcolormesh(cpp_waves, cpp_taus, ratio.T, shading="auto",
-                                cmap="RdBu", vmin=-200, vmax=200)
+                                cmap="RdBu", vmin=-rmax, vmax=rmax)
         axes[2].set_xlabel("wavelength (um)")
         axes[2].set_title("residual (cpp-py)/cpp %", fontsize=9)
         axes[2].set_xmargin(0)

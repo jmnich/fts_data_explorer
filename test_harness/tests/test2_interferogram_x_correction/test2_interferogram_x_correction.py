@@ -177,7 +177,6 @@ def main():
             "test2_interferogram_x_correction", root,
             cpp_opd[:n], cpp_prim[:n], py_opd[:n], prim_[:n],
             burst_frac=0.05,
-            ref_axis_x=py_opd[:n], cand_axis_x=cpp_opd[:n],
             suffix=f"compare_{method}",
             title=f"test2 corrected IFG ({method})",
             y_label="Primary [V]", x_label="OPD [um]",

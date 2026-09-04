@@ -14,7 +14,6 @@ from _common.report_images import save_allan_surface
 from _common import thresholds as thr
 
 DATASET = "wust_mini"; OUTPUT_TYPE = "Allan-Werle 3D"
-EVAL = (1e4/30.0, 1e4/1.0)
 CONFIG = {"refLaserWavelengthUm":1.55,"zeroPadK":2,"apodizationWindow":"Rectangular",
           "rectWidth":1.0,"rectAsymMode":True,"xUnit":"cm-1","xCorrectionMethod":"Hilbert"}
 
@@ -23,6 +22,7 @@ ALLAN_THR = thr.full_window("test8_allan")
 MAX_ABS_FRACTION = thr.get("test8_allan", "max_abs_fraction_of_peak")
 AXIS_RTOL = thr.get("test8_allan", "axis_rtol")
 AXIS_ATOL = thr.get("test8_allan", "axis_atol")
+SURFACE_WINDOW_UM = thr.ALLAN_SURFACE_WINDOW_UM  # residual band = 2000-4000 cm-1
 
 def load_allan_3d(path):
     """Load the long-format Allan 3D CSV → (wavelengths, taus, surface[MxN])."""
@@ -107,9 +107,15 @@ def main():
         for ti in range(n_taus):
             py_surface[wi, ti] = allan_variance(series, ti + 1)
     py_surface = py_surface[::-1, :]  # reverse to match C++ ascending wavelength order
-    # Compare surface (flatten valid entries, magnitude-guard near-zero bins)
+    # Compare surface (flatten valid entries, magnitude-guard near-zero bins).
+    # Residuals are evaluated ONLY in the signal band (ALLAN_SURFACE_WINDOW_UM
+    # = 2000-4000 cm-1); the noisy wings of the 1-30 um surface never enter
+    # the comparison. The axis check below still covers the full 1-30 um.
     comparisons = []
-    valid = ~np.isnan(cpp_surface) & ~np.isnan(py_surface) & (np.abs(cpp_surface) > 1e-15)
+    w_lo, w_hi = SURFACE_WINDOW_UM
+    w_in_band = (cpp_waves >= w_lo) & (cpp_waves <= w_hi)
+    valid = (~np.isnan(cpp_surface) & ~np.isnan(py_surface)
+             & (np.abs(cpp_surface) > 1e-15)) & w_in_band[:, None]
     if np.any(valid):
         cs = cpp_surface[valid]; ps = py_surface[valid]
         # Weighted RMS (magnitude weighting)

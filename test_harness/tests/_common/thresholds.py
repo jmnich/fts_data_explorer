@@ -35,29 +35,41 @@ from __future__ import annotations
 
 
 # ---------------------------------------------------------------------------
+# Evaluation-window policy (see test_instruction.md §5): spectrum residuals
+# are compared ONLY in signal-strong bands — never in noisy regions. The
+# wust_mini spectrum is strong in 2000-4000 cm-1; the ceramicLPF/ref1
+# datasets (tests 9/10) have their signal below 2000 cm-1 and use their own
+# band (200-700 cm-1, containing all SNR>=30 bins with margin).
+# ---------------------------------------------------------------------------
+SPECTRUM_EVAL_WINDOW_CM = (2000.0, 4000.0)   # tests 1, 3, 4, 5, 6, 7
+LPF_SIGNAL_WINDOW_CM = (200.0, 700.0)        # tests 9, 10
+ALLAN_SURFACE_WINDOW_UM = (2.5, 5.0)         # test8 residual band (2000-4000 cm-1)
+
 # Strong-signal region shared by the spectrum-family tests (2050-2250 cm-1).
 # Defined once here; tests reference it by name so the window stays in sync.
-# ---------------------------------------------------------------------------
+# Sits inside SPECTRUM_EVAL_WINDOW_CM; provides the strict per-type gates.
 STRONG_REGION_WINDOW = (2050.0, 2250.0)
 
 
 THRESHOLDS: dict[str, dict] = {
     # ------------------------------------------------------------------ test1
-    # Single first-file spectrum, three-way (A/B/C). The strong region is
-    # stricter than the full window: B (headless vs golden) must reproduce
-    # across versions, C (python vs golden) is the tightest sanity guard.
+    # Single first-file spectrum, three-way (A/B/C). Evaluated in 2000-4000
+    # cm-1 only (SPECTRUM_EVAL_WINDOW_CM) — the noisy regions outside the
+    # signal band never enter the comparison. The strong region is stricter
+    # than the full window: B (headless vs golden) must reproduce across
+    # versions, C (python vs golden) is the tightest sanity guard.
     "test1_single_spectrum": {
         "full_window": {
-            "weighted_rms_rel_pct": 0.1,   # 0.1% — full-spectrum wrms
-            "max_abs_rel_pct": 1.0,        # 1%   — rel cap (not the gate)
-            "max_abs": 1e-6,               # V    — absolute max drives pass/fail
+            "weighted_rms_rel_pct": 0.001,   # observed 8.7e-05% (12x headroom)
+            "max_abs_rel_pct": 1.0,          # rel cap (not the gate)
+            "max_abs": 1e-7,                 # V — observed 3e-9 (33x)
         },
         "regions": {
             "strong_2050_2250": {
                 "window": STRONG_REGION_WINDOW,
-                "thresholds_a": {"weighted_rms_rel_pct": 0.005, "max_abs": 1e-6},
-                "thresholds_b": {"weighted_rms_rel_pct": 0.002, "max_abs": 1e-6},
-                "thresholds_c": {"weighted_rms_rel_pct": 0.0005, "max_abs": 1e-6},
+                "thresholds_a": {"weighted_rms_rel_pct": 0.0005, "max_abs": 1e-7},
+                "thresholds_b": {"weighted_rms_rel_pct": 0.0002, "max_abs": 1e-7},
+                "thresholds_c": {"weighted_rms_rel_pct": 0.0001, "max_abs": 1e-7},
             },
         },
     },
@@ -82,130 +94,135 @@ THRESHOLDS: dict[str, dict] = {
     },
 
     # ------------------------------------------------------------------ test3
-    # Parameter matrix (10 variants, A only). Strong region ~3x headroom on
-    # the worst variant (laser1310, 0.003% observed).
+    # Parameter matrix (10 variants, A only), window 2000-4000 cm-1. Tightened
+    # to observed residuals: worst variant laser1310 0.000105% full-window wrms.
     "test3_single_spectrum_params": {
         "full_window": {
-            "weighted_rms_rel_pct": 0.5,
+            "weighted_rms_rel_pct": 0.001,   # observed 0.000105% (9.5x)
             "max_abs_rel_pct": 1.0,
-            "max_abs": 1e-6,
+            "max_abs": 1e-7,                 # V — observed 7e-9 (14x)
         },
         "regions": {
             "strong_2050_2250": {
                 "window": STRONG_REGION_WINDOW,
-                "thresholds_a": {"weighted_rms_rel_pct": 0.01, "max_abs": 1e-6},
+                "thresholds_a": {"weighted_rms_rel_pct": 0.001, "max_abs": 1e-7},
             },
         },
     },
 
     # ------------------------------------------------------------------ test4
-    # Average spectrum (A only). Averaging smooths residuals, so the strong
-    # region is tighter than test1 (observed 0.000288% wrms).
+    # Average spectrum (A only), window 2000-4000 cm-1. Averaging smooths
+    # residuals; observed 0.000128% full-window wrms.
     "test4_average_spectrum": {
         "full_window": {
-            "weighted_rms_rel_pct": 0.1,
+            "weighted_rms_rel_pct": 0.001,   # observed 0.000128% (8x)
             "max_abs_rel_pct": 1.0,
-            "max_abs": 1e-6,
+            "max_abs": 1e-7,                 # V — observed 3e-9 (33x)
         },
         "regions": {
             "strong_2050_2250": {
                 "window": STRONG_REGION_WINDOW,
-                "thresholds_a": {"weighted_rms_rel_pct": 0.005, "max_abs": 1e-6},
+                "thresholds_a": {"weighted_rms_rel_pct": 0.0005, "max_abs": 1e-7},
             },
         },
     },
 
     # ------------------------------------------------------------------ test5
-    # SNR spectrum (A, SNR-weighted). SNR is a ratio; even the strong region
-    # residual is ~0.5% (observed 0.502% wrms / 0.566% max).
+    # SNR spectrum (A, SNR-weighted), window 2000-4000 cm-1. SNR is a ratio;
+    # even in the strong band the residual is ~0.5% (observed 0.5028% wrms /
+    # 1.239 max-abs in SNR units).
     "test5_snr": {
         "full_window": {
-            "weighted_rms_rel_pct": 1.0,
+            "weighted_rms_rel_pct": 1.0,     # observed 0.503% (2x)
             "max_abs_rel_pct": 1.0,
-            "max_abs": 5.0,
+            "max_abs": 2.0,                  # SNR units — observed 1.239 (1.6x)
         },
         "regions": {
             "strong_2050_2250": {
                 "window": STRONG_REGION_WINDOW,
                 "thresholds_a": {
-                    "weighted_rms_rel_pct": 1.0,
+                    "weighted_rms_rel_pct": 1.0,   # observed 0.502% (2x)
                     "max_abs_rel_pct": 1.0,
-                    "max_abs": 2.0,
+                    "max_abs": 2.0,                # observed 1.203 (1.7x)
                 },
             },
         },
     },
 
     # ------------------------------------------------------------------ test6
-    # 100% T transmission line (A, referenceSource=File). First file against
-    # itself ≈ 100%, so residuals are tiny.
+    # 100% T transmission line (A, referenceSource=File), window 2000-4000
+    # cm-1. First file against itself ≈ 100%: residuals are bit-exact here
+    # (observed 0.0); thresholds absorb CSV 6-sig-digit rounding.
     "test6_t100": {
         "full_window": {
-            "weighted_rms_rel_pct": 0.5,
+            "weighted_rms_rel_pct": 0.1,     # observed 0.0 (CSV-rounding cushion)
             "max_abs_rel_pct": 1.0,
-            "max_abs": 1.0,
+            "max_abs": 0.01,                 # T % — observed 0.0
         },
     },
 
     # ------------------------------------------------------------------ test7
-    # 100% T standard deviation (A). Stddev is noisier than spectra (sample
-    # variance across files) but the strong region is still tight (observed
-    # 0.0258% wrms / 0.066% max).
+    # 100% T standard deviation (A), window 2000-4000 cm-1. Stddev is noisier
+    # than spectra (sample variance across files): observed 0.0206% wrms /
+    # 0.00128 max-abs (T %).
     "test7_t100_stddev": {
         "full_window": {
-            "weighted_rms_rel_pct": 1.0,
+            "weighted_rms_rel_pct": 0.1,     # observed 0.0206% (5x)
             "max_abs_rel_pct": 1.0,
-            "max_abs": 2.0,
+            "max_abs": 0.005,                # T % — observed 0.00128 (4x)
         },
         "regions": {
             "strong_2050_2250": {
                 "window": STRONG_REGION_WINDOW,
-                "thresholds_a": {"weighted_rms_rel_pct": 0.1, "max_abs": 0.005},
+                "thresholds_a": {"weighted_rms_rel_pct": 0.1, "max_abs": 0.001},
             },
         },
     },
 
     # ------------------------------------------------------------------ test8
-    # Allan-Werle 3D surface. Allan variance spans many orders of magnitude,
-    # so the max gate is absolute = a fraction of the peak variance (computed
-    # at run time: peak * ``max_abs_fraction_of_peak``). The wrms gate is a
-    # fixed percent. Axis bins are compared with rtol/atol; taus match exactly.
+    # Allan-Werle 3D surface, residual evaluated only in the 2.5-5 um band
+    # (ALLAN_SURFACE_WINDOW_UM = 2000-4000 cm-1); the axis check covers the
+    # full 1-30 um. The max gate is absolute = fraction of the band peak
+    # (computed at run time); observed max-abs err is 1.5e-4 of the band peak.
     "test8_allan": {
         "full_window": {
-            "weighted_rms_rel_pct": 10.0,
-            "max_abs_rel_pct": 1.0,        # cap; not the gate
+            "weighted_rms_rel_pct": 1.0,     # observed 0.0507% (20x)
+            "max_abs_rel_pct": 1.0,          # cap; not the gate
         },
-        "max_abs_fraction_of_peak": 0.1,   # threshold_max_abs = peak * 0.1
-        "axis_rtol": 1e-4,                 # wavelength bins (6-sig-digit CSV)
+        "max_abs_fraction_of_peak": 0.01,    # observed 1.5e-4 (66x)
+        "axis_rtol": 1e-4,                   # wavelength bins (6-sig-digit CSV)
         "axis_atol": 1e-6,
     },
 
     # ------------------------------------------------------------------ test9
-    # Absorbance / transmittance (A, referenceSource=Average). An SNR hard
+    # Absorbance / transmittance (A, referenceSource=Average), evaluated in the
+    # ceramicLPF signal band 200-700 cm-1 (LPF_SIGNAL_WINDOW_CM — the LPF
+    # transmits below ~1000 cm-1, so 2000-4000 has no signal). An SNR hard
     # mask excludes unstable bins: T uses SNR>=30, A uses SNR>=70 because
     # -log10(T) is unstable at T≈1 even in high-SNR bins.
     "test9_absorbance_transmittance": {
         "transmittance": {
-            "weighted_rms_rel_pct": 0.5,
+            "weighted_rms_rel_pct": 0.5,     # observed 0.301% (1.7x)
             "max_abs_rel_pct": 1.0,
-            "max_abs": 0.05,
+            "max_abs": 0.05,                 # observed 0.0178 (2.8x)
         },
         "absorbance": {
-            "weighted_rms_rel_pct": 50.0,
+            "weighted_rms_rel_pct": 50.0,    # observed 16.5% (3x)
             "max_abs_rel_pct": 1.0,
-            "max_abs": 0.01,
+            "max_abs": 0.01,                 # observed 0.0022 (4.5x)
         },
         "snr_mask_threshold_transmittance": 30.0,
         "snr_mask_threshold_absorbance": 70.0,
     },
 
     # ----------------------------------------------------------------- test10
-    # Comparator ratio (A). Relative max gate (no max_abs — the ratio is
-    # well-behaved away from zero, so relative max is meaningful here).
+    # Comparator ratio (A), evaluated in the ceramicLPF signal band 200-700
+    # cm-1. Relative max gate (no max_abs — the ratio is well-behaved away
+    # from zero, so relative max is meaningful here).
     "test10_comparator": {
         "full_window": {
-            "weighted_rms_rel_pct": 1.0,
-            "max_abs_rel_pct": 1.0,
+            "weighted_rms_rel_pct": 0.1,     # observed 0.0041% (24x)
+            "max_abs_rel_pct": 0.1,          # observed 0.0146% (7x)
         },
     },
 }

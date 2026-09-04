@@ -11,18 +11,19 @@ T100 transmittance (interp(spec)/ref × 100) matches the Python reference.
 headless -w "100% T transmission line" → <slug>_t100_transmission_<file>.csv;
 pipeline.transmittance recomputes. Reference source = File (first file).
 ## Evaluation window
-333–10000 cm-1
+2000–4000 cm-1 (signal band only, `SPECTRUM_EVAL_WINDOW_CM`)
 ## Comparisons declared
 - [x] A: headless vs Python reference
 ## Tolerance
-weighted_rms_rel_pct: 0.5
+weighted_rms_rel_pct: 0.1
 max_abs_rel_pct: 1.0 (cap; not used for pass/fail)
-max_abs: 1.0 (absolute max |c-r|, drives pass/fail)
+max_abs: 0.01 (absolute max |c-r| in T %, drives pass/fail)
 
-Rationale: T=100% exactly for the reference (file 0 vs itself), but the C++
-export has tiny numerical differences at high-frequency noise bins
-(observed 100% relative at bins where T≈0, but only 0.31 absolute on a
-0-100 scale). The absolute max is the correct pass/fail metric.
+Observed in 2000–4000 cm-1: bit-exact (wrms 0.0, max-abs 0.0). The
+thresholds absorb CSV 6-sig-digit rounding only. Outside the band, the
+old full-window residual was dominated by high-frequency noise bins where
+T≈0 (100% relative, 0.31 absolute) — those bins are excluded by the
+band policy.
 
 ## Note on the reference source
 This test uses `referenceSource=File` (first file) and compares the first

@@ -69,17 +69,16 @@ gates on `max_abs` (see `compare.py`).
 ## Burst-window plotting
 Interferogram comparison plots use a burst window of 5% of the total length
 centered on `argmax(|primary|)` (the burst is at 50% of the data, idx ~9773 of
-19533). Residual is absolute difference in signal units (V for primary, um for
-the OPD axis) — interferograms cross zero, so relative error is meaningless
-near the wings. One figure per method
+19533). Residual is absolute difference in signal units (V for primary) —
+interferograms cross zero, so relative error is meaningless near the wings.
+One figure per method
 (`test2_interferogram_x_correction_compare_hilbert.png`,
-`test2_interferogram_x_correction_compare_peakfinding.png`), each with three
-panels: primary overlay, primary residual (V, post-correction OPD-aligned),
-OPD axis residual (um, per-sample). The primary residual interpolates the
-Python primary onto the C++ OPD grid before differencing, so it shows the
-signal impact of the X-correction difference (the same quantity the
-resampled-primary pass/fail metric evaluates); the OPD-axis residual shows
-the per-sample axis displacement directly.
+`test2_interferogram_x_correction_compare_peakfinding.png`), each with two
+panels: primary overlay, primary residual (V, post-correction OPD-aligned).
+The primary residual interpolates the Python primary onto the C++ OPD grid
+before differencing, so it shows the signal impact of the X-correction
+difference (the same quantity the resampled-primary pass/fail metric
+evaluates).
 
 ## Timeout
 timeout: 1200

@@ -12,24 +12,26 @@ headless -w "Allan-Werle 3D" → <slug>_allan_3d.csv (long format Wavelength,Tau
 pipeline.allan_variance recomputes per wavelength bin. Axes (taus, wavelengths)
 compared exactly.
 ## Evaluation window
-1–30 um (Allan wavelength range)
+Residual band: 2.5–5 um (`ALLAN_SURFACE_WINDOW_UM` = 2000–4000 cm-1).
+Axis check: full 1–30 um (Allan wavelength range) — the axis is not a
+residual, so the band policy does not apply to it.
 ## Comparisons declared
-- [x] A: headless vs Python reference (surface weighted)
-- [x] axis: taus/wavelengths exact match
+- [x] A: headless vs Python reference (surface weighted, band-restricted)
+- [x] axis: taus/wavelengths exact match (full 1–30 um)
 ## Tolerance
-weighted_rms_rel_pct: 10.0
+weighted_rms_rel_pct: 1.0
 max_abs_rel_pct: 1.0 (cap; not used for pass/fail)
-max_abs: 10% of peak Allan variance (absolute, drives pass/fail)
+max_abs: 1% of band peak Allan variance (absolute, drives pass/fail)
+
+Observed in the 2.5–5 um band: wrms 0.0507%, max-abs err 0.00318 vs band
+peak 21.13 → 20x (wrms) / 66x (max-abs) headroom.
 
 Rationale: Allan variance spans many orders of magnitude, so the relative
-max blows up at small-variance bins (observed 249.7% relative, 7.26
-absolute vs peak 3665). The absolute max (10% of peak) is the correct
-pass/fail metric.
-
-## Calibration
-Observed: weighted_rms_rel_pct = 0.23%, max_abs_rel_pct = 249.7% (at a
-long-tau noisy bin). The weighted RMS is excellent; the max is driven by
-a single noisy long-tau bin where Allan variance has few clusters.
+max blows up at small-variance bins. The absolute max (fraction of the band
+peak) is the correct pass/fail metric. The residual is evaluated only in the
+signal band; the noisy wings of the 1–30 um surface (where the old
+full-surface comparison saw 249.7% relative at a long-tau bin) never enter
+the comparison.
 
 ## Report image
 The Allan surface comparison plot has three subplots: C++ surface, Python

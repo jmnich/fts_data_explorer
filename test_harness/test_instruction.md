@@ -216,6 +216,35 @@ residuals. The SNR curve is passed via `snr_ref` (same as the weighting path)
 and the threshold is per-test (e.g. 30 for transmittance, 70 for absorbance
 where -log10 amplifies small differences).
 
+### Evaluation-window policy (signal bands only)
+
+**Spectrum residuals are evaluated ONLY in signal-strong bands — noisy
+regions never enter any comparison.** Every test that takes residuals from a
+spectrum (or a spectrum-derived quantity) restricts its eval window to the
+dataset's signal band:
+
+| Band | Value | Tests |
+|------|-------|-------|
+| Default (wust_mini) | 2000–4000 cm-1 (`SPECTRUM_EVAL_WINDOW_CM`) | 1, 3, 4, 5, 6, 7 |
+| ceramicLPF/ref1 signal band | 200–700 cm-1 (`LPF_SIGNAL_WINDOW_CM`) | 9, 10 |
+| Allan surface residual | 2.5–5 µm (`ALLAN_SURFACE_WINDOW_UM` = 2000–4000 cm-1) | 8 (surface only; the axis check covers the full 1–30 µm) |
+
+The constants live in `tests/_common/thresholds.py` (single source of truth);
+tests reference them by name so the bands stay in sync. The 2050–2250 cm-1
+strong region (`STRONG_REGION_WINDOW`) sits inside the default band and still
+provides the strict per-comparison-type gates. Interferogram tests (test2) are
+exempt: their residuals are OPD-axis and burst-window primary differences, not
+spectrum residuals.
+
+**AC RMS**: the RMS of the residual (an AC signal around zero) over the eval
+window — this is `unweighted_rms_rel_pct` in the comparison dict (computed by
+`compare()` only inside `eval_window`). The HTML report surfaces it as the
+"AC RMS %" column next to the SNR-weighted RMS. Tests that predate the
+band-policy (calibrated on 333–10000 cm-1) were re-calibrated after the
+restriction: residuals tighten dramatically once noise-floor bins are
+excluded (e.g. test6's self-100% line went from `max=100%` relative noise to
+bit-exact 0.0).
+
 ## 6. Reference-Python standard
 
 The independent reimplementation in `tests/_common/pipeline.py`:
@@ -310,7 +339,7 @@ curves are empty. They must never raise into the test path.
 |--------|--------|---------|
 | `save_overlay_residual` | 2 panels: overlay (log-Y by default) + residual % | single-curve tests (1, 4, 5, 6, 7, 9, 10) |
 | `save_multi_overlay` | N panels, one overlay + residual strip per variant | matrix tests (2, 3) |
-| `save_ifg_burst_residual` | 2-3 panels: burst-window overlay + abs residual (+ axis residual) | interferogram tests (2) |
+| `save_ifg_burst_residual` | 2 panels: burst-window overlay + abs residual | interferogram tests (2) |
 | `save_allan_surface` | 3 panels: C++ surface + Python surface + ratio surface | Allan 3D (8) |
 
 The residual panel uses the same convention as the canonical metric:
@@ -334,13 +363,16 @@ visual counterpart of the canonical metric in `compare.py`:
 
 | Plot type | Residual | Units |
 |-----------|----------|-------|
-| Spectrum (single or matrix) | `(candidate - reference) / reference * 100` | relative %, clamped to ±5% |
+| Spectrum (single or matrix) | `(candidate - reference) / reference * 100` | relative % |
 | Interferogram | `(candidate - reference)` | absolute, signal units (V, um) |
-| Allan surface | `(cpp - py) / cpp * 100` | relative %, clamped to ±200%, diverging colormap |
+| Allan surface | `(cpp - py) / cpp * 100` | relative %, diverging colormap |
 
-Interferograms cross zero, so relative error is meaningless near the wings —
-absolute difference is the correct residual. Spectrum residuals use relative
-percent to match the pass/fail metric.
+Residual axes are autoscaled to the **full extent of the windowed data**
+(symmetric about zero, `autoscale_residual_ylim` in `report_images.py`) —
+every plotted point is always visible; data is never clipped. Interferograms
+cross zero, so relative error is meaningless near the wings — absolute
+difference is the correct residual. Spectrum residuals use relative percent
+to match the pass/fail metric.
 
 ### Burst-window plotting (interferograms)
 
@@ -349,5 +381,4 @@ fraction of the total length centered on `argmax(|candidate_y|)`. Default
 `burst_frac=0.05` (5% of length); per-test configurable, documented in the
 test's `description.md`. Rationale: the burst contains all the signal; the
 wings are noise and dominate the plot if shown in full. The `save_ifg_burst_residual`
-helper renders three panels when an axis comparison is provided: primary
-overlay, primary residual (absolute), axis residual (absolute).
+helper renders two panels: primary overlay and primary residual (absolute).

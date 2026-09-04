@@ -12,15 +12,17 @@ Uses ceramicLPF as sample and ref1 as reference (low-pass filter spectrum).
 headless -cmp <ceramicLPF.h5> <ref1.h5> "Comparator ratio" <dir>;
 Python reference computes avg(ceramicLPF)/avg(ref1) independently.
 ## Evaluation window
-333–10000 cm-1
+200–700 cm-1 (ceramicLPF signal band, `LPF_SIGNAL_WINDOW_CM` — the LPF
+transmits below ~1000 cm-1; 2000–4000 cm-1 has no signal in this dataset)
 ## Comparisons declared
 - [x] A: headless vs Python reference
 ## Tolerance
-weighted_rms_rel_pct: 1.0
-max_abs_rel_pct: 1.0
+weighted_rms_rel_pct: 0.1
+max_abs_rel_pct: 0.1
 
-Rationale: the comparator ratio (avg(sample)/avg(reference)) has observed
-max 0.23% relative — well within 1%, so the relative max is retained.
+Observed in 200–700 cm-1: wrms 0.00412%, max 0.0146% relative → 24x / 7x
+headroom. The ratio is well-behaved in the signal band, so the relative max
+is retained as the gate.
 ## Timeout
 timeout: 1200
 ## Dependencies

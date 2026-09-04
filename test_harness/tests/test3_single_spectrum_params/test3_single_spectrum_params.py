@@ -14,7 +14,7 @@ from _common.report_images import save_multi_overlay
 from _common import thresholds as thr
 
 DATASET = "wust_mini"; OUTPUT_TYPE = "Spectra from selected files"
-EVAL = (1e4/30.0, 1e4/1.0)
+EVAL = thr.SPECTRUM_EVAL_WINDOW_CM
 BASE = {"refLaserWavelengthUm":1.55,"zeroPadK":2,"apodizationWindow":"Rectangular",
         "rectWidth":1.0,"rectAsymMode":True,"xUnit":"cm-1","xCorrectionMethod":"Hilbert",
         "gaussSigma":1.0,"nortonBeerFwhm":1.5,"dolphChebyshevAttenuationDb":60.0}

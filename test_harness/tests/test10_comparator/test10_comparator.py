@@ -20,7 +20,7 @@ from _common import thresholds as thr
 SAMPLE = "2025-04-16_12-19-18_ceramicLPF"
 REFERENCE = "2025-04-15_11-52-54_ref1"
 OUTPUT_TYPE = "Comparator ratio"
-EVAL = (1e4/30.0, 1e4/1.0)
+EVAL = thr.LPF_SIGNAL_WINDOW_CM
 CONFIG = {"refLaserWavelengthUm":1.55,"zeroPadK":2,"apodizationWindow":"Rectangular",
           "rectWidth":1.0,"rectAsymMode":True,"xUnit":"cm-1","xCorrectionMethod":"Hilbert"}
 

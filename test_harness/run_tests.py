@@ -492,7 +492,8 @@ def _build_html_report(records: list[dict], verdict: str,
         thr_max_hdr = "Threshold Max (abs)" if use_abs else "Threshold Max %"
         p.append('<table><thead><tr>'
                  '<th>Subtest</th><th>Result</th>'
-                 '<th class="num">Weighted RMS %</th><th class="num">Threshold RMS %</th>'
+                 '<th class="num">Weighted RMS %</th><th class="num">AC RMS %</th>'
+                 '<th class="num">Threshold RMS %</th>'
                  f'<th class="num">{html.escape(max_hdr)}</th><th class="num">{html.escape(thr_max_hdr)}</th>'
                  '</tr></thead><tbody>')
         for c in r["comparisons"]:
@@ -507,6 +508,7 @@ def _build_html_report(records: list[dict], verdict: str,
                 f'<td>{html.escape(c.get("name", ""))}</td>'
                 f'<td>{_status_badge(c.get("status", "").upper())}</td>'
                 f'<td class="num">{html.escape(_fmt_num(c.get("weighted_rms_rel_pct")))}</td>'
+                f'<td class="num">{html.escape(_fmt_num(c.get("unweighted_rms_rel_pct")))}</td>'
                 f'<td class="num">{html.escape(_fmt_num(c.get("threshold_wrms_pct")))}</td>'
                 f'<td class="num">{html.escape(max_val)}</td>'
                 f'<td class="num">{html.escape(thr_max)}</td>'
@@ -516,6 +518,19 @@ def _build_html_report(records: list[dict], verdict: str,
 
     p.append("</body></html>")
     return "".join(p)
+
+
+def _image_sort_key(p: Path) -> tuple:
+    """Natural sort for report images: test10_*.png after test9_*.png.
+
+    Images are named <testname>_<suffix>.png; parse the numeric test prefix
+    (test<N>_) and sort by N, then by full name for stable suffix order.
+    Non-test images sort after all test images, by name.
+    """
+    m = _TEST_RE.match(p.name)
+    if m:
+        return (0, int(m.group(1)), p.name)
+    return (1, 0, p.name)
 
 
 def write_report(records: list[dict]) -> None:
@@ -534,7 +549,7 @@ def write_report(records: list[dict]) -> None:
     # Report images (sanity-check PNGs)
     images = []
     if REPORT_IMAGES_DIR.is_dir():
-        images = sorted(REPORT_IMAGES_DIR.glob("*.png"))
+        images = sorted(REPORT_IMAGES_DIR.glob("*.png"), key=_image_sort_key)
 
     # report.html
     html_text = _build_html_report(records, verdict, images)

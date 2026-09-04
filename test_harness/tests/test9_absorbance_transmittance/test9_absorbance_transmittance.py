@@ -20,7 +20,7 @@ from _common import thresholds as thr
 DATASET = "2025-04-16_12-19-18_ceramicLPF"
 OUTPUT_TYPE_T = "Transmittance from selected files"
 OUTPUT_TYPE_A = "Absorbance from selected files"
-EVAL = (1e4/30.0, 1e4/1.0)
+EVAL = thr.LPF_SIGNAL_WINDOW_CM
 CONFIG = {"refLaserWavelengthUm":1.55,"zeroPadK":2,"apodizationWindow":"Rectangular",
           "rectWidth":1.0,"rectAsymMode":True,"xUnit":"cm-1","xCorrectionMethod":"Hilbert"}
 

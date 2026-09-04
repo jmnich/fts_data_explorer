@@ -16,23 +16,23 @@ and reference-laser wavelength.
 | refLaserWavelengthUm | 1.55, 1.31, 0.850 | all with Rectangular / K=2 |
 ## Comparisons declared
 - [x] A: headless vs Python reference (per variant)
+## Evaluation window
+2000–4000 cm-1 (signal band only, `SPECTRUM_EVAL_WINDOW_CM`)
 ## Tolerance
-weighted_rms_rel_pct: 0.5
+weighted_rms_rel_pct: 0.001
 max_abs_rel_pct: 1.0 (cap; not used for pass/fail)
-max_abs: 1e-6 (absolute max |c-r|, drives pass/fail)
+max_abs: 1e-7 (absolute max |c-r|, drives pass/fail)
 
-Rationale: same as test1 — the relative max blows up at noise-floor bins
-(observed up to 7.6% relative, but only 3.9e-7 absolute). The absolute max
-is the correct pass/fail metric for the full window.
+Observed in 2000–4000 cm-1 (worst variant laser1310): wrms 0.000105%,
+max-abs 7e-9 V → 9.5x / 14x headroom.
 
 ## Region-locked comparisons
 Strong-signal region 2050-2250 cm-1, A-only (test3 declares A per variant).
-0.01% wrms gives ~3x headroom on the worst variant (laser1310, 0.003%
-observed) and ~18x on typical variants.
+Observed worst (laser1310) 0.000143% wrms → 0.001% gives ~7x headroom.
 
 | Comparison | Region | Weighted RMS % | Max |rel| % |
 |------------|--------|----------------|--------------|
-| A (headless vs Python) | 2050-2250 | 0.01 | 0.05 |
+| A (headless vs Python) | 2050-2250 | 0.001 | 0.05 |
 ## Timeout
 timeout: 1200
 ## Note

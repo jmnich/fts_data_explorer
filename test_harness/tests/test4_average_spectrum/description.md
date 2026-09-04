@@ -15,26 +15,25 @@ recomputes from the same input; compare (A) on the evaluation grid.
 After Phase 01 D4, the headless CSV is byte-stable (common grid from first
 sorted file). Comparison is on the interpolated evaluation grid (defense-in-depth).
 ## Evaluation window
-333–10000 cm-1
+2000–4000 cm-1 (signal band only, `SPECTRUM_EVAL_WINDOW_CM`)
 ## Comparisons declared
 - [x] A: headless vs Python reference
 ## Tolerance
-weighted_rms_rel_pct: 0.1
+weighted_rms_rel_pct: 0.001
 max_abs_rel_pct: 1.0 (cap; not used for pass/fail)
-max_abs: 1e-6 (absolute max |c-r|, drives pass/fail)
+max_abs: 1e-7 (absolute max |c-r|, drives pass/fail)
 
-Rationale: same as test1 — noise-floor bins dominate the relative max
-(observed 0.054% relative, 3.7e-7 absolute). The absolute max is the
-correct pass/fail metric for the full window.
+Observed in 2000–4000 cm-1: wrms 0.000128%, max-abs 3e-9 V → 8x / 33x
+headroom.
 
 ## Region-locked comparisons
 Strong-signal region 2050-2250 cm-1, A-only. Averaging smooths residuals
-(observed 0.000288% wrms / 0.000770% max), so the strong-region threshold
+(observed 0.000046% wrms / 0.000075% max), so the strong-region threshold
 matches test1.
 
 | Comparison | Region | Weighted RMS % | Max |rel| % |
 |------------|--------|----------------|--------------|
-| A (headless vs Python) | 2050-2250 | 0.005 | 0.05 |
+| A (headless vs Python) | 2050-2250 | 0.0005 | 0.05 |
 ## Timeout
 timeout: 1200
 ## Dependencies

@@ -22,12 +22,12 @@ from _common.pipeline import process_spectrum
 from _common.compare import compare
 from _common.h5io import strip_derivatives, validate_h5, read_golden_member
 from _common.headless import run_binary, load_csv, find_exported_csv
-from _common.report_images import save_overlay_residual
+from _common.report_images import save_overlay_residual, autoscale_residual_ylim
 from _common import thresholds as thr
 
 DATASET = "wust_mini"
 OUTPUT_TYPE = "Spectra from selected files"
-EVAL_WINDOW_CM = (1e4 / 30.0, 1e4 / 1.0)  # 333.33 – 10000 cm-1
+EVAL_WINDOW_CM = thr.SPECTRUM_EVAL_WINDOW_CM  # 2000-4000 cm-1 — signal band only
 GOLDEN_MEMBER = "spectra/spec_raw_0"  # group/member-id of the first-file golden
 
 # Thresholds live in _common/thresholds.py (single source of truth).
@@ -211,7 +211,8 @@ def _save_plot(workdir, py_x, py_y, cpp_x, cpp_y, comp):
     with np.errstate(divide="ignore", invalid="ignore"):
         rd = np.where(py_interp > 1e-15, (cpp_y[mask] - py_interp) / py_interp * 100, np.nan)
     ax2.plot(cpp_x[mask], rd, lw=0.5, color="tab:red")
-    ax2.set_ylim(-5, 5); ax2.set_xlabel("cm-1"); ax2.set_ylabel("rel. diff %")
+    autoscale_residual_ylim(ax2, rd)
+    ax2.set_xlabel("cm-1"); ax2.set_ylabel("rel. diff %")
     ax2.axhline(0, color="grey", lw=0.4)
     fig.tight_layout()
     fig.savefig(workdir / "compare.png", dpi=120)

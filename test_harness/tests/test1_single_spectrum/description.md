@@ -16,7 +16,7 @@ headless `-w` on the stripped input exports `work_spectra.csv`;
 `compare.py` computes comparison (A) on the common evaluation grid.
 
 ## Evaluation window
-333–10000 cm-1 (1–30 um)
+2000–4000 cm-1 (signal band only, `SPECTRUM_EVAL_WINDOW_CM`)
 
 ## Comparisons declared
 - [x] A: headless vs Python reference
@@ -26,13 +26,13 @@ headless `-w` on the stripped input exports `work_spectra.csv`;
       classified `error`, not `fail`)
 
 ## Tolerance
-weighted_rms_rel_pct: 0.1
+weighted_rms_rel_pct: 0.001 (A, full window)
 max_abs_rel_pct: 1.0 (cap; not used for pass/fail)
-max_abs: 1e-6 (absolute max |c-r|, drives pass/fail)
+max_abs: 1e-7 (absolute max |c-r|, drives pass/fail)
 
-Rationale: the relative max blows up at noise-floor bins where the reference
-is near zero (observed 1.87% relative, but only 3.9e-7 absolute — 0.03% of
-peak). The absolute max is the correct pass/fail metric for the full window.
+Observed in 2000–4000 cm-1: A wrms 8.7e-05%, max-abs 3e-9 V; B bit-exact
+(0.0); C wrms 8.7e-05%. The noisy bins outside the band (which drove the
+old full-window max to 1.87% relative) are excluded by the band policy.
 
 ## Region-locked comparisons
 Strong-signal region 2050-2250 cm-1 (mean magnitude 87% of peak) is evaluated
@@ -43,21 +43,20 @@ golden) is the tightest sanity guard (two independent implementations agreeing).
 
 | Comparison | Region | Weighted RMS % | Max |rel| % |
 |------------|--------|----------------|--------------|
-| A (headless vs Python) | 2050-2250 | 0.005 | 0.05 |
-| B (headless vs golden) | 2050-2250 | 0.002 | 0.02 |
-| C (Python vs golden) | 2050-2250 | 0.0005 | 0.005 |
+| A (headless vs Python) | 2050-2250 | 0.0005 | 0.05 |
+| B (headless vs golden) | 2050-2250 | 0.0002 | 0.02 |
+| C (Python vs golden) | 2050-2250 | 0.0001 | 0.005 |
 
 Calibration (observed in 2050-2250 cm-1):
-- A: wrms 0.000662%, max 0.002106% (7x / 24x headroom)
-- B: wrms 0.000663%, max 0.002135% (3x / 9x headroom — cross-platform safe)
-- C: wrms 0.000012%, max 0.000034% (42x / 147x headroom)
+- A: wrms 0.000012%, max 0.000034% (42x / 147x headroom)
+- B: wrms 0.0 (bit-exact)
+- C: wrms 0.000012%, max 0.000034% (8x / 147x headroom)
 
 ## Calibration
-Observed: weighted_rms_rel_pct = 0.009138%, max_abs_rel_pct = 1.872136%
-Frozen via: wrms = max(10×0.009138, 0.1) = 0.1%; max = max(10×1.872, 1.0) = 19.0%
-The weighted RMS is the primary metric (sub-0.1%, excellent). The max is
-driven by noise-floor bins where the reference is near zero; the SNR weighting
-correctly downweights these.
+Observed in 2000–4000 cm-1: A weighted_rms_rel_pct = 0.000087%, max-abs
+3e-9 V. Thresholds: wrms 0.001% (12x headroom), max-abs 1e-7 V (33x). The
+weighted RMS is the primary metric; the relative max is no longer
+noise-dominated since the eval window excludes the noisy regions.
 
 ## Timeout
 timeout: 1200
