@@ -6,7 +6,6 @@
 #include "config.h"
 #include "file_browser.h"
 #include "theme.h"
-#include "version.h"
 #include "session/cross_store.h"
 #include "session/workspace_session.h"
 
@@ -192,10 +191,14 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
 
     if (!showPopup) return;
 
-    // Launch-only welcome (M2.6): a plain two-column window — left = recent
-    // single-dataset workspaces + converter, right = recent multi-workspace
-    // files + New Multi-Workspace. Not a modal: the Session tab takes over
-    // after the first open/create and is never closable afterwards.
+    // Launch-only welcome (M2.6): a plain window with three stacked rows —
+    // (1) two equal list columns: recent single-dataset workspaces | recent
+    // multi-workspace files, (2) Convert Dataset | New Multi-Workspace button
+    // strip, (3) a bottom bar with the UI size selector and the Open .h5
+    // button. Arrow keys navigate the lists (Up/Down within the active list,
+    // Left/Right jump between the lists, Enter opens the selection). Not a
+    // modal: the Session tab takes over after the first open/create and is
+    // never closable afterwards.
     // Size tracks the app window the same way the Convert modal does
     // (conversion_screen.cpp): a proportional share of the work viewport with
     // clamped bounds, re-applied every frame so it scales with the viewport
@@ -205,8 +208,6 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
     const ImVec2 work = ImGui::GetMainViewport()->WorkSize;
     const float winW = std::clamp(work.x * 0.85f, 720.0f, 2000.0f);
     const float winH = std::clamp(work.y * 0.85f, 700.0f, 1600.0f) * 0.75f;
-    const float listChildH = std::max(100.0f, winH - 340.0f);
-    const float crossChildH = std::max(100.0f, winH - 160.0f);
     ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(),
                             ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(ImVec2(winW, winH), ImGuiCond_Always);
@@ -224,24 +225,77 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
     winDl->AddRectFilled(winPos, ImVec2(winPos.x + winW, winPos.y + winH),
                          IM_COL32(0, 0, 0, 100));
 
-    ImGui::TextColored(GetAccentBase(StringToAccentColor(appState.currentAccentColor)),
-                       "%s %s", title, APP_VERSION);
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
+    // ── Selection / focus state for keyboard navigation ─────────────────────
+    // One active side owns Up/Down/Enter; Left/Right jumps between the lists.
+    static bool recentSideLeft = true;
+    static int selectedIdx = 0;      // recent datasets (left)
+    static int crossSelectedIdx = 0; // recent multi-workspaces (right)
 
+    const int leftCount = (int)config.recentDatasets.size();
+    const int rightCount = (int)config.recentMultiWorkspaces.size();
+
+    // Keep stored indices valid, and keep focus on a non-empty list.
+    if (leftCount > 0 && selectedIdx >= leftCount) selectedIdx = leftCount - 1;
+    if (rightCount > 0 && crossSelectedIdx >= rightCount) crossSelectedIdx = rightCount - 1;
+    if (leftCount == 0 && rightCount > 0 && recentSideLeft) recentSideLeft = false;
+    if (rightCount == 0 && leftCount > 0 && !recentSideLeft) recentSideLeft = true;
+
+    const int leftBefore = selectedIdx;
+    const int crossBefore = crossSelectedIdx;
+
+    // Skip keyboard navigation while the UI-size combo popup is open: its
+    // Up/Down/Enter select combo items, not list rows.
+    const bool uiComboOpen = ImGui::IsPopupOpen("##UISizeCombo");
+
+    if (!uiComboOpen) {
+        if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
+            if (recentSideLeft) { if (selectedIdx > 0) selectedIdx--; }
+            else { if (crossSelectedIdx > 0) crossSelectedIdx--; }
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
+            if (recentSideLeft) { if (selectedIdx < leftCount - 1) selectedIdx++; }
+            else { if (crossSelectedIdx < rightCount - 1) crossSelectedIdx++; }
+        }
+        // Jump to the other list only when it has entries.
+        if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) && recentSideLeft && rightCount > 0) {
+            recentSideLeft = false;
+            if (crossSelectedIdx >= rightCount) crossSelectedIdx = rightCount - 1;
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) && !recentSideLeft && leftCount > 0) {
+            recentSideLeft = true;
+            if (selectedIdx >= leftCount) selectedIdx = leftCount - 1;
+        }
+    }
+
+    // One-shot scroll-to-selection flags (SetScrollHereY applies next frame,
+    // so calling it every frame would fight manual scrolling).
+    const bool scrollLeft = selectedIdx != leftBefore;
+    const bool scrollCross = crossSelectedIdx != crossBefore;
+
+    // Enter opens only the active list's selection (a single flag per side so
+    // one key press can never open two workspaces in the same frame).
+    bool openLeftSelection = false, openRightSelection = false;
+    if (!uiComboOpen && ImGui::IsKeyPressed(ImGuiKey_Enter)) {
+        if (recentSideLeft && leftCount > 0) openLeftSelection = true;
+        else if (!recentSideLeft && rightCount > 0) openRightSelection = true;
+    }
+
+    // ── Layout: two equal list columns, a button strip, a bottom bar ────────
     // Two side-by-side child windows (NOT ImGui::Columns — columns corrupt
     // their cursor when a BeginChild runs inside one, which pushed the right
     // column down to the left column's cursor and broke the whole layout).
     const float colGap = ImGui::GetStyle().ItemSpacing.x;
     const float colW = (ImGui::GetContentRegionAvail().x - colGap) * 0.5f;
-    const float colH = winH - 55.0f;
+    const float rowH = ImGui::GetFrameHeightWithSpacing();
+    // Reserve the button strip + bottom bar (plus separators) for the columns.
+    const float bottomAreaH = rowH * 2.0f + ImGui::GetStyle().ItemSpacing.y * 4.0f + 6.0f;
+    const float colH = std::max(120.0f, ImGui::GetContentRegionAvail().y - bottomAreaH);
 
-    // ── Left: recent single-dataset workspaces + converter ─────────────────
+    // ── Left: recent single-dataset workspaces ──────────────────────────────
     ImGui::BeginChild("##welcomeLeft", ImVec2(colW, colH), true);
     ImGui::Text("Recent Datasets");
     ImGui::Separator();
-    if (ImGui::BeginChild("RecentDatasetsChild", ImVec2(0, listChildH), true)) {
+    if (ImGui::BeginChild("RecentDatasetsChild", ImVec2(0, 0), true)) {
         if (config.recentDatasets.empty()) {
             float childHeight = ImGui::GetContentRegionAvail().y;
             float textHeight = ImGui::GetTextLineHeightWithSpacing() * 3;
@@ -251,20 +305,6 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
             ImGui::Text("No recent datasets found.");
             ImGui::Text("Use the button below to select a dataset directory.");
         } else {
-            static int selectedIdx = 0;
-            if (selectedIdx >= (int)config.recentDatasets.size())
-                selectedIdx = config.recentDatasets.empty() ? 0 : (int)config.recentDatasets.size() - 1;
-
-            // Arrow key navigation
-            if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
-                int next = selectedIdx - 1;
-                if (next >= 0) selectedIdx = next;
-            }
-            if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
-                int next = selectedIdx + 1;
-                if (next < (int)config.recentDatasets.size()) selectedIdx = next;
-            }
-
             for (size_t i = 0; i < config.recentDatasets.size(); ) {
                 const auto& entry = config.recentDatasets[i];
                 const auto& datasetPath = entry.path;
@@ -290,14 +330,14 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
 
                 float btnH = ImGui::GetFrameHeight();
 
-                // Highlight selected row
+                // Highlight selected row (bright when the left list is active)
                 if ((int)i == selectedIdx) {
                     ImVec2 rowMin = ImGui::GetCursorScreenPos();
                     float rowH = ImGui::GetFrameHeight();
                     ImGui::GetWindowDrawList()->AddRectFilled(
                         rowMin,
                         ImVec2(rowMin.x + ImGui::GetContentRegionAvail().x, rowMin.y + rowH),
-                        IM_COL32(80, 80, 200, 120));
+                        IM_COL32(80, 80, 200, recentSideLeft ? 120 : 60));
                 }
 
                 // Cross (×) button — delete from recent list (always active)
@@ -327,12 +367,16 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                     ImGui::BeginDisabled(true);
                 }
 
-                // Dataset name button (mouse click or Enter on selected row)
+                // Dataset name button (mouse click or Enter on selected row).
+                // A click also drives the selection, so Enter re-opens the
+                // row the user last interacted with.
                 bool shouldOpen = false;
                 if (ImGui::Button(displayName.c_str(), ImVec2(-FLT_MIN, 0))) {
                     shouldOpen = true;
+                    selectedIdx = (int)i;
+                    recentSideLeft = true;
                 }
-                if (!shouldOpen && exists && (int)i == selectedIdx && ImGui::IsKeyPressed(ImGuiKey_Enter)) {
+                if (!shouldOpen && exists && (int)i == selectedIdx && openLeftSelection) {
                     shouldOpen = true;
                 }
                 if (shouldOpen) {
@@ -361,6 +405,7 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                     }
                 }
 
+                if ((int)i == selectedIdx && scrollLeft) ImGui::SetScrollHereY(0.5f);
                 ImGui::PopID();
                 i++;
             }
@@ -368,80 +413,16 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
         ImGui::EndChild();
     }
 
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
-
-    // UI Size selection dropdown
-    ImGui::Text("UI Size:");
-    if (ImGui::BeginCombo("##UISizeCombo", appState.currentUiSize.c_str())) {
-        if (ImGui::Selectable("tiny", appState.currentUiSize == "tiny")) {
-            appState.currentUiSize = "tiny";
-            appState.uiSizeChanged = true;
-        }
-        if (ImGui::Selectable("small", appState.currentUiSize == "small")) {
-            appState.currentUiSize = "small";
-            appState.uiSizeChanged = true;
-        }
-        if (ImGui::Selectable("normal", appState.currentUiSize == "normal")) {
-            appState.currentUiSize = "normal";
-            appState.uiSizeChanged = true;
-        }
-        if (ImGui::Selectable("large", appState.currentUiSize == "large")) {
-            appState.currentUiSize = "large";
-            appState.uiSizeChanged = true;
-        }
-        if (ImGui::Selectable("huge", appState.currentUiSize == "huge")) {
-            appState.currentUiSize = "huge";
-            appState.uiSizeChanged = true;
-        }
-        ImGui::EndCombo();
-    }
-    ImGui::Spacing();
-
-#if FTS_BUILD_HDF5
-    AccentColor accent = StringToAccentColor(appState.currentAccentColor);
-    ImVec4 btnBg = GetAccentMuted(accent);
-    btnBg.w = 1.0f;
-    ImGui::PushStyleColor(ImGuiCol_Button, btnBg);
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, GetAccentHovered(accent));
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive, GetAccentActive(accent));
-
-    float buttonHeight = ImGui::GetContentRegionAvail().y - ImGui::GetStyle().ItemSpacing.y * 2;
-    if (buttonHeight > 60.0f) buttonHeight = 60.0f;
-    bool openClicked = ImGui::Button("Open .h5", ImVec2(-FLT_MIN, buttonHeight));
-    ImGui::PopStyleColor(3);
-
-    if (openClicked) {
-        std::string defaultFolder;
-        if (std::filesystem::is_directory(config.lastWorkingDirectory))
-            defaultFolder = config.lastWorkingDirectory;
-        std::string path = FileBrowser::showFileOpenDialog(
-            "Open HDF5 Workspace", "HDF5 files", "*.h5",
-            glfwGetCurrentContext(), defaultFolder);
-        if (!path.empty()) {
-            requestWorkspaceDiscard(appState, PendingWorkspaceAction::OpenPath, path);
-            appState.needsRedraw = true;
-        }
-    }
-#endif
-
-    ImGui::Spacing();
-    // Secondary action: convert foreign formats (legacy/non-.h5 datasets
-    // enter via the Conversion screen — phase5 decision 6).
-    if (ImGui::Button("Convert Dataset", ImVec2(-FLT_MIN, 0))) {
-        openConversionScreen(appState);
-    }
-
     ImGui::EndChild();   // ##welcomeLeft
     ImGui::SameLine();
 
-    // ── Right: recent multi-workspace files + New Multi-Workspace ──────────
+    // ── Right: recent multi-workspace files ────────────────────────────────
     ImGui::BeginChild("##welcomeRight", ImVec2(colW, colH), true);
     ImGui::Text("Recent Multi-Workspaces");
     ImGui::Separator();
-    if (ImGui::BeginChild("RecentCrossChild", ImVec2(0, crossChildH), true)) {
-        if (config.recentMultiWorkspaces.empty()) {            float childHeight = ImGui::GetContentRegionAvail().y;
+    if (ImGui::BeginChild("RecentCrossChild", ImVec2(0, 0), true)) {
+        if (config.recentMultiWorkspaces.empty()) {
+            float childHeight = ImGui::GetContentRegionAvail().y;
             float textHeight = ImGui::GetTextLineHeightWithSpacing() * 3;
             float offsetY = (childHeight - textHeight) * 0.5f;
             if (offsetY > 0) ImGui::SetCursorPosY(ImGui::GetCursorPosY() + offsetY);
@@ -453,9 +434,21 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                 bool exists = std::filesystem::exists(path);
                 ImGui::PushID(path.c_str());
                 float btnH = ImGui::GetFrameHeight();
+
+                // Highlight selected row (bright when the right list is active)
+                if ((int)i == crossSelectedIdx) {
+                    ImVec2 rowMin = ImGui::GetCursorScreenPos();
+                    float rowH = ImGui::GetFrameHeight();
+                    ImGui::GetWindowDrawList()->AddRectFilled(
+                        rowMin,
+                        ImVec2(rowMin.x + ImGui::GetContentRegionAvail().x, rowMin.y + rowH),
+                        IM_COL32(80, 80, 200, recentSideLeft ? 60 : 120));
+                }
+
                 if (ImGui::Button("×", ImVec2(btnH, btnH))) {
                     config.recentMultiWorkspaces.erase(config.recentMultiWorkspaces.begin() + i);
                     config.saveToFile(configFilePath);
+                    if (crossSelectedIdx > (int)i) crossSelectedIdx--;
                     ImGui::PopID();
                     continue;
                 }
@@ -470,7 +463,16 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                     displayName = truncateToWidth(displayName, maxTextW);
                 }
                 if (exists) {
+                    bool shouldOpen = false;
                     if (ImGui::Button(displayName.c_str(), ImVec2(-FLT_MIN, 0))) {
+                        shouldOpen = true;
+                        crossSelectedIdx = (int)i;
+                        recentSideLeft = false;
+                    }
+                    if (!shouldOpen && (int)i == crossSelectedIdx && openRightSelection) {
+                        shouldOpen = true;
+                    }
+                    if (shouldOpen) {
                         requestWorkspaceDiscard(appState, PendingWorkspaceAction::OpenPath, path);
                         appState.needsRedraw = true;
                     }
@@ -485,6 +487,7 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                     ImGui::SameLine();
                     ImGui::TextDisabled("(unreachable)");
                 }
+                if ((int)i == crossSelectedIdx && scrollCross) ImGui::SetScrollHereY(0.5f);
                 ImGui::PopID();
                 i++;
             }
@@ -492,13 +495,24 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
         ImGui::EndChild();
     }
 
+    ImGui::EndChild();   // ##welcomeRight
+
     ImGui::Spacing();
     ImGui::Separator();
     ImGui::Spacing();
 
+    // ── Button strip: Convert Dataset under the left column, New
+    // Multi-Workspace under the right column ─────────────────────────────────
+    // Secondary action: convert foreign formats (legacy/non-.h5 datasets
+    // enter via the Conversion screen — phase5 decision 6).
+    if (ImGui::Button("Convert Dataset", ImVec2(colW, 0))) {
+        openConversionScreen(appState);
+    }
+    ImGui::SameLine();
+
     // [New Multi-Workspace…]: empty multi-workspace .h5; only the Session tab
     // exists — start populating via its column (a).
-    if (ImGui::Button("New Multi-Workspace...", ImVec2(-FLT_MIN, 0))) {
+    if (ImGui::Button("New Multi-Workspace...", ImVec2(colW, 0))) {
         std::string defaultFolder;
         if (std::filesystem::is_directory(config.lastWorkingDirectory))
             defaultFolder = config.lastWorkingDirectory;
@@ -531,7 +545,61 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
         ImGui::SetTooltip("Creates an empty multi-workspace .h5. Datasets are embedded from "
                           "the Session tab's column (a).");
 
-    ImGui::EndChild();   // ##welcomeRight
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // ── Bottom bar: Open .h5 (left, ~2/3 width) + UI size selector ──────────
+#if FTS_BUILD_HDF5
+    AccentColor accent = StringToAccentColor(appState.currentAccentColor);
+    ImVec4 btnBg = GetAccentMuted(accent);
+    btnBg.w = 1.0f;
+    ImGui::PushStyleColor(ImGuiCol_Button, btnBg);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, GetAccentHovered(accent));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, GetAccentActive(accent));
+    const float openW = ImGui::GetContentRegionAvail().x * (2.0f / 3.0f);
+    if (ImGui::Button("Open .h5", ImVec2(openW, 0))) {
+        std::string defaultFolder;
+        if (std::filesystem::is_directory(config.lastWorkingDirectory))
+            defaultFolder = config.lastWorkingDirectory;
+        std::string path = FileBrowser::showFileOpenDialog(
+            "Open HDF5 Workspace", "HDF5 files", "*.h5",
+            glfwGetCurrentContext(), defaultFolder);
+        if (!path.empty()) {
+            requestWorkspaceDiscard(appState, PendingWorkspaceAction::OpenPath, path);
+            appState.needsRedraw = true;
+        }
+    }
+    ImGui::PopStyleColor(3);
+    ImGui::SameLine();
+#endif
+
+    ImGui::Text("UI Size:");
+    ImGui::SameLine();
+    if (ImGui::BeginCombo("##UISizeCombo", appState.currentUiSize.c_str())) {
+        if (ImGui::Selectable("tiny", appState.currentUiSize == "tiny")) {
+            appState.currentUiSize = "tiny";
+            appState.uiSizeChanged = true;
+        }
+        if (ImGui::Selectable("small", appState.currentUiSize == "small")) {
+            appState.currentUiSize = "small";
+            appState.uiSizeChanged = true;
+        }
+        if (ImGui::Selectable("normal", appState.currentUiSize == "normal")) {
+            appState.currentUiSize = "normal";
+            appState.uiSizeChanged = true;
+        }
+        if (ImGui::Selectable("large", appState.currentUiSize == "large")) {
+            appState.currentUiSize = "large";
+            appState.uiSizeChanged = true;
+        }
+        if (ImGui::Selectable("huge", appState.currentUiSize == "huge")) {
+            appState.currentUiSize = "huge";
+            appState.uiSizeChanged = true;
+        }
+        ImGui::EndCombo();
+    }
+
     ImGui::End();
     ImGui::PopStyleColor(); // WindowBg
 }
