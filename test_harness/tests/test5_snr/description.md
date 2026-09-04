@@ -6,7 +6,7 @@ requires_golden: false
 ---
 # Test 5: SNR spectrum
 ## What this test verifies
-SnrSpectrum (mean/std per bin, population std ddof=0, D12) matches the Python reference.
+SnrSpectrum (mean/std per bin, sample std N-1, matching RunningStats) matches the Python reference.
 ## Method
 headless -w "SNR spectrum" → <slug>_snr_spectrum.csv; pipeline.snr_spectrum recomputes.
 SNR-weighted metric (q_i = SNR_i). Mask bins where mean <= 1% peak or std <= eps.
@@ -15,21 +15,22 @@ SNR-weighted metric (q_i = SNR_i). Mask bins where mean <= 1% peak or std <= eps
 ## Comparisons declared
 - [x] A: headless vs Python reference
 ## Tolerance
-weighted_rms_rel_pct: 1.0
+weighted_rms_rel_pct: 0.1
 max_abs_rel_pct: 1.0 (cap; not used for pass/fail)
-max_abs: 2.0 (absolute max |c-r|, drives pass/fail)
+max_abs: 0.5 (absolute max |c-r|, drives pass/fail)
 
-Observed in 2000–4000 cm-1: wrms 0.5028%, max-abs 1.239 (SNR units) →
-2x / 1.6x headroom. SNR is a ratio (mean/std); the residual is ~0.5% even in
-the strong band.
+Observed in 2000–4000 cm-1: wrms 0.0232%, max-abs 0.143 (SNR units) →
+4.3x / 3.5x headroom. SNR is a ratio (mean/std); the residual is the
+genuine FFTW-vs-scipy + interpolation noise floor (~250x above the raw
+spectrum residual because SNR amplifies tiny per-bin std differences).
 
 ## Region-locked comparisons
-Strong-signal region 2050-2250 cm-1, A-only. Observed 0.502314% wrms /
-1.203 absolute → 1.0% / 2.0 gives ~2x / 1.7x headroom.
+Strong-signal region 2050-2250 cm-1, A-only. Observed 0.0282% wrms /
+0.130 absolute → 0.1% / 0.5 gives ~3.5x / 3.8x headroom.
 
 | Comparison | Region | Weighted RMS % | Max |rel| % | Max abs |
 |------------|--------|----------------|--------------|---------|
-| A (headless vs Python) | 2050-2250 | 1.0 | 1.0 (cap) | 2.0 |
+| A (headless vs Python) | 2050-2250 | 0.1 | 1.0 (cap) | 0.5 |
 ## Timeout
 timeout: 1200
 ## Dependencies

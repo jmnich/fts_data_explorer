@@ -129,21 +129,21 @@ THRESHOLDS: dict[str, dict] = {
 
     # ------------------------------------------------------------------ test5
     # SNR spectrum (A, SNR-weighted), window 2000-4000 cm-1. SNR is a ratio;
-    # even in the strong band the residual is ~0.5% (observed 0.5028% wrms /
-    # 1.239 max-abs in SNR units).
+    # residual is small once the reference uses sample std (N-1, matching
+    # RunningStats): observed 0.0232% wrms / 0.143 max-abs (SNR units).
     "test5_snr": {
         "full_window": {
-            "weighted_rms_rel_pct": 1.0,     # observed 0.503% (2x)
+            "weighted_rms_rel_pct": 0.1,     # observed 0.0232% (4.3x)
             "max_abs_rel_pct": 1.0,
-            "max_abs": 2.0,                  # SNR units — observed 1.239 (1.6x)
+            "max_abs": 0.5,                  # SNR units — observed 0.143 (3.5x)
         },
         "regions": {
             "strong_2050_2250": {
                 "window": STRONG_REGION_WINDOW,
                 "thresholds_a": {
-                    "weighted_rms_rel_pct": 1.0,   # observed 0.502% (2x)
+                    "weighted_rms_rel_pct": 0.1,   # observed 0.0282% (3.5x)
                     "max_abs_rel_pct": 1.0,
-                    "max_abs": 2.0,                # observed 1.203 (1.7x)
+                    "max_abs": 0.5,                # observed 0.130 (3.8x)
                 },
             },
         },

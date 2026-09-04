@@ -186,16 +186,17 @@ def test_stddev_curves():
 
 
 def test_snr_spectrum():
-    """SNR = mean/std with population std (ddof=0); zero-std guarded."""
+    """SNR = mean/std with sample std (ddof=1); zero-std guarded."""
     grid = np.array([1.0, 2.0, 3.0])
     spectra = [(grid, np.array([1.0, 2.0, 3.0])),
                (grid, np.array([3.0, 2.0, 1.0]))]
     _, snr = snr_spectrum(spectra, grid)
-    # mean=[2,2,2], std(ddof=0)=[1,0,1] → SNR=[2, 0 (guard), 2]
-    assert_close(snr[0], 2.0, tol=1e-9, msg="SNR bin 0")
+    # mean=[2,2,2], std(ddof=1)=[sqrt(2),0,sqrt(2)] → SNR=[sqrt(2), 0 (guard), sqrt(2)]
+    expected = 2.0 / np.sqrt(2.0)
+    assert_close(snr[0], expected, tol=1e-9, msg="SNR bin 0")
     assert snr[1] == 0.0, "zero-std bin → 0 (guarded)"
-    assert_close(snr[2], 2.0, tol=1e-9, msg="SNR bin 2")
-    print("  OK: snr_spectrum population std + zero-std guard")
+    assert_close(snr[2], expected, tol=1e-9, msg="SNR bin 2")
+    print("  OK: snr_spectrum sample std (ddof=1) + zero-std guard")
 
 
 def test_mean_spectrum():

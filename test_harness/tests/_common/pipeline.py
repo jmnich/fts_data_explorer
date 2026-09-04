@@ -9,7 +9,7 @@ Mirrors (workspace/spectral_toolbox.{h,cpp}, workspace/apodization.{h,cpp}):
   process_spectrum      ↔ SpectralToolbox::processSpectrum
   apply_window          ↔ Apodization::createWindow + applyWindow
   mean_spectrum         ↔ AverageSpectrum (accumulate + divide)
-  snr_spectrum          ↔ SnrSpectrum (Welford, population std ddof=0 — D12)
+  snr_spectrum          ↔ SnrSpectrum (Welford, sample std N-1)
   allan_variance        ↔ AllanVariance::computeAllanVariance
   transmittance         ↔ T100Spectrum::computeTransmittanceFromVectors
   stddev_curves         ↔ T100Spectrum stddev (RunningStats, sample N-1)
@@ -350,7 +350,7 @@ def mean_spectrum(spectra: list[tuple[np.ndarray, np.ndarray]],
 
 def snr_spectrum(spectra: list[tuple[np.ndarray, np.ndarray]],
                  common_x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """SNR = mean / std per bin — mirrors SnrSpectrum (population std, ddof=0, D12)."""
+    """SNR = mean / std per bin — mirrors SnrSpectrum (Welford, sample N-1)."""
     if not spectra or common_x.size == 0:
         return common_x, np.zeros_like(common_x)
     ys = []
@@ -364,7 +364,7 @@ def snr_spectrum(spectra: list[tuple[np.ndarray, np.ndarray]],
         return common_x, np.zeros_like(common_x)
     arr = np.array(ys)
     mean = np.mean(arr, axis=0)
-    std = np.std(arr, axis=0, ddof=0)  # population std (D12)
+    std = np.std(arr, axis=0, ddof=1)  # sample variance (N-1), matches RunningStats
     with np.errstate(divide="ignore", invalid="ignore"):
         snr = np.where(std > 1e-15, mean / std, 0.0)
     return common_x, snr

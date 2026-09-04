@@ -30,7 +30,7 @@ even with SNR>=70). The absolute max is the correct pass/fail metric.
 ## SNR-masked evaluation
 Transmittance and absorbance are only evaluated in strong-signal bins, using a
 hard SNR mask (not downweighting). The SNR spectrum is computed from the
-per-file spectra (mean/std, population ddof=0) and bins below the threshold are
+per-file spectra (mean/std, sample std N-1) and bins below the threshold are
 excluded entirely.
 
 | Quantity | SNR threshold | Rationale |
@@ -40,8 +40,8 @@ excluded entirely.
 
 ## Calibration
 Observed with the SNR mask (ceramicLPF, first file vs average, 200–700 cm-1):
-- Transmittance (SNR>=30, 178 bins): wrms 0.301%, max 0.0178 (1.7x / 2.8x headroom)
-- Absorbance (SNR>=70, 29 bins): wrms 16.5%, max 0.0022 (3x / 4.5x headroom)
+- Transmittance (SNR>=30, 177 bins): wrms 0.301%, max 0.0178 (1.7x / 2.8x headroom)
+- Absorbance (SNR>=70, 28 bins): wrms 16.7%, max 0.0022 (3x / 4.5x headroom)
 
 The old full-window thresholds (35% / 10000% for T, 110% / 100000% for A) were
 dominated by unstable noise-floor / T≈0 / T≈1 bins and are retired.
