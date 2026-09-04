@@ -24,7 +24,7 @@ from _common.pipeline import (
     hilbert_x_axis, process_spectrum, apply_window, NORTON_BEER_COEFFS,
     allan_variance, transmittance, stddev_curves, snr_spectrum, mean_spectrum,
 )
-from _common.compare import relative_error, ComparisonError, residual_metrics, snr_weights
+from _common.compare import relative_error, ComparisonError, residual_metrics, snr_weights, compare
 from _common.h5io import strip_derivatives, validate_h5
 
 
@@ -102,6 +102,38 @@ def test_residual_metrics():
     assert w.shape == b.shape, "weights shape"
     assert w[3] == 1.0, "max |r| → weight 1.0"
     print("  OK: residual_metrics + snr_weights sanity")
+
+
+def test_abs_only():
+    """compare(abs_only=True) reports absolute metrics only, gates on them."""
+    x = np.linspace(1.0, 4.0, 100)
+    cand = np.sin(x)
+    ref = cand + 0.01                      # constant +0.01 abs offset
+    comps = compare(x, cand, x, ref, None, None,
+                    {"abs_rms": 0.02, "max_abs": 0.05},
+                    eval_window=(1.0, 4.0), declared=["A"], abs_only=True)
+    c = comps[0]
+    assert c["status"] == "pass", "abs gates pass for 0.01 offset"
+    assert c["abs_rms"] is not None and c["max_abs"] is not None, "abs fields"
+    assert c.get("weighted_rms_rel_pct") is None, "no relative metrics at all"
+    assert c.get("unweighted_rms_rel_pct") is None, "no unweighted rel either"
+    # relative error of 1% offset would be huge near zero crossings — the
+    # whole point of abs-only; verify the abs_rms gate flips on/off when set
+    tight = compare(x, cand, x, ref, None, None,
+                    {"abs_rms": 0.001, "max_abs": 0.05},
+                    eval_window=(1.0, 4.0), declared=["A"], abs_only=True)
+    assert tight[0]["status"] == "fail", "abs_rms gate drives pass/fail"
+    # max-abs-only mode: no abs_rms threshold → max_abs alone gates
+    only_max = compare(x, cand, x, ref, None, None,
+                       {"max_abs": 0.005},
+                       eval_window=(1.0, 4.0), declared=["A"], abs_only=True)
+    assert only_max[0]["status"] == "fail", "max_abs-only gate fails on 0.01 offset"
+    assert only_max[0].get("threshold_abs_rms") is None, "no abs_rms threshold"
+    ok_max = compare(x, cand, x, ref, None, None,
+                     {"max_abs": 0.05},
+                     eval_window=(1.0, 4.0), declared=["A"], abs_only=True)
+    assert ok_max[0]["status"] == "pass", "max_abs-only gate passes"
+    print("  OK: compare abs_only mode (absolute metrics, no relative)")
 
 
 def test_strip_derivatives():
@@ -215,6 +247,7 @@ def main():
         ("windows", test_windows),
         ("relative_error guards", test_relative_error_guards),
         ("residual_metrics", test_residual_metrics),
+        ("abs_only compare", test_abs_only),
         ("strip_derivatives", test_strip_derivatives),
         ("allan_variance", test_allan_variance),
         ("transmittance", test_transmittance),

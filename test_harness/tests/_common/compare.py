@@ -131,7 +131,8 @@ def _one_comparison(name: str, cand_x: np.ndarray, cand_y: np.ndarray,
                     thresholds: dict, eval_window: tuple[float, float] | None = None,
                     snr_ref: tuple[np.ndarray, np.ndarray] | None = None,
                     regions: list[dict] | None = None,
-                    snr_mask_threshold: float | None = None) -> list[dict]:
+                    snr_mask_threshold: float | None = None,
+                    abs_only: bool = False) -> list[dict]:
     """Run one (A)/(B)/(C) comparison on a common grid.
 
     snr_ref: optional (snr_x, snr_y) SNR curve; resampled onto the same eval
@@ -143,9 +144,13 @@ def _one_comparison(name: str, cand_x: np.ndarray, cand_y: np.ndarray,
     (length 1 when regions is None/empty).
     snr_mask_threshold: when set with snr_ref, bins where the resampled SNR is
     below the threshold are excluded entirely (hard mask, not downweighting).
+    abs_only: evaluate absolute differences only — no relative metrics at all.
+    Pass/fail gates on ``abs_rms`` and ``max_abs`` thresholds; the result dict
+    carries only absolute fields.
     """
     full = _compute_comparison(name, cand_x, cand_y, ref_x, ref_y,
-                               thresholds, eval_window, snr_ref, snr_mask_threshold)
+                               thresholds, eval_window, snr_ref, snr_mask_threshold,
+                               abs_only)
     results = [full]
     if not regions:
         return results
@@ -167,7 +172,7 @@ def _one_comparison(name: str, cand_x: np.ndarray, cand_y: np.ndarray,
         suffix = f"__{r_name}" if r_name else ""
         results.append(_compute_comparison(
             f"{name}{suffix}", cand_x, cand_y, ref_x, ref_y,
-            r_thr, r_window, snr_ref, snr_mask_threshold))
+            r_thr, r_window, snr_ref, snr_mask_threshold, abs_only))
     return results
 
 
@@ -175,12 +180,17 @@ def _compute_comparison(name: str, cand_x: np.ndarray, cand_y: np.ndarray,
                          ref_x: np.ndarray, ref_y: np.ndarray,
                          thresholds: dict, eval_window: tuple[float, float] | None = None,
                          snr_ref: tuple[np.ndarray, np.ndarray] | None = None,
-                         snr_mask_threshold: float | None = None) -> dict:
+                         snr_mask_threshold: float | None = None,
+                         abs_only: bool = False) -> dict:
     """Compute one comparison on a common grid restricted to eval_window.
 
     When ``snr_ref`` and ``snr_mask_threshold`` are both provided, bins where
     the resampled SNR is below the threshold are excluded entirely (hard mask,
     not downweighting) — the residual is computed only over strong-signal bins.
+
+    ``abs_only``: evaluate absolute differences only (no relative metrics at
+    all). Gates: ``abs_rms`` (unweighted RMS of |c-r| in native units) and
+    ``max_abs``. The result dict carries only absolute fields.
     """
     # Build evaluation grid: union of X ranges, intersected with eval_window
     xmin = max(min(cand_x[0], cand_x[-1]), min(ref_x[0], ref_x[-1]))
@@ -220,6 +230,31 @@ def _compute_comparison(name: str, cand_x: np.ndarray, cand_y: np.ndarray,
             cand_on = cand_on[keep]
             ref_on = ref_on[keep]
             snr_on = snr_on[keep]
+    # Absolute-only mode: no relative metrics at all. The max-abs gate is
+    # mandatory; the abs_rms gate is optional — when the thresholds dict has
+    # no "abs_rms" key, max_abs alone drives pass/fail.
+    if abs_only:
+        diff = cand_on - ref_on
+        if np.any(np.isnan(diff)):
+            return {"name": name, "status": "error",
+                    "summary": "nan in curve (defect, not a tolerance)",
+                    "n_bins": 0, "n_weighted_bins": 0}
+        abs_rms = float(np.sqrt(np.mean(diff ** 2)))
+        max_abs = float(np.max(np.abs(diff)))
+        thr_rms = thresholds.get("abs_rms")
+        thr_max = thresholds.get("max_abs")
+        rms_ok = (abs_rms <= thr_rms) if thr_rms is not None else True
+        status = "pass" if (rms_ok and max_abs <= thr_max) else "fail"
+        result = {
+            "name": name, "status": status,
+            "abs_rms": round(abs_rms, 9), "max_abs": round(max_abs, 9),
+            "threshold_max_abs": thr_max,
+            "n_bins": int(cand_on.size),
+        }
+        if thr_rms is not None:
+            result["threshold_abs_rms"] = thr_rms
+        return result
+    if snr_ref is not None:
         weights = snr_weights(ref_on, snr_on)
     else:
         weights = snr_weights(ref_on)
@@ -261,7 +296,8 @@ def compare(headless_x: np.ndarray, headless_y: np.ndarray,
              snr_ref: tuple[np.ndarray, np.ndarray] | None = None,
              declared: list[str] | None = None,
              regions: list[dict] | None = None,
-             snr_mask_threshold: float | None = None) -> list[dict]:
+             snr_mask_threshold: float | None = None,
+             abs_only: bool = False) -> list[dict]:
     """Run the three-way comparison (A)/(B)/(C) per §3 of the overview.
 
     declared: subset of ["A","B","C"] to run; default = all available.
@@ -273,6 +309,8 @@ def compare(headless_x: np.ndarray, headless_y: np.ndarray,
     snr_mask_threshold: when set with snr_ref, bins where the resampled SNR is
     below the threshold are excluded entirely (hard mask, not downweighting) —
     use to restrict transmittance/absorbance comparisons to strong-signal bins.
+    abs_only: absolute-difference mode — no relative metrics are computed or
+    reported; gates are ``abs_rms`` / ``max_abs`` thresholds.
     Returns a list of comparison dicts.
     """
     results = []
@@ -280,13 +318,16 @@ def compare(headless_x: np.ndarray, headless_y: np.ndarray,
     if "A" in run and python_x is not None and python_x.size > 0:
         results.extend(_one_comparison("headless_vs_python",
                          headless_x, headless_y, python_x, python_y,
-                         thresholds, eval_window, snr_ref, regions, snr_mask_threshold))
+                         thresholds, eval_window, snr_ref, regions, snr_mask_threshold,
+                         abs_only))
     if "B" in run and golden_x is not None and golden_x.size > 0:
         results.extend(_one_comparison("headless_vs_golden",
                          headless_x, headless_y, golden_x, golden_y,
-                         thresholds, eval_window, snr_ref, regions, snr_mask_threshold))
+                         thresholds, eval_window, snr_ref, regions, snr_mask_threshold,
+                         abs_only))
     if "C" in run and golden_x is not None and golden_x.size > 0:
         results.extend(_one_comparison("python_vs_golden",
                          python_x, python_y, golden_x, golden_y,
-                         thresholds, eval_window, snr_ref, regions, snr_mask_threshold))
+                         thresholds, eval_window, snr_ref, regions, snr_mask_threshold,
+                         abs_only))
     return results

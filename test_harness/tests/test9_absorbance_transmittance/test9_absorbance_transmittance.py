@@ -97,33 +97,39 @@ def main():
     _, snr_y = snr_spectrum(spectra, grid)
     snr_ref = (grid, snr_y)
 
-    # Tolerance is now much tighter because the SNR mask excludes the unstable
-    # noise-floor / T≈0 / T≈1 bins that dominated the old full-window residual.
+    # Absolute-difference evaluation only (no relative metrics): gates are
+    # abs_rms (unweighted RMS of |c-r| in native units) and max_abs. The SNR
+    # hard mask still excludes the unstable noise-floor / T≈0 / T≈1 bins.
     thresholds_t = THRESHOLDS_T
     thresholds_a = THRESHOLDS_A
     comps = compare(cpp_tx, cpp_ty, py_tx, py_t, None, None, thresholds_t,
                     eval_window=EVAL, snr_ref=snr_ref, declared=["A"],
-                    snr_mask_threshold=SNR_MASK_T)
+                    snr_mask_threshold=SNR_MASK_T, abs_only=True)
     comps[0]["name"] = "transmittance"
     comps_a = compare(cpp_ax, cpp_ay, py_tx, py_a, None, None, thresholds_a,
                      eval_window=EVAL, snr_ref=snr_ref, declared=["A"],
-                     snr_mask_threshold=SNR_MASK_A)
+                     snr_mask_threshold=SNR_MASK_A, abs_only=True)
     comps_a[0]["name"] = "absorbance"
     comparisons = comps + comps_a
     all_pass = all(c["status"]=="pass" for c in comparisons)
     status = "pass" if all_pass else "fail"
-    summary = f"T={comps[0]['status']} A={comps_a[0]['status']}"
+    summary = (f"T={comps[0]['status']} (abs_rms {comps[0]['abs_rms']:.2e}, "
+               f"max {comps[0]['max_abs']:.2e}) "
+               f"A={comps_a[0]['status']} (abs_rms {comps_a[0]['abs_rms']:.2e}, "
+               f"max {comps_a[0]['max_abs']:.2e})")
     save_overlay_residual("test9_absorbance_transmittance", root,
                           cpp_tx, cpp_ty, py_tx, py_t,
                           eval_window=EVAL, suffix="transmittance",
                           title="test9 transmittance", log_y=False,
                           y_label="Transmittance (fraction)",
+                          residual_mode="absolute",
                           status=comps[0]["status"], metrics=comps[0])
     save_overlay_residual("test9_absorbance_transmittance", root,
                           cpp_ax, cpp_ay, py_tx, py_a,
                           eval_window=EVAL, suffix="absorbance",
                           title="test9 absorbance", log_y=False,
                           y_label="Absorbance (-log10 T)",
+                          residual_mode="absolute",
                           status=comps_a[0]["status"], metrics=comps_a[0])
     write_result(workdir,"test9_absorbance_transmittance",status,summary,comparisons,OUTPUT_TYPE_T,[],t0)
     return 0 if all_pass else 1

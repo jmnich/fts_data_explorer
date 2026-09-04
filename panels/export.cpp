@@ -568,12 +568,11 @@ void ExportPanel::writeT100TransCsv(const std::string& dir)
     if (!t100.transmittanceAvailable || t100.lastKnownSelection.empty())
         return;
     const std::string& fileId = t100.lastKnownSelection[0];
-    auto xIt = t100.cachedTransX.find(fileId);
-    auto yIt = t100.cachedTransY.find(fileId);
-    if (xIt == t100.cachedTransX.end() || yIt == t100.cachedTransY.end())
+    std::vector<double> xv, yv;
+    // Full-resolution path: the panel cache is display-downsampled for large
+    // grids (>maxPointsBeforeDownsampling); exports must not lose resolution.
+    if (!t100.computeTransmittanceFullRes(fileId, xv, yv))
         return;
-    const auto& xv = xIt->second;
-    const auto& yv = yIt->second;
     if (xv.empty() || yv.empty()) return;
 
     std::string srcName = exportBaseName(fileId);
@@ -678,12 +677,32 @@ void ExportPanel::writeT100AllTransCsv(const std::string& dir)
     if (!masterXPtr) { ofs.close(); return; }
     const auto& masterX = *masterXPtr;
     size_t nRows = masterX.size();
+
+    // Each file's transmittance grid is a subset of the same reference grid,
+    // but files whose spectrum does not span the reference's full range drop
+    // bins at the low and/or high end. Writing row r of every column against
+    // masterX[r] would silently misalign columns that dropped low-end bins
+    // (their values would shift by one row). Map each file's grid positions
+    // back onto the master rows explicitly; cells without a value stay empty.
+    std::vector<std::vector<int>> rowOf(checkedFiles.size());
+    for (size_t i = 0; i < checkedFiles.size(); i++) {
+        rowOf[i].assign(nRows, -1);
+        if (allTransX[i].empty()) continue;
+        size_t o = 0;
+        for (size_t r = 0; r < nRows && o < allTransX[i].size(); r++) {
+            while (o < allTransX[i].size() && allTransX[i][o] < masterX[r])
+                o++;
+            if (o < allTransX[i].size() && allTransX[i][o] == masterX[r])
+                rowOf[i][r] = static_cast<int>(o);
+        }
+    }
+
     for (size_t r = 0; r < nRows; r++) {
         ofs << masterX[r];
         for (size_t i = 0; i < checkedFiles.size(); i++) {
-            if (allTransX[i].empty()) { ofs << ","; continue; }
-            if (r >= allTransY[i].size()) { ofs << ","; continue; }
-            ofs << "," << allTransY[i][r];
+            int o = rowOf[i][r];
+            if (o < 0) { ofs << ","; continue; }
+            ofs << "," << allTransY[i][o];
         }
         ofs << "\n";
     }
@@ -724,11 +743,9 @@ void ExportPanel::writeAbsorbanceCsv(const std::string& dir)
     else if (t100.plot.xUnitSelector == 2) xLabel = "Frequency [THz]";
 
     for (const auto& fileId : t100.lastKnownSelection) {
-        auto xIt = t100.cachedTransX.find(fileId);
-        auto yIt = t100.cachedTransY.find(fileId);
-        if (xIt == t100.cachedTransX.end() || yIt == t100.cachedTransY.end()) continue;
-        const auto& xv = xIt->second;
-        const auto& yv = yIt->second;
+        std::vector<double> xv, yv;
+        // Full-resolution path (the panel cache is display-downsampled).
+        if (!t100.computeTransmittanceFullRes(fileId, xv, yv)) continue;
         if (xv.empty() || yv.empty()) continue;
         std::string srcName = exportBaseName(fileId);
         srcName = sanitizeFilename(srcName);
@@ -758,11 +775,9 @@ void ExportPanel::writeTransmittanceCsv(const std::string& dir)
     else if (t100.plot.xUnitSelector == 2) xLabel = "Frequency [THz]";
 
     for (const auto& fileId : t100.lastKnownSelection) {
-        auto xIt = t100.cachedTransX.find(fileId);
-        auto yIt = t100.cachedTransY.find(fileId);
-        if (xIt == t100.cachedTransX.end() || yIt == t100.cachedTransY.end()) continue;
-        const auto& xv = xIt->second;
-        const auto& yv = yIt->second;
+        std::vector<double> xv, yv;
+        // Full-resolution path (the panel cache is display-downsampled).
+        if (!t100.computeTransmittanceFullRes(fileId, xv, yv)) continue;
         if (xv.empty() || yv.empty()) continue;
         std::string srcName = exportBaseName(fileId);
         srcName = sanitizeFilename(srcName);

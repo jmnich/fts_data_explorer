@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Test 10: comparator ratio (comparison A).
+"""Test 10: comparator spectra (comparison A).
 
-Uses -cmp to compute avg(ceramicLPF)/avg(ref1), comparing against the Python
-reference which computes both averages independently.
+Uses -cmp to compute the average spectrum of each workspace and export BOTH
+curves on the shared reference grid (sample interpolated onto the reference
+axis) — the same view the UI Comparator overlay shows. The test compares each
+exported curve against the independent Python reference.
 """
 import argparse, csv, sys, time
 from pathlib import Path
@@ -19,7 +21,7 @@ from _common import thresholds as thr
 
 SAMPLE = "2025-04-16_12-19-18_ceramicLPF"
 REFERENCE = "2025-04-15_11-52-54_ref1"
-OUTPUT_TYPE = "Comparator ratio"
+OUTPUT_TYPE = "Comparator spectra"
 EVAL = thr.LPF_SIGNAL_WINDOW_CM
 CONFIG = {"refLaserWavelengthUm":1.55,"zeroPadK":2,"apodizationWindow":"Rectangular",
           "rectWidth":1.0,"rectAsymMode":True,"xUnit":"cm-1","xCorrectionMethod":"Hilbert"}
@@ -27,13 +29,14 @@ CONFIG = {"refLaserWavelengthUm":1.55,"zeroPadK":2,"apodizationWindow":"Rectangu
 # Thresholds live in _common/thresholds.py (single source of truth).
 THRESHOLDS = thr.full_window("test10_comparator")
 
-def load_two_col_csv(path):
-    xs, ys = [], []
+def load_three_col_csv(path):
+    xs, ys, zs = [], [], []
     with open(path) as f:
         r = csv.reader(f); next(r)
         for row in r:
-            if len(row) >= 2: xs.append(float(row[0])); ys.append(float(row[1]))
-    return np.array(xs), np.array(ys)
+            if len(row) >= 3:
+                xs.append(float(row[0])); ys.append(float(row[1])); zs.append(float(row[2]))
+    return np.array(xs), np.array(ys), np.array(zs)
 
 def compute_avg(h5_path, config):
     members = list_members(h5_path)
@@ -85,34 +88,49 @@ def main():
     except Exception as e:
         write_result(workdir,"test10_comparator","error",f"-cmp exception: {e}"); return 2
 
-    # Find the ratio CSV
+    # Find the spectra CSV
     slug = sample_work.stem
-    csvs = sorted(workdir.glob(f"{slug}_comparator_ratio.csv"))
+    csvs = sorted(workdir.glob(f"{slug}_comparator_spectra.csv"))
     if not csvs:
-        csvs = sorted(workdir.glob("*_comparator_ratio.csv"))
-    if not csvs: write_result(workdir,"test10_comparator","error","no ratio CSV"); return 2
-    cpp_x, cpp_y = load_two_col_csv(csvs[0])
+        csvs = sorted(workdir.glob("*_comparator_spectra.csv"))
+    if not csvs: write_result(workdir,"test10_comparator","error","no spectra CSV"); return 2
+    cpp_x, cpp_sample, cpp_ref = load_three_col_csv(csvs[0])
+    if cpp_sample.size == 0 or cpp_ref.size == 0:
+        write_result(workdir,"test10_comparator","error","empty spectra CSV"); return 2
 
-    # Python reference: avg(sample)/avg(ref)
-    sample_x, avg_sample = compute_avg(sample_work, CONFIG)
+    # Python reference: avg(sample) and avg(reference) independently; the
+    # sample average is interpolated onto the reference grid (the shared axis).
     ref_x, avg_ref = compute_avg(ref_work, CONFIG)
-    # Interpolate sample average onto the reference grid
+    sample_x, avg_sample = compute_avg(sample_work, CONFIG)
     si = np.argsort(sample_x)
     sample_on_ref = np.interp(ref_x, sample_x[si], avg_sample[si],
                               left=avg_sample[si][0], right=avg_sample[si][-1])
-    py_ratio = np.where(np.abs(avg_ref) > 1e-15, sample_on_ref / avg_ref, 0.0)
 
     thresholds = THRESHOLDS
-    comps = compare(cpp_x, cpp_y, ref_x, py_ratio, None, None, thresholds, eval_window=EVAL, declared=["A"])
-    all_pass = all(c["status"]=="pass" for c in comps)
+    comps = compare(cpp_x, cpp_sample, ref_x, sample_on_ref, None, None,
+                    thresholds, eval_window=EVAL, declared=["A"])
+    comps[0]["name"] = "sample_average"
+    comps_r = compare(cpp_x, cpp_ref, ref_x, avg_ref, None, None,
+                      thresholds, eval_window=EVAL, declared=["A"])
+    comps_r[0]["name"] = "reference_average"
+    comparisons = comps + comps_r
+    all_pass = all(c["status"]=="pass" for c in comparisons)
     status = "pass" if all_pass else "fail"
-    summary = f"wrms={comps[0]['weighted_rms_rel_pct']}% max={comps[0]['max_abs_rel_pct']}%"
+    summary = (f"sample={comps[0]['status']} (wrms {comps[0]['weighted_rms_rel_pct']}%) "
+               f"ref={comps_r[0]['status']} (wrms {comps_r[0]['weighted_rms_rel_pct']}%)")
     save_overlay_residual("test10_comparator", root,
-                          cpp_x, cpp_y, ref_x, py_ratio,
-                          eval_window=EVAL, title="test10 comparator ratio",
-                          log_y=False, y_label="avg(sample)/avg(ref)",
+                          cpp_x, cpp_sample, ref_x, sample_on_ref,
+                          eval_window=EVAL, suffix="sample",
+                          title="test10 comparator — sample average",
+                          log_y=False, y_label="avg(sample)",
                           status=comps[0]["status"], metrics=comps[0])
-    write_result(workdir,"test10_comparator",status,summary,comps,OUTPUT_TYPE,[],t0)
+    save_overlay_residual("test10_comparator", root,
+                          cpp_x, cpp_ref, ref_x, avg_ref,
+                          eval_window=EVAL, suffix="reference",
+                          title="test10 comparator — reference average",
+                          log_y=False, y_label="avg(reference)",
+                          status=comps_r[0]["status"], metrics=comps_r[0])
+    write_result(workdir,"test10_comparator",status,summary,comparisons,OUTPUT_TYPE,[],t0)
     return 0 if all_pass else 1
 
 if __name__ == "__main__": sys.exit(main())

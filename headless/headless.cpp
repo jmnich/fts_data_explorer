@@ -56,9 +56,11 @@ static void handleHelp() {
               << "                 Uses the local clone as-is (no implicit network).\n"
               << "  -cmp <sample.h5> <reference.h5> <output type> <output dir> [<config.json>]\n"
               << "                 Compare two workspaces: compute the average spectrum\n"
-              << "                 from each, then emit the ratio or difference. The\n"
+              << "                 from each and export BOTH curves on a shared axis\n"
+              << "                 (sample interpolated onto the reference grid) — the\n"
+              << "                 same view the UI Comparator overlay shows. The\n"
               << "                 optional processing config applies to BOTH workspaces.\n"
-              << "                 Output types: Comparator ratio, Comparator difference.\n"
+              << "                 Output type: Comparator spectra.\n"
               << "  -sync-converters\n"
               << "                 Clone (first run) or pull the standard converter repo.\n"
               << "  -t             Generate template.json with all config settings.\n"
@@ -907,8 +909,10 @@ static void handleCompare(const HeadlessConfig& cfg) {
     sampleSess.reset();   // free the sample session's loaded data before the reference
     computeAvgSpectrum(cfg.referencePath, refX, refY, &j);
 
-    // Interpolate the sample onto the reference grid (resampleToGrid handles
-    // both ascending and descending X, endpoint-clamped — same as the panels).
+    // Export both average spectra on the shared reference grid — the same
+    // overlay the UI Comparator shows, with the sample interpolated onto the
+    // reference axis (resampleToGrid handles both ascending/descending X,
+    // endpoint-clamped — same as the panels).
     auto interpSample = resampleToGrid(sampleX, sampleY, refX);
 
     std::string slug = std::filesystem::path(cfg.path).stem().string();
@@ -923,29 +927,19 @@ static void handleCompare(const HeadlessConfig& cfg) {
     if (appState.active->averageSpectrum.plot.xUnitSelector == 1) xLabel = "Wavelength [um]";
     else if (appState.active->averageSpectrum.plot.xUnitSelector == 2) xLabel = "Frequency [THz]";
 
-    if (ot == "Comparator ratio") {
-        std::string path = cfg.outputDir + "/" + slug + "_comparator_ratio.csv";
+    if (ot == "Comparator spectra") {
+        std::string path = cfg.outputDir + "/" + slug + "_comparator_spectra.csv";
         std::ofstream ofs(path);
         if (!ofs.is_open()) { std::cerr << "Error: cannot write " << path << std::endl; exit(1); }
-        ofs << xLabel << ",Ratio\n";
-        for (size_t i = 0; i < refX.size(); i++) {
-            double r = (std::abs(refY[i]) > 1e-15) ? (interpSample[i] / refY[i]) : 0.0;
-            ofs << refX[i] << "," << r << "\n";
-        }
-        ofs.close();
-        std::cout << "Exported 'Comparator ratio' to " << cfg.outputDir << std::endl;
-    } else if (ot == "Comparator difference") {
-        std::string path = cfg.outputDir + "/" + slug + "_comparator_difference.csv";
-        std::ofstream ofs(path);
-        if (!ofs.is_open()) { std::cerr << "Error: cannot write " << path << std::endl; exit(1); }
-        ofs << xLabel << ",Difference\n";
+        ofs << std::setprecision(15);
+        ofs << xLabel << ",Sample average,Reference average\n";
         for (size_t i = 0; i < refX.size(); i++)
-            ofs << refX[i] << "," << (interpSample[i] - refY[i]) << "\n";
+            ofs << refX[i] << "," << interpSample[i] << "," << refY[i] << "\n";
         ofs.close();
-        std::cout << "Exported 'Comparator difference' to " << cfg.outputDir << std::endl;
+        std::cout << "Exported 'Comparator spectra' to " << cfg.outputDir << std::endl;
     } else {
         std::cerr << "Error: Unknown comparator output type '" << ot << "'. "
-                  << "Available: Comparator ratio, Comparator difference" << std::endl;
+                  << "Available: Comparator spectra" << std::endl;
         exit(1);
     }
 }

@@ -70,12 +70,15 @@ def save_overlay_residual(test_name: str, root: str | Path,
                           y_label: str = "Magnitude",
                           x_label: str = "cm-1",
                           status: str | None = None,
-                          metrics: dict | None = None) -> Path | None:
+                          metrics: dict | None = None,
+                          residual_mode: str = "relative") -> Path | None:
     """Save a two-panel overlay+residual comparison PNG.
 
     Returns the path written, or None if matplotlib is unavailable / the curves
-    are empty. Residual is (candidate - reference) / reference * 100, matching
-    the canonical metric in compare.py.
+    are empty. Residual is (candidate - reference) / reference * 100 (matching
+    the canonical metric in compare.py), or the absolute difference
+    (candidate - reference) in the curve's native units when
+    ``residual_mode="absolute"`` (used by absolute-only tests like test9).
     """
     plt = _import_mpl()
     if plt is None:
@@ -112,17 +115,29 @@ def save_overlay_residual(test_name: str, root: str | Path,
         mx = metrics.get("max_abs_rel_pct")
         if wrms is not None and mx is not None:
             head += f" (wrms {wrms}%, max {mx}%)"
+        else:
+            ar = metrics.get("abs_rms")
+            ma = metrics.get("max_abs")
+            if ar is not None and ma is not None:
+                head += f" (abs_rms {ar:.2e}, max_abs {ma:.2e})"
     ax1.set_title(head)
 
     # Residual on the candidate grid: interp reference onto candidate X.
     order = np.argsort(rx)
     ref_interp = np.interp(cx, rx[order], ry[order],
                           left=ry[order][0], right=ry[order][-1])
-    with np.errstate(divide="ignore", invalid="ignore"):
-        rd = np.where(np.abs(ref_interp) > 1e-15,
-                      (cy - ref_interp) / ref_interp * 100.0, np.nan)
-    ax2.plot(cx, rd, lw=0.5, color="tab:red")
-    autoscale_residual_ylim(ax2, rd)
+    if residual_mode == "absolute":
+        rd = cy - ref_interp
+        ax2.plot(cx, rd, lw=0.5, color="tab:red")
+        autoscale_residual_ylim(ax2, rd)
+        ax2.set_ylabel(f"abs. diff ({y_label})")
+    else:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            rd = np.where(np.abs(ref_interp) > 1e-15,
+                          (cy - ref_interp) / ref_interp * 100.0, np.nan)
+        ax2.plot(cx, rd, lw=0.5, color="tab:red")
+        autoscale_residual_ylim(ax2, rd)
+        ax2.set_ylabel("rel. diff %")
     ax2.set_xlabel(x_label)
     ax2.set_ylabel("rel. diff %")
     ax2.axhline(0, color="grey", lw=0.4)
@@ -335,14 +350,21 @@ def save_allan_surface(test_name: str, root: str | Path,
                        py_waves: np.ndarray, py_taus: np.ndarray,
                        py_surface: np.ndarray,
                        *, suffix: str = "compare",
+                       residual_window: tuple[float, float] | None = None,
                        status: str | None = None) -> Path | None:
     """Save a side-by-side Allan-Werle surface comparison + ratio surface.
 
-    Three subplots: C++ surface, Python surface, and the ratio
-    ``(cpp - py) / cpp`` as a residual sanity-check, with the color scale
-    fitted to the data extent (never clips). The numeric metric in result.json
-    remains authoritative.
+    Three subplots: C++ surface, Python surface (both full 1-30 um, log10
+    scale), and the ratio ``(cpp - py) / cpp`` as a residual sanity-check.
+    The ratio panel is restricted to ``residual_window`` (default
+    ALLAN_SURFACE_WINDOW_UM = 2.5-5 um, the band the pass/fail metric
+    evaluates) with a p99 color scale — the full surface's noisy wings would
+    flatten the colormap into a featureless wash. The numeric metric in
+    result.json remains authoritative.
     """
+    if residual_window is None:
+        from . import thresholds as _thr  # deferred: avoids import ordering
+        residual_window = _thr.ALLAN_SURFACE_WINDOW_UM
     plt = _import_mpl()
     if plt is None:
         return None
@@ -361,24 +383,35 @@ def save_allan_surface(test_name: str, root: str | Path,
             ax.set_title(f"{label}", fontsize=9)
             ax.set_xmargin(0)
             fig.colorbar(im, ax=ax, label="log10|Allan var|")
-    # Ratio/residual surface — limits from the data extent (never clips).
+    # Ratio/residual surface — restricted to the signal band the metric
+    # evaluates (residual_window, default = ALLAN_SURFACE_WINDOW_UM) with a
+    # percentile color scale. The full 1-30 um surface is dominated by noisy
+    # long-tau wings (up to ~250% ratio) whose cells flatten any full-extent
+    # scale: 97%+ of cells sit within ±1% and would render as a uniform wash.
+    # The p99 scale gives the bulk real contrast; the few tail cells saturate
+    # (still drawn, color-capped only).
     if cpp_surface.size and py_surface.size and cpp_surface.shape == py_surface.shape:
         with np.errstate(divide="ignore", invalid="ignore"):
             ratio = np.where(np.abs(cpp_surface) > 1e-15,
                               (cpp_surface - py_surface) / cpp_surface * 100.0, np.nan)
-        finite = ratio[np.isfinite(ratio)]
-        rmax = float(np.max(np.abs(finite))) * 1.05 if finite.size else 200.0
-        if rmax <= 0.0:
-            rmax = 1.0
-        ratio = np.nan_to_num(ratio, nan=0.0)
-        im = axes[2].pcolormesh(cpp_waves, cpp_taus, ratio.T, shading="auto",
-                                cmap="RdBu", vmin=-rmax, vmax=rmax)
-        axes[2].set_xlabel("wavelength (um)")
-        axes[2].set_title("residual (cpp-py)/cpp %", fontsize=9)
-        axes[2].set_xmargin(0)
-        fig.colorbar(im, ax=axes[2], label="rel. diff %")
-    else:
-        axes[2].axis("off")
+        rw_lo, rw_hi = residual_window
+        in_band = (cpp_waves >= rw_lo) & (cpp_waves <= rw_hi)
+        band_ratio = ratio[in_band, :]
+        finite = band_ratio[np.isfinite(band_ratio)]
+        if finite.size:
+            rmax = float(np.percentile(np.abs(finite), 99.0))
+            if rmax <= 0.0:
+                rmax = 1.0
+            im = axes[2].pcolormesh(cpp_waves[in_band], cpp_taus,
+                                    ratio[in_band, :].T, shading="auto",
+                                    cmap="RdBu", vmin=-rmax, vmax=rmax)
+            axes[2].set_xlabel("wavelength (um)")
+            axes[2].set_title(f"residual (cpp-py)/cpp %, {rw_lo:.1f}-{rw_hi:.1f} um, "
+                              f"scale p99={rmax:.2f}", fontsize=9)
+            axes[2].set_xmargin(0)
+            fig.colorbar(im, ax=axes[2], label="rel. diff %")
+        else:
+            axes[2].axis("off")
     head = test_name
     if status:
         head += f" — {status}"

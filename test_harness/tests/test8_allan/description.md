@@ -35,8 +35,11 @@ the comparison.
 
 ## Report image
 The Allan surface comparison plot has three subplots: C++ surface, Python
-surface, and a residual ratio surface `(cpp - py) / cpp * 100` (clamped to
-±200% for readability, diverging colormap). The numeric metric in
+surface (both full 1–30 um, log10 scale), and a residual ratio surface
+`(cpp - py) / cpp * 100`. The residual panel is restricted to the 2.5–5 um
+signal band (the window the pass/fail metric evaluates) with a p99 color
+scale — the noisy long-tau wings of the full surface reach ~250% and would
+flatten the colormap into a featureless wash. The numeric metric in
 result.json remains authoritative.
 ## Timeout
 timeout: 1200

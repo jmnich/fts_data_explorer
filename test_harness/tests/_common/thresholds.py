@@ -150,15 +150,18 @@ THRESHOLDS: dict[str, dict] = {
     },
 
     # ------------------------------------------------------------------ test6
-    # 100% T transmission line (A, referenceSource=File), window 2000-4000
-    # cm-1. First file against itself ≈ 100%: residuals are bit-exact here
-    # (observed 0.0); thresholds absorb CSV 6-sig-digit rounding.
+    # 100% T lines for all files (A, referenceSource=File), window 2000-4000
+    # cm-1. Reference = first file; the comparison uses the SECOND file's line
+    # (a genuine T curve ~95-105%) so the transmittance computation is really
+    # exercised. The first file's line (T==100% by construction) is guarded by
+    # a scalar self-reference check (reference-setup integrity).
     "test6_t100": {
         "full_window": {
-            "weighted_rms_rel_pct": 0.1,     # observed 0.0 (CSV-rounding cushion)
+            "weighted_rms_rel_pct": 0.001,   # observed 3.8e-05% (26x)
             "max_abs_rel_pct": 1.0,
-            "max_abs": 0.01,                 # T % — observed 0.0
+            "max_abs": 0.01,                 # T % — observed 0.00023 (44x)
         },
+        "self_ref_max_abs": 1e-3,            # raw_0 line vs itself: |T-100| max
     },
 
     # ------------------------------------------------------------------ test7
@@ -197,32 +200,32 @@ THRESHOLDS: dict[str, dict] = {
     # ------------------------------------------------------------------ test9
     # Absorbance / transmittance (A, referenceSource=Average), evaluated in the
     # ceramicLPF signal band 200-700 cm-1 (LPF_SIGNAL_WINDOW_CM — the LPF
-    # transmits below ~1000 cm-1, so 2000-4000 has no signal). An SNR hard
-    # mask excludes unstable bins: T uses SNR>=30, A uses SNR>=70 because
-    # -log10(T) is unstable at T≈1 even in high-SNR bins.
+    # transmits below ~1000 cm-1, so 2000-4000 has no signal). Absolute-only
+    # evaluation (compare abs_only=True) with ONLY the max-abs gate — no RMS
+    # gate of any kind. An SNR hard mask excludes unstable bins: T uses
+    # SNR>=30, A uses SNR>=70 because -log10(T) is unstable at T≈1 even in
+    # high-SNR bins.
     "test9_absorbance_transmittance": {
         "transmittance": {
-            "weighted_rms_rel_pct": 0.5,     # observed 0.301% (1.7x)
-            "max_abs_rel_pct": 1.0,
-            "max_abs": 0.05,                 # observed 0.0178 (2.8x)
+            "max_abs": 2e-4,                 # fraction — observed 2.35e-5 (8.5x)
         },
         "absorbance": {
-            "weighted_rms_rel_pct": 50.0,    # observed 16.5% (3x)
-            "max_abs_rel_pct": 1.0,
-            "max_abs": 0.01,                 # observed 0.0022 (4.5x)
+            "max_abs": 1e-4,                 # -log10 units — observed 7.8e-6 (13x)
         },
         "snr_mask_threshold_transmittance": 30.0,
         "snr_mask_threshold_absorbance": 70.0,
     },
 
     # ----------------------------------------------------------------- test10
-    # Comparator ratio (A), evaluated in the ceramicLPF signal band 200-700
-    # cm-1. Relative max gate (no max_abs — the ratio is well-behaved away
-    # from zero, so relative max is meaningful here).
+    # Comparator spectra (A): -cmp exports both average spectra on the shared
+    # reference grid; the test compares each curve against the Python
+    # reference in the ceramicLPF signal band 200-700 cm-1
+    # (LPF_SIGNAL_WINDOW_CM). Relative gates — the curves are spectra-like,
+    # well-behaved away from zero.
     "test10_comparator": {
         "full_window": {
-            "weighted_rms_rel_pct": 0.1,     # observed 0.0041% (24x)
-            "max_abs_rel_pct": 0.1,          # observed 0.0146% (7x)
+            "weighted_rms_rel_pct": 0.01,    # observed 0.0021% (sample) / 0.0017% (ref)
+            "max_abs_rel_pct": 0.05,         # observed 0.0147% / 0.0144%
         },
     },
 }

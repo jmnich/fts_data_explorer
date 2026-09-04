@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
-"""Test 6: 100% T transmission line (comparison A, referenceSource=File)."""
-import argparse, sys, time
+"""Test 6: 100% T transmission line (comparison A, referenceSource=File).
+
+Reference = first file (the headless "current spectrum"); the all-files export
+writes every checked file's T line vs that reference. The comparison uses the
+SECOND file's line (raw_1) — a genuine T curve (94.9-105.3% in 2000-4000) —
+so the transmittance computation is really exercised. The first file's line
+(raw_0, T==100% by construction) is kept as a scalar self-reference guard for
+the reference-setup path.
+"""
+import argparse, csv, sys, time
 from pathlib import Path
 import numpy as np
 
@@ -9,17 +17,34 @@ sys.path.insert(0, str(HERE.parent))
 from _common.pipeline import process_spectrum, transmittance
 from _common.compare import compare
 from _common.test_helpers import read_raw_ifg, list_members, write_result, strip_and_validate
-from _common.headless import run_binary, load_csv, find_exported_csv
+from _common.headless import run_binary
 from _common.report_images import save_overlay_residual
 from _common import thresholds as thr
 
-DATASET = "wust_mini"; OUTPUT_TYPE = "100% T transmission line"
+DATASET = "wust_mini"; OUTPUT_TYPE = "100% T lines for all files"
 EVAL = thr.SPECTRUM_EVAL_WINDOW_CM
 CONFIG = {"refLaserWavelengthUm":1.55,"zeroPadK":2,"apodizationWindow":"Rectangular",
           "rectWidth":1.0,"rectAsymMode":True,"xUnit":"cm-1","xCorrectionMethod":"Hilbert"}
+SELF_REF_MAX_ABS = thr.get("test6_t100", "self_ref_max_abs", default=1e-3)
 
 # Thresholds live in _common/thresholds.py (single source of truth).
 THRESHOLDS = thr.full_window("test6_t100")
+
+def load_all_trans(path, col):
+    """Load one T% column from the all-transmissions CSV.
+
+    Rows are aligned per reference-grid bin, but a file whose own spectrum
+    does not overlap the reference's final bin has an EMPTY cell there (the
+    app writes sparse cells rather than re-binning). Skip such rows for the
+    target column only — the remaining values stay bin-aligned with X.
+    """
+    xs, ys = [], []
+    with open(path) as f:
+        r = csv.reader(f); next(r)
+        for row in r:
+            if len(row) > col and row[col] != "":
+                xs.append(float(row[0])); ys.append(float(row[col]))
+    return np.array(xs), np.array(ys)
 
 def main():
     ap = argparse.ArgumentParser()
@@ -38,30 +63,46 @@ def main():
     rc, log = run_binary(args.binary, work_h5, OUTPUT_TYPE, workdir, HERE/"config.json", timeout=600)
     (workdir/"run.log").write_text(log)
     if rc != 0: write_result(workdir,"test6_t100","error",f"headless rc={rc}"); return 2
-    # Find the transmission CSV for the first file
+    # All-files CSV: first column X (reference grid), one T% column per file
+    # in natural sort order (raw_0, raw_1, ...).
     slug = work_h5.stem
-    csvs = sorted(workdir.glob(f"{slug}_t100_transmission_*.csv"))
-    if not csvs: write_result(workdir,"test6_t100","error","no t100 CSV"); return 2
-    cpp_x, cpp_ys = load_csv(csvs[0])
-    if not cpp_ys: write_result(workdir,"test6_t100","error","empty CSV"); return 2
-    # Python reference: referenceSource=File → reference = first file's spectrum.
-    # The C++ exports the first file's transmittance (raw_0 against itself = ~100%).
+    csv_path = workdir / f"{slug}_t100_all_transmissions.csv"
+    if not csv_path.is_file(): write_result(workdir,"test6_t100","error","no all-transmissions CSV"); return 2
     members = list_members(work_h5)
+    if len(members) < 2: write_result(workdir,"test6_t100","error","need >=2 files"); return 2
+    cpp_x, cpp_y1 = load_all_trans(csv_path, 2)   # T%_1 [raw_1]
+    cpp_x0, cpp_y0 = load_all_trans(csv_path, 1)  # T%_0 [raw_0]
+    if cpp_y1.size == 0 or cpp_y0.size == 0:
+        write_result(workdir,"test6_t100","error","empty all-transmissions columns"); return 2
+
+    # Self-reference guard: raw_0's line (file 0 vs itself) must be ~100% in
+    # the eval window — catches reference-setup regressions.
+    m0 = (cpp_x0 >= EVAL[0]) & (cpp_x0 <= EVAL[1])
+    guard_max = float(np.max(np.abs(cpp_y0[m0] - 100.0))) if m0.any() else float("inf")
+    guard_pass = guard_max <= SELF_REF_MAX_ABS
+    guard_comp = {"name": "self_reference", "status": "pass" if guard_pass else "fail",
+                  "max_abs": round(guard_max, 9), "threshold_max_abs": SELF_REF_MAX_ABS,
+                  "summary": "raw_0 line vs itself must be ~100%"}
+
+    # Python reference: second file against the first (referenceSource=File).
     ref0, prim0 = read_raw_ifg(work_h5, members[0])
     ref_x, ref_y = process_spectrum(prim0, ref0, CONFIG)
-    # First file transmittance against itself
-    py_x, py_y = transmittance(ref_x, ref_y, ref_x, ref_y)
+    r1, p1 = read_raw_ifg(work_h5, members[1])
+    s1x, s1y = process_spectrum(p1, r1, CONFIG)
+    py_x, py_y = transmittance(s1x, s1y, ref_x, ref_y)
+
     thresholds = THRESHOLDS
-    comps = compare(cpp_x, cpp_ys[0], py_x, py_y, None, None, thresholds, eval_window=EVAL, declared=["A"])
-    all_pass = all(c["status"]=="pass" for c in comps)
+    comps = compare(cpp_x, cpp_y1, py_x, py_y, None, None, thresholds, eval_window=EVAL, declared=["A"])
+    comparisons = comps + [guard_comp]
+    all_pass = all(c["status"]=="pass" for c in comparisons)
     status = "pass" if all_pass else "fail"
-    summary = f"wrms={comps[0]['weighted_rms_rel_pct']}% max={comps[0]['max_abs_rel_pct']}%"
+    summary = f"wrms={comps[0]['weighted_rms_rel_pct']}% max={comps[0]['max_abs_rel_pct']}% self={guard_max:.3g}"
     save_overlay_residual("test6_t100", root,
-                          cpp_x, cpp_ys[0], py_x, py_y,
-                          eval_window=EVAL, title="test6 100% T transmission",
+                          cpp_x, cpp_y1, py_x, py_y,
+                          eval_window=EVAL, title="test6 100% T (file1 vs file0)",
                           log_y=False, y_label="Transmittance %",
                           status=comps[0]["status"], metrics=comps[0])
-    write_result(workdir,"test6_t100",status,summary,comps,OUTPUT_TYPE,["compare.png"],t0)
+    write_result(workdir,"test6_t100",status,summary,comparisons,OUTPUT_TYPE,["compare.png"],t0)
     return 0 if all_pass else 1
 
 if __name__ == "__main__": sys.exit(main())

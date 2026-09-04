@@ -67,7 +67,7 @@ dir. The harness operates on a **stripped copy** (`work.h5`) so
 | `SNR spectrum` | `<slug>_snr_spectrum.csv` | test5 |
 | `Allan-Werle 3D` | `<slug>_allan_3d.csv` | test8 |
 | `Allan-Werle slice` | `<slug>_allan_slice_<wl>_<unit>.csv` | test8 |
-| `100% T transmission line` | `<slug>_t100_transmission_<file>.csv` | test6 |
+| `100% T transmission line` | `<slug>_t100_transmission_<file>.csv` | — (single first-file line; degenerate, unused) |
 | `100% T lines for all files` | `<slug>_t100_all_transmissions.csv` | test6 |
 | `100% T standard deviation` | `<slug>_t100_stddev.csv` | test7 |
 
@@ -215,6 +215,19 @@ meaningful, avoiding the T≈0 / T≈1 instability that dominates full-window
 residuals. The SNR curve is passed via `snr_ref` (same as the weighting path)
 and the threshold is per-test (e.g. 30 for transmittance, 70 for absorbance
 where -log10 amplifies small differences).
+
+### Absolute-only evaluation (no relative metrics)
+
+`compare(abs_only=True)` evaluates **absolute differences only** — no relative
+metrics are computed or reported. The result dict carries only absolute fields
+(`abs_rms`, `max_abs`, `threshold_max_abs`, optionally `threshold_abs_rms`).
+The `max_abs` gate is always applied; the `abs_rms` gate is optional — a
+thresholds dict without an `abs_rms` key gates on `max_abs` alone. The SNR
+hard mask still applies. Used by test9 (transmittance/absorbance):
+`-log10(T)` amplifies small differences at T≈1, so relative error is
+structurally unstable there; test9 gates on `max_abs` only. The report renders
+such comparisons with an "Abs RMS" column (observed value, not a gate), and
+their plots use the absolute residual (`residual_mode="absolute"`).
 
 ### Evaluation-window policy (signal bands only)
 
@@ -364,8 +377,9 @@ visual counterpart of the canonical metric in `compare.py`:
 | Plot type | Residual | Units |
 |-----------|----------|-------|
 | Spectrum (single or matrix) | `(candidate - reference) / reference * 100` | relative % |
+| Spectrum (absolute-only tests, e.g. test9) | `(candidate - reference)` | native units (`residual_mode="absolute"`) |
 | Interferogram | `(candidate - reference)` | absolute, signal units (V, um) |
-| Allan surface | `(cpp - py) / cpp * 100` | relative %, diverging colormap |
+| Allan surface | `(cpp - py) / cpp * 100` | relative %, diverging colormap, banded to the metric window (2.5–5 um) with p99 color scale |
 
 Residual axes are autoscaled to the **full extent of the windowed data**
 (symmetric about zero, `autoscale_residual_ylim` in `report_images.py`) —

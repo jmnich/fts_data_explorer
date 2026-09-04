@@ -97,9 +97,17 @@ public:
                                           const std::vector<double>& specY,
                                           int specXUnit,
                                           std::vector<double>& outX,
-                                          std::vector<double>& outY);
+                                          std::vector<double>& outY) const;
 
     bool computeTransmittanceForFile(const std::string& fileId);
+
+    // Full-resolution transmittance of fileId against the current reference.
+    // computeTransmittanceForFile downsamples the result for display when the
+    // grid exceeds maxPointsBeforeDownsampling; exports must NOT lose that
+    // resolution, so they call this instead (same math, no decimation).
+    bool computeTransmittanceFullRes(const std::string& fileId,
+                                     std::vector<double>& outX,
+                                     std::vector<double>& outY) const;
 
     // Lazy transmittance recompute: wipe the per-file caches when
     // needsRecompute is set, then fill every missing entry for
@@ -122,4 +130,12 @@ private:
     std::vector<double> calcRatioA;
     std::vector<double> calcRatioB;
     std::vector<double> calcRatioC;
+
+    // Full-resolution spectrum for fileId (cached, else synchronous
+    // workspaceRead + processSpectrum fallback that also populates the cache).
+    // Out params carry the spectrum in the Spectrum panel's current X unit.
+    bool acquireSpectrumForT100(const std::string& fileId,
+                                std::vector<double>& freq,
+                                std::vector<double>& spec,
+                                int& spectrumXUnit) const;
 };

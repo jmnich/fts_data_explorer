@@ -258,6 +258,79 @@ void T100Spectrum::setReferenceFromAverage() {
 #endif
 }
 
+bool T100Spectrum::acquireSpectrumForT100(const std::string& fileId,
+                                          std::vector<double>& freq,
+                                          std::vector<double>& spec,
+                                          int& spectrumXUnit) const {
+    auto freqIt = appState->active->spectrum.cachedFrequencies.find(fileId);
+    auto specIt = appState->active->spectrum.cachedSpectra.find(fileId);
+    if (freqIt != appState->active->spectrum.cachedFrequencies.end() &&
+        specIt != appState->active->spectrum.cachedSpectra.end() &&
+        !freqIt->second.empty() && !specIt->second.empty()) {
+        freq = freqIt->second;
+        spec = specIt->second;
+        spectrumXUnit = appState->active->spectrum.plot.xUnitSelector;
+        return true;
+    }
+    // Spectrum not yet cached — compute synchronously as fallback
+    std::string fullPath = fileId;
+    // fileId may be just a filename; find the full path in sortedFiles
+    for (const auto& sp : appState->active->sortedFiles) {
+        std::string fn = sp;
+        size_t ls = fn.find_last_of("/\\");
+        if (ls != std::string::npos) fn = fn.substr(ls + 1);
+        if (fn == fileId) { fullPath = sp; break; }
+    }
+    try {
+        auto raw = workspaceRead(appState->active->workspace, fullPath);
+        SpectralToolbox::ProcessedSpectrum ps;
+        if (appState->active->datasetInfo.hasPrecomputedSpectra) {
+            ps.spectrumX = raw.referenceDetector;
+            auto tgt = static_cast<SpectralToolbox::SpectrumXUnit>(appState->active->spectrum.plot.xUnitSelector);
+            for (double& f : ps.spectrumX)
+                f = SpectralToolbox::convertXValue(f, SpectralToolbox::SpectrumXUnit::CmInv, tgt);
+            ps.spectrumY = std::move(raw.primaryDetector);
+        } else if (appState->active->datasetInfo.axisIsCorrected) {
+            for (auto& v : raw.opdAxis) v *= 1e6;
+            ps = SpectralToolbox::processSpectrumFromCorrectedAxis(
+                raw.primaryDetector, raw.opdAxis,
+                appState->active->spectrum.Kpadding,
+                static_cast<SpectralToolbox::SpectrumXUnit>(appState->active->spectrum.plot.xUnitSelector),
+                static_cast<ApodizationWindow>(appState->active->spectrum.apodizationSelector),
+                appState->active->spectrum.apodizationParams);
+        } else {
+            ps = SpectralToolbox::processSpectrum(
+                raw.primaryDetector, raw.referenceDetector,
+                appState->active->spectrum.refLaserTextbox,
+                appState->active->spectrum.Kpadding,
+                static_cast<SpectralToolbox::SpectrumXUnit>(appState->active->spectrum.plot.xUnitSelector),
+                static_cast<ApodizationWindow>(appState->active->spectrum.apodizationSelector),
+                appState->active->spectrum.apodizationParams,
+                static_cast<SpectralToolbox::XCorrectionMethod>(appState->active->xCorrectionMethod),
+                appState->active->peakProminenceThreshold);
+        }
+        if (ps.spectrumX.empty() || ps.spectrumY.empty())
+            return false;
+        freq = std::move(ps.spectrumX);
+        spec = std::move(ps.spectrumY);
+        spectrumXUnit = appState->active->spectrum.plot.xUnitSelector;
+        // cache the fallback-computed spectrum so subsequent calls
+        // for the same file reuse it instead of recomputing. Stamp the
+        // Spectrum panel's param fingerprint + primary detector so
+        // isSpectrumDirty returns false on the next frame (consistent
+        // with the sync/async paths in renderSpectrumContents).
+        appState->active->spectrum.cachedFrequencies[fileId] = freq;
+        appState->active->spectrum.cachedSpectra[fileId] = spec;
+        appState->active->spectrum.lastPrimaryDetectors[fileId] = raw.primaryDetector;
+        appState->active->spectrum.lastSpectrumParams[fileId] =
+            appState->active->spectrum.currentSpectrumParams();
+        return true;
+    } catch (const std::exception& e) {
+        fprintf(stderr, "[t100] acquireSpectrumForT100: failed to compute fallback: %s\n", e.what());
+        return false;
+    }
+}
+
 bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
     using Clock = std::chrono::high_resolution_clock;
     auto t0 = Clock::now();
@@ -265,78 +338,14 @@ bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
     if (!referenceAvailable || refX.empty() || refY.empty())
         return false;
 
-    std::vector<double> localFreq, localSpec;
-    bool useLocal = false;
-
-    auto freqIt = appState->active->spectrum.cachedFrequencies.find(fileId);
-    auto specIt = appState->active->spectrum.cachedSpectra.find(fileId);
-    if (freqIt == appState->active->spectrum.cachedFrequencies.end() ||
-        specIt == appState->active->spectrum.cachedSpectra.end() ||
-        freqIt->second.empty() || specIt->second.empty()) {
-        // Spectrum not yet cached — compute synchronously as fallback
-        std::string fullPath = fileId;
-        // fileId may be just a filename; find the full path in sortedFiles
-        for (const auto& sp : appState->active->sortedFiles) {
-            std::string fn = sp;
-            size_t ls = fn.find_last_of("/\\");
-            if (ls != std::string::npos) fn = fn.substr(ls + 1);
-            if (fn == fileId) { fullPath = sp; break; }
-        }
-        try {
-            auto raw = workspaceRead(appState->active->workspace, fullPath);
-            SpectralToolbox::ProcessedSpectrum ps;
-            if (appState->active->datasetInfo.hasPrecomputedSpectra) {
-                ps.spectrumX = raw.referenceDetector;
-                auto tgt = static_cast<SpectralToolbox::SpectrumXUnit>(appState->active->spectrum.plot.xUnitSelector);
-                for (double& f : ps.spectrumX)
-                    f = SpectralToolbox::convertXValue(f, SpectralToolbox::SpectrumXUnit::CmInv, tgt);
-                ps.spectrumY = std::move(raw.primaryDetector);
-            } else if (appState->active->datasetInfo.axisIsCorrected) {
-                for (auto& v : raw.opdAxis) v *= 1e6;
-                ps = SpectralToolbox::processSpectrumFromCorrectedAxis(
-                    raw.primaryDetector, raw.opdAxis,
-                    appState->active->spectrum.Kpadding,
-                    static_cast<SpectralToolbox::SpectrumXUnit>(appState->active->spectrum.plot.xUnitSelector),
-                    static_cast<ApodizationWindow>(appState->active->spectrum.apodizationSelector),
-                    appState->active->spectrum.apodizationParams);
-            } else {
-                ps = SpectralToolbox::processSpectrum(
-                    raw.primaryDetector, raw.referenceDetector,
-                    appState->active->spectrum.refLaserTextbox,
-                    appState->active->spectrum.Kpadding,
-                    static_cast<SpectralToolbox::SpectrumXUnit>(appState->active->spectrum.plot.xUnitSelector),
-                    static_cast<ApodizationWindow>(appState->active->spectrum.apodizationSelector),
-                    appState->active->spectrum.apodizationParams,
-                    static_cast<SpectralToolbox::XCorrectionMethod>(appState->active->xCorrectionMethod),
-                    appState->active->peakProminenceThreshold);
-            }
-            if (ps.spectrumX.empty() || ps.spectrumY.empty())
-                return false;
-            localFreq = std::move(ps.spectrumX);
-            localSpec = std::move(ps.spectrumY);
-            useLocal = true;
-            // cache the fallback-computed spectrum so subsequent calls
-            // for the same file reuse it instead of recomputing. Stamp the
-            // Spectrum panel's param fingerprint + primary detector so
-            // isSpectrumDirty returns false on the next frame (consistent
-            // with the sync/async paths in renderSpectrumContents).
-            appState->active->spectrum.cachedFrequencies[fileId] = localFreq;
-            appState->active->spectrum.cachedSpectra[fileId] = localSpec;
-            appState->active->spectrum.lastPrimaryDetectors[fileId] = raw.primaryDetector;
-            appState->active->spectrum.lastSpectrumParams[fileId] =
-                appState->active->spectrum.currentSpectrumParams();
-        } catch (const std::exception& e) {
-            fprintf(stderr, "[t100] computeTransmittanceForFile: failed to compute fallback: %s\n", e.what());
-            return false;
-        }
-    }
-
-    const auto& curFreq = useLocal ? localFreq : freqIt->second;
-    const auto& curSpec = useLocal ? localSpec : specIt->second;
+    std::vector<double> curFreq, curSpec;
+    int specXUnit = 0;
+    if (!acquireSpectrumForT100(fileId, curFreq, curSpec, specXUnit))
+        return false;
 
     using ST = SpectralToolbox::SpectrumXUnit;
     auto displayUnit = static_cast<ST>(plot.xUnitSelector);
-    auto specU = static_cast<ST>(appState->active->spectrum.plot.xUnitSelector);
+    auto specU = static_cast<ST>(specXUnit);
     auto refU = static_cast<ST>(refXUnit);
 
     std::vector<double> convertedRefX(refX.size());
@@ -418,6 +427,19 @@ bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
     return true;
 }
 
+bool T100Spectrum::computeTransmittanceFullRes(const std::string& fileId,
+                                               std::vector<double>& outX,
+                                               std::vector<double>& outY) const {
+    if (!referenceAvailable || refX.empty() || refY.empty())
+        return false;
+
+    std::vector<double> curFreq, curSpec;
+    int specXUnit = 0;
+    if (!acquireSpectrumForT100(fileId, curFreq, curSpec, specXUnit))
+        return false;
+    return computeTransmittanceFromVectors(curFreq, curSpec, specXUnit, outX, outY);
+}
+
 void T100Spectrum::refreshTransmittanceCache() {
     if (needsRecompute) {
         cachedTransX.clear();
@@ -436,7 +458,7 @@ bool T100Spectrum::computeTransmittanceFromVectors(
         const std::vector<double>& specY,
         int specXUnit,
         std::vector<double>& outX,
-        std::vector<double>& outY) {
+        std::vector<double>& outY) const {
     if (!referenceAvailable || refX.empty() || refY.empty())
         return false;
     if (specX.empty() || specY.empty())
