@@ -55,6 +55,8 @@ void T100Spectrum::reset() {
     refDescription.clear();
     cachedTransX.clear();
     cachedTransY.clear();
+    fullResCachedTransX.clear();
+    fullResCachedTransY.clear();
     transmittanceAvailable = false;
     lastKnownSelection.clear();
 
@@ -113,6 +115,8 @@ void T100Spectrum::setReferenceFromCurrentSpectrum() {
 
     cachedTransX.clear();
     cachedTransY.clear();
+    fullResCachedTransX.clear();
+    fullResCachedTransY.clear();
     transmittanceAvailable = false;
     // The view is NEVER reset on recompute: after recalculation the same
     // X/Y range is presented (user request); the first-load latch still
@@ -192,6 +196,8 @@ void T100Spectrum::setReferenceFromCSV(const std::string& path) {
 
     cachedTransX.clear();
     cachedTransY.clear();
+    fullResCachedTransX.clear();
+    fullResCachedTransY.clear();
     transmittanceAvailable = false;
     // The view is NEVER reset on recompute: after recalculation the same
     // X/Y range is presented (user request); the first-load latch still
@@ -241,6 +247,8 @@ void T100Spectrum::setReferenceFromAverage() {
 
     cachedTransX.clear();
     cachedTransY.clear();
+    fullResCachedTransX.clear();
+    fullResCachedTransY.clear();
     transmittanceAvailable = false;
     // The view is NEVER reset on recompute: after recalculation the same
     // X/Y range is presented (user request); the first-load latch still
@@ -392,6 +400,14 @@ bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
         return false;
 
     size_t origSize = newX.size();
+    // F2: the workspace member must persist FULL resolution — the batch engine
+    // writes full-res members, and the export writers already recompute
+    // full-res (computeTransmittanceFullRes). Store the pre-decimation curves
+    // for the mirror (wsUpsertT100FromPanel reads these maps); the display
+    // cache below stays decimated for large grids.
+    fullResCachedTransX[fileId] = newX;
+    fullResCachedTransY[fileId] = newY;
+
     if (appState && appState->active->enableDownsampling &&
         newX.size() > appState->maxPointsBeforeDownsampling) {
         size_t factor = newX.size() / appState->maxPointsBeforeDownsampling + 1;
@@ -444,6 +460,8 @@ void T100Spectrum::refreshTransmittanceCache() {
     if (needsRecompute) {
         cachedTransX.clear();
         cachedTransY.clear();
+        fullResCachedTransX.clear();
+        fullResCachedTransY.clear();
         transmittanceAvailable = false;
         needsRecompute = false;
     }
@@ -788,6 +806,12 @@ void T100Spectrum::convertCachedXUnits(int fromUnit, int toUnit) {
     // Main transmittance curves (T% is unit-independent).
     if (transmittanceAvailable && !cachedTransX.empty()) {
         for (auto& [fid, vec] : cachedTransX)
+            for (double& x : vec)
+                x = SpectralToolbox::convertXValue(x, oldU, newU);
+    }
+    // Full-res mirror curves follow the same unit switch (F2).
+    if (!fullResCachedTransX.empty()) {
+        for (auto& [fid, vec] : fullResCachedTransX)
             for (double& x : vec)
                 x = SpectralToolbox::convertXValue(x, oldU, newU);
     }

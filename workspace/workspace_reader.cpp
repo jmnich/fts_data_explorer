@@ -946,9 +946,17 @@ nlohmann::json makeT100Config(const AppState& s, const std::vector<std::string>&
 void wsUpsertT100FromPanel(AppState& s) {
     if (!s.hasWorkspace() || !s.active->t100.referenceAvailable) return;
     std::vector<T100Member::Curve> curves;
-    for (const auto& kv : s.active->t100.cachedTransX) {
-        auto it = s.active->t100.cachedTransY.find(kv.first);
-        if (it == s.active->t100.cachedTransY.end()) continue;
+    // F2: persist the FULL-RESOLUTION curves (the display cache is decimated
+    // past maxPointsBeforeDownsampling). Fall back to the display cache only
+    // if a path left the full-res maps empty — both are kept in sync by every
+    // mutation site (compute, reference changes, refresh, unit switch, seed).
+    const auto& srcX = !s.active->t100.fullResCachedTransX.empty()
+        ? s.active->t100.fullResCachedTransX : s.active->t100.cachedTransX;
+    const auto& srcY = !s.active->t100.fullResCachedTransY.empty()
+        ? s.active->t100.fullResCachedTransY : s.active->t100.cachedTransY;
+    for (const auto& kv : srcX) {
+        auto it = srcY.find(kv.first);
+        if (it == srcY.end()) continue;
         T100Member::Curve c;
         c.fileId = kv.first;
         c.x = kv.second;
@@ -1155,16 +1163,24 @@ void seedPanelsFromWorkspace(WorkspaceSession& sess) {
         sess.t100.refDescription = (src == "csv") ? "From CSV" : "From workspace";
         sess.t100.cachedTransX.clear();
         sess.t100.cachedTransY.clear();
+        sess.t100.fullResCachedTransX.clear();
+        sess.t100.fullResCachedTransY.clear();
         // Eager restore: seed curves for every saved file still present in the
         // workspace. The old selectedFiles guard was always empty at seed time
         // (selection is populated later by the frame loop), so restore-on-open
         // never worked and the render path recomputed every curve on the first
         // frame — which rewrote the member and dirtied a pristine open.
+        // Members hold FULL-resolution curves (F2), so the full-res mirror
+        // maps are seeded too — wsUpsertT100FromPanel must find the same
+        // curves after a pristine open (no-op guard) and after the stddev
+        // completion path, which upserts without recomputing transmittance.
         for (const auto& c : m.curves) {
             if (std::find(sess.csvFiles.begin(), sess.csvFiles.end(), c.fileId) == sess.csvFiles.end())
                 continue;   // deleted/absent member: keep its curve out of caches
             sess.t100.cachedTransX[c.fileId] = c.x;
             sess.t100.cachedTransY[c.fileId] = c.y;
+            sess.t100.fullResCachedTransX[c.fileId] = c.x;
+            sess.t100.fullResCachedTransY[c.fileId] = c.y;
         }
         sess.t100.transmittanceAvailable = !sess.t100.cachedTransY.empty();
         // Restore the saved plotted set so the first render sees no selection

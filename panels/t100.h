@@ -33,6 +33,14 @@ public:
     std::map<std::string, std::vector<double>> cachedTransY;
     bool transmittanceAvailable;
 
+    // Full-resolution transmittance curves (never decimated) for the workspace
+    // mirror. The display caches above are downsampled past
+    // maxPointsBeforeDownsampling; the t100 workspace member must persist FULL
+    // resolution (the batch engine writes full-res), so wsUpsertT100FromPanel
+    // reads these maps instead of the display cache (F2).
+    std::map<std::string, std::vector<double>> fullResCachedTransX;
+    std::map<std::string, std::vector<double>> fullResCachedTransY;
+
     // Unified view/interaction state (zoom window, selectors, unit switch,
     // shift+drag, arrow pan) — see spectral_plot.h for the phase contract.
     // T100 is always linear Y (T% around 100%): the y-scale selector is gated

@@ -23,7 +23,7 @@ struct HeadlessConfig {
     std::string converter; // -c: converter id or direct .py path
     std::string configPath;
     std::string outputType;
-    std::string outputDir;
+    std::string outputPath;   // -w/-cmp: output directory; -c: output .h5 file path
 };
 
 // Parse command-line arguments. Returns false on success, true on error.

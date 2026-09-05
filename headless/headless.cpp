@@ -32,6 +32,35 @@ static std::string getImguiIniPath() {
     return "imgui.ini";
 }
 
+// Directory-stripped basename (Windows member ids can carry '\'). Used in the
+// member-load loops and the (removed) pre-compute loops — see F14.
+static std::string basenameOf(const std::string& p) {
+    size_t ls = p.find_last_of("/\\");
+    return (ls == std::string::npos) ? p : p.substr(ls + 1);
+}
+
+// Number of successfully LOADED members. F10: the SNR/Allan "≥2 files" checks
+// must count loaded members (selectedFiles), not the checkbox vector
+// (filesSelectedForAveraging is all-true by construction in headless, so it
+// would pass even when most members failed to load).
+static int countCheckedFiles() {
+    return static_cast<int>(appState.active->selectedFiles.size());
+}
+
+// "Load AppConfig + resolve converterRepoDir" — duplicated 3× in handleList /
+// handleConvert / handleSyncConverters (F14). The returned config keeps the
+// other persisted fields (converterPaths, recentDatasets, interpreter) alive.
+static AppConfig loadAppConfigWithRepoDir(std::string& repoDir) {
+    AppConfig config;
+    std::string configFilePath = getConfigFilePath();
+    if (std::filesystem::exists(configFilePath)) {
+        config.loadFromFile(configFilePath);
+    }
+    repoDir = config.converterRepoDir.empty()
+        ? appDataDir() + "/converter-repo" : config.converterRepoDir;
+    return config;
+}
+
 // ---------------------------------------------------------------------------
 // Help (-help)
 // ---------------------------------------------------------------------------
@@ -50,6 +79,11 @@ static void handleHelp() {
               << "                 place and export. Config optional (saved view state\n"
               << "                 otherwise); processing.workerThreads from config only,\n"
               << "                 pool defaults to hardware_concurrency otherwise.\n"
+              << "                 NOTE: 'Allan-Werle 3D'/'Allan-Werle slice' export one\n"
+              << "                 wavelengthDecimation-th of the wavelength bins by\n"
+              << "                 default (decimation 5, X range 1-30 um — the GUI\n"
+              << "                 defaults); set config allan.wavelengthDecimation=1 for\n"
+              << "                 full resolution.\n"
               << "  -c <converter> <input> <output.h5>\n"
               << "                 Run a converter (<id> from -l converter, or a direct\n"
               << "                 .py path) on <input>, validate the result, exit 0/1.\n"
@@ -85,13 +119,8 @@ static void handleList(const std::string& type) {
     }
 
     if (type == "converter") {
-        AppConfig config;
-        std::string configFilePath = getConfigFilePath();
-        if (std::filesystem::exists(configFilePath)) {
-            config.loadFromFile(configFilePath);
-        }
-        std::string repoDir = config.converterRepoDir.empty()
-            ? appDataDir() + "/converter-repo" : config.converterRepoDir;
+        std::string repoDir;
+        AppConfig config = loadAppConfigWithRepoDir(repoDir);
         ConverterRegistry::instance().refresh(appDataDir() + "/converters",
                                               config.converterPaths, repoDir);
         for (const auto& c : ConverterRegistry::instance().all()) {
@@ -125,11 +154,8 @@ static void handleList(const std::string& type) {
             std::cout << l.name << std::endl;
         }
     } else if (type == "recent") {
-        std::string configFilePath = getConfigFilePath();
-        AppConfig config;
-        if (std::filesystem::exists(configFilePath)) {
-            config.loadFromFile(configFilePath);
-        }
+        std::string repoDir;
+        AppConfig config = loadAppConfigWithRepoDir(repoDir);
         for (const auto& entry : config.recentDatasets) {
             std::cout << entry.path << std::endl;
         }
@@ -251,22 +277,28 @@ static void handleTemplate() {
 // ---------------------------------------------------------------------------
 // JSON config applier
 // ---------------------------------------------------------------------------
+// Enum-string helpers. F9: unknown strings must NOT silently default to index
+// 0 — a typo in the config would silently change the computation. Warn on
+// stderr and fall back to the documented default.
 static int jsonXUnitToInt(const std::string& s) {
     if (s == "cm-1") return 0;
     if (s == "um")   return 1;
     if (s == "THz")  return 2;
+    std::cerr << "Warning: unknown xUnit '" << s << "' — using cm-1" << std::endl;
     return 0;
 }
 static int jsonYScaleToInt(const std::string& s) {
     if (s == "lin")   return 0;
     if (s == "log10") return 1;
     if (s == "dB")    return 2;
+    std::cerr << "Warning: unknown yScale '" << s << "' — using lin" << std::endl;
     return 0;
 }
 static int jsonYAxisModeToInt(const std::string& s) {
     if (s == "all")   return 0;
     if (s == "tight") return 1;
     if (s == "force") return 2;
+    std::cerr << "Warning: unknown yAxisMode '" << s << "' — using all" << std::endl;
     return 0;
 }
 static int jsonApodToInt(const std::string& s) {
@@ -275,11 +307,14 @@ static int jsonApodToInt(const std::string& s) {
     if (s == "Triangular")     return 2;
     if (s == "NortonBeer")     return 3;
     if (s == "DolphChebyshev") return 4;
+    std::cerr << "Warning: unknown apodizationWindow '" << s
+              << "' — using Rectangular" << std::endl;
     return 0;
 }
 static int jsonCalcBaseToInt(const std::string& s) {
     if (s == "100% T")  return 0;
     if (s == "Spectrum") return 1;
+    std::cerr << "Warning: unknown calcBase '" << s << "' — using 100% T" << std::endl;
     return 0;
 }
 
@@ -298,18 +333,23 @@ static void applyJsonConfig(AppState& state, const json& j) {
     if (j.contains("spectrum")) {
         const auto& s = j["spectrum"];
         state.active->spectrum.refLaserTextbox  = jsonVal<float>(s, "refLaserWavelengthUm", 1.550f);
-        state.active->spectrum.Kpadding         = jsonVal<int>(s, "zeroPadK", 0);
+        // F9: clamp to the GUI ranges (spectrum.cpp InputInt/SliderFloat
+        // bounds) — an out-of-range config must not silently change the math.
+        state.active->spectrum.Kpadding         = std::clamp(jsonVal<int>(s, "zeroPadK", 0), 0, 16);
         state.active->spectrum.apodizationSelector = jsonApodToInt(jsonVal<std::string>(s, "apodizationWindow", "Rectangular"));
-        state.active->spectrum.apodizationParams.gaussSigma   = jsonVal<float>(s, "gaussSigma", 1.0f);
-        state.active->spectrum.apodizationParams.rectWidth    = jsonVal<float>(s, "rectWidth", 1.0f);
+        state.active->spectrum.apodizationParams.gaussSigma   = std::clamp(jsonVal<float>(s, "gaussSigma", 1.0f), 1.0f, 3.0f);
+        state.active->spectrum.apodizationParams.rectWidth    = std::clamp(jsonVal<float>(s, "rectWidth", 1.0f), 0.05f, 1.0f);
         state.active->spectrum.apodizationParams.rectAsymMode = jsonVal<bool>(s, "rectAsymMode", true);
-        state.active->spectrum.apodizationParams.nortonBeerFwhm = jsonVal<float>(s, "nortonBeerFwhm", 1.5f);
-        state.active->spectrum.apodizationParams.dolphChebyshevAt = jsonVal<float>(s, "dolphChebyshevAttenuationDb", 60.0f);
+        state.active->spectrum.apodizationParams.nortonBeerFwhm = std::clamp(jsonVal<float>(s, "nortonBeerFwhm", 1.5f), 1.0f, 2.0f);
+        state.active->spectrum.apodizationParams.dolphChebyshevAt = std::clamp(jsonVal<float>(s, "dolphChebyshevAttenuationDb", 60.0f), 50.0f, 160.0f);
         state.active->spectrum.detectorSensitivity = jsonVal<float>(s, "detectorSensitivityKVperW", 0.0f);
-        // NOTE: comparison is case-sensitive — "PeakFinding" only, "peakfinding" silently falls back to Hilbert
+        // F12: case-insensitive match — "peakfinding"/"peakFinding" must not
+        // silently fall back to Hilbert.
         std::string xMethod = jsonVal<std::string>(s, "xCorrectionMethod", "Hilbert");
-        state.active->xCorrectionMethod = (xMethod == "PeakFinding") ? 1 : 0;
-        state.active->peakProminenceThreshold = jsonVal<float>(s, "peakProminence", 0.02f);
+        std::transform(xMethod.begin(), xMethod.end(), xMethod.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        state.active->xCorrectionMethod = (xMethod == "peakfinding") ? 1 : 0;
+        state.active->peakProminenceThreshold = std::clamp(jsonVal<float>(s, "peakProminence", 0.02f), 0.0f, 0.5f);
         state.active->spectrum.plot.xUnitSelector   = jsonXUnitToInt(jsonVal<std::string>(s, "xUnit", "cm-1"));
         state.active->spectrum.plot.yScaleSelector  = jsonYScaleToInt(jsonVal<std::string>(s, "yScale", "lin"));
         state.active->spectrum.plot.yAxisMode       = jsonYAxisModeToInt(jsonVal<std::string>(s, "yAxisMode", "all"));
@@ -320,6 +360,18 @@ static void applyJsonConfig(AppState& state, const json& j) {
         state.active->spectrum.plot.prevXUnitSelector = state.active->spectrum.plot.xUnitSelector;
         state.active->spectrum.plot.prevYScaleSelector = state.active->spectrum.plot.yScaleSelector;
         state.active->spectrum.plot.prevYAxisMode = state.active->spectrum.plot.yAxisMode;
+
+        // The config applies AFTER openWorkspace's seedPanelsFromWorkspace
+        // restored caches from a saved member matching the SAVED params. The
+        // applied params may differ, leaving the seeded caches stale — drop
+        // them so every downstream ensure (writeSpectraCsv, the T100 pipeline)
+        // recomputes with the config's params instead of silently reusing the
+        // saved spectra (test3 K1/K4 regression).
+        state.active->spectrum.cachedSpectra.clear();
+        state.active->spectrum.cachedFrequencies.clear();
+        state.active->spectrum.lastPrimaryDetectors.clear();
+        state.active->spectrum.lastSpectrumParams.clear();
+        state.active->spectrum.pendingSpectra_.clear();
     }
 
     // Average settings
@@ -352,7 +404,7 @@ static void applyJsonConfig(AppState& state, const json& j) {
     if (j.contains("allan")) {
         const auto& s = j["allan"];
         state.active->allanVariance.xUnitSelector      = jsonXUnitToInt(jsonVal<std::string>(s, "xUnit", "um"));
-        state.active->allanVariance.wavelengthDecimation = std::max(1, jsonVal<int>(s, "wavelengthDecimation", 5));
+        state.active->allanVariance.wavelengthDecimation = std::clamp(jsonVal<int>(s, "wavelengthDecimation", 5), 1, 50);
         state.active->allanVariance.xRangeMin           = jsonVal<double>(s, "xRangeMinUm", 1.0);
         state.active->allanVariance.xRangeMax           = jsonVal<double>(s, "xRangeMaxUm", 30.0);
         state.active->allanVariance.calcBaseSelector    = jsonCalcBaseToInt(jsonVal<std::string>(s, "calcBase", "100% T"));
@@ -404,13 +456,6 @@ static void applyJsonConfig(AppState& state, const json& j) {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Compute spectrum for a single file and cache it in appState
-// ---------------------------------------------------------------------------
-static bool computeSpectrumForFile(AppState& state, const std::string& filePath, const std::string& fileId) {
-    return state.active->spectrum.computeAndCacheSpectrum(filePath, fileId);
-}
-
-// ---------------------------------------------------------------------------
 // Poll a batch computation (Average/SNR) until done
 // ---------------------------------------------------------------------------
 template<typename T>
@@ -422,18 +467,32 @@ static void pollUntilDone(T& panel) {
     }
 }
 
+// F5a: the CSV writers swallow write failures and early-return on empty
+// selections — "Exported ..." must not be printed when nothing was written.
+// Snapshot the newest .csv mtime in the output dir before exporting; after the
+// export at least one .csv must be newer.
+static std::filesystem::file_time_type newestCsvMtime(const std::string& dir) {
+    auto newest = std::filesystem::file_time_type::min();
+    for (const auto& e : std::filesystem::directory_iterator(dir)) {
+        if (!e.is_regular_file()) continue;
+        const std::string& p = e.path().string();
+        if (p.size() < 4 || p.compare(p.size() - 4, 4, ".csv") != 0) continue;
+        newest = std::max(newest, e.last_write_time());
+    }
+    return newest;
+}
+
 // ---------------------------------------------------------------------------
-// Shared compute + export tail for -p and -w.
-// Verbatim move of handleProcess steps 8-9 (output-type switch + setupT100Reference
-// + pollUntilDone + computeSpectrumForFile + exportArtifact). Reads everything it
-// needs from appState (loading differs between the two commands).
+// Shared compute + export tail for -w. Reads everything it needs from
+// appState (loading differs between the two commands).
 // ---------------------------------------------------------------------------
 static bool computeAndExport(const HeadlessConfig& cfg) {
     // 8. Compute requested output
     std::string ot = cfg.outputType;
     bool computedOk = false;
 
-    // Helper lambda to set T100 reference based on config
+    // Set T100 reference based on the panel's referenceSource (File/CSV/
+    // Average). Shared by the T100 and Absorbance/Transmittance branches (F4).
     auto setupT100Reference = [&]() {
         if (appState.active->t100.referenceAvailable) return true;
         if (appState.active->t100.referenceSource == 1 && appState.active->t100.csvPathBuffer[0] != '\0') {
@@ -449,90 +508,83 @@ static bool computeAndExport(const HeadlessConfig& cfg) {
         return appState.active->t100.referenceAvailable;
     };
 
-    if (ot == "Corrected interferograms from selected files" ||
-        ot == "Uncorrected interferograms from selected files") {
-        // IFG export just needs raw data loaded (already done)
-        computedOk = true;
-    } else if (ot == "Spectra from selected files") {
-        // Compute spectra for all selected files
-        computedOk = true;
-        for (size_t i = 0; i < appState.active->selectedFilenames.size(); i++) {
-            if (!computeSpectrumForFile(appState, appState.active->selectedFiles[i],
-                                        appState.active->selectedFilenames[i])) {
-                computedOk = false;
-                break;
+    // Shared T100 transmittance pipeline (F4): reference setup + per-file
+    // compute. Tracks per-file success (F5b — transmittanceAvailable must not
+    // be set unconditionally) and derives the export set from the LOADED
+    // members (F5a — a fresh member seed without a saved selection must still
+    // export every file).
+    auto ensureT100Transmittance = [&]() {
+        // Pre-compute the first file's spectrum: setReferenceFromCurrentSpectrum
+        // (referenceSource=File) reads the spectrum cache and returns without a
+        // reference when it is missing.
+        if (!appState.active->selectedFiles.empty()) {
+            std::string fid0 = appState.active->selectedFilenames[0];
+            if (appState.active->spectrum.cachedSpectra.find(fid0) == appState.active->spectrum.cachedSpectra.end()) {
+                appState.active->spectrum.computeAndCacheSpectrum(appState.active->selectedFiles[0], fid0);
             }
         }
+        if (!setupT100Reference()) {
+            std::cerr << "Error: Failed to set 100% T reference" << std::endl;
+            exit(1);
+        }
+
+        appState.active->t100.lastKnownSelection = appState.active->selectedFilenames;
+        appState.active->t100.needsRecompute = true;
+        bool anyOk = false;
+        for (const auto& fid : appState.active->t100.lastKnownSelection) {
+            if (appState.active->t100.cachedTransY.find(fid) == appState.active->t100.cachedTransY.end()) {
+                if (!appState.active->t100.computeTransmittanceForFile(fid)) continue;
+            }
+            anyOk = true;
+        }
+        appState.active->t100.transmittanceAvailable = anyOk;
+        return anyOk;
+    };
+
+    if (ot == "Corrected interferograms from selected files" ||
+        ot == "Uncorrected interferograms from selected files") {
+        // F7: the GUI gates IFG artifacts on datasetInfo.hasInterferograms;
+        // headless must not run xAxisFromHilbert on a wavenumber axis (or dump
+        // spectra as "Reference/Primary") for precomputed-spectra workspaces.
+        if (!appState.active->datasetInfo.hasInterferograms) {
+            std::cerr << "Error: workspace has no interferograms (hasInterferograms=false)" << std::endl;
+            exit(1);
+        }
+        computedOk = true;
+    } else if (ot == "Spectra from selected files") {
+        // F6: writeSpectraCsv (export.cpp) ensures each checked file's
+        // spectrum is cached and warns-and-skips on failure — no pre-compute
+        // loop (and no hard exit(1) on a single failure) needed here.
+        computedOk = true;
     } else if (ot == "Average spectrum") {
         pollUntilDone(appState.active->averageSpectrum);
         computedOk = appState.active->averageSpectrum.averageAvailable;
     } else if (ot == "SNR spectrum") {
-        // SNR needs at least 2 files checked
-        int checked = 0;
-        for (size_t i = 0; i < appState.active->filesSelectedForAveraging.size(); i++)
-            if (appState.active->filesSelectedForAveraging[i]) checked++;
-        if (checked < 2) {
+        // F10: count loaded members (selectedFiles), not the checkbox vector.
+        if (countCheckedFiles() < 2) {
             std::cerr << "Error: SNR requires at least 2 files selected for averaging" << std::endl;
             exit(1);
         }
         pollUntilDone(appState.active->snrSpectrum);
         computedOk = appState.active->snrSpectrum.snrAvailable;
     } else if (ot == "Allan-Werle 3D" || ot == "Allan-Werle slice") {
-        int checked = 0;
-        for (size_t i = 0; i < appState.active->filesSelectedForAveraging.size(); i++)
-            if (appState.active->filesSelectedForAveraging[i]) checked++;
-        if (checked < 2) {
+        // F3: no pre-compute loop — AllanVariance phase 0 re-reads every file
+        // via workspaceRead in its own workers and never consults
+        // spectrum.cachedSpectra. The removed loop's only effect was
+        // wsMirrorSpectrum persisting unwanted spectra/spec_* members.
+        if (countCheckedFiles() < 2) {
             std::cerr << "Error: Allan variance requires at least 2 files selected for averaging" << std::endl;
             exit(1);
-        }
-        // Pre-compute spectra for all checked files (Allan needs them)
-        for (size_t i = 0; i < appState.active->sortedFiles.size(); i++) {
-            if (i < appState.active->filesSelectedForAveraging.size() && appState.active->filesSelectedForAveraging[i]) {
-                const auto& fp = appState.active->sortedFiles[i];
-                std::string fid = fp;
-                size_t ls = fid.find_last_of("/\\");
-                if (ls != std::string::npos) fid = fid.substr(ls + 1);
-                computeSpectrumForFile(appState, fp, fid);
-            }
         }
         pollUntilDone(appState.active->allanVariance);
         computedOk = appState.active->allanVariance.allanAvailable;
     } else if (ot == "100% T transmission line" ||
                ot == "100% T lines for all files" ||
                ot == "100% T standard deviation") {
-        // Pre-compute spectrum for the first file (needed by setReferenceFromCurrentSpectrum)
-        if (!appState.active->selectedFiles.empty()) {
-            std::string fid0 = appState.active->selectedFilenames[0];
-            if (appState.active->spectrum.cachedSpectra.find(fid0) == appState.active->spectrum.cachedSpectra.end()) {
-                computeSpectrumForFile(appState, appState.active->selectedFiles[0], fid0);
-            }
-        }
-        // Set up reference
-        if (!setupT100Reference()) {
-            std::cerr << "Error: Failed to set 100% T reference" << std::endl;
+        if (!ensureT100Transmittance()) {
+            std::cerr << "Error: 100% T transmittance computation failed" << std::endl;
             exit(1);
         }
-
-        // Compute transmittance for selected files
-        if (!appState.active->t100.transmittanceAvailable) {
-            for (const auto& fp : appState.active->selectedFiles) {
-                std::string fid = fp;
-                size_t ls = fid.find_last_of("/\\");
-                if (ls != std::string::npos) fid = fid.substr(ls + 1);
-                auto it = appState.active->spectrum.cachedSpectra.find(fid);
-                if (it == appState.active->spectrum.cachedSpectra.end()) {
-                    computeSpectrumForFile(appState, fp, fid);
-                }
-            }
-            appState.active->t100.lastKnownSelection = appState.active->selectedFilenames;
-            appState.active->t100.needsRecompute = true;
-            // Explicitly compute transmittance for each file
-            for (const auto& fid : appState.active->t100.lastKnownSelection) {
-                appState.active->t100.computeTransmittanceForFile(fid);
-            }
-            appState.active->t100.transmittanceAvailable = true;
-        }
-
         if (ot == "100% T standard deviation") {
             if (!appState.active->t100.stddevAvailable) {
                 appState.active->t100.startStdCalculation();
@@ -543,40 +595,17 @@ static bool computeAndExport(const HeadlessConfig& cfg) {
             }
             computedOk = appState.active->t100.stddevAvailable;
         } else {
-            computedOk = appState.active->t100.transmittanceAvailable;
+            computedOk = true;
         }
     } else if (ot == "Absorbance from selected files" ||
                ot == "Transmittance from selected files") {
-        // Reuse the T100 transmittance pipeline (T% = spec/ref × 100);
-        // the export writers convert to -log10(T) or fractional T.
-        if (!appState.active->selectedFiles.empty()) {
-            std::string fid0 = appState.active->selectedFilenames[0];
-            if (appState.active->spectrum.cachedSpectra.find(fid0) == appState.active->spectrum.cachedSpectra.end()) {
-                computeSpectrumForFile(appState, appState.active->selectedFiles[0], fid0);
-            }
-        }
-        if (!setupT100Reference()) {
-            std::cerr << "Error: Failed to set 100% T reference" << std::endl;
+        // Reuse the T100 transmittance pipeline (T% = spec/ref × 100); the
+        // export writers convert to -log10(T) or fractional T.
+        if (!ensureT100Transmittance()) {
+            std::cerr << "Error: Transmittance computation failed" << std::endl;
             exit(1);
         }
-        if (!appState.active->t100.transmittanceAvailable) {
-            for (const auto& fp : appState.active->selectedFiles) {
-                std::string fid = fp;
-                size_t ls = fid.find_last_of("/\\");
-                if (ls != std::string::npos) fid = fid.substr(ls + 1);
-                auto it = appState.active->spectrum.cachedSpectra.find(fid);
-                if (it == appState.active->spectrum.cachedSpectra.end()) {
-                    computeSpectrumForFile(appState, fp, fid);
-                }
-            }
-            appState.active->t100.lastKnownSelection = appState.active->selectedFilenames;
-            appState.active->t100.needsRecompute = true;
-            for (const auto& fid : appState.active->t100.lastKnownSelection) {
-                appState.active->t100.computeTransmittanceForFile(fid);
-            }
-            appState.active->t100.transmittanceAvailable = true;
-        }
-        computedOk = appState.active->t100.transmittanceAvailable;
+        computedOk = true;
     } else {
         std::cerr << "Error: Unknown output type '" << ot << "'. "
                   << "Available: Corrected interferograms from selected files, "
@@ -596,10 +625,17 @@ static bool computeAndExport(const HeadlessConfig& cfg) {
     }
 
     // 9. Export
-    appState.active->exportPanel.exportArtifact(ot, cfg.outputDir);
-    std::cout << "Exported '" << ot << "' to " << cfg.outputDir << std::endl;
+    auto beforeExport = newestCsvMtime(cfg.outputPath);
+    appState.active->exportPanel.exportArtifact(ot, cfg.outputPath);
+    // F5a: fail instead of claiming success when the writers wrote nothing.
+    if (newestCsvMtime(cfg.outputPath) == beforeExport) {
+        std::cerr << "Error: No CSV file was produced for output type '" << ot << "'" << std::endl;
+        exit(1);
+    }
+    std::cout << "Exported '" << ot << "' to " << cfg.outputPath << std::endl;
     return true;
 }
+
 // ---------------------------------------------------------------------------
 // Workspace (-w): open a .h5 workspace, compute the requested artifact into it
 // (the panels mirror derivatives into Workspace when hasWorkspace()), save in
@@ -608,8 +644,8 @@ static bool computeAndExport(const HeadlessConfig& cfg) {
 // ---------------------------------------------------------------------------
 static void handleWorkspace(const HeadlessConfig& cfg) {
     // 1. Validate output directory and input file
-    if (!std::filesystem::exists(cfg.outputDir)) {
-        std::cerr << "Error: Directory '" << cfg.outputDir << "' does not exist" << std::endl;
+    if (!std::filesystem::exists(cfg.outputPath)) {
+        std::cerr << "Error: Directory '" << cfg.outputPath << "' does not exist" << std::endl;
         exit(1);
     }
     if (!std::filesystem::is_regular_file(cfg.path)) {
@@ -667,37 +703,28 @@ static void handleWorkspace(const HeadlessConfig& cfg) {
     //    (std::sort on member ids) — for >9 members raw_10 would sort before
     //    raw_2. The GUI frame loop and applyViewState natural-sort; re-sorting
     //    is idempotent (applyViewState already built a natural-sorted list).
+    //    F13: naturalBasenameLess matches the GUI/applyViewState order (a
+    //    full-id natural sort can disagree for ids with directory prefixes).
     appState.active->sortedFiles = appState.active->csvFiles;
-    std::sort(appState.active->sortedFiles.begin(), appState.active->sortedFiles.end(), naturalSortCompare);
+    std::sort(appState.active->sortedFiles.begin(), appState.active->sortedFiles.end(), naturalBasenameLess);
 
     // 6. Load EVERY member (no GUI limit in headless mode): rawDataCache feeds
     //    the IFG CSV writers. loadFileStatic routes the "HDF5 Workspace"
-    //    sentinel to workspaceRead (adapter_registry.cpp). Mirrors
-    //    handleProcess step 6, incl. the downsampling pass.
+    //    sentinel to workspaceRead (adapter_registry.cpp).
+    //    F1: no downsampling pass — enableDownsampling defaults to true here
+    //    (applySessionDefaults is GUI-only, configPtr is null) but nothing in
+    //    headless reads loadedData; every export re-reads full density via
+    //    rawDataCache or workspaceRead. The decimated copy was dead work with
+    //    a referenceDetector-based factor/loop bound that also truncated the
+    //    primary channel to the reference length.
     for (size_t i = 0; i < appState.active->sortedFiles.size(); i++) {
         try {
             const auto& filePath = appState.active->sortedFiles[i];
             InterferogramData data = workspaceRead(appState.active->workspace, filePath);
             appState.active->rawDataCache.push_back(data);
-
-            InterferogramData processed = data;
-            if (appState.active->enableDownsampling && processed.dataSize() > appState.maxPointsBeforeDownsampling) {
-                size_t factor = processed.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
-                std::vector<double> downRef, downPrim;
-                for (size_t j = 0; j < processed.referenceDetector.size(); j += factor) {
-                    downRef.push_back(processed.referenceDetector[j]);
-                    downPrim.push_back(processed.primaryDetector[j]);
-                }
-                processed.referenceDetector = downRef;
-                processed.primaryDetector = downPrim;
-            }
-
-            appState.active->loadedData.push_back(processed);
+            appState.active->loadedData.push_back(std::move(data));
             appState.active->selectedFiles.push_back(filePath);
-            std::string fname = filePath;
-            size_t ls = fname.find_last_of("/\\");
-            if (ls != std::string::npos) fname = fname.substr(ls + 1);
-            appState.active->selectedFilenames.push_back(fname);
+            appState.active->selectedFilenames.push_back(basenameOf(filePath));
         } catch (const std::exception& e) {
             std::cerr << "Warning: Failed to load " << appState.active->sortedFiles[i] << ": " << e.what() << std::endl;
             continue;
@@ -740,13 +767,8 @@ static void handleWorkspace(const HeadlessConfig& cfg) {
 // path. Uses the local clone as-is — no implicit network (deterministic CI).
 // ---------------------------------------------------------------------------
 static void handleConvert(const HeadlessConfig& cfg) {
-    AppConfig config;
-    std::string configFilePath = getConfigFilePath();
-    if (std::filesystem::exists(configFilePath)) {
-        config.loadFromFile(configFilePath);
-    }
-    std::string repoDir = config.converterRepoDir.empty()
-        ? appDataDir() + "/converter-repo" : config.converterRepoDir;
+    std::string repoDir;
+    AppConfig config = loadAppConfigWithRepoDir(repoDir);
     ConverterRegistry::instance().refresh(appDataDir() + "/converters",
                                           config.converterPaths, repoDir);
 
@@ -764,7 +786,7 @@ static void handleConvert(const HeadlessConfig& cfg) {
 
     std::string log, error;
     if (!runConverterSync(*desc, config.converterInterpreter, cfg.path,
-                          cfg.outputDir, {}, log, error)) {
+                          cfg.outputPath, {}, log, error)) {
         if (log.empty() && !error.empty()) log = error;
         if (!log.empty()) std::cout << log << std::endl;
         std::cerr << "Error: Converter '" << cfg.converter << "' failed" << std::endl;
@@ -773,12 +795,12 @@ static void handleConvert(const HeadlessConfig& cfg) {
     if (!log.empty()) std::cout << log << std::endl;
 
     try {
-        H5Store::validate(cfg.outputDir);
+        H5Store::validate(cfg.outputPath);
     } catch (const std::exception& e) {
         std::cerr << "Error: Converted file failed validation: " << e.what() << std::endl;
         exit(1);
     }
-    std::cout << "Converted '" << cfg.path << "' -> '" << cfg.outputDir
+    std::cout << "Converted '" << cfg.path << "' -> '" << cfg.outputPath
               << "' using " << desc->id << std::endl;
 }
 
@@ -786,13 +808,8 @@ static void handleConvert(const HeadlessConfig& cfg) {
 // Sync converters (-sync-converters): clone on first run, pull afterwards.
 // ---------------------------------------------------------------------------
 static void handleSyncConverters() {
-    AppConfig config;
-    std::string configFilePath = getConfigFilePath();
-    if (std::filesystem::exists(configFilePath)) {
-        config.loadFromFile(configFilePath);
-    }
-    std::string repoDir = config.converterRepoDir.empty()
-        ? appDataDir() + "/converter-repo" : config.converterRepoDir;
+    std::string repoDir;
+    AppConfig config = loadAppConfigWithRepoDir(repoDir);
     std::string url = config.converterRepoUrl.empty()
         ? "https://github.com/jmnich/fts_data_explorer_converters" : config.converterRepoUrl;
 
@@ -809,7 +826,7 @@ static void handleSyncConverters() {
 // ---------------------------------------------------------------------------
 static void computeAvgSpectrum(const std::string& h5Path,
                                std::vector<double>& outX, std::vector<double>& outY,
-                               const json* cfg = nullptr) {
+                               const json* cfg = nullptr, int pinnedXUnit = 0) {
     // Open workspace, load all members, compute spectra, average on common grid.
     auto sess = std::make_unique<WorkspaceSession>();
     sess->key = h5Path;
@@ -834,34 +851,34 @@ static void computeAvgSpectrum(const std::string& h5Path,
     // Optional processing config — the -cmp command passes the same config to
     // both workspaces so the ratio/difference is a like-for-like comparison.
     if (cfg && !cfg->empty()) applyJsonConfig(appState, *cfg);
+    // F8: -cmp must compare in ONE X unit. Without a config each workspace
+    // restores its own saved averageView.xUnit, and resampleToGrid would
+    // interpolate across incompatible unit systems (endpoint-clamped flat
+    // sample curve). Pin both to the same unit — cm-1 unless the config
+    // overrides (handleCompare derives pinnedXUnit from the same config).
+    appState.active->averageSpectrum.plot.xUnitSelector = pinnedXUnit;
+    appState.active->averageSpectrum.plot.prevXUnitSelector = pinnedXUnit;
     appState.active->sortedFiles = appState.active->csvFiles;
-    std::sort(appState.active->sortedFiles.begin(), appState.active->sortedFiles.end(), naturalSortCompare);
+    // F13: naturalBasenameLess matches the GUI/applyViewState order.
+    std::sort(appState.active->sortedFiles.begin(), appState.active->sortedFiles.end(), naturalBasenameLess);
+    // F1: no downsampling pass (see handleWorkspace) — the average workers
+    // re-read full density via workspaceRead.
     for (size_t i = 0; i < appState.active->sortedFiles.size(); i++) {
         try {
             const auto& filePath = appState.active->sortedFiles[i];
             InterferogramData data = workspaceRead(appState.active->workspace, filePath);
             appState.active->rawDataCache.push_back(data);
-
-            // Same downsampling pass as handleWorkspace (parity between -w and -cmp).
-            InterferogramData processed = data;
-            if (appState.active->enableDownsampling && processed.dataSize() > appState.maxPointsBeforeDownsampling) {
-                size_t factor = processed.referenceDetector.size() / appState.maxPointsBeforeDownsampling + 1;
-                std::vector<double> downRef, downPrim;
-                for (size_t j = 0; j < processed.referenceDetector.size(); j += factor) {
-                    downRef.push_back(processed.referenceDetector[j]);
-                    downPrim.push_back(processed.primaryDetector[j]);
-                }
-                processed.referenceDetector = downRef;
-                processed.primaryDetector = downPrim;
-            }
-
-            appState.active->loadedData.push_back(processed);
+            appState.active->loadedData.push_back(std::move(data));
             appState.active->selectedFiles.push_back(filePath);
-            std::string fname = filePath;
-            size_t ls = fname.find_last_of("/\\");
-            if (ls != std::string::npos) fname = fname.substr(ls + 1);
-            appState.active->selectedFilenames.push_back(fname);
-        } catch (...) { continue; }
+            appState.active->selectedFilenames.push_back(basenameOf(filePath));
+        } catch (const std::exception& e) {
+            // F11: mirror the -w handler — warn and skip instead of silently
+            // continuing (a fully-failed load otherwise surfaces only as
+            // "Average spectrum computation failed").
+            std::cerr << "Warning: Failed to load " << appState.active->sortedFiles[i]
+                      << ": " << e.what() << std::endl;
+            continue;
+        }
     }
     appState.active->dataLoaded = true;
     appState.active->filesSelectedForAveraging.resize(appState.active->sortedFiles.size(), true);
@@ -883,8 +900,8 @@ static void handleCompare(const HeadlessConfig& cfg) {
         std::cerr << "Error: Reference workspace '" << cfg.referencePath << "' not found" << std::endl;
         exit(1);
     }
-    if (!std::filesystem::exists(cfg.outputDir)) {
-        std::cerr << "Error: Directory '" << cfg.outputDir << "' does not exist" << std::endl;
+    if (!std::filesystem::exists(cfg.outputPath)) {
+        std::cerr << "Error: Directory '" << cfg.outputPath << "' does not exist" << std::endl;
         exit(1);
     }
 
@@ -893,6 +910,10 @@ static void handleCompare(const HeadlessConfig& cfg) {
     if (!cfg.configPath.empty()) {
         try {
             std::ifstream ifs(cfg.configPath);
+            if (!ifs.is_open()) {
+                std::cerr << "Error: Config file '" << cfg.configPath << "' not found" << std::endl;
+                exit(1);
+            }
             ifs >> j;
         } catch (const std::exception& e) {
             std::cerr << "Error: Invalid config: " << e.what() << std::endl;
@@ -900,14 +921,29 @@ static void handleCompare(const HeadlessConfig& cfg) {
         }
     }
 
+    // F8: pin both workspaces to ONE X unit so the averages land on grids in
+    // the same unit system (cm-1 unless the config overrides with
+    // average.xUnit). The CSV header below uses the same pinned unit.
+    int pinnedXUnit = 0;
+    if (!j.empty() && j.contains("average")) {
+        const auto& av = j["average"];
+        if (av.contains("xUnit"))
+            pinnedXUnit = jsonXUnitToInt(jsonVal<std::string>(av, "xUnit", "cm-1"));
+    }
+
     // Compute average spectra — the same optional processing config is applied
     // to BOTH workspaces so the ratio/difference is a like-for-like comparison.
     std::vector<double> sampleX, sampleY, refX, refY;
-    computeAvgSpectrum(cfg.path, sampleX, sampleY, &j);
+    computeAvgSpectrum(cfg.path, sampleX, sampleY, &j, pinnedXUnit);
     auto sampleSess = std::move(appState.sessions.back());
     appState.sessions.pop_back();
     sampleSess.reset();   // free the sample session's loaded data before the reference
-    computeAvgSpectrum(cfg.referencePath, refX, refY, &j);
+    computeAvgSpectrum(cfg.referencePath, refX, refY, &j, pinnedXUnit);
+    // F15: the reference session is never used after extraction — pop it like
+    // the sample session instead of leaking it as appState.active.
+    auto refSess = std::move(appState.sessions.back());
+    appState.sessions.pop_back();
+    refSess.reset();
 
     // Export both average spectra on the shared reference grid — the same
     // overlay the UI Comparator shows, with the sample interpolated onto the
@@ -922,13 +958,15 @@ static void handleCompare(const HeadlessConfig& cfg) {
             c = '_';
     std::string ot = cfg.outputType;
 
-    // X-unit label follows the average panel's selector (matches export.cpp).
+    // X-unit label follows the pinned average-panel selector (matches
+    // export.cpp); the reference session is already freed, so use the pinned
+    // unit directly.
     const char* xLabel = "Wavenumber [cm-1]";
-    if (appState.active->averageSpectrum.plot.xUnitSelector == 1) xLabel = "Wavelength [um]";
-    else if (appState.active->averageSpectrum.plot.xUnitSelector == 2) xLabel = "Frequency [THz]";
+    if (pinnedXUnit == 1) xLabel = "Wavelength [um]";
+    else if (pinnedXUnit == 2) xLabel = "Frequency [THz]";
 
     if (ot == "Comparator spectra") {
-        std::string path = cfg.outputDir + "/" + slug + "_comparator_spectra.csv";
+        std::string path = cfg.outputPath + "/" + slug + "_comparator_spectra.csv";
         std::ofstream ofs(path);
         if (!ofs.is_open()) { std::cerr << "Error: cannot write " << path << std::endl; exit(1); }
         ofs << std::setprecision(15);
@@ -936,7 +974,7 @@ static void handleCompare(const HeadlessConfig& cfg) {
         for (size_t i = 0; i < refX.size(); i++)
             ofs << refX[i] << "," << interpSample[i] << "," << refY[i] << "\n";
         ofs.close();
-        std::cout << "Exported 'Comparator spectra' to " << cfg.outputDir << std::endl;
+        std::cout << "Exported 'Comparator spectra' to " << cfg.outputPath << std::endl;
     } else {
         std::cerr << "Error: Unknown comparator output type '" << ot << "'. "
                   << "Available: Comparator spectra" << std::endl;
@@ -995,7 +1033,7 @@ bool parseHeadlessArgs(int argc, char* argv[], HeadlessConfig& cfg) {
         cfg.command = HeadlessConfig::Command::Workspace;
         cfg.path = argv[2];
         cfg.outputType = argv[3];
-        cfg.outputDir = argv[4];
+        cfg.outputPath = argv[4];
         if (argc == 6) cfg.configPath = argv[5];
         return false;
     }
@@ -1008,7 +1046,7 @@ bool parseHeadlessArgs(int argc, char* argv[], HeadlessConfig& cfg) {
         cfg.command = HeadlessConfig::Command::Convert;
         cfg.converter = argv[2];
         cfg.path = argv[3];
-        cfg.outputDir = argv[4];
+        cfg.outputPath = argv[4];
         return false;
     }
 
@@ -1022,7 +1060,7 @@ bool parseHeadlessArgs(int argc, char* argv[], HeadlessConfig& cfg) {
         cfg.path = argv[2];
         cfg.referencePath = argv[3];
         cfg.outputType = argv[4];
-        cfg.outputDir = argv[5];
+        cfg.outputPath = argv[5];
         if (argc == 7) cfg.configPath = argv[6];
         return false;
     }

@@ -77,6 +77,8 @@ static void removeFileFromEngine(AppState& s, const std::string& id) {
     s.active->peakPositionsCache.erase(id);
     s.active->t100.cachedTransX.erase(id);
     s.active->t100.cachedTransY.erase(id);
+    s.active->t100.fullResCachedTransX.erase(id);
+    s.active->t100.fullResCachedTransY.erase(id);
 }
 
 void performWorkspaceMemberDeletion(AppState& s, const std::string& absPath) {
