@@ -54,7 +54,9 @@ inline void renderStaleDataOverlay(ImDrawList* dl, const ImVec2& rectMin,
                 message, nullptr, wrapW);
 
     // Tooltip diagnostics (hover over the message box): per-source reason rows.
-    if (ImGui::IsMouseHoveringRect(boxMin, boxMax)) {
+    // Skipped when no details are supplied — the no-data overlay's box carries
+    // no stale-diagnostic rows, and the "Stale:" wording would be misleading.
+    if (!details.empty() && ImGui::IsMouseHoveringRect(boxMin, boxMax)) {
         ImGui::BeginTooltip();
         ImGui::TextUnformatted("Stale: the following sources changed since compute:");
         for (size_t i = 0; i < details.size() && i < 4; ++i)

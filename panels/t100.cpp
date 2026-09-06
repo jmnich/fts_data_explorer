@@ -872,6 +872,11 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
     // Recompute button; button hidden while the recompute chain is busy).
     auto renderStaleIfNeeded = [this](const ImVec2& rMin, const ImVec2& rMax) {
         if (!appState || !appState->hasWorkspace()) return;
+        // During the std batch the in-plot progress bar in the std-dev region
+        // carries the busy state; the stale overlay (button hidden anyway)
+        // would only mask the transmittance curves. It returns after the
+        // batch if the artifact is still stale.
+        if (calcStdInProgress) return;
         if (!t100Outdated(*appState) &&
             !chainTargetsPanel(*appState, PanelKind::T100))
             return;
@@ -1396,13 +1401,27 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
         float phHeight = ImGui::CalcTextSize("Std dev not calculated").y + 40.0f;
         ImGui::BeginChild("##StdDevPlaceholder", ImVec2(0, phHeight), false,
                           ImGuiWindowFlags_NoScrollbar);
-        const char* msg = "Std dev not calculated";
-        ImVec2 textSize = ImGui::CalcTextSize(msg);
-        ImVec2 avail = ImGui::GetContentRegionAvail();
-        ImGui::SetCursorPos(ImVec2(
-            (avail.x - textSize.x) * 0.5f,
-            (avail.y - textSize.y) * 0.5f));
-        ImGui::Text("%s", msg);
+        if (calcStdInProgress) {
+            // In-plot progress bar: replaces the std-dev region while the std
+            // batch runs (the transmittance curves above stay visible).
+            ImVec2 avail = ImGui::GetContentRegionAvail();
+            char pctBuf[48];
+            float pct = stdProgressTotal > 0
+                ? (float)stdProgressCurrent / (float)stdProgressTotal : 0.0f;
+            std::snprintf(pctBuf, sizeof(pctBuf), "Calculating std dev (%.0f%%)", pct * 100.0f);
+            const float barW = std::min(avail.x * 0.6f, 400.0f);
+            ImGui::SetCursorPos(ImVec2((avail.x - barW) * 0.5f,
+                                       (avail.y - ImGui::GetFrameHeight()) * 0.5f));
+            ImGui::ProgressBar(pct, ImVec2(barW, 0), pctBuf);
+        } else {
+            const char* msg = "Std dev not calculated";
+            ImVec2 textSize = ImGui::CalcTextSize(msg);
+            ImVec2 avail = ImGui::GetContentRegionAvail();
+            ImGui::SetCursorPos(ImVec2(
+                (avail.x - textSize.x) * 0.5f,
+                (avail.y - textSize.y) * 0.5f));
+            ImGui::Text("%s", msg);
+        }
         ImGui::EndChild();
     }
 }

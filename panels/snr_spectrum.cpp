@@ -41,20 +41,32 @@ void SnrSpectrum::reset() {
 
 void SnrSpectrum::renderSnrContents(bool showTrackingCursor) {
     // Stale-data overlay shared with the experiment tabs (in-plot message +
-    // Recompute button; button hidden while the recompute chain is busy).
-    auto renderStaleIfNeeded = [this](const ImVec2& rMin, const ImVec2& rMax) {
+    // Recompute button; button hidden while the recompute chain is busy). In
+    // the no-data state (no SNR member yet / stripped workspace) the same
+    // button is offered when a compute can produce data (>=2 checked files).
+    auto renderOverlayIfNeeded = [this](const ImVec2& rMin, const ImVec2& rMax) {
         if (!appState || !appState->hasWorkspace()) return;
-        if (!snrOutdated(*appState) &&
-            !chainTargetsPanel(*appState, PanelKind::Snr))
+        if (snrOutdated(*appState) ||
+            chainTargetsPanel(*appState, PanelKind::Snr)) {
+            renderStaleDataOverlay(ImGui::GetWindowDrawList(), rMin, rMax,
+                                   "Stale data: source changed.",
+                                   panelStaleDetails(*appState, PanelKind::Snr),
+                                   "##staleRecomputeSnr",
+                                   !artifactRecomputeBusy(*appState, PanelKind::Snr),
+                                   [this]() {
+                                       requestRecomputeChain(*appState, PanelKind::Snr);
+                                   });
             return;
-        renderStaleDataOverlay(ImGui::GetWindowDrawList(), rMin, rMax,
-                               "Stale data: source changed.",
-                               panelStaleDetails(*appState, PanelKind::Snr),
-                               "##staleRecomputeSnr",
-                               !artifactRecomputeBusy(*appState, PanelKind::Snr),
-                               [this]() {
-                                   requestRecomputeChain(*appState, PanelKind::Snr);
-                               });
+        }
+        const bool noData = !snrAvailable || cachedSnrX.empty() || cachedSnrY.empty();
+        if (noData && checkedInputPaths(*appState).size() >= 2)
+            renderStaleDataOverlay(ImGui::GetWindowDrawList(), rMin, rMax,
+                                   "No SNR spectrum available.", {},
+                                   "##staleRecomputeSnr",
+                                   !artifactRecomputeBusy(*appState, PanelKind::Snr),
+                                   [this]() {
+                                       requestRecomputeChain(*appState, PanelKind::Snr);
+                                   });
     };
 
     // Unified view/interaction phases (spectral_plot.h) — placed BEFORE the
@@ -99,6 +111,25 @@ void SnrSpectrum::renderSnrContents(bool showTrackingCursor) {
 
     plot.tickPrePlot(f);
 
+    // ---- In-plot progress bar while a recalculation runs: the bar is the
+    // ONLY thing in the plot area (no placeholder text, no stale overlay, no
+    // no-data button) — mirrors the config-panel bar. Reached after
+    // tickPrePlot so the C1 unit-latch sync keeps running during the batch.
+    if (calcInProgress) {
+        ImVec2 avail = ImGui::GetContentRegionAvail();
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.75f, 0.25f, 0.15f, 1.0f));
+        char pctBuf[48];
+        float pct = progressTotal > 0
+            ? (float)progressCurrent / (float)progressTotal : 0.0f;
+        std::snprintf(pctBuf, sizeof(pctBuf), "Calculating SNR (%.0f%%)", pct * 100.0f);
+        const float barW = std::min(avail.x * 0.6f, 400.0f);
+        ImGui::SetCursorPos(ImVec2((avail.x - barW) * 0.5f,
+                                   (avail.y - ImGui::GetFrameHeight()) * 0.5f));
+        ImGui::ProgressBar(pct, ImVec2(barW, 0), pctBuf);
+        ImGui::PopStyleColor();
+        return;
+    }
+
     if (!snrAvailable || cachedSnrX.empty() || cachedSnrY.empty()) {
         ImVec2 avail = ImGui::GetContentRegionAvail();
         ImVec2 textSize = ImGui::CalcTextSize("No SNR spectrum available");
@@ -107,8 +138,8 @@ void SnrSpectrum::renderSnrContents(bool showTrackingCursor) {
             (avail.x - textSize.x) * 0.5f,
             (avail.y - textSize.y) * 0.5f));
         ImGui::Text("No SNR spectrum available");
-        renderStaleIfNeeded(contentMin,
-                            ImVec2(contentMin.x + avail.x, contentMin.y + avail.y));
+        renderOverlayIfNeeded(contentMin,
+                              ImVec2(contentMin.x + avail.x, contentMin.y + avail.y));
         return;
     }
 
@@ -175,8 +206,8 @@ void SnrSpectrum::renderSnrContents(bool showTrackingCursor) {
     ImPlot::PopStyleColor();
 
     if (plotSize.x > 0.0f && plotSize.y > 0.0f)
-        renderStaleIfNeeded(plotPos,
-                            ImVec2(plotPos.x + plotSize.x, plotPos.y + plotSize.y));
+        renderOverlayIfNeeded(plotPos,
+                              ImVec2(plotPos.x + plotSize.x, plotPos.y + plotSize.y));
 }
 
 void SnrSpectrum::startCalculation() {

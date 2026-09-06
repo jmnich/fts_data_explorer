@@ -150,6 +150,26 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
                                });
     };
 
+    // ---- In-plot progress bar while a recalculation runs: the bar is the
+    // ONLY thing in the plot area (no placeholder text, no stale overlay) —
+    // mirrors the config-panel bar that replaces the Calculate button. Allan
+    // has no SpectralPlotView phases before this point, so no view state
+    // needs to survive the early return.
+    if (calcInProgress) {
+        ImVec2 avail = ImGui::GetContentRegionAvail();
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.2f, 0.6f, 0.5f, 1.0f));
+        char pctBuf[48];
+        float pct = progressTotal > 0
+            ? (float)progressCurrent / (float)progressTotal : 0.0f;
+        std::snprintf(pctBuf, sizeof(pctBuf), "Calculating Allan (%.0f%%)", pct * 100.0f);
+        const float barW = std::min(avail.x * 0.6f, 400.0f);
+        ImGui::SetCursorPos(ImVec2((avail.x - barW) * 0.5f,
+                                   (avail.y - ImGui::GetFrameHeight()) * 0.5f));
+        ImGui::ProgressBar(pct, ImVec2(barW, 0), pctBuf);
+        ImGui::PopStyleColor();
+        return;
+    }
+
     if (!allanAvailable || cachedSurfaceWavelengths.empty() ||
         cachedSurfaceTaus.empty() || cachedSurfaceAllanVar.empty()) {
         ImVec2 avail = ImGui::GetContentRegionAvail();

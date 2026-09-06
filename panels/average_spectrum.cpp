@@ -65,20 +65,33 @@ void AverageSpectrum::reset() {
 
 void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
     // Stale-data overlay shared with the experiment tabs (in-plot message +
-    // Recompute button; button hidden while the recompute chain is busy).
-    auto renderStaleIfNeeded = [this](const ImVec2& rMin, const ImVec2& rMax) {
+    // Recompute button; button hidden while the recompute chain is busy). In
+    // the no-data state (no average member yet / stripped workspace) the same
+    // button is offered when a compute can produce data (>=1 checked file).
+    auto renderOverlayIfNeeded = [this](const ImVec2& rMin, const ImVec2& rMax) {
         if (!appState || !appState->hasWorkspace()) return;
-        if (!averageOutdated(*appState) &&
-            !chainTargetsPanel(*appState, PanelKind::Average))
+        if (averageOutdated(*appState) ||
+            chainTargetsPanel(*appState, PanelKind::Average)) {
+            renderStaleDataOverlay(ImGui::GetWindowDrawList(), rMin, rMax,
+                                   "Stale data: source changed.",
+                                   panelStaleDetails(*appState, PanelKind::Average),
+                                   "##staleRecomputeAvg",
+                                   !artifactRecomputeBusy(*appState, PanelKind::Average),
+                                   [this]() {
+                                       requestRecomputeChain(*appState, PanelKind::Average);
+                                   });
             return;
-        renderStaleDataOverlay(ImGui::GetWindowDrawList(), rMin, rMax,
-                               "Stale data: source changed.",
-                               panelStaleDetails(*appState, PanelKind::Average),
-                               "##staleRecomputeAvg",
-                               !artifactRecomputeBusy(*appState, PanelKind::Average),
-                               [this]() {
-                                   requestRecomputeChain(*appState, PanelKind::Average);
-                               });
+        }
+        const bool noData = !averageAvailable || cachedAverageX.empty() ||
+                            cachedAverageY.empty();
+        if (noData && !checkedInputPaths(*appState).empty())
+            renderStaleDataOverlay(ImGui::GetWindowDrawList(), rMin, rMax,
+                                   "No average spectrum available.", {},
+                                   "##staleRecomputeAvg",
+                                   !artifactRecomputeBusy(*appState, PanelKind::Average),
+                                   [this]() {
+                                       requestRecomputeChain(*appState, PanelKind::Average);
+                                   });
     };
 
     // ---- 1. Unified view/interaction phases (spectral_plot.h) — placed
@@ -156,6 +169,26 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
 
     plot.tickPrePlot(f);
 
+    // ---- 1b. In-plot progress bar while a recalculation runs: the bar is
+    // the ONLY thing in the plot area (no placeholder text, no stale overlay,
+    // no no-data button) — mirrors the config-panel bar that replaces the
+    // Calculate button. Reached after tickPrePlot so the C1 unit-latch sync
+    // keeps running during the batch.
+    if (calcInProgress) {
+        ImVec2 avail = ImGui::GetContentRegionAvail();
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.6f, 0.5f, 0.1f, 1.0f));
+        char pctBuf[48];
+        float pct = progressTotal > 0
+            ? (float)progressCurrent / (float)progressTotal : 0.0f;
+        std::snprintf(pctBuf, sizeof(pctBuf), "Calculating average (%.0f%%)", pct * 100.0f);
+        const float barW = std::min(avail.x * 0.6f, 400.0f);
+        ImGui::SetCursorPos(ImVec2((avail.x - barW) * 0.5f,
+                                   (avail.y - ImGui::GetFrameHeight()) * 0.5f));
+        ImGui::ProgressBar(pct, ImVec2(barW, 0), pctBuf);
+        ImGui::PopStyleColor();
+        return;
+    }
+
     // ---- 2. Placeholder when no average data available ----
     if (!averageAvailable || cachedAverageX.empty() || cachedAverageY.empty()) {
         ImVec2 avail = ImGui::GetContentRegionAvail();
@@ -165,8 +198,8 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
             (avail.x - textSize.x) * 0.5f,
             (avail.y - textSize.y) * 0.5f));
         ImGui::Text("No average spectrum available");
-        renderStaleIfNeeded(contentMin,
-                            ImVec2(contentMin.x + avail.x, contentMin.y + avail.y));
+        renderOverlayIfNeeded(contentMin,
+                              ImVec2(contentMin.x + avail.x, contentMin.y + avail.y));
         return;
     }
 
@@ -258,8 +291,8 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
     ImPlot::PopStyleColor();
 
     if (plotSize.x > 0.0f && plotSize.y > 0.0f)
-        renderStaleIfNeeded(plotPos,
-                            ImVec2(plotPos.x + plotSize.x, plotPos.y + plotSize.y));
+        renderOverlayIfNeeded(plotPos,
+                              ImVec2(plotPos.x + plotSize.x, plotPos.y + plotSize.y));
 }
 
 void AverageSpectrum::startCalculation() {
