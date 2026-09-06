@@ -33,9 +33,9 @@ from pathlib import Path
 
 HARNESS_DIR = Path(__file__).resolve().parent
 TESTS_DIR = HARNESS_DIR / "tests"
-OUTPUT_DIR = HARNESS_DIR / "output"
-REPORT_IMAGES_DIR = OUTPUT_DIR / "report_images"
+OUTPUT_DIR = HARNESS_DIR / "output"          # holds final reports; purge also clears stale legacy artifacts
 TEMP_DIR = HARNESS_DIR / "temporary"
+REPORT_IMAGES_DIR = TEMP_DIR / "report_images"
 REFERENCE_INPUT = HARNESS_DIR / "reference_input"
 REFERENCE_OUTPUT = HARNESS_DIR / "reference_output"
 
@@ -120,7 +120,7 @@ def parse_timeout(test_dir: Path) -> int:
 def run_test(test: dict, binary: Path, verbose: bool) -> dict:
     name = test["name"]
     tdir = test["dir"]
-    workdir = OUTPUT_DIR / name
+    workdir = TEMP_DIR / name
     workdir.mkdir(parents=True, exist_ok=True)
     log_path = workdir / "run.log"
     stripped_dir = TEMP_DIR / "stripped"
@@ -464,9 +464,9 @@ def _build_html_report(records: list[dict], verdict: str,
     if images:
         p.append('<details class="collapsible">')
         p.append('<summary>Report images</summary>')
-        p.append('<p class="meta">Visual sanity-check comparisons (C++ headless vs Python reference) saved under <code>output/report_images/</code>:</p>')
+        p.append('<p class="meta">Visual sanity-check comparisons (C++ headless vs Python reference) saved under <code>temporary/report_images/</code>:</p>')
         for img_path in images:
-            rel = img_path.relative_to(OUTPUT_DIR).as_posix()
+            rel = img_path.relative_to(TEMP_DIR).as_posix()
             uri = _img_data_uri(img_path)
             p.append(f'<figure class="report-img">')
             p.append(f'<img src="{uri}" alt="{html.escape(rel)}" loading="lazy">')
@@ -562,7 +562,7 @@ def write_report(records: list[dict]) -> None:
     if REPORT_IMAGES_DIR.is_dir():
         images = sorted(REPORT_IMAGES_DIR.glob("*.png"), key=_image_sort_key)
 
-    # report.html
+    # report.html — final deliverable lives under output/ (gitignored)
     html_text = _build_html_report(records, verdict, images)
     (OUTPUT_DIR / "report.html").write_text(html_text)
 

@@ -36,17 +36,24 @@ test_harness/
 ├── tests/                        # one directory per test, NO .h5 data here
 │   ├── _common/                  # shared reference math + harness helpers
 │   │   ├── report_images.py       # sanity-check PNG helpers (see §10)
-│   └── test<N>_<name>/           # <name>.py + description.md
-├── output/                       # cleared at start of each run (gitignored)
-│   └── report_images/            # sanity-check PNGs, <testname>_<suffix>.png
-└── temporary/                    # scratch; purged at start of each run (gitignored)
+│   └── test<N>_<name>/           # <name>.py + description.md (IMMUTABLE: tests never write here)
+├── temporary/                    # per-test scratch; purged at start of each run (gitignored)
+│   ├── test<N>_<name>/           # per-test workdir: result.json, run.log, CSVs, PNGs
+│   ├── report_images/            # sanity-check PNGs, <testname>_<suffix>.png
+│   └── stripped/                 # stripped work .h5 copies (scratch input)
+└── output/                       # final reports only; cleared at start of each run (gitignored)
+    ├── report.html               # self-contained (PNGs embedded as base64)
+    └── report.json               # machine-readable verdict + per-test records
 ```
 
-Rules: `tests/` holds **code only** — no `.h5` file is ever committed under
-`tests/`. `reference_input/` and `reference_output/` hold **data only** (no
-scripts, no results) and are git-tracked. `output/` and `temporary/` are
-gitignored. `output/report_images/` is recreated each run by the orchestrator
-and by the helpers in `_common/report_images.py`.
+Rules: `tests/` holds **code only** and is **immutable** — test scripts never
+write into their own (or any other) `tests/` directory; all per-test scratch
+(`.csv`, per-test `.json`, `.png`, run logs, stripped `.h5`) goes to
+`temporary/`. The only artifacts written to `output/` are the final
+`report.html` and `report.json`. `reference_input/` and `reference_output/`
+hold **data only** (no scripts, no results) and are git-tracked. `output/` and
+`temporary/` are gitignored. `temporary/report_images/` is recreated each run
+by the orchestrator and by the helpers in `_common/report_images.py`.
 
 ## 3. Headless `-w` contract
 
@@ -80,7 +87,7 @@ full schema. Notable: `xCorrectionMethod` is **case-sensitive** (`"Hilbert"` /
 
 ## 4. Result contract (test → orchestrator)
 
-A test script writes `output/<testdir>/result.json` and exits with:
+A test script writes `temporary/<testdir>/result.json` and exits with:
 
 | Exit | Status | Meaning |
 |------|--------|---------|
@@ -322,7 +329,7 @@ timeout: <seconds>   (default 1200)
    - Run the headless binary (`tests/_common/headless.py`).
    - Compute the reference (`tests/_common/pipeline.py`).
    - Compare (`tests/_common/compare.py`) and write `result.json`.
-   - Emit a sanity-check PNG to `output/report_images/` (see §10).
+   - Emit a sanity-check PNG to `temporary/report_images/` (see §10).
    - Exit 0/1/2/3 per the result contract.
 3. Write `description.md` from the template.
 4. Run `python3 test_harness/run_tests.py --only test<N>_<name> -v`.
@@ -331,7 +338,7 @@ timeout: <seconds>   (default 1200)
 ## 10. Report images (visual sanity checks)
 
 Every test should, whenever practical, save a matplotlib comparison plot to
-`output/report_images/` so a human can judge at a glance whether the result is
+`temporary/report_images/` so a human can judge at a glance whether the result is
 reasonable. These are **not** pass/fail evidence — the numeric metrics in
 `result.json` are authoritative — they are a sanity-check aid for spotting
 gross regressions, wrong units, or a broken reference.
@@ -351,7 +358,7 @@ multiple plots from the same test. Conventions:
 ### Helpers (`tests/_common/report_images.py`)
 
 All helpers take `root` (the harness root passed via `--root`), resolve
-`output/report_images/` under it, create the directory on demand, and
+`temporary/report_images/` under it, create the directory on demand, and
 degrade gracefully (return `None`) when matplotlib is unavailable or the
 curves are empty. They must never raise into the test path.
 
@@ -369,8 +376,8 @@ The residual panel uses the same convention as the canonical metric:
 
 - matplotlib is already a declared dependency (`requirements.txt`); the harness
   still runs without it (helpers return `None`, tests stay green).
-- Images are gitignored (they live under `output/`); the orchestrator
-  recreates `output/report_images/` each run and embeds the generated PNGs in
+- Images are gitignored (they live under `temporary/`); the orchestrator
+  recreates `temporary/report_images/` each run and embeds the generated PNGs in
   `report.html` (base64, self-contained).
 - A test that cannot produce a meaningful plot (e.g. an axis-only check) may
   skip the image — this is a "whenever practical" expectation, not a hard

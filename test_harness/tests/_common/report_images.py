@@ -1,9 +1,9 @@
-"""Report-image helpers — save sanity-check PNGs to output/report_images/.
+"""Report-image helpers — save sanity-check PNGs to temporary/report_images/.
 
 Every test may emit one or more matplotlib comparison plots here so a human
 can judge at a glance whether the test result is reasonable. Files are named
 ``<testname>_<suffix>.png`` (suffix defaults to ``compare``). The directory
-lives under ``output/`` (gitignored, purged each run); helpers recreate it on
+lives under ``temporary/`` (gitignored, purged each run); helpers recreate it on
 demand and degrade gracefully when matplotlib is unavailable.
 
 Layout convention: a two-panel figure — top overlay (candidate vs reference,
@@ -24,8 +24,8 @@ import numpy as np
 
 
 def report_images_dir(root: str | Path) -> Path:
-    """Resolve output/report_images/ under the harness root, creating it."""
-    d = Path(root) / "output" / "report_images"
+    """Resolve temporary/report_images/ under the harness root, creating it."""
+    d = Path(root) / "temporary" / "report_images"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
