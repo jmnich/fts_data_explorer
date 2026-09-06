@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HDF5 Multi-Workspace Container — Specification</title>
+<style>
+:root {
+  --bg: #fff; --fg: #1a1a1a; --muted: #555; --border: #ddd;
+  --code-bg: #f4f4f4; --tree-fg: #2d2d2d; --tree-bg: #fafafa;
+  --tree-border: #e0e0e0; --link: #0366d6; --th-bg: #f0f0f0;
+  --blockquote-bg: #f9f9f9; --blockquote-border: #999;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1e1e1e; --fg: #ddd; --muted: #999; --border: #444;
+    --code-bg: #2a2a2a; --tree-fg: #ccc; --tree-bg: #252525;
+    --tree-border: #444; --link: #58a6ff; --th-bg: #2a2a2a;
+    --blockquote-bg: #252525; --blockquote-border: #666;
+  }
+}
+[data-theme="light"] { --bg:#fff; --fg:#1a1a1a; --muted:#555; --border:#ddd; --code-bg:#f4f4f4; --tree-fg:#2d2d2d; --tree-bg:#fafafa; --tree-border:#e0e0e0; --link:#0366d6; --th-bg:#f0f0f0; --blockquote-bg:#f9f9f9; --blockquote-border:#999; }
+[data-theme="dark"]  { --bg:#1e1e1e; --fg:#ddd; --muted:#999; --border:#444; --code-bg:#2a2a2a; --tree-fg:#ccc; --tree-bg:#252525; --tree-border:#444; --link:#58a6ff; --th-bg:#2a2a2a; --blockquote-bg:#252525; --blockquote-border:#666; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--fg); line-height: 1.6; padding: 2rem; max-width: 1020px; margin: 0 auto; transition: background 0.2s, color 0.2s; }
+.theme-toggle { position: fixed; top: 1rem; right: 1rem; background: var(--code-bg); border: 1px solid var(--border); color: var(--fg); padding: 0.4rem 0.8rem; border-radius: 4px; cursor: pointer; font-size: 0.85rem; z-index: 10; }
+.theme-toggle:hover { opacity: 0.8; }
+h1 { font-size: 1.8rem; border-bottom: 2px solid var(--border); padding-bottom: 0.5rem; margin-bottom: 0.5rem; }
+h2 { font-size: 1.35rem; margin: 2rem 0 0.75rem; border-bottom: 1px solid var(--border); padding-bottom: 0.25rem; }
+h3 { font-size: 1.15rem; margin: 1.5rem 0 0.5rem; }
+h4 { font-size: 1rem; margin: 1.25rem 0 0.4rem; }
+p { margin: 0.5rem 0; }
+a { color: var(--link); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.meta { color: var(--muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
+table { width: 100%; border-collapse: collapse; margin: 0.75rem 0 1.25rem; font-size: 0.9rem; }
+th, td { text-align: left; padding: 0.4rem 0.6rem; border: 1px solid var(--border); }
+th { background: var(--th-bg); font-weight: 600; }
+td { background: var(--bg); }
+tr:nth-child(even) td { background: var(--tree-bg); }
+td code { font-size: 0.85em; }
+pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 4px; padding: 0.75rem 1rem; overflow-x: auto; margin: 0.75rem 0; font-size: 0.85rem; line-height: 1.4; }
+code { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 0.9em; }
+pre code { background: none; border: none; padding: 0; }
+blockquote { border-left: 3px solid var(--blockquote-border); background: var(--blockquote-bg); padding: 0.5rem 1rem; margin: 0.75rem 0; font-size: 0.9rem; color: var(--muted); }
+ul, ol { padding-left: 1.5rem; margin: 0.5rem 0; }
+li { margin: 0.2rem 0; }
+.tree { background: var(--tree-bg); border: 1px solid var(--tree-border); border-radius: 4px; padding: 1rem 1.25rem; font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 0.82rem; line-height: 1.45; overflow-x: auto; white-space: pre; color: var(--tree-fg); margin: 0.75rem 0; }
+.tree .c { color: var(--muted); }
+.tree .a { color: #b86e00; }
+.tree .t { color: #085; }
+@media (prefers-color-scheme: dark) { .tree .a { color: #e0b000; } .tree .t { color: #5dba7a; } }
+[data-theme="light"] .tree .a { color: #b86e00; } [data-theme="light"] .tree .t { color: #085; }
+[data-theme="dark"]  .tree .a { color: #e0b000; } [data-theme="dark"]  .tree .t { color: #5dba7a; }
+.nav-toc { background: var(--tree-bg); border: 1px solid var(--border); border-radius: 4px; padding: 1rem 1.25rem; margin: 1rem 0 2rem; }
+.nav-toc h3 { margin-top: 0; font-size: 1rem; }
+.nav-toc ul { columns: 2; list-style: none; padding-left: 0; }
+.nav-toc li { margin: 0.15rem 0; font-size: 0.9rem; break-inside: avoid; }
+.ds { background: var(--tree-bg); border: 1px solid var(--tree-border); border-radius: 4px; padding: 0.75rem 1rem; font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 0.82rem; line-height: 1.4; overflow-x: auto; white-space: pre; margin: 0.5rem 0; color: var(--tree-fg); }
+.ds .c { color: var(--muted); }
+hr { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
+.footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.8rem; }
+.new { background: var(--blockquote-bg); border-left: 3px solid #58a6ff; padding: 0.3rem 0.8rem; margin: 0.5rem 0; font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme">◐ Theme</button>
+
+<h1>HDF5 Multi-Workspace Container</h1>
+<div class="meta">FTS Data Explorer &nbsp;|&nbsp; HDF5 (<code>.cross.h5</code>) &nbsp;|&nbsp; Specification v.1 &nbsp;|&nbsp; 2026-08-31</div>
+
+<nav class="nav-toc">
+<h3>Contents</h3>
+<ul>
+  <li><a href="#overview">1. Overview</a></li>
+  <li><a href="#rules">2. Format rules</a></li>
+  <li><a href="#layout">3. Container layout</a></li>
+  <li><a href="#notation">3.1 Notation</a></li>
+  <li><a href="#manifest">4. <code>archive.json</code> manifest</a></li>
+  <li><a href="#sources">5. <code>sources/&lt;id&gt;/</code> — embedded workspaces</a></li>
+  <li><a href="#experiments">6. <code>experiments/&lt;id&gt;/</code> — cross-workspace analysis</a></li>
+  <li><a href="#exp-config">6.1 <code>config.json</code></a></li>
+  <li><a href="#exp-fingerprint">6.2 <code>fingerprint.json</code></a></li>
+  <li><a href="#exp-results">6.3 <code>results/</code></a></li>
+  <li><a href="#exp-stats">6.4 <code>stats.json</code></a></li>
+  <li><a href="#recipes">7. <code>recipes/</code> — batch-processing recipes</a></li>
+  <li><a href="#atomicity">8. Atomicity &amp; versioning</a></li>
+  <li><a href="#discrim">9. File-type discrimination</a></li>
+</ul>
+</nav>
+
+<h2 id="overview">1. Overview</h2>
+<p>A <strong>multi-workspace container</strong> (file extension <code>.cross.h5</code>) holds many single-dataset workspaces plus the cross-workspace artifacts built on top of them. It is the project file the application opens when a user works with several datasets at once.</p>
+<p>Each embedded workspace is a complete <a href="hdf_single_dataset_specification.html">unified-spectral-data-container</a> — raw measurements, computed spectra, and per-panel view state — stored byte-identically under a <code>sources/&lt;id&gt;/</code> group. The container adds three things the single-dataset format does not have:</p>
+<ul>
+  <li>An <strong>archive manifest</strong> (<code>archive.json</code>) that is the single source of truth for what the archive contains.</li>
+  <li><strong>Cross-workspace experiments</strong> (<code>experiments/&lt;id&gt;/</code>) — Absorbance and Comparator analyses that overlay artifacts from one or more embedded datasets.</li>
+  <li><strong>Batch-processing recipes</strong> (<code>recipes/</code>) — reusable processing parameter sets that can be applied across datasets.</li>
+</ul>
+<p>The inner layout of each embedded workspace is specified by the <a href="hdf_single_dataset_specification.html">Single-Dataset Specification</a>; this document does not repeat it.</p>
+
+<h2 id="rules">2. Format rules</h2>
+<table>
+<tr><th style="width:2rem">#</th><th>Rule</th></tr>
+<tr><td>1</td><td>The container has <strong>no root <code>@format</code> attribute</strong>. This distinguishes it from a single-dataset <code>.h5</code>, which always carries <code>@format = "unified-spectral-data-container"</code>. The <code>archive.json</code> dataset at the root is the discriminator (see <a href="#discrim">§9</a>).</td></tr>
+<tr><td>2</td><td><code>archive.json</code> is the <strong>source of truth</strong>. The list of sources, experiments, and the tab-strip order live in the manifest. Group existence on disk is secondary; the manifest is what the application reads first.</td></tr>
+<tr><td>3</td><td>All mutations are <strong>atomic</strong>: copy the file to a temp sibling, mutate the temp, reopen it once (HDF5 1.14.3 metadata-cache quirk), then rename over the original. A crash never leaves a half-written archive — at most a stale <code>.tmp</code> file beside it (see <a href="#atomicity">§8</a>).</td></tr>
+<tr><td>4</td><td>Manifest version is gated. An unknown <code>version</code> in <code>archive.json</code> produces an explicit error; the application never guesses the layout.</td></tr>
+<tr><td>5</td><td>No host info: no hostnames, usernames, paths, or OS fingerprints. The archive records only application identity and timestamps.</td></tr>
+<tr><td>6</td><td>The pre-embedding file path of a source is <strong>never</strong> stored. Once a dataset is embedded, it has no link back to where it came from.</td></tr>
+<tr><td>7</td><td>Embedded workspace content is <strong>byte-identical</strong> to a standalone <code>.h5</code> file. The same read/write helpers operate on the group handle as on a file root, so embedded sources behave exactly like standalone files.</td></tr>
+<tr><td>8</td><td>No images, opaque blobs, base64, executables, or scripts. The container stores only datasets, groups, and string metadata attributes — the same restriction as the single-dataset format.</td></tr>
+<tr><td>9</td><td>All numeric data is native HDF5 typed datasets (IEEE fp32/fp64, i32). Strings are VLEN UTF-8 (<code>H5T_C_S1 + H5T_VARIABLE</code>), shape <code>(1,)</code>. Shapes are C order, row-major. The fp32/fp64 mix is inherited from the single-dataset format (uncorrected interferograms are fp32 on disk); cross-store-specific datasets (experiment <code>results/</code>) are fp64.</td></tr>
+<tr><td>10</td><td>Every mutation self-compacts the file. Because HDF5 does not reclaim bytes freed by <code>H5Ldelete</code> by default, the atomic copy step drops dead space and the archive stays near its live size instead of growing monotonically.</td></tr>
+</table>
+
+<hr>
+
+<h2 id="layout">3. Container layout</h2>
+<p>The root holds one dataset (the manifest) and three optional group families. Groups are organized <strong>by function</strong>: embedded datasets, cross-workspace experiments, and batch recipes.</p>
+
+<div class="tree">
+<a href="#manifest">archive.json</a>                              <span class="c">(vlen str) — §4, the manifest</span>
+├── <a href="#sources">sources/</a>                                <span class="c">embedded single-dataset workspaces</span>
+│   ├── &lt;id&gt;/                                <span class="c">(one per embedded dataset)</span>
+│   │   │   <span class="a">@summary</span> = <span class="t">"{id,name,memberCount,createdIso}"</span>   <span class="c">(JSON string)</span>
+│   │   └── <span class="c">&lt;workspace content — see Single-Dataset Spec&gt;</span>
+│   └── …
+├── <a href="#experiments">experiments/</a>                          <span class="c">cross-workspace analyses (optional)</span>
+│   ├── &lt;id&gt;/
+│   │   ├── config.json                     <span class="c">(vlen str) — §6.1</span>
+│   │   ├── fingerprint.json                 <span class="c">(vlen str) — §6.2</span>
+│   │   ├── results/                        <span class="c">(fp64 datasets) — §6.3</span>
+│   │   │   ├── curve_0_x                   <span class="c">(fp64 [M])</span>
+│   │   │   ├── curve_0_ratio                <span class="c">(fp64 [M])</span>
+│   │   │   └── …
+│   │   └── stats.json                      <span class="c">(vlen str) — §6.4</span>
+│   └── …
+└── <a href="#recipes">recipes/</a>                               <span class="c">batch-processing recipes (optional)</span>
+    ├── &lt;recipe-name&gt;                      <span class="c">(vlen str, content = recipe JSON) — §7</span>
+    └── …
+</div>
+
+<h3 id="notation">3.1 Notation</h3>
+<table>
+<tr><th>Symbol</th><th>Meaning</th></tr>
+<tr><td><code>name/</code></td><td>HDF5 group</td></tr>
+<tr><td><code>name</code></td><td>HDF5 dataset</td></tr>
+<tr><td><code>@name = value</code></td><td>HDF5 attribute</td></tr>
+<tr><td><code>(fp64 [N])</code></td><td>Dataset shape: <code>fp64</code> = IEEE double, <code>i32</code> = int32</td></tr>
+<tr><td><code>&lt;id&gt;</code></td><td>Source or experiment identifier (<a href="#manifest">§4</a>)</td></tr>
+</table>
+<p>Shapes are C order, row-major. VLEN strings are datasets of shape <code>(1,)</code> with <code>H5T_C_S1 + H5T_VARIABLE</code>.</p>
+
+<hr>
+
+<h2 id="manifest">4. <code>archive.json</code> manifest</h2>
+<p>Root-level VLEN-string dataset. JSON object. The single source of truth for the archive's contents. Written at creation, rewritten on every mutation that changes membership.</p>
+
+<h3>4.1 Schema</h3>
+<pre><code>{
+  "version": 2,
+  "sources": [
+    { "id": "sample_0001", "name": "sample_0001",
+      "memberCount": 12, "createdIso": "2026-08-01T12:34:56Z" }
+  ],
+  "experiments": [
+    { "id": "exp_0001", "name": "Absorbance 1",
+      "type": "Absorbance", "createdIso": "2026-08-02T09:00:00Z" }
+  ],
+  "tabOrder": [ "ws:sample_0001", "exp:exp_0001", "ws:sample_0002" ]
+}</pre></code>
+
+<h3>4.2 Key reference</h3>
+<table>
+<tr><th>Key</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>version</code></td><td>i32</td><td>Manifest schema version. Current: <code>2</code>. Unknown → explicit error.</td></tr>
+<tr><td><code>sources</code></td><td>array</td><td>One entry per embedded workspace. Order is preserved as written (append on embed, erase on remove).</td></tr>
+<tr><td><code>sources[].id</code></td><td>string</td><td>Stable source identifier (slug). Unique within the archive. Used as the <code>sources/&lt;id&gt;/</code> group name.</td></tr>
+<tr><td><code>sources[].name</code></td><td>string</td><td>Display name. May differ from <code>id</code> after a rename. The manifest name is authoritative; <code>@summary</code> mirrors it best-effort.</td></tr>
+<tr><td><code>sources[].memberCount</code></td><td>i32</td><td>Number of primary members (corrected IFG &gt; uncorrected IFG &gt; original spectra). Refreshed on save-back.</td></tr>
+<tr><td><code>sources[].createdIso</code></td><td>string</td><td>ISO-8601 UTC timestamp of first embed.</td></tr>
+<tr><td><code>experiments</code></td><td>array</td><td>Optional. One entry per persisted cross-workspace experiment.</td></tr>
+<tr><td><code>experiments[].id</code></td><td>string</td><td>Stable experiment identifier. Used as the <code>experiments/&lt;id&gt;/</code> group name.</td></tr>
+<tr><td><code>experiments[].name</code></td><td>string</td><td>Display name (instance name, e.g. <code>"Absorbance 1"</code>).</td></tr>
+<tr><td><code>experiments[].type</code></td><td>string</td><td><code>"Absorbance"</code> or <code>"Comparator"</code>.</td></tr>
+<tr><td><code>experiments[].createdIso</code></td><td>string</td><td>ISO-8601 UTC timestamp.</td></tr>
+<tr><td><code>tabOrder</code></td><td>string[]</td><td>Optional. Exact visual tab-strip order, interleaved: <code>"ws:&lt;sourceId&gt;"</code> for workspace tabs, <code>"exp:&lt;experimentId&gt;"</code> for experiment tabs.</td></tr>
+</table>
+
+<h3>4.3 Legacy tab-order fallbacks</h3>
+<p>Older archives may lack <code>tabOrder</code>. The reader then restores <em>workspace tabs only</em> (experiment tab order is empty, so persisted experiments load but do not auto-open as tabs):</p>
+<ol>
+  <li><code>openTabs</code> — array of source ids (legacy). Each id opens as a workspace tab.</li>
+  <li>Per-source <code>open</code> boolean — sources with <code>open = true</code> open as workspace tabs, in manifest order.</li>
+</ol>
+<p>If neither <code>tabOrder</code> nor <code>openTabs</code> is present and no source has <code>open = true</code>, no workspace tabs auto-open.</p>
+
+<hr>
+
+<h2 id="sources">5. <code>sources/&lt;id&gt;/</code> — embedded workspaces</h2>
+<p>One group per embedded dataset. The group name is the source <code>id</code>. The group's content is a complete single-dataset workspace, stored exactly as it would be in a standalone <code>.h5</code> file.</p>
+
+<div class="ds">
+sources/&lt;id&gt;/
+    <span class="a">@summary</span> = <span class="t">"{\"id\":\"...\",\"name\":\"...\",\"memberCount\":N,\"createdIso\":\"...\"}"</span>
+    <span class="c"># --- workspace content (see Single-Dataset Spec) ---</span>
+    <span class="a">@format</span> = <span class="t">"unified-spectral-data-container"</span>
+    <span class="a">@created</span> = <span class="t">"2026-08-01T12:34:56Z"</span>
+    ├── workspace.json
+    ├── measurement_config.json
+    ├── measurement_comment.txt
+    ├── tags
+    ├── igm_uncorrected_x/
+    ├── igm_corrected_x/
+    ├── spectra/
+    ├── average_spectra/
+    ├── snr_spectra/
+    ├── allan_werle/
+    └── t100/
+</div>
+
+<h3>5.1 <code>@summary</code> attribute</h3>
+<p>JSON string attribute on each source group. Informational mirror of the manifest entry; the manifest is authoritative. Refreshed on save-back and rename.</p>
+<table>
+<tr><th>Key</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>id</code></td><td>string</td><td>Source id (matches group name and manifest <code>sources[].id</code>)</td></tr>
+<tr><td><code>name</code></td><td>string</td><td>Display name (mirrors manifest)</td></tr>
+<tr><td><code>memberCount</code></td><td>i32</td><td>Primary member count (mirrors manifest)</td></tr>
+<tr><td><code>createdIso</code></td><td>string</td><td>ISO-8601 UTC timestamp</td></tr>
+</table>
+
+<h3>5.2 Inner layout</h3>
+<p>The group's children — root datasets, type groups, member datasets, and all <code>@format</code>/<code>@created</code>/<code>@origin</code>/<code>@config</code>/<code>@schema</code> attributes — are specified in full by the <a href="hdf_single_dataset_specification.html">Single-Dataset Specification</a>. An embedded source is read and written with the same helpers as a standalone file; the only difference is that the HDF5 root handle is the <code>sources/&lt;id&gt;</code> group rather than the file root.</p>
+<blockquote>Original-data immutability and <code>inputs</code> integrity (single-dataset rules 7, 10) apply inside each embedded source. Save-back rewrites the whole source group atomically.</blockquote>
+
+<hr>
+
+<h2 id="experiments">6. <code>experiments/&lt;id&gt;/</code> — cross-workspace analysis</h2>
+<p>One group per persisted experiment. Experiments overlay artifacts from one or more embedded datasets: <strong>Absorbance</strong> computes reference/sample ratios, <strong>Comparator</strong> overlays selected artifact types across datasets. Transient (unsaved) experiments have no group here; only persisted instances occupy space.</p>
+
+<div class="ds">
+experiments/&lt;id&gt;/
+    ├── config.json          <span class="c">(vlen str) — full instance state — §6.1</span>
+    ├── fingerprint.json     <span class="c">(vlen str) — per-source compute-time snapshots — §6.2</span>
+    ├── results/             <span class="c">(fp64 datasets, Absorbance only) — §6.3</span>
+    │   ├── curve_0_x        <span class="c">(fp64 [M])</span>
+    │   ├── curve_0_ratio    <span class="c">(fp64 [M])</span>
+    │   └── …
+    └── stats.json           <span class="c">(vlen str) — per-curve summary stats — §6.4</span>
+</div>
+
+<h3 id="exp-config">6.1 <code>config.json</code></h3>
+<p>JSON string dataset. Full instance state minus transient plot flags. The <code>type</code> field selects the schema branch: Absorbance stores <code>curves</code>; Comparator stores <code>artifactSelector</code>/<code>comparatorKeys</code>/<code>memberPicks</code>.</p>
+
+<h4>Shared keys (both types)</h4>
+<table>
+<tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>type</code></td><td>string</td><td>—</td><td><code>"Absorbance"</code> or <code>"Comparator"</code></td></tr>
+<tr><td><code>name</code></td><td>string</td><td>—</td><td>Instance display name (e.g. <code>"Absorbance 1"</code>)</td></tr>
+<tr><td><code>comment</code></td><td>string</td><td><code>""</code></td><td>Free-text note</td></tr>
+<tr><td><code>xUnit</code></td><td>i32</td><td>0</td><td>0 = cm⁻¹, 1 = µm, 2 = THz</td></tr>
+<tr><td><code>yMode</code></td><td>i32</td><td>0</td><td>Meaningful only for Absorbance (written for both types): 0 = T%, 1 = A</td></tr>
+<tr><td><code>yAxisMode</code></td><td>i32</td><td>0</td><td>0 = all, 1 = tight, 2 = force</td></tr>
+<tr><td><code>forcedYMin</code>, <code>forcedYMax</code></td><td>fp64</td><td>0.0, 1.0</td><td>Forced Y range (mode 2)</td></tr>
+<tr><td><code>yScale</code></td><td>i32</td><td>0</td><td>0 = linear, 1 = log10, 2 = dB (gated off for T100/IFG)</td></tr>
+<tr><td><code>showCursor</code></td><td>bool</td><td>false</td><td>Tracking cursor</td></tr>
+<tr><td><code>hitranGases</code></td><td>bool[8]</td><td>all false</td><td>HITRAN gas-marker selection (spectral artifacts)</td></tr>
+<tr><td><code>hitranThreshold</code></td><td>i32</td><td>2</td><td>Threshold level index (0–3)</td></tr>
+<tr><td><code>hitranSmooth</code></td><td>i32</td><td>3</td><td>Smoothing level index (0–3)</td></tr>
+<tr><td><code>downsampleDisplay</code></td><td>bool</td><td>false</td><td>Display-only stride downsampling</td></tr>
+<tr><td><code>computed</code></td><td>bool</td><td>false</td><td>True once a compute produced a ratio for ≥1 curve</td></tr>
+<tr><td><code>manualXMin</code>, <code>manualXMax</code></td><td>fp64</td><td>0.0, 0.0</td><td>Saved view X range (in the saved <code>xUnit</code>)</td></tr>
+<tr><td><code>tabHidden</code></td><td>bool</td><td>false</td><td>Tab-strip visibility (closed-but-kept experiments)</td></tr>
+</table>
+
+<h4>Absorbance-specific keys</h4>
+<table>
+<tr><th>Key</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>curves</code></td><td>array</td><td>One entry per reference/sample pair</td></tr>
+<tr><td><code>curves[].refKey</code></td><td>string</td><td>Stable key of the reference source</td></tr>
+<tr><td><code>curves[].refArtifact</code></td><td>i32</td><td>0 = Average spectrum, 1 = Raw spectrum</td></tr>
+<tr><td><code>curves[].refMember</code></td><td>string</td><td>Member id ("" = first member)</td></tr>
+<tr><td><code>curves[].sampleKey</code></td><td>string</td><td>Stable key of the sample source</td></tr>
+<tr><td><code>curves[].sampleArtifact</code></td><td>i32</td><td>0 = Average spectrum, 1 = Raw spectrum</td></tr>
+<tr><td><code>curves[].sampleMember</code></td><td>string</td><td>Member id</td></tr>
+<tr><td><code>curves[].name</code></td><td>string</td><td>User-chosen curve name ("" = auto "Curve N")</td></tr>
+</table>
+
+<h4>Comparator-specific keys</h4>
+<table>
+<tr><th>Key</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>artifactSelector</code></td><td>i32</td><td>0 = Average spectrum, 1 = Raw spectrum, 2 = SNR, 3 = T100, 4 = Corrected IFG, 5 = Raw IFG</td></tr>
+<tr><td><code>comparatorKeys</code></td><td>string[]</td><td>Stable keys of included datasets. Empty + <code>comparatorKeysExplicit=false</code> = all open datasets.</td></tr>
+<tr><td><code>comparatorKeysExplicit</code></td><td>bool</td><td>True once the user toggled a checkbox (empty then means "nothing selected")</td></tr>
+<tr><td><code>memberPicks</code></td><td>object</td><td>Map of dataset key → member id (multi-member artifacts)</td></tr>
+</table>
+
+<h3 id="exp-fingerprint">6.2 <code>fingerprint.json</code></h3>
+<p>JSON string dataset. Per-source compute-time snapshots used to detect result staleness. Keyed by a composite string <code>&lt;sourceKey&gt;\x1f&lt;artifact&gt;\x1f&lt;memberId&gt;</code> (two curves may reference the same source with different members). On load, the application compares each snapshot to the source's current member state and raises a staleness flag on mismatch.</p>
+
+<h4>MemberSnapshot schema</h4>
+<table>
+<tr><th>Key</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>memberId</code></td><td>string</td><td>Resolved member id at compute time</td></tr>
+<tr><td><code>dataHash</code></td><td>uint64</td><td>FNV-1a content hash over the member's x/y IEEE-754 bit patterns (stable across app versions)</td></tr>
+<tr><td><code>effectiveParams</code></td><td>object</td><td>Normalized params that determine content: active apodization window's field(s), <code>zeroPadK</code>, <code>refLaserUm</code>, <code>xCorrectionMethod</code>, <code>prominence</code> (peak-finding only). xUnit and sensitivity excluded (display-only).</td></tr>
+<tr><td><code>valid</code></td><td>bool</td><td>False for unresolvable members and legacy entries (dropped silently on load)</td></tr>
+</table>
+<blockquote>Staleness is data-grounded: a snapshot mismatch means the source's data or effective params changed since compute. The user sees a warning and a Recompute button; results are not auto-discarded.</blockquote>
+
+<h3 id="exp-results">6.3 <code>results/</code></h3>
+<p>Group of fp64 datasets, Absorbance experiments only. One pair per computed curve. Comparator experiments store no results (they re-extract overlay curves live from the sources).</p>
+<table>
+<tr><th>Dataset</th><th>Shape</th><th>Description</th></tr>
+<tr><td><code>curve_&lt;k&gt;_x</code></td><td>fp64 [M]</td><td>Common X grid (overlapping region of the curve's ref/sample pair)</td></tr>
+<tr><td><code>curve_&lt;k&gt;_ratio</code></td><td>fp64 [M]</td><td>Clamped ratio (sample / reference)</td></tr>
+</table>
+<p><code>k</code> is the curve index (0-based). Only curves with non-empty <code>gridX</code>/<code>ratioY</code> are written. The display curve (T% or absorbance) is derived from the ratio at render time and is not stored separately — <code>yMode</code> in <code>config.json</code> selects the transform.</p>
+
+<h3 id="exp-stats">6.4 <code>stats.json</code></h3>
+<p>JSON string dataset. Light per-curve summary statistics over the display curve. Absorbance only; Comparator emits an empty array.</p>
+<pre><code>[
+  { "label": "Curve 1", "min": 0.42, "max": 1.08, "mean": 0.91, "std": 0.03 }
+]</code></pre>
+<table>
+<tr><th>Key</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>label</code></td><td>string</td><td>Curve label (user name or auto "Curve N")</td></tr>
+<tr><td><code>min</code></td><td>fp64</td><td>Minimum of the display curve</td></tr>
+<tr><td><code>max</code></td><td>fp64</td><td>Maximum of the display curve</td></tr>
+<tr><td><code>mean</code></td><td>fp64</td><td>Arithmetic mean</td></tr>
+<tr><td><code>std</code></td><td>fp64</td><td>Population standard deviation (N divisor)</td></tr>
+</table>
+
+<hr>
+
+<h2 id="recipes">7. <code>recipes/</code> — batch-processing recipes</h2>
+<p>Optional group. One VLEN-string dataset per recipe, named by the recipe name; the dataset content is the recipe JSON. Additive to the archive: recipe operations never touch <code>archive.json</code>, and the single-dataset validator is never run on cross files. Recipe names must be non-empty and contain no <code>/</code>.</p>
+
+<h3>7.1 Recipe JSON schema</h3>
+<pre><code>{
+  "name": "Average spectrum - NB medium",
+  "comment": "K=2, Norton-Beer FWHM 1.4, Hilbert on dual-IFG data.",
+  "artifacts": ["spectra", "average"],
+  "spectrum": {
+    "zeroPadK": 2,
+    "apodization": { "window": "norton_beer", "nortonBeerFwhm": 1.4 },
+    "xCorrectionMethod": "hilbert",
+    "prominenceThreshold": 0.02
+  },
+  "overrides": { "refLaserUm": null, "detectorSensitivityKVPerW": null },
+  "t100": { "energyRatios": [{"num":"2000","den":"1000"}] },
+  "allan": { "wavelengthDecimation": 5, "xRangeMinUm": 1.0,
+             "xRangeMaxUm": 30.0, "calcBase": "100% T" }
+}</code></pre>
+
+<h3>7.2 Key reference</h3>
+<table>
+<tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>name</code></td><td>string</td><td>—</td><td>Required, non-empty, unique among recipes</td></tr>
+<tr><td><code>comment</code></td><td>string</td><td><code>""</code></td><td>Free text</td></tr>
+<tr><td><code>artifacts</code></td><td>string[]</td><td>—</td><td>Non-empty subset of <code>spectra</code>, <code>average</code>, <code>snr</code>, <code>t100</code>, <code>allan</code></td></tr>
+<tr><td><code>spectrum.zeroPadK</code></td><td>i32</td><td>0</td><td>N = n·(K+1); 0 = off</td></tr>
+<tr><td><code>spectrum.apodization</code></td><td>object</td><td>—</td><td>Active window + its parameter(s). See <a href="hdf_single_dataset_specification.html">Single-Dataset Spec §7.1</a> for the full window list.</td></tr>
+<tr><td><code>spectrum.xCorrectionMethod</code></td><td>string</td><td><code>"hilbert"</code></td><td><code>hilbert</code> | <code>peaks</code></td></tr>
+<tr><td><code>spectrum.prominenceThreshold</code></td><td>fp64</td><td>0.02</td><td>Peak-finding fraction (0.0–0.5), used only with <code>peaks</code></td></tr>
+<tr><td><code>overrides.refLaserUm</code></td><td>fp64 | null</td><td>null</td><td>null = each dataset keeps its own value</td></tr>
+<tr><td><code>overrides.detectorSensitivityKVPerW</code></td><td>fp64 | null</td><td>null</td><td>null = each dataset keeps its own value</td></tr>
+</table>
+
+<h4>Conditional sections</h4>
+<p>The <code>t100</code> section is emitted only when <code>"t100"</code> ∈ <code>artifacts</code>; the <code>allan</code> section only when <code>"allan"</code> ∈ <code>artifacts</code>.</p>
+<table>
+<tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>t100.energyRatios</code></td><td>array</td><td>ASTM E1421</td><td>Up to 3 <code>{"num","den"}</code> pairs (string values; <code>"max"</code> allowed for den)</td></tr>
+<tr><td><code>allan.wavelengthDecimation</code></td><td>i32</td><td>5</td><td></td></tr>
+<tr><td><code>allan.xRangeMinUm</code>, <code>xRangeMaxUm</code></td><td>fp64</td><td>1.0, 30.0</td><td>Wavelength slice range</td></tr>
+<tr><td><code>allan.calcBase</code></td><td>string</td><td><code>"100% T"</code></td><td><code>"100% T"</code> | <code>"Spectrum"</code></td></tr>
+</table>
+
+<h3>7.3 Built-in recipes</h3>
+<p>Six built-in recipes are compiled into the application (Norton-Beer, K=2, Hilbert, no overrides, no Allan). They are in-memory defaults, <strong>not</strong> stored in the <code>recipes/</code> group — the group holds only user-saved recipes. The UI lists built-ins first, then file-stored recipes appended after:</p>
+<ul>
+  <li><code>Average spectrum - NB weak/medium/strong</code> (FWHM 1.2 / 1.4 / 1.6) — artifacts: <code>spectra</code>, <code>average</code>.</li>
+  <li><code>All - NB weak/medium/strong</code> — adds <code>snr</code> + <code>t100</code> (ASTM E1421 bands).</li>
+</ul>
+
+<hr>
+
+<h2 id="atomicity">8. Atomicity &amp; versioning</h2>
+
+<h3>8.1 Atomic mutation contract</h3>
+<p>Every write — embed, remove, rename, save-back, experiment write/remove, recipe write/remove, tab-order save — follows the same atomic window:</p>
+<pre><code>1. Copy path → path.tmp          (object-by-object H5Ocopy; drops dead space)
+2. Mutate path.tmp               (the actual write)
+3. Reopen path.tmp RDONLY        (HDF5 1.14.3 metadata-cache finalize quirk)
+4. Rename path.tmp → path        (delete-then-rename fallback on Windows)</code></pre>
+<p>A crash at any step leaves the original intact and at most a stale <code>.tmp</code> beside it. The temp is removed at the start of the next mutation.</p>
+
+<h3>8.2 Compaction-on-save</h3>
+<p>HDF5 does not reclaim bytes freed by <code>H5Ldelete</code> by default (its free-space manager does not track that space). The atomic copy step copies only <strong>live</strong> objects, so deleted-and-recreated members do not accumulate dead bytes. The archive self-compacts to near its live size on every mutation instead of growing monotonically.</p>
+
+<h3>8.3 Version gate</h3>
+<p>The manifest <code>version</code> field is checked on every open. The current version is <code>2</code>. An unknown version produces an explicit error (<code>"unsupported archive version N (expected 2)"</code>) — the application never guesses the layout of a newer or older archive.</p>
+
+<h3>8.4 Save-back semantics</h3>
+<p>Saving an embedded workspace rewrites the whole <code>sources/&lt;id&gt;/</code> group atomically (delete + recreate within the temp copy). Original-data immutability is enforced against the current on-disk group; a fresh embed (missing group) skips the check. The manifest entry's <code>memberCount</code> and <code>name</code> are refreshed in the same save, and <code>@summary</code> is rewritten to match.</p>
+
+<hr>
+
+<h2 id="discrim">9. File-type discrimination</h2>
+<p>The application must tell a multi-workspace <code>.cross.h5</code> from a single-dataset <code>.h5</code> before attempting to open it, because the two have different root layouts:</p>
+<table>
+<tr><th>File type</th><th>Extension</th><th>Root discriminator</th><th>Open path</th></tr>
+<tr><td>Single-dataset</td><td><code>.h5</code></td><td>Root <code>@format = "unified-spectral-data-container"</code></td><td><code>H5Store::load</code></td></tr>
+<tr><td>Multi-workspace</td><td><code>.cross.h5</code></td><td>Root dataset <code>archive.json</code> exists; no root <code>@format</code></td><td><code>crossLoad</code></td></tr>
+</table>
+<blockquote>The cross file deliberately has no root <code>@format</code> attribute. <code>H5Store::load</code> rejects any file missing <code>@format</code>, so the generic open path (<code>openWorkspaceInNewTab</code>) sniffs for <code>archive.json</code> and routes cross files to <code>crossLoad</code> before that check can fire. Paths that already know a file is a cross archive (recent-cross list, session tab) call <code>crossOpenProject</code> directly.</blockquote>
+
+<hr>
+
+<div class="footer">FTS Data Explorer — HDF5 Multi-Workspace Container — Draft v1, 2026-08-31</div>
+
+<script>
+function toggleTheme() {
+  const c = document.documentElement.getAttribute('data-theme');
+  const n = c === 'dark' ? 'light' : (c === 'light' ? null : 'dark');
+  if (n) document.documentElement.setAttribute('data-theme', n);
+  else document.documentElement.removeAttribute('data-theme');
+}
+</script>
+</body>
+</html>

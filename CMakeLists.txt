@@ -218,7 +218,7 @@ execute_process(
     ERROR_VARIABLE XXD_ERR
 )
 if(NOT XXD_ERR STREQUAL "")
-    message(FATAL_ERROR "Failed to generate icon header: ${XXD_ERR}")
+    message(FATAL_ERROR "Failed to generate asset header: ${XXD_ERR}")
 endif()
 
 # Find required packages
@@ -239,6 +239,14 @@ include_directories(
     ${OPENGL_INCLUDE_DIR}
     ${glfw_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/core
+    ${CMAKE_SOURCE_DIR}/ui
+    ${CMAKE_SOURCE_DIR}/panels
+    ${CMAKE_SOURCE_DIR}/session
+    ${CMAKE_SOURCE_DIR}/workspace
+    ${CMAKE_SOURCE_DIR}/hitran
+    ${CMAKE_SOURCE_DIR}/io
+    ${CMAKE_SOURCE_DIR}/headless
     ${imgui_SOURCE_DIR}
     ${imgui_SOURCE_DIR}/backends
     ${implot_SOURCE_DIR}
@@ -250,7 +258,7 @@ include_directories(
 
 # Platform-specific sources
 set(PLATFORM_SOURCES
-    glibc_compat.cpp
+    core/glibc_compat.cpp
 )
 if(WIN32)
     set(PLATFORM_SOURCES)  # glibc_compat.cpp is Linux/GLIBC-specific
@@ -259,29 +267,45 @@ endif()
 # Add executable
 add_executable(fts_data_explorer
     main.cpp
-    app_state.cpp
-    headless.cpp
-    spectrum.cpp
-    average_spectrum.cpp
-    snr_spectrum.cpp
-    allan_variance.cpp
-    t100.cpp
-    spectral_toolbox.cpp
-    apodization.cpp
-    export.cpp
-    theme.cpp
-    converter.cpp
-    conversion_screen.cpp
-    app_dirs.cpp
-    file_browser.cpp
-    welcome.cpp
-    about.cpp
+    core/app_state.cpp
+    headless/headless.cpp
+    panels/spectrum.cpp
+    panels/spectral_plot.cpp
+    panels/average_spectrum.cpp
+    panels/hitran_panel.cpp
+    panels/snr_spectrum.cpp
+    panels/allan_variance.cpp
+    panels/t100.cpp
+    workspace/spectral_toolbox.cpp
+    workspace/apodization.cpp
+    panels/export.cpp
+    ui/theme.cpp
+    io/converter.cpp
+    panels/conversion_screen.cpp
+    io/app_dirs.cpp
+    ui/file_browser.cpp
+    panels/welcome.cpp
+    panels/about.cpp
+    ui/window.cpp
+    ui/app_loop.cpp
+    ui/menu_bar.cpp
+    ui/layout_persistence.cpp
+    panels/files_panel.cpp
+    panels/interferogram_view.cpp
+    panels/metadata_panel.cpp
+    session/workspace_session.cpp
+    session/cross_store.cpp
+    session/session_tab.cpp
+    session/spectral_pool.cpp
+    session/environment_session.cpp
+    session/wrap_text.cpp
+    session/batch_engine.cpp
     ${PLATFORM_SOURCES}
     ${EXTRA_SOURCES}
 )
 
 # fts_hdf integration (unconditional — .h5 is the only runtime input)
-target_sources(fts_data_explorer PRIVATE workspace_reader.cpp)
+target_sources(fts_data_explorer PRIVATE workspace/workspace_reader.cpp)
 target_link_libraries(fts_data_explorer fts_hdf)
 target_compile_definitions(fts_data_explorer PRIVATE FTS_BUILD_HDF5=1)
 
@@ -358,3 +382,108 @@ endif()
 
 # Install targets (optional)
 install(TARGETS fts_data_explorer DESTINATION bin)
+
+# ── fts_session_roundtrip (M2.1/M2.7): park/resume equality harness ─────────
+# Python cannot reach AppState, so the session-level round-trip test is C++.
+# Links the app's non-GUI state + the panel render objects (they reference
+# ImGui/ImPlot/GLFW symbols even though this binary never opens a window).
+add_executable(fts_session_roundtrip
+    session/session_roundtrip.cpp
+    core/app_state.cpp
+    session/workspace_session.cpp
+    session/spectral_pool.cpp
+    session/environment_session.cpp
+    session/wrap_text.cpp
+    session/cross_store.cpp
+    session/batch_engine.cpp
+    ui/layout_persistence.cpp
+    panels/spectrum.cpp
+    panels/spectral_plot.cpp
+    panels/average_spectrum.cpp
+    panels/hitran_panel.cpp
+    panels/snr_spectrum.cpp
+    panels/allan_variance.cpp
+    panels/t100.cpp
+    panels/export.cpp
+    workspace/spectral_toolbox.cpp
+    workspace/apodization.cpp
+    workspace/workspace_reader.cpp
+    ui/file_browser.cpp
+    ui/theme.cpp
+    ${PLATFORM_SOURCES}
+    ${EXTRA_SOURCES}
+)
+target_link_libraries(fts_session_roundtrip
+    fts_hdf
+    fftw3
+    fftw3_threads
+    ${OPENGL_LIBRARIES}
+    glfw
+    nlohmann_json::nlohmann_json
+)
+if(NOT WIN32)
+    target_link_libraries(fts_session_roundtrip GL X11 m pthread dl)
+endif()
+target_compile_definitions(fts_session_roundtrip PRIVATE
+    FTS_BUILD_HDF5=1
+    IMGUI_IMPL_OPENGL_LOADER_GLAD=0
+    IMGUI_USER_CONFIG="imconfig_custom.h"
+)
+target_include_directories(fts_session_roundtrip PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/core
+    ${CMAKE_SOURCE_DIR}/ui
+    ${CMAKE_SOURCE_DIR}/panels
+    ${CMAKE_SOURCE_DIR}/session
+    ${CMAKE_SOURCE_DIR}/workspace
+    ${CMAKE_SOURCE_DIR}/hitran
+    ${CMAKE_SOURCE_DIR}/io
+    ${CMAKE_SOURCE_DIR}/headless
+    ${imgui_SOURCE_DIR}
+    ${imgui_SOURCE_DIR}/backends
+    ${implot_SOURCE_DIR}
+    ${implot3d_SOURCE_DIR}
+    ${tinyfiledialogs_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/fftw-3.3.10/api
+)
+if(NOT WIN32)
+    target_link_options(fts_session_roundtrip PRIVATE ${GLIBCOMPAT_WRAP})
+    target_compile_options(fts_session_roundtrip PRIVATE
+        -U_GNU_SOURCE -D_DEFAULT_SOURCE -D_FORTIFY_SOURCE=0 -U_FORTIFY_SOURCE
+        -march=x86-64-v3
+    )
+endif()
+
+# ── fts_cross_roundtrip (M2.4): cross-store CLI driver for the h5py suite ───
+# Modes: create/add/remove/list/load/sniff/save-source (+ --slow-save kill test).
+# Links only the hdf layer + cross_store (no ImGui/GLFW).
+add_executable(fts_cross_roundtrip
+    session/cross_roundtrip.cpp
+    session/cross_store.cpp
+    ${PLATFORM_SOURCES}
+)
+target_link_libraries(fts_cross_roundtrip
+    fts_hdf
+    nlohmann_json::nlohmann_json
+)
+target_compile_definitions(fts_cross_roundtrip PRIVATE
+    FTS_BUILD_HDF5=1
+    IMGUI_USER_CONFIG="imconfig_custom.h"
+)
+target_include_directories(fts_cross_roundtrip PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/core
+    ${CMAKE_SOURCE_DIR}/session
+    ${CMAKE_SOURCE_DIR}/workspace
+    ${CMAKE_SOURCE_DIR}/io
+    ${CMAKE_SOURCE_DIR}/headless
+    ${imgui_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/fftw-3.3.10/api
+)
+if(NOT WIN32)
+    target_link_options(fts_cross_roundtrip PRIVATE ${GLIBCOMPAT_WRAP})
+    target_compile_options(fts_cross_roundtrip PRIVATE
+        -U_GNU_SOURCE -D_DEFAULT_SOURCE -D_FORTIFY_SOURCE=0 -U_FORTIFY_SOURCE
+        -march=x86-64-v3
+    )
+endif()

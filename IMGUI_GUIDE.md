@@ -7,7 +7,7 @@ Concise reference for building ImGui-based scientific applications with ImPlot/I
 ## 1. Project Conventions
 
 - Classes: `PascalCase`. Methods: `PascalCase`. Members: `m_` prefix. Statics: `s_` prefix.
-- File per feature: `feature.h`, `feature.cpp`. Heavy rendering stays in `main.cpp`'s draw loop.
+- File per feature: `feature.h`, `feature.cpp`. Panel rendering lives in per-panel render functions under `panels/` (driven by `ui/app_loop.cpp`'s frame pipeline).
 - All state lives in application structs/classes — ImGui owns only internal widget state.
 
 ## 2. Immediate Mode Fundamentals
@@ -473,7 +473,7 @@ ImGui's `ConfigInputTrickleEventQueue` blocks wheel events after any `MousePos` 
 
 **Fix: bypass ImGui's input queue for the wheel.** The GLFW scroll callback (which ImGui_ImplGlfw chains and runs *before* `io.AddMouseWheelEvent`) accumulates the raw deltas; the main loop drains them at one notch per frame.
 
-`app_state.h`:
+`core/app_state.h`:
 ```cpp
 float scrollAccumX = 0.0f;
 float scrollAccumY = 0.0f;
@@ -491,7 +491,7 @@ glfwSetScrollCallback(window, [](GLFWwindow* w, double xoffset, double yoffset) 
 });
 ```
 
-Rate limiter (`main.cpp`, after `NewFrame()`, before any `BeginPlot()`):
+Rate limiter (`ui/app_loop.cpp`, after `NewFrame()`, before any `BeginPlot()`):
 ```cpp
 {
     ImGuiIO& io = ImGui::GetIO();

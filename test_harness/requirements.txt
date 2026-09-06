@@ -1,0 +1,12 @@
+# FTS Data Explorer — test harness dependencies
+# Verified on Python 3.14.4 (jupyterVenv): numpy 2.4.4, scipy 1.17.1,
+# h5py 3.16.0, matplotlib 3.10.9.
+# Install: python -m pip install -r requirements.txt
+#
+# matplotlib is only needed for the diagnostic PNG plots (compare.png); the
+# harness still runs without it (the plot code degrades gracefully).
+
+numpy>=2.4
+scipy>=1.17
+h5py>=3.16
+matplotlib>=3.10

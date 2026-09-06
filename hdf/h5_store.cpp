@@ -36,6 +36,17 @@ bool fileExists(const std::string& path) {
     return stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode);
 }
 
+// H5Lexists is tri-state: 1 = exists, 0 = missing leaf (silent), -1 = error
+// (a path whose PARENT group is missing pushes an error stack + auto-print).
+// Check the parent first so missing parents stay silent and return "missing".
+bool linkPathExists(hid_t loc, const std::string& path) {
+    const size_t slash = path.find('/');
+    if (slash != std::string::npos) {
+        if (H5Lexists(loc, path.substr(0, slash).c_str(), H5P_DEFAULT) <= 0) return false;
+    }
+    return H5Lexists(loc, path.c_str(), H5P_DEFAULT) > 0;
+}
+
 void fail(const std::string& what) {
     throw H5Error(what + ": " + h5LastError());
 }
@@ -315,7 +326,7 @@ void writeAllanSub(hid_t file, const char* path, const char* schema,
         h5WriteAttrString(wl.id, "units", "um");
         h5WriteFp64Vector(mg.id, "taus", m.taus);
         H5DatasetGuard ts(H5Dopen2(mg.id, "taus", H5P_DEFAULT));
-        h5WriteAttrString(ts.id, "units", "s");
+        h5WriteAttrString(ts.id, "units", "measurements");   // taus are cluster sizes, not seconds
     }
 }
 
@@ -425,20 +436,21 @@ std::string joinDangling(const std::vector<std::string>& dangling) {
 
 }  // namespace
 
-Workspace H5Store::load(const std::string& path) {
-    H5FileGuard file(H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT));
-    if (file.id < 0) throw H5Error("load: cannot open '" + path + "'");
+// Read the whole workspace content under `root` (the file id for a standalone
+// .h5, or a source group id for a .cross.h5 source — the helpers use relative
+// names, so both work unchanged).
+static Workspace readAll(hid_t root) {
     Workspace ws;
 
-    if (!h5HasAttr(file.id, "format"))
+    if (!h5HasAttr(root, "format"))
         throw H5Error("load: missing root @format");
-    ws.format = h5ReadAttrString(file.id, "format");
+    ws.format = h5ReadAttrString(root, "format");
     if (ws.format != kFormat)
         throw H5Error("load: @format mismatch: '" + ws.format + "'");
-    ws.created = h5HasAttr(file.id, "created") ? h5ReadAttrString(file.id, "created") : "";
+    ws.created = h5HasAttr(root, "created") ? h5ReadAttrString(root, "created") : "";
 
     auto readRoot = [&](const char* name, const std::string& fallback) {
-        return H5Lexists(file.id, name, H5P_DEFAULT) ? h5ReadVlenString(file.id, name) : fallback;
+        return H5Lexists(root, name, H5P_DEFAULT) ? h5ReadVlenString(root, name) : fallback;
     };
     auto parseJson = [](const std::string& s) {
         nlohmann::json j = nlohmann::json::parse(s, nullptr, false);
@@ -449,14 +461,40 @@ Workspace H5Store::load(const std::string& path) {
     ws.tags = readRoot("tags", "");
     ws.workspaceJson = parseJson(readRoot("workspace.json", "{}"));
 
-    ws.uncorrectedIfg = loadFlatIfg(file.id, "igm_uncorrected_x", "interferogram", false);
-    ws.correctedIfg = loadFlatIfg(file.id, "igm_corrected_x", "interferogram", true);
-    ws.spectra = loadTwoColSub(file.id, "spectra", "spectrum/v1");
-    ws.averageSpectra = loadTwoColSub(file.id, "average_spectra", "average_spectrum/v1");
-    ws.snrSpectra = loadTwoColSub(file.id, "snr_spectra", "snr_spectrum/v1");
-    ws.allanWerle = loadAllanSub(file.id, "allan_werle", "allan_werle/v1");
-    ws.t100 = loadT100Sub(file.id, "t100", "t100/v1");
+    ws.uncorrectedIfg = loadFlatIfg(root, "igm_uncorrected_x", "interferogram", false);
+    ws.correctedIfg = loadFlatIfg(root, "igm_corrected_x", "interferogram", true);
+    ws.spectra = loadTwoColSub(root, "spectra", "spectrum/v1");
+    ws.averageSpectra = loadTwoColSub(root, "average_spectra", "average_spectrum/v1");
+    ws.snrSpectra = loadTwoColSub(root, "snr_spectra", "snr_spectrum/v1");
+    ws.allanWerle = loadAllanSub(root, "allan_werle", "allan_werle/v1");
+    ws.t100 = loadT100Sub(root, "t100", "t100/v1");
     return ws;
+}
+
+// Write the whole workspace content under `root` (file id or source group id).
+static void writeAll(hid_t root, const Workspace& ws) {
+    writeRoot(root, ws);
+    writeFlatIfg(root, "igm_uncorrected_x", "interferogram", ws.uncorrectedIfg, true);
+    writeFlatIfg(root, "igm_corrected_x", "interferogram", ws.correctedIfg, false);
+    writeTwoColSub(root, "spectra", "spectrum/v1", ws.spectra);
+    writeTwoColSub(root, "average_spectra", "average_spectrum/v1", ws.averageSpectra);
+    writeTwoColSub(root, "snr_spectra", "snr_spectrum/v1", ws.snrSpectra);
+    writeAllanSub(root, "allan_werle", "allan_werle/v1", ws.allanWerle);
+    writeT100Sub(root, "t100", "t100/v1", ws.t100);
+}
+
+Workspace H5Store::load(const std::string& path) {
+    H5FileGuard file(H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT));
+    if (file.id < 0) throw H5Error("load: cannot open '" + path + "'");
+    return readAll(file.id);
+}
+
+Workspace H5Store::loadGroup(const std::string& path, const std::string& prefix) {
+    H5FileGuard file(H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT));
+    if (file.id < 0) throw H5Error("loadGroup: cannot open '" + path + "'");
+    H5GroupGuard group(H5Gopen2(file.id, prefix.c_str(), H5P_DEFAULT));
+    if (group.id < 0) throw H5Error("loadGroup: no group '" + prefix + "' in '" + path + "'");
+    return readAll(group.id);
 }
 
 void H5Store::save(const std::string& path, const Workspace& ws) {
@@ -474,14 +512,7 @@ void H5Store::save(const std::string& path, const Workspace& ws) {
     try {
         H5FileGuard file(H5Fcreate(tmp.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT));
         if (file.id < 0) fail("save: H5Fcreate");
-        writeRoot(file.id, ws);
-        writeFlatIfg(file.id, "igm_uncorrected_x", "interferogram", ws.uncorrectedIfg, true);
-        writeFlatIfg(file.id, "igm_corrected_x", "interferogram", ws.correctedIfg, false);
-        writeTwoColSub(file.id, "spectra", "spectrum/v1", ws.spectra);
-        writeTwoColSub(file.id, "average_spectra", "average_spectrum/v1", ws.averageSpectra);
-        writeTwoColSub(file.id, "snr_spectra", "snr_spectrum/v1", ws.snrSpectra);
-        writeAllanSub(file.id, "allan_werle", "allan_werle/v1", ws.allanWerle);
-        writeT100Sub(file.id, "t100", "t100/v1", ws.t100);
+        writeAll(file.id, ws);
     } catch (...) {
         std::remove(tmp.c_str());
         throw;
@@ -490,6 +521,41 @@ void H5Store::save(const std::string& path, const Workspace& ws) {
         std::remove(tmp.c_str());
         throw H5Error("save: rename failed for '" + path + "'");
     }
+}
+
+void H5Store::saveGroup(const std::string& path, const std::string& prefix,
+                        const Workspace& ws) {
+    std::vector<std::string> dangling = ws.danglingInputs();
+    if (!dangling.empty())
+        throw H5Error("saveGroup: dangling inputs (rule 10): " + joinDangling(dangling));
+
+    H5FileGuard file(H5Fopen(path.c_str(), H5F_ACC_RDWR, H5P_DEFAULT));
+    if (file.id < 0) throw H5Error("saveGroup: cannot open '" + path + "'");
+
+    // Original-data protection against the CURRENT on-disk source group.
+    if (linkPathExists(file.id, prefix)) {
+        H5GroupGuard existingGroup(H5Gopen2(file.id, prefix.c_str(), H5P_DEFAULT));
+        if (existingGroup.id < 0) fail("saveGroup: H5Gopen2 " + prefix);
+        Workspace existing = readAll(existingGroup.id);
+        verifyOriginalsUnchanged(existing, ws);
+    }
+
+    // Whole-group rewrite: delete + recreate, then write the content.
+    if (linkPathExists(file.id, prefix))
+        H5Ldelete(file.id, prefix.c_str(), H5P_DEFAULT);
+    // H5Gcreate2 does not create intermediate groups: ensure "sources/".
+    const size_t slash = prefix.find('/');
+    if (slash != std::string::npos) {
+        const std::string parent = prefix.substr(0, slash);
+        if (H5Lexists(file.id, parent.c_str(), H5P_DEFAULT) <= 0) {
+            H5GroupGuard pg(H5Gcreate2(file.id, parent.c_str(), H5P_DEFAULT,
+                                       H5P_DEFAULT, H5P_DEFAULT));
+            if (pg.id < 0) fail("saveGroup: H5Gcreate2 " + parent);
+        }
+    }
+    H5GroupGuard group(H5Gcreate2(file.id, prefix.c_str(), H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT));
+    if (group.id < 0) fail("saveGroup: H5Gcreate2 " + prefix);
+    writeAll(group.id, ws);
 }
 
 void H5Store::validate(const std::string& path) {

@@ -70,6 +70,7 @@ void test2_pythonExampleRoundTrip(const std::string& examplePath) {
     for (size_t i = 0; i < orig.uncorrectedIfg.members.size(); ++i) {
         const auto& a = orig.uncorrectedIfg.members[i];
         const auto& b = back.uncorrectedIfg.members[i];
+        (void)a; (void)b;  // assert-only uses, compiled out under NDEBUG
         assert(a.id == b.id);
         assert(a.kind == b.kind);
         assert(a.columns == b.columns);
@@ -92,6 +93,7 @@ void test3_originalDataProtection(const std::string& examplePath) {
     Workspace ws = H5Store::load(examplePath);
     auto& m = ws.uncorrectedIfg.members[0];
     double before = m.col0[0];
+    (void)before;  // assert-only use, compiled out under NDEBUG
     m.col0[0] += 100.0;  // mutate an original in RAM
 
     bool threw = false;
@@ -101,6 +103,7 @@ void test3_originalDataProtection(const std::string& examplePath) {
         threw = true;
     }
     assert(threw);
+    (void)threw;
 
     Workspace reloaded = H5Store::load(examplePath);
     assert(reloaded.uncorrectedIfg.members[0].col0[0] == before);
@@ -301,8 +304,10 @@ void test6_deletedOriginalAuthorization() {
 
     Workspace reloaded = H5Store::load(tmpFile);
     assert(reloaded.uncorrectedIfg.members.size() == 5);
-    for (const auto& m : reloaded.uncorrectedIfg.members)
+    for (const auto& m : reloaded.uncorrectedIfg.members) {
+        (void)m;  // assert-only use, compiled out under NDEBUG
         assert(m.id != "record_5");
+    }
 
     // A fresh load (empty authorization list) saves fine — the member is simply absent.
     Workspace fresh = H5Store::load(tmpFile);
@@ -324,6 +329,7 @@ void test7_unauthorizedOriginalDeletionThrows() {
         threw = true;
     }
     assert(threw);
+    (void)threw;
     std::remove(tmpFile);
     printf("roundtrip: unauthorized original deletion refused OK\n");
 }
