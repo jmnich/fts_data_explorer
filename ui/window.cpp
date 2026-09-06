@@ -2,6 +2,7 @@
 #include "window.h"
 #include "app_state.h"
 #include "config.h"
+#include "app_dirs.h"
 #include "icon.h"
 #include "stb_image.h"
 #include "theme.h"
@@ -293,8 +294,25 @@ void setupApplication(AppConfig& config, GLFWwindow* window) {
     // Enable docking
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
-    // Use explicit imgui.ini path for first-launch layout detection
-    io.IniFilename = "imgui.ini";
+    // ImGui ini + per-tab-type/per-workspace layout snapshots live next to
+    // IniFilename (layout_persistence.cpp derives from it), so placing it in
+    // appDataDir() keeps all of them out of the repo root / CWD.
+    ensureAppDirs();
+    static std::string iniPath = appDataDir() + "/imgui.ini";
+    // Migration: if a repo-root imgui.ini exists (left by a pre-relocate
+    // binary), move it to appDataDir. Overwrite an older appDataDir copy so
+    // the most recent layout wins.
+    if (std::filesystem::exists("imgui.ini")) {
+        std::error_code ec;
+        std::filesystem::rename("imgui.ini", iniPath, ec);
+        if (ec) {
+            // rename can fail cross-filesystem; fall back to copy+remove
+            std::filesystem::copy_file("imgui.ini", iniPath,
+                std::filesystem::copy_options::overwrite_existing, ec);
+            if (!ec) std::filesystem::remove("imgui.ini", ec);
+        }
+    }
+    io.IniFilename = iniPath.c_str();
 
     ImGui::StyleColorsDark();
 

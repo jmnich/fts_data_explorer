@@ -18,6 +18,7 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
 #include <imgui.h>
 
@@ -61,3 +62,11 @@ void resetTabLayout(const char* type);
 // The caller re-applies it (pre-DockSpace) because ImGui's own restore does
 // not reliably honor the snapshot's per-node selection. Returns-and-clears.
 std::map<ImGuiID, std::string> takeRestoredNodeSelection();
+
+// Garbage-collect stale per-workspace layout snapshots: delete any
+// `imgui.ini.layout.workspace.<hex>` (+ `.sel` sidecar) whose key is neither
+// in keepKeys (currently-open session keys) nor derivable from recentPaths
+// (the recent-datasets list). Tab-type snapshots (session/experiment) are
+// kept. No-op without an ImGui context (headless safety).
+void pruneStaleWorkspaceLayouts(const std::vector<std::string>& keepKeys,
+                                 const std::vector<std::string>& recentPaths);

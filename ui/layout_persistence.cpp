@@ -3,10 +3,12 @@
 
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <sstream>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include <imgui.h>
@@ -147,4 +149,39 @@ std::map<ImGuiID, std::string> takeRestoredNodeSelection() {
     std::map<ImGuiID, std::string> out;
     out.swap(g_restoredNodeSelection);
     return out;
+}
+
+void pruneStaleWorkspaceLayouts(const std::vector<std::string>& keepKeys,
+                                 const std::vector<std::string>& recentPaths) {
+    if (!ImGui::GetCurrentContext()) return;
+    const char* ini = ImGui::GetIO().IniFilename;
+    if (!ini) return;
+
+    // Build the set of workspace-layout name suffixes to keep: one per
+    // currently-open session key + one per recent-dataset path. Each hashes
+    // to "workspace.<16hex>" via workspaceLayoutName.
+    std::unordered_set<std::string> keepHex;
+    for (const std::string& key : keepKeys)
+        keepHex.insert(workspaceLayoutName(key));
+    for (const std::string& path : recentPaths)
+        keepHex.insert(workspaceLayoutName(path));
+
+    // Snapshots live next to imgui.ini; iterate the directory and delete any
+    // workspace.* snapshot (or its .sel sidecar) not in the keep set.
+    std::filesystem::path dir = std::filesystem::path(ini).parent_path();
+    if (dir.empty()) dir = ".";
+    if (!std::filesystem::exists(dir)) return;
+
+    const std::string prefix = "imgui.ini.layout.workspace.";
+    for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+        const std::string fname = entry.path().filename().string();
+        if (fname.rfind(prefix, 0) != 0) continue;
+        // fname == "imgui.ini.layout.workspace.<hex>" or "...<hex>.sel"
+        const std::string rest = fname.substr(prefix.size());
+        const size_t dot = rest.find('.');
+        const std::string hex = (dot == std::string::npos) ? rest
+                                                           : rest.substr(0, dot);
+        if (keepHex.count(hex) == 0)
+            std::filesystem::remove(entry.path());
+    }
 }

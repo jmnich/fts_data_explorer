@@ -680,6 +680,19 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // Garbage-collect stale per-workspace layout snapshots: keep only those
+    // for currently-open sessions + recent datasets, delete the rest. Bounds
+    // the unbounded growth of imgui.ini.layout.workspace.<hex> files.
+    {
+        std::vector<std::string> keepKeys;
+        for (const auto& s : appState.sessions)
+            if (s && !s->key.empty()) keepKeys.push_back(s->key);
+        std::vector<std::string> recentPaths;
+        for (const auto& e : config.recentDatasets)
+            recentPaths.push_back(e.path);
+        pruneStaleWorkspaceLayouts(keepKeys, recentPaths);
+    }
+
     // Cleanup
     destroyWelcomeBackground();
     cleanupApplication(window);

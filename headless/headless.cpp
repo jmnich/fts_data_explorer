@@ -29,7 +29,7 @@ using json = nlohmann::json;
 // ---------------------------------------------------------------------------
 
 static std::string getImguiIniPath() {
-    return "imgui.ini";
+    return appDataDir() + "/imgui.ini";
 }
 
 // Directory-stripped basename (Windows member ids can carry '\'). Used in the
@@ -179,6 +179,18 @@ static void handleReset() {
     if (std::filesystem::exists(imguiPath)) {
         std::filesystem::remove(imguiPath);
         std::cout << "Removed " << imguiPath << std::endl;
+    }
+    // Also remove per-tab-type and per-workspace layout snapshots + .sel
+    // sidecars that live next to imgui.ini in appDataDir.
+    std::filesystem::path dir = std::filesystem::path(imguiPath).parent_path();
+    if (!dir.empty() && std::filesystem::exists(dir)) {
+        const std::string prefix = "imgui.ini.layout.";
+        for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+            const std::string fname = entry.path().filename().string();
+            if (fname.rfind(prefix, 0) == 0) {
+                std::filesystem::remove(entry.path());
+            }
+        }
     }
 }
 
