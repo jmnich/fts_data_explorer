@@ -1,11 +1,11 @@
 // Phase 4 (M4.4): dock-layout persistence (imgui.ini snapshots).
 #include "layout_persistence.h"
+#include "layout_key.h"
 
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
-#include <functional>
 #include <sstream>
 #include <string>
 #include <unordered_set>
@@ -28,14 +28,6 @@ std::string layoutFilePath(const std::string& name) {
 // Sidecar: the SELECTED window per dock node ("0x<NodeID>=<WindowName>").
 std::string selectionFilePath(const std::string& name) {
     return layoutFilePath(name) + ".sel";
-}
-
-// Stable per-workspace snapshot name: hash the session key (a path, or
-// "multi-workspace .h5#sourceId") into a filename-safe suffix.
-std::string workspaceLayoutName(const std::string& key) {
-    char hex[17];
-    std::snprintf(hex, sizeof(hex), "%016zx", std::hash<std::string>{}(key));
-    return std::string("workspace.") + hex;
 }
 
 }  // namespace
@@ -157,14 +149,16 @@ void pruneStaleWorkspaceLayouts(const std::vector<std::string>& keepKeys,
     const char* ini = ImGui::GetIO().IniFilename;
     if (!ini) return;
 
-    // Build the set of workspace-layout name suffixes to keep: one per
-    // currently-open session key + one per recent-dataset path. Each hashes
-    // to "workspace.<16hex>" via workspaceLayoutName.
+    // Build the set of workspace-layout hex suffixes to keep: one per
+    // currently-open session key + one per recent-dataset path. The suffix
+    // MUST be the same form the file-name scan below extracts ("<16hex>") —
+    // comparing it against the full "workspace.<hex>" name silently deleted
+    // every snapshot on every exit (bugfix 2026-09-13).
     std::unordered_set<std::string> keepHex;
     for (const std::string& key : keepKeys)
-        keepHex.insert(workspaceLayoutName(key));
+        keepHex.insert(workspaceLayoutHex(key));
     for (const std::string& path : recentPaths)
-        keepHex.insert(workspaceLayoutName(path));
+        keepHex.insert(workspaceLayoutHex(path));
 
     // Snapshots live next to imgui.ini; iterate the directory and delete any
     // workspace.* snapshot (or its .sel sidecar) not in the keep set.
@@ -176,7 +170,9 @@ void pruneStaleWorkspaceLayouts(const std::vector<std::string>& keepKeys,
     for (const auto& entry : std::filesystem::directory_iterator(dir)) {
         const std::string fname = entry.path().filename().string();
         if (fname.rfind(prefix, 0) != 0) continue;
-        // fname == "imgui.ini.layout.workspace.<hex>" or "...<hex>.sel"
+        // fname == "imgui.ini.layout.workspace.<hex>" or "...<hex>.sel".
+        // The keep-set counterpart above (workspaceLayoutHex) must produce
+        // this exact "<16hex>" form — see bugfix 2026-09-13.
         const std::string rest = fname.substr(prefix.size());
         const size_t dot = rest.find('.');
         const std::string hex = (dot == std::string::npos) ? rest
