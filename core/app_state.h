@@ -18,9 +18,7 @@
 #include "session/environment_session.h"
 #include "session/spectral_pool.h"
 #include "session/batch_engine.h"
-#if FTS_BUILD_HDF5
 #include "hdf/workspace.h"
-#endif
 
 struct AppState;
 struct GLFWwindow;
@@ -37,11 +35,8 @@ bool naturalSortCompare(const std::string& a, const std::string& b);
 // list order used by the frame loop and the view-state restore.
 bool naturalBasenameLess(const std::string& a, const std::string& b);
 
-#if FTS_BUILD_HDF5
 enum class PendingWorkspaceAction { None, CloseWorkspace, OpenPath, OpenMultiWorkspace };
-#endif
 
-#if FTS_BUILD_HDF5
 void openWorkspace(AppState& s, const std::string& path);
 // Open in a new workspace tab (M2.2): dedupes by stable key, queues the swap,
 // stashes the path; the load runs at frame top after the swap.
@@ -87,7 +82,6 @@ void executePendingSave(AppState& s);
 // modal runs in the frame and dispatches the stashed action on resolution.
 void requestWorkspaceDiscard(AppState& s, PendingWorkspaceAction action, const std::string& path);
 void dispatchPendingAction(AppState& s);
-#endif
 
 // Reset-only workspace clear (no tab close, no welcome screen): clears the
 // ACTIVE workspace tab's panels/selection (or the most-recently-active one
@@ -103,7 +97,6 @@ void clearWorkspacePanels(AppState& s);
 // field-identical, only the target differs.
 void clearSessionPanels(WorkspaceSession& sess);
 
-#if FTS_BUILD_HDF5
 // Ctrl+H "go home" (full-home semantics): closes EVERY workspace tab and
 // re-shows the launch welcome screen. Dirty tabs route through the shared
 // Save All / Discard All modal first (exitTargetIsGoHome picks the terminal
@@ -117,7 +110,6 @@ void finalizeGoHome(AppState& s);
 // appState.exitDirtyExperiments filled; non-const because of that side output).
 void collectDirtyTabs(AppState& s, std::vector<int>& tabs,
                       std::vector<std::string>& labels);
-#endif
 
 // Active tab discriminator (Amendment 4): the active concept spans three tab
 // types, so activeSessionIdx alone is insufficient. AppLoop dispatches on this
@@ -166,7 +158,6 @@ struct SessionTabState {
 
 // Application state structure
 struct AppState {
-#if FTS_BUILD_HDF5
     // Pending workspace-discarding action stashed while the unsaved-changes
     // modal runs; dispatched by dispatchPendingAction on resolution.
     PendingWorkspaceAction pendingWorkspaceAction = PendingWorkspaceAction::None;
@@ -177,9 +168,8 @@ struct AppState {
     // pendingSaveAsPath empty = plain Save, non-empty = Save As target.
     std::string pendingSaveAsPath;
     bool showStaleDropPrompt = false;
-#endif
-    bool showAdapterErrorPopup = false;
-    std::string adapterErrorMsg;
+    bool showErrorPopup = false;
+    std::string errorMsg;
     AppConfig* configPtr = nullptr;
     std::string configFilePath;
     // UI state

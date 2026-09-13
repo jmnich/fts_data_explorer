@@ -148,9 +148,6 @@ public:
     RecomputeChain recomputeChain;
 
     // ── modal buffers ──────────────────────────────────────────────────────
-    bool showDeleteConfirmPopup = false;
-    size_t deleteConfirmIndex = 0;
-    bool skipDeleteConfirm = false;
     bool showWorkspaceDeleteConfirmPopup = false;
     std::string pendingWorkspaceDeletionPath;
 

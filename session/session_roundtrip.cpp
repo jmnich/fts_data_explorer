@@ -194,9 +194,6 @@ void populateSession(WorkspaceSession& s, const std::string& tag, const std::str
     s.exportPanel.artifactLabels = {"Average spectrum"};
     s.exportPanel.artifactChecked = {1};
 
-    s.showDeleteConfirmPopup = true;
-    s.deleteConfirmIndex = 1;
-    s.skipDeleteConfirm = true;
     s.showWorkspaceDeleteConfirmPopup = true;
     s.pendingWorkspaceDeletionPath = "/igm_uncorrected_x/record_0";
 }
@@ -527,9 +524,6 @@ void checkMirrored(const L& a, const R& b) {
     CHECK(a.recomputeChain.t100RefreshDone == b.recomputeChain.t100RefreshDone);
     CHECK(a.recomputeChain.t100RecomputeStd == b.recomputeChain.t100RecomputeStd);
 
-    CHECK(a.showDeleteConfirmPopup == b.showDeleteConfirmPopup);
-    CHECK(a.deleteConfirmIndex == b.deleteConfirmIndex);
-    CHECK(a.skipDeleteConfirm == b.skipDeleteConfirm);
     CHECK(a.showWorkspaceDeleteConfirmPopup == b.showWorkspaceDeleteConfirmPopup);
     CHECK(a.pendingWorkspaceDeletionPath == b.pendingWorkspaceDeletionPath);
 }

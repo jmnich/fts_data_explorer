@@ -90,7 +90,7 @@ EnergyRatios computeEnergyRatiosDirect(const char* numA, const char* denA,
 // Interpolate (srcX, srcY) onto targetX. Handles ascending and descending srcX.
 // Linear, endpoint-clamped. Empty input -> empty output; degenerate (size 1)
 // srcX -> srcY copy. The ONLY linear-interp path in the codebase (Phase-1 M1.3).
-static std::vector<double> resampleToGrid(
+inline std::vector<double> resampleToGrid(
     const std::vector<double>& srcX,
     const std::vector<double>& srcY,
     const std::vector<double>& targetX) {
@@ -227,7 +227,7 @@ public:
      * Pipeline (mirrors test17 processSpectrum minus Mertz):
      *   1. Hilbert-corrected X axis (um) from the reference detector.
      *   2. Uniform resample on [0, maxOPD] via linear interpolation.
-     *   3. Mean removal (CSV adapter does not, Python loadDataset does).
+     *   3. Mean removal.
      *   4. Apodization: apply selected window function to resampled signal.
      *   5. Zero pad: N = n*(K+1).
      *   6. FFT and magnitude spectrum.

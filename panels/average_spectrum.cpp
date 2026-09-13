@@ -3,9 +3,7 @@
 #include "interferogram_data.h"
 #include "hitran_panel.h"
 #include "cursor_overlay.h"
-#if FTS_BUILD_HDF5
 #include "workspace_reader.h"
-#endif
 #include "theme.h"
 #include "app_state.h"
 #include "imgui_internal.h"   // GetCurrentWindowRead()->SkipItems (hidden dock tab)
@@ -458,14 +456,12 @@ bool AverageSpectrum::tickCalculation() {
             cachedAverageX = calcCommonX;
             averageCount = calcValidFiles;
             averageAvailable = true;
-#if FTS_BUILD_HDF5
             if (appState && appState->hasWorkspace() && averageAvailable) {
                 auto inputs = checkedInputPaths(*appState);
                 wsUpsertAverage(appState->active->workspace, inputs, averageCount,
                                 cachedAverageX, cachedAverageY,
                                 makeAverageConfig(*appState, inputs, averageCount));
             }
-#endif
         } else {
             averageAvailable = false;
             averageCount = 0;

@@ -7,7 +7,6 @@
 #include "spectral_toolbox.h"
 #include <imgui.h>
 #include <algorithm>
-#include <filesystem>
 #include <iostream>
 
 static bool workspaceMemberIsOriginal(const Workspace& ws, const std::string& path) {
@@ -63,9 +62,9 @@ static void removeFileFromEngine(AppState& s, const std::string& id) {
         }
     }
     // Keep the navigation index and the data-loaded flag consistent with the
-    // shrunk lists (mirrors the legacy performFileDeletion clamp): a stale
-    // index would OOB-index sortedFiles, and dataLoaded=true with an empty
-    // loadedData would OOB-index loadedData[0] in the frame loop.
+    // shrunk lists: a stale index would OOB-index sortedFiles, and
+    // dataLoaded=true with an empty loadedData would OOB-index loadedData[0]
+    // in the frame loop.
     if (s.active->currentSortedFileIndex >= s.active->sortedFiles.size())
         s.active->currentSortedFileIndex = s.active->sortedFiles.empty() ? 0 : s.active->sortedFiles.size() - 1;
     s.active->dataLoaded = !s.active->loadedData.empty();
@@ -129,79 +128,9 @@ static void stripWorkspaceDerivatives(AppState& s) {
     s.needsRedraw = true;
 }
 
-void performFileDeletion(AppState& appState, size_t index) {
-#if FTS_BUILD_HDF5
-    // Defensive guard: in workspace mode sortedFiles holds member IDs, not
-    // disk paths — the filesystem remove below would either fail or delete an
-    // unrelated file named like the member from the CWD. Route to the
-    // workspace-aware deletion (cascade + engine cleanup). Callers already
-    // route around this, but the function must be safe on its own.
-    if (appState.hasWorkspace()) {
-        if (index < appState.active->sortedFiles.size()) {
-            std::string path = memberPathOf(appState.active->workspace, appState.active->sortedFiles[index]);
-            if (!path.empty())
-                performWorkspaceMemberDeletion(appState, path);
-        }
-        return;
-    }
-#endif
-    const auto& file = appState.active->sortedFiles[index];
-
-    std::error_code ec;
-    bool removed = std::filesystem::remove(file, ec);
-    if (!removed || ec) {
-        std::cerr << "Failed to delete file: " << file << " (" << ec.message() << ")" << std::endl;
-        return;
-    }
-
-    std::cout << "Deleted file: " << file << std::endl;
-
-    // Remove from csvFiles
-    auto csvIt = std::find(appState.active->csvFiles.begin(), appState.active->csvFiles.end(), file);
-    if (csvIt != appState.active->csvFiles.end())
-        appState.active->csvFiles.erase(csvIt);
-
-    // Remove from sortedFiles at index
-    appState.active->sortedFiles.erase(appState.active->sortedFiles.begin() + index);
-
-    // Remove from filesSelectedForAveraging
-    if (index < appState.active->filesSelectedForAveraging.size())
-        appState.active->filesSelectedForAveraging.erase(appState.active->filesSelectedForAveraging.begin() + index);
-
-    // If the file was in selectedFiles, remove it there too
-    auto selIt = std::find(appState.active->selectedFiles.begin(), appState.active->selectedFiles.end(), file);
-    if (selIt != appState.active->selectedFiles.end()) {
-        size_t selIdx = std::distance(appState.active->selectedFiles.begin(), selIt);
-        appState.active->selectedFiles.erase(appState.active->selectedFiles.begin() + selIdx);
-        appState.active->selectedFilenames.erase(appState.active->selectedFilenames.begin() + selIdx);
-        appState.active->loadedData.erase(appState.active->loadedData.begin() + selIdx);
-        appState.active->rawDataCache.erase(appState.active->rawDataCache.begin() + selIdx);
-    }
-
-    // Adjust currentSortedFileIndex: jump to previous file when deleting current
-    if (index < appState.active->currentSortedFileIndex) {
-        appState.active->currentSortedFileIndex--;
-    } else if (index == appState.active->currentSortedFileIndex) {
-        if (appState.active->currentSortedFileIndex > 0)
-            appState.active->currentSortedFileIndex--;
-        appState.active->filesChanged = true; // trigger reload from new position
-    }
-    if (appState.active->currentSortedFileIndex >= appState.active->sortedFiles.size())
-        appState.active->currentSortedFileIndex = appState.active->sortedFiles.empty() ? 0 : appState.active->sortedFiles.size() - 1;
-
-    if (appState.active->loadedData.empty())
-        appState.active->dataLoaded = false;
-
-    appState.needsRedraw = true;
-}
-
 void renderFilesPanel() {
 
         ImGui::Begin("Files");
-        // Open delete confirmation popup if pending (called within frame context)
-        if (appState.active->showDeleteConfirmPopup) {
-            ImGui::OpenPopup("Delete File##confirm");
-        }
         ImGui::PushTextWrapPos(); // Enable text wrapping
         ImGui::Text("Current Dataset: %s", appState.active->currentDatasetName.c_str());
         ImGui::Separator();
@@ -233,7 +162,6 @@ void renderFilesPanel() {
             }
 
             ImGui::Separator();
-#if FTS_BUILD_HDF5
         // In workspace mode the entries are member IDs, not disk paths.
         if (appState.hasWorkspace()) {
             if (ImGui::Button("Strip derivatives", ImVec2(-FLT_MIN, 0))) {
@@ -241,7 +169,6 @@ void renderFilesPanel() {
             }
             ImGui::Separator();
         }
-#endif
         ImGui::BeginChild("##FileList", ImVec2(0, 0), ImGuiChildFlags_None,
                           ImGuiWindowFlags_AlwaysVerticalScrollbar);
 
@@ -269,35 +196,17 @@ void renderFilesPanel() {
             filename = shortenFilename(filename);
             
             // Delete button (left) — unique label per row avoids needing PushID.
-            // Workspace mode: member delete (always confirms, decision 1).
-            // Legacy mode: file delete from disk (confirm, or skip-flag).
+            // Member delete (always confirms, decision 1).
             float btnH = ImGui::GetFrameHeight();
-#if FTS_BUILD_HDF5
-            if (appState.hasWorkspace()) {
-                std::string delBtnId = "×##del" + std::to_string(i);
-                if (ImGui::Button(delBtnId.c_str(), ImVec2(btnH, btnH))) {
-                    appState.active->pendingWorkspaceDeletionPath = memberPathOf(appState.active->workspace, file);
-                    if (!appState.active->pendingWorkspaceDeletionPath.empty()) {
-                        appState.active->showWorkspaceDeleteConfirmPopup = true;
-                        appState.needsRedraw = true;
-                    }
+            std::string delBtnId = "×##del" + std::to_string(i);
+            if (ImGui::Button(delBtnId.c_str(), ImVec2(btnH, btnH))) {
+                appState.active->pendingWorkspaceDeletionPath = memberPathOf(appState.active->workspace, file);
+                if (!appState.active->pendingWorkspaceDeletionPath.empty()) {
+                    appState.active->showWorkspaceDeleteConfirmPopup = true;
+                    appState.needsRedraw = true;
                 }
-                ImGui::SameLine();
-            } else
-#endif
-            {
-                std::string delBtnId = "×##del" + std::to_string(i);
-                if (ImGui::Button(delBtnId.c_str(), ImVec2(btnH, btnH))) {
-                    if (appState.active->skipDeleteConfirm) {
-                        performFileDeletion(appState, i);
-                        continue;
-                    } else {
-                        appState.active->deleteConfirmIndex = i;
-                        appState.active->showDeleteConfirmPopup = true;
-                    }
-                }
-                ImGui::SameLine();
             }
+            ImGui::SameLine();
             
             ImGui::PushID(static_cast<int>(i));
             
@@ -348,12 +257,10 @@ void renderFilesPanel() {
             // derivatives / empty timestamps). Rows are under PushID(i), so the
             // label text change never shifts widget IDs (IMGUI_GUIDE §3).
             std::string rowLabel = filename;
-#if FTS_BUILD_HDF5
             if (appState.hasWorkspace() && appState.showTimestamps) {
                 std::string ts = memberTimestampHMS(appState.active->workspace, file);
                 if (!ts.empty()) rowLabel += " [" + ts + "]";
             }
-#endif
             if (ImGui::Button(rowLabel.c_str(), ImVec2(btnWidth, 0))) {
                 // Handle multi-select with Ctrl key
                 if (appState.active->multiSelectMode) {
@@ -506,7 +413,6 @@ void renderFilesPanel() {
         }
         ImGui::EndChild();
 
-#if FTS_BUILD_HDF5
         // Derived products section (workspace mode only): derivative members,
         // each deletable immediately (no confirm — recomputable, spec rule 7).
         if (appState.hasWorkspace()) {
@@ -583,7 +489,6 @@ void renderFilesPanel() {
             }
             endModal();
         }
-#endif
 
         // Show selection limit popup if needed
         {
@@ -612,54 +517,6 @@ void renderFilesPanel() {
             endModal();
         }
 
-        // Delete confirmation popup
-        {
-            static int focusIdx = 0;
-            static bool prevPopupOpen = false;
-            if (!appState.active->showDeleteConfirmPopup)
-                prevPopupOpen = false;
-
-            beginModal(480.0f, modalAccent());
-            if (ImGui::BeginPopupModal("Delete File##confirm", NULL,
-                                       ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
-                size_t idx = appState.active->deleteConfirmIndex;
-                std::string fname = idx < appState.active->sortedFiles.size()
-                    ? appState.active->sortedFiles[idx].substr(appState.active->sortedFiles[idx].find_last_of("/\\") + 1)
-                    : "";
-
-                ImGui::Text("Are you sure you want to delete?");   // body restates the title (NoTitleBar)
-                ImGui::Spacing();
-                ImGui::TextWrapped("%s", fname.c_str());
-                ImGui::Spacing();
-                ImGui::Separator();
-                ImGui::Spacing();
-
-                int pressed = modalButtonRow(
-                    {"Cancel", "Yes", "Yes, don't ask again"},
-                    focusIdx, prevPopupOpen, modalAccent());
-                if (pressed == 0 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-                    appState.active->showDeleteConfirmPopup = false;
-                    ImGui::CloseCurrentPopup();
-                } else if (pressed == 1) {
-                    if (idx < appState.active->sortedFiles.size())
-                        performFileDeletion(appState, idx);
-                    appState.active->showDeleteConfirmPopup = false;
-                    ImGui::CloseCurrentPopup();
-                } else if (pressed == 2) {
-                    appState.active->skipDeleteConfirm = true;
-                    if (idx < appState.active->sortedFiles.size())
-                        performFileDeletion(appState, idx);
-                    appState.active->showDeleteConfirmPopup = false;
-                    ImGui::CloseCurrentPopup();
-                }
-
-                drawModalAccentFrame(modalAccent());
-                ImGui::EndPopup();
-                prevPopupOpen = true;
-            }
-            endModal();
-        }
-        
         ImGui::PopTextWrapPos(); // Disable text wrapping
         ImGui::End();
 

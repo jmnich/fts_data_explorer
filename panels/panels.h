@@ -15,7 +15,6 @@ struct GLFWwindow;
 
 // panels/files_panel.cpp
 void renderFilesPanel();
-void performFileDeletion(AppState& s, size_t index);
 
 // panels/interferogram_view.cpp
 void renderInterferogramPanel();

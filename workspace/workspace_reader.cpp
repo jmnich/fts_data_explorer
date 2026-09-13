@@ -1,4 +1,3 @@
-#if FTS_BUILD_HDF5
 
 #include "workspace_reader.h"
 
@@ -29,30 +28,6 @@ const TwoColumnMember* findInGroup(const std::vector<TwoColumnMember>& members,
             return &m;
     }
     return nullptr;
-}
-
-std::string memberIds(const std::vector<InterferogramMember>& members) {
-    std::vector<std::string> ids;
-    for (const auto& m : members) ids.push_back(m.id);
-    std::string out;
-    for (size_t i = 0; i < ids.size(); ++i) {
-        if (i) out += ", ";
-        out += ids[i];
-    }
-    return out;
-}
-
-std::string memberIds(const std::vector<TwoColumnMember>& members,
-                      bool originalsOnly) {
-    std::vector<std::string> ids;
-    for (const auto& m : members)
-        if (!originalsOnly || m.kind == MemberKind::Original) ids.push_back(m.id);
-    std::string out;
-    for (size_t i = 0; i < ids.size(); ++i) {
-        if (i) out += ", ";
-        out += ids[i];
-    }
-    return out;
 }
 
 std::string readMetadata(const MemberBase& m, const std::string& group) {
@@ -162,12 +137,6 @@ bool configParamsMatch(const nlohmann::json& cfg, const WorkspaceSession& sess) 
            effectiveApodizationJson(makeApodizationJson(
                sess.spectrum.apodizationSelector, sess.spectrum.apodizationParams));
 }
-
-bool configParamsMatch(const nlohmann::json& cfg, const AppState& s) {
-    return configParamsMatch(cfg, *s.active);
-}
-
-
 
 bool configInputsEqual(const nlohmann::json& cfg, const std::vector<std::string>& paths) {
     auto it = cfg.find("inputs");
@@ -504,10 +473,6 @@ void applyPanelViewState(WorkspaceSession& ws, const nlohmann::json& vs) {
                                                  "enableDownsampling", ws.enableDownsampling);
         }
     }
-}
-
-void applyPanelViewState(AppState& s, const nlohmann::json& vs) {
-    applyPanelViewState(*s.active, vs);
 }
 
 } // namespace
@@ -1527,5 +1492,3 @@ std::vector<StaleDetail> panelStaleDetails(const AppState& s, PanelKind kind) {
     }
     return out;
 }
-
-#endif // FTS_BUILD_HDF5

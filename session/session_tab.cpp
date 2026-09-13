@@ -95,8 +95,8 @@ void renderRemoveConfirm() {
                 multiWorkspaceLoad(appState, appState.sessionTab.multiWorkspacePath, err2);
                 refreshBatchRecipes(appState);
             } else {
-                appState.adapterErrorMsg = "Remove failed:\n" + err;
-                appState.showAdapterErrorPopup = true;
+                appState.errorMsg = "Remove failed:\n" + err;
+                appState.showErrorPopup = true;
             }
             g_showRemoveConfirm = false;
             appState.needsRedraw = true;
@@ -203,14 +203,6 @@ void renderSessionPanel(const char* name, const std::function<void()>& content) 
 // All colors from theme.h; no new fonts, textures, or dependencies. Sticks to
 // the app's accent language (modalAccent is reused throughout).
 
-// True when the source has an open workspace tab.
-bool sourceOpenInTab(const std::string& id) {
-    const std::string key = appState.sessionTab.multiWorkspacePath + "#" + id;
-    for (const auto& sess : appState.sessions)
-        if (sess->key == key) return true;
-    return false;
-}
-
 // File-browser → embed flow (shared by the pinned footer button).
 void addDatasetFromFileDialog() {
     std::string defaultFolder;
@@ -227,8 +219,8 @@ void addDatasetFromFileDialog() {
             refreshBatchRecipes(appState);
             appState.needsRedraw = true;
         } else {
-            appState.adapterErrorMsg = "Add failed:\n" + err;
-            appState.showAdapterErrorPopup = true;
+            appState.errorMsg = "Add failed:\n" + err;
+            appState.showErrorPopup = true;
         }
     }
 }
@@ -470,13 +462,13 @@ void renderCreateMultiWorkspaceButton() {
                 // Embed a copy of the most relevant open dataset from disk.
                 const std::string srcPath = appState.sessions[src]->path;
                 std::string err;
-                if (multiWorkspaceCreateFromDataset(appState, path, srcPath, err)) {
+                if (multiWorkspaceCreateFromDataset(path, srcPath, err)) {
                     multiWorkspaceOpenProject(appState, path, err);
                     rememberMultiWorkspace(appState, path);
                     appState.needsRedraw = true;
                 } else {
-                    appState.adapterErrorMsg = "Create failed:\n" + err;
-                    appState.showAdapterErrorPopup = true;
+                    appState.errorMsg = "Create failed:\n" + err;
+                    appState.showErrorPopup = true;
                 }
             }
         }
@@ -547,8 +539,8 @@ void SessionTab::renderRenameModal() {
                 if (g_renameKind == RenameKind::Dataset) {
                     renameDatasetSource(appState, g_renameDatasetId, name, err);
                     if (!err.empty()) {
-                        appState.adapterErrorMsg = "Rename failed:\n" + err;
-                        appState.showAdapterErrorPopup = true;
+                        appState.errorMsg = "Rename failed:\n" + err;
+                        appState.showErrorPopup = true;
                     }
                 } else if (g_renameExpIdx >= 0 &&
                            g_renameExpIdx < static_cast<int>(appState.experiments.size())) {

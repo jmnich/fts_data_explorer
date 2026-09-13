@@ -310,9 +310,7 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                 const auto& datasetPath = entry.path;
                 bool exists = std::filesystem::exists(datasetPath)
                     || std::filesystem::is_directory(datasetPath);
-#if FTS_BUILD_HDF5
                 bool isH5 = std::filesystem::path(datasetPath).extension() == ".h5";
-#endif
 
                 std::string displayName = datasetPath;
                 size_t last_slash = displayName.find_last_of("/\\");
@@ -380,14 +378,12 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                     shouldOpen = true;
                 }
                 if (shouldOpen) {
-#if FTS_BUILD_HDF5
                     if (isH5) {
                         requestWorkspaceDiscard(appState, PendingWorkspaceAction::OpenPath, datasetPath);
                         appState.needsRedraw = true;
                     }
                     // Non-.h5 entries are pruned on render; any forced open
                     // of such a path fails silently in openWorkspace().
-#endif
                 }
 
                 if (!exists && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
@@ -535,8 +531,8 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                 }
             }
             if (!err.empty()) {
-                appState.adapterErrorMsg = "Create failed:\n" + err;
-                appState.showAdapterErrorPopup = true;
+                appState.errorMsg = "Create failed:\n" + err;
+                appState.showErrorPopup = true;
             }
             appState.needsRedraw = true;
         }
@@ -550,7 +546,6 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
     ImGui::Spacing();
 
     // ── Bottom bar: Open .h5 (left, ~2/3 width) + UI size selector ──────────
-#if FTS_BUILD_HDF5
     AccentColor accent = StringToAccentColor(appState.currentAccentColor);
     ImVec4 btnBg = GetAccentMuted(accent);
     btnBg.w = 1.0f;
@@ -572,7 +567,6 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
     }
     ImGui::PopStyleColor(3);
     ImGui::SameLine();
-#endif
 
     ImGui::Text("UI Size:");
     ImGui::SameLine();

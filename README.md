@@ -36,6 +36,7 @@ The application is designed to help with handling data from DIY lab instruments 
 
 - Custom energy ratio calculation with statistics, with presets defined in ASTM E1421 for FTS-MIR
 - Allan plots calculated from T100% and spectral brightness to aid you in finding optimal integration time
+- HITRAN gas absorption markers overlaid on the Spectrum/Average plots (8 gases, adjustable strength threshold and smoothing)
 
 ![Primary1](screenshots/scr_primary3.png)
 

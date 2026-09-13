@@ -2,96 +2,79 @@
 
 ## Overview
 
-Playground contains headless-mode demos for users and C++ unit tests. Numeric
-accuracy regression testing lives in `test_harness/`.
-
-The playground includes a Python demo harness that processes real instrument
-data, generates all 10 export artifacts, and produces PNG plots of raw
-interferograms and spectra.  It uses the same pipeline structure as the C++
-application (FFT → average → T% → Allan, etc.) to produce CSVs matching the
-export panel's format.
+Playground contains headless-mode demos for users and standalone C++ unit tests.
+Numeric-accuracy regression testing lives in `test_harness/`.
 
 ## Directory layout
 
 ```
 playground/
-├── test_artifacts.py    # main test harness
-├── test_data/           # instrument datasets (one subfolder per dataset)
-│   └── <dataset>/
-│       ├── raw_data/    # raw interferogram CSVs (reference + primary)
-│       ├── interferogram.csv / .png
-│       ├── spectrum.csv / .png
-│       └── measurementInfo.txt
-├── templates/           # JSON config templates (one per artifact)
-├── outputs/             # generated artifacts (cleared each run)
-│   └── <dataset>/
-│       ├── raw_0.png … raw_N.png  # per-file interferogram plots
-│       ├── interferogram.png
-│       ├── spectrum.png
-│       ├── artifacts/   # CSV exports
-│       └── templates/   # copy of templates/ for reference
-└── log.txt              # timestamped log (errors + progress)
+├── headless_demo/                 # user-facing headless (`-w`) demos
+│   ├── demo_common.py             # shared helpers (converter invocation, -w driver)
+│   └── basic_<name>/demo_<name>.py
+├── tests/                         # standalone checks (assert-based or h5py-based)
+│   ├── batch_recipes/             # recipe JSON/validation/built-ins model
+│   ├── hdf_conformance/           # .h5 schema conformance + C++ round-trip
+│   ├── hitran_bands/              # HITRAN band/peak extraction sanity
+│   ├── resample_grid/             # resampleToGrid interpolation check
+│   ├── spectrum_validation/       # spectrum pipeline vs. reference
+│   └── wrap_text/                 # session-tab text wrapping
+├── multi_workspace_roundtrip.py   # multi-workspace .h5 CLI suite (h5py)
+├── test_data/                     # small instrument datasets (one folder per source)
+└── outputs/                       # generated artifacts (gitignored)
 ```
 
 ## Prerequisites
 
-- Python 3.10+
-- `numpy`, `scipy`, `matplotlib`
+- Python 3.10+, `numpy`, `matplotlib`, `h5py`
+- A C++17 compiler for the standalone tests
 
-## Headless demos and tests
-
-`headless_demo/basic_<name>/demo_<name>.py` runs the app's headless mode
-(`-w`) on converted test data; `tests/hdf_conformance/run_conformance.py` and
-`tests/spectrum_validation/validate_spectrum.py` are the verification suites.
-
-These scripts need the converter scripts, which live in the separate
+The converter-dependent scripts (`headless_demo/`, `hdf_conformance/`) need the
+converter scripts from the separate
 [fts_data_explorer_converters](https://github.com/jmnich/fts_data_explorer_converters)
-repo (not in this repository). Set `FTS_CONVERTERS_DIR` to that checkout before
-running them:
+repo (not shipped here). Point `FTS_CONVERTERS_DIR` at that checkout:
 
 ```bash
 export FTS_CONVERTERS_DIR=/path/to/fts_data_explorer_converters
-python3 playground/headless_demo/basic_allan/demo_allan.py
-python3 playground/tests/hdf_conformance/run_conformance.py
 ```
 
-Without the variable the scripts exit with a clear error message.
+Without the variable those scripts exit with a clear error message.
 
-## Running
+## Headless demos
+
+`headless_demo/basic_<name>/demo_<name>.py` converts the matching
+`test_data/` source, runs the app's headless mode (`-w`) and writes its
+outputs to `playground/outputs/`:
 
 ```bash
-cd <repo_root>
-python3 playground/test_artifacts.py
+python3 playground/headless_demo/basic_spectrum_hilbert/demo_spectrum_hilbert.py
+python3 playground/headless_demo/basic_average_spectrum/demo_average_spectrum.py
 ```
 
-Output goes to `playground/outputs/`.  Logs are written to
-`playground/log.txt`.
+Available demos: `spectrum_hilbert`, `spectrum_peakfinding`,
+`average_spectrum`, `snr`, `t100`, `allan`.
 
-## What it generates
+## Tests
 
-All 10 artifact types defined in `export.h`:
+Run each from the repo root.
 
-| Artifact | File(s) | Content |
-|----------|---------|---------|
-| Corrected IFG | `<slug>_corrected_ifg_<file>.csv` (× N files) | OPD vs primary detector |
-| Uncorrected IFG | `<slug>_uncorrected_ifgs.csv` | Sample index, ref+primary side-by-side |
-| Spectra | `<slug>_spectra.csv` | FFT magnitude spectra on common grid |
-| Average spectrum | `<slug>_average_spectrum.csv` | Mean spectrum across all files |
-| SNR spectrum | `<slug>_snr_spectrum.csv` | SNR = mean / std_dev per bin |
-| Allan-Werle 3D | `<slug>_allan_3d.csv` | M×N variance surface (long format) |
-| Allan-Werle slice | `<slug>_allan_slice_<wl>_<unit>.csv` | 2D slice at selected wavelength |
-| 100% T transmission | `<slug>_t100_transmission_<file>.csv` | Single-file transmittance |
-| 100% T all | `<slug>_t100_all_transmissions.csv` | All files' transmittance on common X grid |
-| 100% T stddev | `<slug>_t100_stddev.csv` | Std dev across all files |
+```bash
+# HDF5 conformance: regenerates the golden, validates Python- and C++-written
+# .h5 files, runs fts_hdf_roundtrip and a headless -w pass
+python3 playground/tests/hdf_conformance/run_conformance.py
 
-## Pipeline details
+# Spectrum pipeline vs. the independent Python reference
+python3 playground/tests/spectrum_validation/validate_spectrum.py
 
-- **Spectrum**: FFT (RFFT) of each raw interferogram → magnitude → unit conversion
-- **Average**: sum / N on common frequency grid
-- **SNR**: online variance (sum + sum-of-squares) → mean / std per bin
-- **Allan**: average reference → T% = spectrum / avg × 100 → overlapping
-  Allan-Werle variance (cluster-mean algorithm, matching `allan_variance.cpp`)
-- **100% T**: T% = spectrum / reference × 100 (first file or average as ref)
+# Multi-workspace .h5 CLI round-trip (create/add/load/save/remove/atomicity)
+python3 playground/multi_workspace_roundtrip.py
 
-All calculations use the full dataset (100 files).  X-axis range for Allan is
-restricted to 1–30 µm by default.
+# Standalone C++ checks (assert-based, no test framework)
+g++ -std=c++17 -I. -Iworkspace -Ifftw-3.3.10/api playground/tests/resample_grid/test_resample.cpp -o /tmp/test_resample && /tmp/test_resample
+g++ -std=c++17 -I. playground/tests/wrap_text/test_wrap.cpp -o /tmp/test_wrap && /tmp/test_wrap
+g++ -std=c++17 -I. -Ihitran playground/tests/hitran_bands/test_bands.cpp -o /tmp/test_bands && /tmp/test_bands
+g++ -std=c++17 -I. -Iworkspace -Ifftw-3.3.10/api -Ibuild/linux-release/_deps/nlohmann_json-src/include playground/tests/batch_recipes/test_batch_recipes.cpp -o /tmp/test_batch_recipes && /tmp/test_batch_recipes
+```
+
+`multi_workspace_roundtrip.py` accepts `--binary PATH` if the round-trip
+binary is not in the default build tree.

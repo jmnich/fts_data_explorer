@@ -19,7 +19,7 @@ FTS Data Explorer is a scientific GUI for rapid exploration of fourier spectrome
 - C++17, CMake 3.18+ (HDF5 1.14.3 requires 3.18), GLFW/OpenGL3
 - ImGui (docking branch), ImPlot (master), ImPlot3D (main)
 - FFTW3 for FFT, pthread for thread pool and FFTW plan mutex
-- HDF5 1.14.3 (FetchContent, static C lib) for the `fts_hdf` exchange layer (`hdf/`) — unconditional since phase 5 (`.h5` is the only runtime input); the `FTS_BUILD_HDF5=OFF` escape hatch is retired
+- HDF5 1.14.3 (FetchContent, static C lib) for the `fts_hdf` exchange layer (`hdf/`) — unconditional (`.h5` is the only runtime input); no `FTS_BUILD_HDF5` guards remain in the sources
 
 # Layout & interaction
 
@@ -34,6 +34,7 @@ FTS Data Explorer is a scientific GUI for rapid exploration of fourier spectrome
 | **SNR** | SNR-per-wavelength (>=2 files) + plot. |
 | **Allan** | 3D Allan-Werle surface + 2D slice. |
 | **100% T** | Transmittance curves, energy ratios, std dev. |
+| **HITRAN Gas Markers** | Per-gas checkbox overlays (8 gases), strength threshold + smoothing; markers drawn on Spectrum/Average plots. |
 
 **Interaction (all plots):** Shift+drag = X range select. Mouse wheel = zoom. Arrows = pan (10%) / navigate files. ESC = reset zoom. Ctrl+Y = auto-fit Y, Ctrl+A = max-at-zero, Ctrl+D = downsample. >50k points: auto-downsample, no AA, `NoInputs`, "LARGE DATA" indicator.
 
@@ -42,20 +43,24 @@ FTS Data Explorer is a scientific GUI for rapid exploration of fourier spectrome
 # Directory layout
 
 ```
-main.cpp                  thin entry (~100 lines) + headless dispatch
+main.cpp                  entry + headless dispatch (~720 lines: open/save routing)
 core/        app_state, config.h, version.h, imconfig_custom.h,
              popup_utils.h, pthread_compat.h, glibc_compat.cpp
 ui/          app_loop, window, menu_bar, theme, file_browser, layout_persistence
 panels/      spectrum, average_spectrum, snr_spectrum, allan_variance, t100,
              export, welcome, about, conversion_screen, files_panel,
-             interferogram_view, metadata_panel
+             interferogram_view, metadata_panel, hitran_panel
+             (+ spectral_plot, cursor_overlay, stale_overlay helpers)
 session/     session_base, workspace_session, session_tab, environment_session,
-             spectral_pool, multi_workspace_store, wrap_text, round-trip harnesses
+             spectral_pool, multi_workspace_store, batch_engine, wrap_text,
+             round-trip harnesses
 workspace/   workspace_reader, interferogram_data.h, spectral_toolbox,
              apodization, thread_pool.h
 io/          converter, app_dirs
 headless/    headless
-hdf/         fts_hdf exchange layer (unchanged)
+hdf/         fts_hdf exchange layer
+hitran/      generated gas-band tables + generator (HITRAN panel data)
+docs/        .h5 format specifications (single-dataset, multi-workspace)
 ```
 
 All directories are on the CMake include path — `#include "app_state.h"` style bare
@@ -184,7 +189,7 @@ Format: `<YY>.<MM>.<minor>` from `VERSION` file. `./build_script.sh` shows last 
 | Cumulative counters go local | Use member `std::atomic<int> completedCount_` |
 | Submit inside `BeginPlot`/`EndPlot` | Submit/poll before `BeginPlot` |
 | `std::mutex`/`condition_variable` on GCC 16+ | Include `core/pthread_compat.h` first; `_GNU_SOURCE` undefined |
-| File delete cross button / Delete key | Calls `performFileDeletion()` which cleans `csvFiles`, `sortedFiles`, selection, cache |
+| File delete cross button / Delete key | Workspace member deletion (`performWorkspaceMemberDeletion`, always confirms); cleans `csvFiles`, `sortedFiles`, selection, caches |
 | `computeTransmittanceForFile` no cache | Must fall back to synchronous CSV load + compute |
 | `waitAll()` before pool reconfigure | Destructor joins workers directly (stop flag); call `waitAll()` first |
 | `SetKeyboardFocusHere` | Not used -- activates ImGui nav, conflicts with manual arrow-key handling |
@@ -194,14 +199,16 @@ Format: `<YY>.<MM>.<minor>` from `VERSION` file. `./build_script.sh` shows last 
 
 # Testing
 
-Test data lives in `playground/test_data/` (there is no `example_datasets/`). Visual plot verification is manual. The playground harnesses (each needs `FTS_CONVERTERS_DIR` pointing at a `fts_data_explorer_converters` checkout, plus h5py/numpy/matplotlib):
+Test data lives in `playground/test_data/` (there is no `example_datasets/`). Visual plot verification is manual. See `playground/README.md` for the harness index. Converter-dependent harnesses need `FTS_CONVERTERS_DIR` pointing at a `fts_data_explorer_converters` checkout; Python harnesses need h5py/numpy/matplotlib:
 
 - **Headless demos** (converter script invoked directly, then process `-w`): `python3 playground/headless_demo/basic_<name>/demo_<name>.py` (spectrum_hilbert, spectrum_peakfinding, average_spectrum, snr, t100, allan; outputs -> `playground/outputs/`). Batch-artifact outputs (Average/SNR/Allan/T100) are deterministic — the common grid is taken from the first file in natural sort order (`chooseCommonGrid`). Single-spectrum outputs are byte-stable.
 - **Resample check** (`resampleToGrid`): `g++ -std=c++17 -I. -Iworkspace -Ifftw-3.3.10/api playground/tests/resample_grid/test_resample.cpp -o /tmp/test_resample && /tmp/test_resample` (assert-based; no framework).
 - **Session-tab text wrap** (`wrapToLinesCore`, session/wrap_text.h): `g++ -std=c++17 -I. playground/tests/wrap_text/test_wrap.cpp -o /tmp/test_wrap && /tmp/test_wrap` (assert-based; no framework).
 - **Batch recipe model** (recipe JSON/validation/built-ins/capture/strip, session/batch_engine.h — header-only, nothing to link): `g++ -std=c++17 -I. -Iworkspace -Ifftw-3.3.10/api -Ibuild/linux-release/_deps/nlohmann_json-src/include playground/tests/batch_recipes/test_batch_recipes.cpp -o /tmp/test_batch_recipes && /tmp/test_batch_recipes` (assert-based; no framework).
+- **HITRAN bands** (band/peak extraction, hitran/hitran_bands.h): `g++ -std=c++17 -I. -Ihitran playground/tests/hitran_bands/test_bands.cpp -o /tmp/test_bands && /tmp/test_bands` (assert-based; mirrors `hitran/generate_gas_bands.py --check`).
 - **Spectrum validation**: `python3 playground/tests/spectrum_validation/validate_spectrum.py`.
 - **HDF5 conformance**: `python3 playground/tests/hdf_conformance/run_conformance.py` (regenerates the golden from the parser, validates Python- and C++-written `.h5` files via `validate_h5.py`, runs `fts_hdf_roundtrip` and a headless `-w` pass). Manual like the other playground scripts.
+- **Multi-workspace round-trip** (h5py, drives `fts_multi_workspace_roundtrip`): `python3 playground/multi_workspace_roundtrip.py`.
 
 ## Mathematical-accuracy regression harness
 

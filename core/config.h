@@ -10,9 +10,7 @@
 #include <cstring>
 #include <utility>
 
-// Configuration structure for app settings
-// Multi-workspace embedded sources/ live under a group prefix and are read/written via
-// H5Store::loadGroup/saveGroup (M2.4); experiments/ groups land in Phase 4.
+// Configuration structure for app settings (persisted to the config file).
 struct AppConfig {
     struct RecentDatasetEntry {
         std::string path;

@@ -102,9 +102,8 @@ FetchContent_MakeAvailable(nlohmann_json)
 # Download and build HDF5 (static C library, no optional features).
 # The pinned tag is hdf5-1_14_3 (the 'hdf5-1.14.3' spelling does not exist upstream).
 # On MinGW the cross-configure must skip HDF5's try_run() probes (x86-64 safe values)
-# and declare vasprintf via _GNU_SOURCE; see phase0.md.
-# Phase 5: HDF5 is unconditional — .h5 is the only runtime input, the
-# FTS_BUILD_HDF5=OFF escape hatch was retired with the adapter system.
+# and declare vasprintf via _GNU_SOURCE.
+# HDF5 is unconditional — .h5 is the only runtime input.
 set(HDF5_BUILD_SHARED_LIBS   OFF CACHE BOOL "Build HDF5 as static library")
 set(HDF5_BUILD_STATIC_LIBS   ON  CACHE BOOL "Build HDF5 as static library")
 set(HDF5_BUILD_CPP_LIB       OFF CACHE BOOL "Disable HDF5 C++ library")
@@ -307,7 +306,6 @@ add_executable(fts_data_explorer
 # fts_hdf integration (unconditional — .h5 is the only runtime input)
 target_sources(fts_data_explorer PRIVATE workspace/workspace_reader.cpp)
 target_link_libraries(fts_data_explorer fts_hdf)
-target_compile_definitions(fts_data_explorer PRIVATE FTS_BUILD_HDF5=1)
 
 # Platform-specific compile options
 if(WIN32)
@@ -426,7 +424,6 @@ if(NOT WIN32)
     target_link_libraries(fts_session_roundtrip GL X11 m pthread dl)
 endif()
 target_compile_definitions(fts_session_roundtrip PRIVATE
-    FTS_BUILD_HDF5=1
     IMGUI_IMPL_OPENGL_LOADER_GLAD=0
     IMGUI_USER_CONFIG="imconfig_custom.h"
 )
@@ -468,7 +465,6 @@ target_link_libraries(fts_multi_workspace_roundtrip
     nlohmann_json::nlohmann_json
 )
 target_compile_definitions(fts_multi_workspace_roundtrip PRIVATE
-    FTS_BUILD_HDF5=1
     IMGUI_USER_CONFIG="imconfig_custom.h"
 )
 target_include_directories(fts_multi_workspace_roundtrip PRIVATE

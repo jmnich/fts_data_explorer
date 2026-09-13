@@ -23,7 +23,6 @@ void renderMainMenuBar(AppConfig& config, const std::string& configFilePath,
                     if (ImGui::MenuItem("Convert Dataset...")) {
                         openConversionScreen(appState);
                     }
-#if FTS_BUILD_HDF5
                     if (ImGui::MenuItem("Open Workspace (.h5)...")) {
                         std::string defaultFolder = appState.active
                             ? appState.active->currentDirectory : std::string();
@@ -55,11 +54,10 @@ void renderMainMenuBar(AppConfig& config, const std::string& configFilePath,
                         try {
                             saveWorkspaceAs(appState, window);
                         } catch (const std::exception& e) {
-                            appState.adapterErrorMsg = std::string("Save failed:\n") + e.what();
-                            appState.showAdapterErrorPopup = true;
+                            appState.errorMsg = std::string("Save failed:\n") + e.what();
+                            appState.showErrorPopup = true;
                         }
                     }
-#endif
                     
                     // Recent datasets menu
                     if (config.recentDatasets.empty()) {
@@ -84,13 +82,11 @@ void renderMainMenuBar(AppConfig& config, const std::string& configFilePath,
                                 }
 
                                 if (clicked && exists) {
-#if FTS_BUILD_HDF5
                                     if (std::filesystem::path(datasetPath).extension() == ".h5") {
                                         requestWorkspaceDiscard(appState, PendingWorkspaceAction::OpenPath, datasetPath);
                                     }
                                     // Non-.h5 entries are pruned at startup; any
                                     // forced open fails silently in openWorkspace().
-#endif
                                 }
                             }
                             ImGui::EndMenu();

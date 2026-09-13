@@ -46,13 +46,11 @@
 // DO NOT REMOVE: these must run before any fftw_plan_dft_1d call.
 // Both functions are declared in fftw3.h (included via spectral_toolbox.h).
 
-#if FTS_BUILD_HDF5
 #include "workspace_reader.h"
 #include "hdf/h5_store.h"
 #include "workspace_session.h"
 #include "hdf/hdf5_util.h"
 #include "session/multi_workspace_store.h"
-#endif
 
 // Include imgui and other dependencies
 #include "imgui.h"
@@ -63,7 +61,6 @@
 #include "implot3d.h"
 #include <GLFW/glfw3.h>
 
-#if FTS_BUILD_HDF5
 // Open a workspace in a NEW tab (M2.2). Dedupes by stable key (path); the
 // blank session is queued for swap and the actual load runs at frame top
 // AFTER the swap (pendingOpenPath) so the previous tab's session is out of
@@ -86,8 +83,8 @@ void openWorkspaceInNewTab(AppState& s, const std::string& path) {
             // multiWorkspaceLoadExperiments dedupes by id — safe to run on every visit.
             std::string err;
             if (!multiWorkspaceLoadExperiments(s, path, err)) {
-                s.adapterErrorMsg = std::string("Failed to reload experiments:\n") + err;
-                s.showAdapterErrorPopup = true;
+                s.errorMsg = std::string("Failed to reload experiments:\n") + err;
+                s.showErrorPopup = true;
             }
             // Same for the open-source tabs (go-home removed all sessions).
             restoreOpenEmbeddedTabs(s);
@@ -111,8 +108,8 @@ void openWorkspaceInNewTab(AppState& s, const std::string& path) {
                 s.showWelcomeScreen = false;
                 s.welcomeScreenInitialized = true;
             } else {
-                s.adapterErrorMsg = std::string("Failed to open multi-workspace:\n") + err;
-                s.showAdapterErrorPopup = true;
+                s.errorMsg = std::string("Failed to open multi-workspace:\n") + err;
+                s.showErrorPopup = true;
             }
             s.needsRedraw = true;
         }
@@ -179,8 +176,8 @@ void executePendingOpen(AppState& s) {
         // The load failed: drop the blank tab and return to the Session tab.
         removeTab(s, s.activeSessionIdx);
         s.activeTabKind = ActiveTabKind::Session;
-        s.adapterErrorMsg = std::string("Failed to open workspace:\n") + e.what();
-        s.showAdapterErrorPopup = true;
+        s.errorMsg = std::string("Failed to open workspace:\n") + e.what();
+        s.showErrorPopup = true;
         s.needsRedraw = true;
     }
 }
@@ -235,13 +232,9 @@ void openWorkspace(AppState& s, const std::string& path) {
     finishWorkspaceLoad(s, std::filesystem::path(path).stem().string(), path);
 }
 
-#endif // FTS_BUILD_HDF5
-
-#if FTS_BUILD_HDF5
-
 // ── Save / Save As + dirty-close routing (Phase 2) ─────────────────────────
 
-// Clear panel caches + selection (applyAdapterSelection-style block).
+// Clear panel caches + selection (dataset-change block).
 void clearPanelCaches(AppState& s) {
     clearWorkspacePanels(s);
 }
@@ -481,9 +474,9 @@ void executePendingSave(AppState& s) {
     } catch (const std::exception& e) {
         const bool isExport =
             (kind == AppState::PendingSaveKind::ExportDataset);
-        s.adapterErrorMsg =
+        s.errorMsg =
             std::string(isExport ? "Export failed:\n" : "Save failed:\n") + e.what();
-        s.showAdapterErrorPopup = true;
+        s.showErrorPopup = true;
         // Drop the overlay immediately so the error popup surfaces right away
         // instead of hiding behind the min-display dim.
         s.saveOverlayUntil = 0.0;
@@ -573,8 +566,8 @@ void dispatchPendingAction(AppState& s) {
                 s.showWelcomeScreen = false;
                 s.welcomeScreenInitialized = true;
             } else {
-                s.adapterErrorMsg = std::string("Failed to open multi-workspace:\n") + err;
-                s.showAdapterErrorPopup = true;
+                s.errorMsg = std::string("Failed to open multi-workspace:\n") + err;
+                s.showErrorPopup = true;
             }
             break;
         }
@@ -582,8 +575,6 @@ void dispatchPendingAction(AppState& s) {
             break;
     }
 }
-
-#endif // FTS_BUILD_HDF5
 
 int main(int argc, char* argv[]) {
     // Initialize FFTW threading support before any FFTW plan creation.
@@ -627,7 +618,7 @@ int main(int argc, char* argv[]) {
         std::cout << "Pruned non-.h5 entries from recent datasets" << std::endl;
     }
 
-    // Store config pointers for use by adapter selection
+    // Store config pointers for use by the app
     appState.configPtr = &config;
     appState.configFilePath = configFilePath;
 

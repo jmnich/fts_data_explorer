@@ -44,7 +44,6 @@ void resetActiveWorkspaceTab(AppState& s) {
     s.needsRedraw = true;
 }
 
-#if FTS_BUILD_HDF5
 void collectDirtyTabs(AppState& s, std::vector<int>& tabs,
                       std::vector<std::string>& labels) {
     if (s.activeTabKind == ActiveTabKind::Workspace &&
@@ -116,7 +115,6 @@ void finalizeGoHome(AppState& s) {
     s.welcomeScreenInitialized = false;
     s.needsRedraw = true;
 }
-#endif
 
 // The single workspace-reset path (session-canonical, M4.5).
 // Order matters: futures first (abandoned → workers finish into moved-from

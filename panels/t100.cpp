@@ -3,9 +3,7 @@
 #include "spectral_toolbox.h"
 #include "interferogram_data.h"
 #include "cursor_overlay.h"
-#if FTS_BUILD_HDF5
 #include "workspace_reader.h"
-#endif
 #include "app_state.h"
 #include "average_spectrum.h"
 #include "tinyfiledialogs.h"
@@ -134,9 +132,7 @@ void T100Spectrum::setReferenceFromCurrentSpectrum() {
         appState->needsRedraw = true;
         appState->pendingRedrawFrames = 2;
     }
-#if FTS_BUILD_HDF5
     wsUpsertT100FromPanel(*appState);
-#endif
 }
 
 static int detectXUnitFromHeader(const std::string& header) {
@@ -210,9 +206,7 @@ void T100Spectrum::setReferenceFromCSV(const std::string& path) {
         // One follow-up frame for the EndPlot-time Y fit.
         appState->pendingRedrawFrames = 2;
     }
-#if FTS_BUILD_HDF5
     wsUpsertT100FromPanel(*appState);
-#endif
 }
 
 void T100Spectrum::setReferenceFromAverage() {
@@ -261,9 +255,7 @@ void T100Spectrum::setReferenceFromAverage() {
         // One follow-up frame for the EndPlot-time Y fit.
         appState->pendingRedrawFrames = 2;
     }
-#if FTS_BUILD_HDF5
     wsUpsertT100FromPanel(*appState);
-#endif
 }
 
 bool T100Spectrum::acquireSpectrumForT100(const std::string& fileId,
@@ -436,10 +428,8 @@ bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
     cachedTransX[fileId] = std::move(newX);
     cachedTransY[fileId] = std::move(newY);
     transmittanceAvailable = true;
-#if FTS_BUILD_HDF5
     if (appState)
         wsUpsertT100FromPanel(*appState);
-#endif
     return true;
 }
 
@@ -783,10 +773,8 @@ bool T100Spectrum::tickStdCalculation() {
             computeStats(calcRatioC, ratioAvgC, ratioSpreadC, ratioStdDevC);
             ratioStatsAvailable = true;
         }
-#if FTS_BUILD_HDF5
         if (appState)
             wsUpsertT100FromPanel(*appState);
-#endif
         // Std batch completion must render (see setReferenceFrom* note).
         if (appState) {
             appState->needsRedraw = true;

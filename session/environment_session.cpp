@@ -33,10 +33,6 @@
 
 namespace {
 
-ImVec4 modalAccent() {
-    return GetAccentBase(StringToAccentColor(appState.currentAccentColor));
-}
-
 // Resolve the MAIN dock space id (same pattern as session_tab.cpp:103).
 ImGuiID mainDockSpaceId() {
     if (ImGuiWindow* ds = ImGui::FindWindowByName("DockSpace"))
@@ -1917,8 +1913,8 @@ void EnvironmentSession::exportCsv() {
 
     std::ofstream ofs(path);
     if (!ofs.is_open()) {
-        appState.adapterErrorMsg = "Export failed: cannot open " + path;
-        appState.showAdapterErrorPopup = true;
+        appState.errorMsg = "Export failed: cannot open " + path;
+        appState.showErrorPopup = true;
         return;
     }
 

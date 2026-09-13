@@ -85,7 +85,7 @@ public:
 
     // Compute spectrum for a file and store in cache. Uses current spectrum panel
     // settings (K, xUnit, refLaser, apodization, xCorrectionMethod, etc.).
-    // Loads raw data from disk via the active adapter. Returns false on failure.
+    // Loads raw data from the active workspace. Returns false on failure.
     bool computeAndCacheSpectrum(const std::string& filePath, const std::string& fileId);
 
     // Synchronously recompute the spectrum cache for `fileIds` wherever it is

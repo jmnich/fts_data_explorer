@@ -312,7 +312,7 @@ t100/&lt;id&gt;/                                   <span class="c">(member group
 <tr><td><code>application</code></td><td>string</td><td>Producing application name</td></tr>
 <tr><td><code>version</code></td><td>string</td><td>Application version</td></tr>
 </table>
-<p>Additional keys permitted (e.g. <code>adapter</code>, <code>parser</code>) but no host-identifying info. For interferogram groups, one <code>@origin</code> serves all datasets in the group.</p>
+<p>Additional keys permitted (e.g. <code>instrument</code>, <code>notes</code>) but no host-identifying info. For interferogram groups, one <code>@origin</code> serves all datasets in the group.</p>
 <p>Individual original datasets may carry a <code>timestamp</code> attribute (ISO-8601 UTC) recording the acquisition time of that measurement.</p>
 
 <hr>
@@ -379,7 +379,6 @@ t100/&lt;id&gt;/                                   <span class="c">(member group
 <table>
 <tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
 <tr><td><code>sourceFormat</code></td><td>string</td><td>—</td><td><code>csv</code>, <code>txt</code></td></tr>
-<tr><td><code>adapterName</code></td><td>string</td><td>—</td><td>e.g. <code>"WUST Mini FTS"</code></td></tr>
 <tr><td><code>dataType</code></td><td>string</td><td>—</td><td><code>igm_uncorrected_x</code> | <code>igm_corrected_x</code></td></tr>
 <tr><td><code>axisCorrected</code></td><td>bool</td><td>false</td><td>OPD column present</td></tr>
 <tr><td><code>detectorUnits</code></td><td>string</td><td><code>"V"</code></td><td></td></tr>

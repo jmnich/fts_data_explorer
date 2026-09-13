@@ -2,9 +2,7 @@
 #include "spectral_toolbox.h"
 #include "interferogram_data.h"
 #include "cursor_overlay.h"
-#if FTS_BUILD_HDF5
 #include "workspace_reader.h"
-#endif
 #include "theme.h"
 #include "app_state.h"
 #include "imgui_internal.h"   // GetCurrentWindowRead()->SkipItems (hidden dock tab)
@@ -377,14 +375,12 @@ bool SnrSpectrum::tickCalculation() {
             cachedSnrX = calcCommonX;
             fileCount = calcValidFiles;
             snrAvailable = true;
-#if FTS_BUILD_HDF5
             if (appState && appState->hasWorkspace() && snrAvailable) {
                 auto inputs = checkedInputPaths(*appState);
                 wsUpsertSnr(appState->active->workspace, inputs, fileCount,
                             cachedSnrX, cachedSnrY,
                             makeSnrConfig(*appState, inputs, fileCount));
             }
-#endif
         } else {
             snrAvailable = false;
             fileCount = 0;

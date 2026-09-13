@@ -681,7 +681,7 @@ static void handleWorkspace(const HeadlessConfig& cfg) {
     // Note: -w stays single-workspace only; multi-workspace .h5 export
     // (P18, beyond committed scope) would land here as a new -w output type.
     // 3. Open workspace (loads, sets datasetInfo/csvFiles, applyViewState,
-    //    seedPanels, AdapterRegistry::s_workspace, currentDatasetName)
+    //    seedPanels, currentDatasetName)
     try {
         openWorkspace(appState, cfg.path);
     } catch (const std::exception& e) {
@@ -721,8 +721,7 @@ static void handleWorkspace(const HeadlessConfig& cfg) {
     std::sort(appState.active->sortedFiles.begin(), appState.active->sortedFiles.end(), naturalBasenameLess);
 
     // 6. Load EVERY member (no GUI limit in headless mode): rawDataCache feeds
-    //    the IFG CSV writers. loadFileStatic routes the "HDF5 Workspace"
-    //    sentinel to workspaceRead (adapter_registry.cpp).
+    //    the IFG CSV writers. Every member is read through workspaceRead.
     //    F1: no downsampling pass — enableDownsampling defaults to true here
     //    (applySessionDefaults is GUI-only, configPtr is null) but nothing in
     //    headless reads loadedData; every export re-reads full density via

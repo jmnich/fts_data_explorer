@@ -29,9 +29,8 @@ bool isMultiWorkspaceFile(const std::string& path);
 
 bool multiWorkspaceCreate(const std::string& path, std::string& err);
 // New multi-workspace .h5 with the current dataset embedded (embeds FROM `srcPath` on
-// disk — the saved state; `s` is unused today and kept for signature
-// compatibility). Route through this from the Session tab's single-file mode.
-bool multiWorkspaceCreateFromDataset(AppState& s, const std::string& path,
+// disk — the saved state). Route through this from the Session tab's single-file mode.
+bool multiWorkspaceCreateFromDataset(const std::string& path,
                             const std::string& srcPath, std::string& err);
 // Embed a copy of a standalone .h5 into the archive; returns the new source id.
 // slowSave pauses inside the atomic window (2 s) — test hook for the

@@ -2,7 +2,7 @@
 
 #include <string>
 
-// Cross-platform application data directory (phase5.md decision 11):
+// Cross-platform application data directory:
 //   Linux:   $XDG_DATA_HOME/fts_data_explorer, defaulting to
 //            $HOME/.local/share/fts_data_explorer, falling back to
 //            $HOME/.fts_data_explorer

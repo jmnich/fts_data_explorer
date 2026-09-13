@@ -2,9 +2,7 @@
 #include "spectral_toolbox.h"
 #include "interferogram_data.h"
 #include "cursor_overlay.h"
-#if FTS_BUILD_HDF5
 #include "workspace_reader.h"
-#endif
 #include "theme.h"
 #include "app_state.h"
 #include "implot3d.h"
@@ -38,12 +36,6 @@ static void SetupAxisTicksLimited(ImAxis axis, double min, double max, int maxTi
     }
     if (!ticks.empty())
         ImPlot::SetupAxisTicks(axis, ticks.data(), ticks.size(), nullptr);
-}
-
-static double convertToUm(double value, int unit) {
-    if (unit == 0) return SpectralToolbox::convertCmToUm(value);
-    if (unit == 2) return SpectralToolbox::convertTHzToUm(value);
-    return value;
 }
 
 static double convertFromUmToDisplay(double um, int unit) {
@@ -1015,14 +1007,12 @@ bool AllanVariance::tickPhase2_AllanVariance() {
         fileCount = M_raw;
         allanAvailable = (numSurfaceWavelengths > 0 && numSurfaceTaus > 0);
 
-#if FTS_BUILD_HDF5
         if (appState && appState->hasWorkspace() && allanAvailable) {
             auto inputs = checkedInputPaths(*appState);
             wsUpsertAllan(appState->active->workspace, inputs,
                           cachedSurfaceTaus, cachedSurfaceWavelengths, cachedSurfaceAllanVar,
                           makeAllanConfig(*appState, inputs));
         }
-#endif
 
         if (selectedSliceIndex >= numSurfaceWavelengths)
             selectedSliceIndex = (numSurfaceWavelengths > 0) ? numSurfaceWavelengths - 1 : 0;

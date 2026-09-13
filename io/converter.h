@@ -8,7 +8,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------------------
-// Converter contract (phase5.md §1)
+// Converter contract
 //
 // A converter is one self-contained script (typically Python) with a magic
 // manifest in its head:

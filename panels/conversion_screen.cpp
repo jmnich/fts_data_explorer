@@ -14,9 +14,7 @@
 #include "file_browser.h"
 #include "theme.h"
 #include "popup_utils.h"
-#if FTS_BUILD_HDF5
 #include "hdf/h5_store.h"
-#endif
 #include "imgui.h"
 
 namespace fs = std::filesystem;
@@ -169,14 +167,12 @@ static void pollJobs(AppState& s) {
         st.showLog = true;
         if (st.job.exitCode == 0) {
             std::string outPath = derivedOutputH5(st);
-#if FTS_BUILD_HDF5
             try {
                 H5Store::validate(outPath);
             } catch (const std::exception& e) {
                 st.lastError = std::string("Converted file failed validation: ") + e.what();
                 return;
             }
-#endif
             st.lastError.clear();
             if (st.openAfterConvert) {
                 // "Convert and open": validate, open the workspace, close.

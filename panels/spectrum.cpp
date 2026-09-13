@@ -3,9 +3,7 @@
 #include "interferogram_data.h"
 #include "hitran_panel.h"
 #include "cursor_overlay.h"
-#if FTS_BUILD_HDF5
 #include "workspace_reader.h"
-#endif
 #include "imgui_internal.h"   // GetCurrentWindowRead()->SkipItems (hidden dock tab)
 #include <cmath>
 #include <algorithm>
@@ -143,10 +141,8 @@ void Spectrum::pollPendingSpectra() {
                 auto ps = it->future.get();
                 cachedSpectra[it->fileId] = std::move(ps.spectrumY);
                 cachedFrequencies[it->fileId] = std::move(ps.spectrumX);
-#if FTS_BUILD_HDF5
                 wsMirrorSpectrum(*appState, it->fileId,
                                  cachedFrequencies[it->fileId], cachedSpectra[it->fileId]);
-#endif
 
                 // Stamp the fingerprint CAPTURED AT SUBMIT TIME, not the
                 // current selectors — a param change mid-compute must not mark
@@ -204,9 +200,7 @@ bool Spectrum::computeAndCacheSpectrum(const std::string& filePath, const std::s
             lastPrimaryDetectors[fileId] = raw.primaryDetector;
         }
 
-#if FTS_BUILD_HDF5
         wsMirrorSpectrum(*appState, fileId, cachedFrequencies[fileId], cachedSpectra[fileId]);
-#endif
 
         lastSpectrumParams[fileId] = currentSpectrumParams();
 
@@ -306,7 +300,6 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                 ImGui::Dummy(square_size);
                 ImGui::SameLine();
                 std::string legendLabel = displayName;
-#if FTS_BUILD_HDF5
                 // "Show timestamps": precomputed-spectrum originals only; derived
                 // spectra (spec_*) never get a timestamp (plan §4, site 3).
                 if (appState && appState->hasWorkspace() && appState->showTimestamps &&
@@ -314,7 +307,6 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                     std::string ts = memberTimestampHMS(appState->active->workspace, fileData.first);
                     if (!ts.empty()) legendLabel += " [" + ts + "]";
                 }
-#endif
                 ImGui::Text("%s", legendLabel.c_str());
                 
                 if (i < primaryDetectors.size() - 1) {
@@ -436,13 +428,11 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                     // primary-only: the reference-empty guard below skips the
                     // computation instead of producing garbage.
                     rawData.primaryDetector = primaryDetector;
-#if FTS_BUILD_HDF5
                     if (appState && appState->hasWorkspace()) {
                         try {
                             rawData = workspaceRead(appState->active->workspace, fileId);
                         } catch (...) { /* keep the primary-only fallback */ }
                     }
-#endif
                 }
 
                 const bool needsComputation = isSpectrumDirty(fileId, rawData.primaryDetector);
@@ -510,10 +500,8 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
 
                         cachedSpectra[fileId]     = std::move(ps.spectrumY);
                         cachedFrequencies[fileId] = std::move(ps.spectrumX);
-#if FTS_BUILD_HDF5
                         wsMirrorSpectrum(*appState, fileId,
                                          cachedFrequencies[fileId], cachedSpectra[fileId]);
-#endif
 
                         lastPrimaryDetectors[fileId] = rawData.primaryDetector;
                         lastSpectrumParams[fileId]   = currentSpectrumParams();

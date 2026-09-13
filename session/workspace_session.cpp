@@ -116,8 +116,8 @@ void restoreOpenEmbeddedTabs(AppState& s) {
         std::string err;
         sess->workspace = multiWorkspaceLoadSource(multiWorkspacePath, id, err);
         if (!err.empty()) {
-            s.adapterErrorMsg = std::string("Failed to reopen source tab:\n") + err;
-            s.showAdapterErrorPopup = true;
+            s.errorMsg = std::string("Failed to reopen source tab:\n") + err;
+            s.showErrorPopup = true;
             continue;
         }
         finishSessionLoad(*sess, name);

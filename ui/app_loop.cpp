@@ -139,9 +139,9 @@ static void renderUnsavedPromptModal() {
                             std::string err;
                             if (!multiWorkspaceSaveExperiments(
                                     appState, appState.sessionTab.multiWorkspacePath, err)) {
-                                appState.adapterErrorMsg =
+                                appState.errorMsg =
                                     std::string("Experiment save failed:\n") + err;
-                                appState.showAdapterErrorPopup = true;
+                                appState.showErrorPopup = true;
                             } else {
                                 // Persist the exact tab-strip order with the
                                 // same save (bugfix 2026-08-14).
@@ -149,9 +149,9 @@ static void renderUnsavedPromptModal() {
                                     appState.sessionTab.multiWorkspacePath,
                                     persistableTabOrder(appState), err);
                                 if (!err.empty()) {
-                                    appState.adapterErrorMsg =
+                                    appState.errorMsg =
                                         std::string("Tab-order save failed:\n") + err;
-                                    appState.showAdapterErrorPopup = true;
+                                    appState.showErrorPopup = true;
                                 }
                             }
                         }
@@ -168,8 +168,8 @@ static void renderUnsavedPromptModal() {
             } catch (const std::exception& e) {
                 appState.pendingTabCloseIdx = -1;
                 appState.pendingWorkspaceAction = PendingWorkspaceAction::None;
-                appState.adapterErrorMsg = std::string("Save failed:\n") + e.what();
-                appState.showAdapterErrorPopup = true;
+                appState.errorMsg = std::string("Save failed:\n") + e.what();
+                appState.showErrorPopup = true;
             }
         } else if (pressed == 1) {
             if (closingTab) {
@@ -250,8 +250,8 @@ static void renderStaleDropPromptModal() {
                     dispatchPendingAction(appState);
                 ImGui::CloseCurrentPopup();
             } catch (const std::exception& e) {
-                appState.adapterErrorMsg = std::string("Save failed:\n") + e.what();
-                appState.showAdapterErrorPopup = true;
+                appState.errorMsg = std::string("Save failed:\n") + e.what();
+                appState.showErrorPopup = true;
             }
         }
         drawModalAccentFrame(modalAccent());
@@ -384,8 +384,8 @@ static void renderExperimentDeleteConfirmModal() {
                     std::string err;
                     if (!multiWorkspaceExperimentRemove(appState.sessionTab.multiWorkspacePath,
                                                env->id, err)) {
-                        appState.adapterErrorMsg = "Delete failed:\n" + err;
-                        appState.showAdapterErrorPopup = true;
+                        appState.errorMsg = "Delete failed:\n" + err;
+                        appState.showErrorPopup = true;
                     }
                 }
                 removeExperiment(appState, idx);
@@ -432,8 +432,8 @@ static void advanceExitSaveAll() {
                 if (!env->dirty) continue;
                 std::string err;
                 if (!multiWorkspaceSaveExperiment(appState, *env, multiWorkspacePath, err)) {
-                    appState.adapterErrorMsg = std::string("Experiment save failed:\n") + err;
-                    appState.showAdapterErrorPopup = true;
+                    appState.errorMsg = std::string("Experiment save failed:\n") + err;
+                    appState.showErrorPopup = true;
                     appState.exitSaveAllRunning = false;
                     appState.exitDirtyTabs.clear();
                     appState.exitDirtyExperiments.clear();
@@ -471,8 +471,8 @@ static void advanceExitSaveAll() {
     try {
         doSaveWorkspace(appState, "");
     } catch (const std::exception& e) {
-        appState.adapterErrorMsg = std::string("Save failed:\n") + e.what();
-        appState.showAdapterErrorPopup = true;
+        appState.errorMsg = std::string("Save failed:\n") + e.what();
+        appState.showErrorPopup = true;
         appState.exitSaveAllRunning = false;
         appState.exitDirtyTabs.clear();
         appState.exitDirtyExperiments.clear();
@@ -1018,7 +1018,7 @@ void handleKeyboardNavigation(const std::vector<std::string>& csvFiles,
  */
 // Experiment windows are docked dynamically (SetNextWindowDockID FirstUseEver
 // in EnvironmentSession::render) — no default-layout entry needed; per-tab-type
-// layout persistence arrives in Phase 4 (P16).
+// layout persistence is handled by ui/layout_persistence.h.
 static void rebuildDefaultLayout(ImGuiID dockspace_id, float topOffset) {
     ImGui::DockBuilderRemoveNode(dockspace_id);
     ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
@@ -1229,9 +1229,7 @@ bool AppLoop::runFrame() {
     // time, or saved/discarded via the shared modal). Must run AFTER
     // advanceExitSaveAll — its completion sets pendingGoHome.
     if (appState.pendingGoHome) {
-#if FTS_BUILD_HDF5
         finalizeGoHome(appState);
-#endif
     }
 
     pollEvents();
@@ -1290,7 +1288,6 @@ bool AppLoop::runFrame() {
 void AppLoop::pollEvents() {
         glfwPollEvents();
 
-#if FTS_BUILD_HDF5
         // Exit intercept (M2.2): defer closing while ANY tab is dirty so the
         // multi-dirty modal can run (Save All / Discard All / Cancel). The
         // active workspace's dirty flag lives in the flat fields; parked
@@ -1333,7 +1330,6 @@ void AppLoop::pollEvents() {
             appState.exitDeferredClose = false;
             glfwSetWindowShouldClose(window_, GLFW_TRUE);
         }
-#endif
 }
 
 void AppLoop::pollAsyncComputations() {
@@ -1457,7 +1453,7 @@ void AppLoop::scheduleRedraws() {
         // last frame's stack and can lag the setting frame).
         const bool modalActive =
             appState.showUnsavedPrompt || appState.showStaleDropPrompt ||
-            appState.showExitDirtyModal || appState.showAdapterErrorPopup ||
+            appState.showExitDirtyModal || appState.showErrorPopup ||
             appState.showExperimentDeleteConfirm;
         if (!appState.needsRedraw && (stepwiseActive || modalActive))
             appState.needsRedraw = true;
@@ -1644,13 +1640,12 @@ void AppLoop::handleInput() {
             glfwGetKey(window_, GLFW_KEY_S) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
         if (sKeyPressed && !appState.sKeyPressedLastFrame &&
             !ImGui::GetIO().WantCaptureKeyboard) {
-#if FTS_BUILD_HDF5
             if (wsActive && appState.hasWorkspace() && ImGui::GetIO().KeyShift) {
                 try {
                     saveWorkspaceAs(appState, window_);   // dialog flow
                 } catch (const std::exception& e) {
-                    appState.adapterErrorMsg = std::string("Save failed:\n") + e.what();
-                    appState.showAdapterErrorPopup = true;
+                    appState.errorMsg = std::string("Save failed:\n") + e.what();
+                    appState.showErrorPopup = true;
                 }
             } else {
                 // Deferred manual save: the "Saving..." overlay draws this
@@ -1658,7 +1653,6 @@ void AppLoop::handleInput() {
                 // frame top and clears into the "Saved" toast.
                 requestSaveEverything(appState);
             }
-#endif
             appState.needsRedraw = true;
         }
         appState.sKeyPressedLastFrame = sKeyPressed;
@@ -1713,26 +1707,15 @@ void AppLoop::handleInput() {
         
 
         
-        // Handle Delete key to remove currently navigated file
+        // Handle Delete key to remove currently navigated member
         // (OpenPopup is deferred to the Files panel, after NewFrame)
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) &&
             ImGui::IsKeyPressed(ImGuiKey_Delete) &&
             !appState.active->sortedFiles.empty()) {
-#if FTS_BUILD_HDF5
-            if (appState.hasWorkspace()) {
-                appState.active->pendingWorkspaceDeletionPath =
-                    memberPathOf(appState.active->workspace, appState.active->sortedFiles[appState.active->currentSortedFileIndex]);
-                if (!appState.active->pendingWorkspaceDeletionPath.empty()) {
-                    appState.active->showWorkspaceDeleteConfirmPopup = true;
-                    appState.needsRedraw = true;
-                }
-            } else
-#endif
-            if (appState.active->skipDeleteConfirm) {
-                performFileDeletion(appState, appState.active->currentSortedFileIndex);
-            } else {
-                appState.active->deleteConfirmIndex = appState.active->currentSortedFileIndex;
-                appState.active->showDeleteConfirmPopup = true;
+            appState.active->pendingWorkspaceDeletionPath =
+                memberPathOf(appState.active->workspace, appState.active->sortedFiles[appState.active->currentSortedFileIndex]);
+            if (!appState.active->pendingWorkspaceDeletionPath.empty()) {
+                appState.active->showWorkspaceDeleteConfirmPopup = true;
                 appState.needsRedraw = true;
             }
         }
@@ -1894,11 +1877,7 @@ void AppLoop::handleInput() {
         // wsActive gate so it works from the Session tab too (bugfix
         // 2026-08-13).
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) && ImGui::IsKeyPressed(ImGuiKey_H) && ImGui::GetIO().KeyCtrl) {
-#if FTS_BUILD_HDF5
             requestGoHome(appState);
-#else
-            resetActiveWorkspaceTab(appState);
-#endif
         }
 
 }
@@ -1963,7 +1942,6 @@ void AppLoop::renderUI() {
         if (appState.scrollAccumY != 0.0f || appState.scrollAccumX != 0.0f)
             appState.needsRedraw = true;
 
-#if FTS_BUILD_HDF5
         // Phase 3 view-state dirty latch: diff the managed view-state JSON
         // against the baseline. The baseline is finalized at the end of the
         // first rendered frame (see the post-render block), so the first-load
@@ -1979,7 +1957,6 @@ void AppLoop::renderUI() {
                                    "View settings (zooms, ranges, panel options)");
             }
         }
-#endif
 
         // Conditionally disable anti-aliasing for large datasets (>50k points).
         // Guarded: the active pointer is null while no workspace tab exists
@@ -1998,7 +1975,7 @@ void AppLoop::renderUI() {
             // Unsaved Changes / stale-drop modal (OpenPopupEx closes open
             // popups with a different id), making the welcome modal
             // "disappear" and the flow look broken.
-            bool showPopup = !appState.showAdapterErrorPopup
+            bool showPopup = !appState.showErrorPopup
                           && !appState.conversionScreen.open
                           && !appState.showUnsavedPrompt
                           && !appState.showStaleDropPrompt;
@@ -2012,19 +1989,19 @@ void AppLoop::renderUI() {
         }
         renderConversionScreen(appState);
 
-        // Render adapter error popup
-        if (appState.showAdapterErrorPopup) {
-            ImGui::OpenPopup("Adapter Error##adapterError");
+        // Render error popup
+        if (appState.showErrorPopup) {
+            ImGui::OpenPopup("Error##errorPopup");
             appState.needsRedraw = true;
         }
         beginModal(520.0f, modalAccent());
-        if (ImGui::BeginPopupModal("Adapter Error##adapterError", &appState.showAdapterErrorPopup,
+        if (ImGui::BeginPopupModal("Error##errorPopup", &appState.showErrorPopup,
                                    ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
             // NoTitleBar: the title moves into the body so removing the
             // header loses no information.
-            ImGui::Text("Adapter Error");
+            ImGui::Text("Error");
             ImGui::Spacing();
-            ImGui::TextWrapped("%s", appState.adapterErrorMsg.c_str());
+            ImGui::TextWrapped("%s", appState.errorMsg.c_str());
             ImGui::Spacing();
             ImGui::Separator();
             ImGui::Spacing();
@@ -2032,7 +2009,7 @@ void AppLoop::renderUI() {
             static bool errWasOpen = false;
             if (modalButtonRow({"OK"}, errFocus, errWasOpen, modalAccent()) == 0 ||
                 ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-                appState.showAdapterErrorPopup = false;
+                appState.showErrorPopup = false;
                 ImGui::CloseCurrentPopup();
             }
             errWasOpen = true;
@@ -2041,13 +2018,11 @@ void AppLoop::renderUI() {
         }
         endModal();
 
-#if FTS_BUILD_HDF5
         // Phase 2 modals: unsaved-changes + stale-drop confirmation.
         renderUnsavedPromptModal();
         renderStaleDropPromptModal();
         renderExitDirtyModal();
         renderExperimentDeleteConfirmModal();
-#endif
         
         // Only render main docking interface if welcome screen is not active
         if (appState.welcomeScreenInitialized) {
@@ -2438,7 +2413,6 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
         // rendered frame, AFTER the panels have rendered and the first-load
         // autoscale has written the final zoom ranges. Latch compares from the
         // next frame.
-#if FTS_BUILD_HDF5
         if (appState.hasWorkspace() && appState.active->viewStateBaselinePending) {
             appState.active->viewStateBaseline = viewStateJson(appState);
             appState.active->viewStateBaselinePending = false;
@@ -2451,7 +2425,6 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
                 appState.active->workspace.changeLog.clear();
             }
         }
-#endif
 }
 
 void AppLoop::present() {

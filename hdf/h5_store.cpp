@@ -16,7 +16,7 @@ constexpr const char* kFormat = "unified-spectral-data-container";
 
 // igm_uncorrected_x is stored as fp32 on disk (matches the python parser);
 // every other type group is fp64. Original-data protection tolerances follow
-// this dtype mapping (see phase0.md "Locked decisions").
+// this dtype mapping.
 constexpr double kTolFp32 = 1e-6;
 constexpr double kTolFp64 = 1e-12;
 

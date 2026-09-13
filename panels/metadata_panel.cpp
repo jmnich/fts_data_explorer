@@ -83,7 +83,6 @@ void renderMetadataPanel() {
             ImGui::Text("Data type: %s", dataTypeName);
             
             // Display comments if comments.txt exists (WUST format)
-#if FTS_BUILD_HDF5
             if (appState.hasWorkspace()) {
                 ImGui::Separator();
 
@@ -126,7 +125,6 @@ void renderMetadataPanel() {
                     }
                 }
             } else
-#endif
             if (appState.active->datasetInfo.hasMetadataFile) {
                 ImGui::Separator();
                 ImGui::Text("Comments:");

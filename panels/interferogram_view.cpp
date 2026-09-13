@@ -124,13 +124,11 @@ void renderInterferogramPanel() {
                     ImGui::Dummy(square_size);
                     ImGui::SameLine();
                     std::string legendLabel = appState.active->selectedFilenames[i];
-#if FTS_BUILD_HDF5
                     // "Show timestamps": append hh:mm:ss for original members.
                     if (appState.hasWorkspace() && appState.showTimestamps) {
                         std::string ts = memberTimestampHMS(appState.active->workspace, appState.active->selectedFiles[i]);
                         if (!ts.empty()) legendLabel += " [" + ts + "]";
                     }
-#endif
                     ImGui::Text("%s", legendLabel.c_str());
                     if (i < appState.active->loadedData.size() - 1) {
                         ImGui::SameLine();

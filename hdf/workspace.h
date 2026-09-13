@@ -79,8 +79,9 @@ struct MemberGroup {
 };
 
 // The in-memory model — the single object the app engine will talk to.
-// Multi-workspace embedded sources/ live under a group prefix and are read/written via
-// H5Store::loadGroup/saveGroup (M2.4); experiments/ groups land in Phase 4.
+// Embedded multi-workspace sources/ live under a group prefix and are
+// read/written via H5Store::loadGroup/saveGroup; experiments/ groups are
+// persisted under experiments/.
 struct Workspace {
     std::string format;     // "unified-spectral-data-container"
     std::string created;    // ISO-8601 UTC

@@ -1,5 +1,5 @@
 #include "file_browser.h"
-#include <filesystem>
+#include <vector>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -13,26 +13,6 @@
 #include <sys/types.h>
 #include <GLFW/glfw3.h>
 #endif
-
-std::vector<std::string> FileBrowser::getCSVFilesInDirectory(const std::string& directoryPath) {
-    std::vector<std::string> csvFiles;
-
-    if (directoryPath.empty()) {
-        return csvFiles;
-    }
-
-    if (!std::filesystem::exists(directoryPath) || !std::filesystem::is_directory(directoryPath)) {
-        return csvFiles;
-    }
-
-    for (const auto& entry : std::filesystem::directory_iterator(directoryPath)) {
-        if (entry.is_regular_file() && entry.path().extension() == ".csv") {
-            csvFiles.push_back(entry.path().string());
-        }
-    }
-
-    return csvFiles;
-}
 
 #ifdef _WIN32
 std::string FileBrowser::pickFolder(GLFWwindow* /*window*/, const std::string& title) {

@@ -1,7 +1,5 @@
 #pragma once
 
-#if FTS_BUILD_HDF5
-
 #include <string>
 #include <vector>
 
@@ -174,5 +172,3 @@ bool persistedSpectrumParams(const Workspace& ws, Spectrum& out,
 // carry no parameters. Two objects with equal window + equal effective
 // parameters produce identical output → plain == on the result compares them.
 nlohmann::json effectiveApodizationJson(const nlohmann::json& apod);
-
-#endif // FTS_BUILD_HDF5

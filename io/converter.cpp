@@ -136,7 +136,7 @@ ConverterDesc parseConverterFile(const std::string& path, bool fromRepo) {
     }
 
     // The manifest is a single JSON object, optionally wrapped across
-    // '# '-prefixed continuation lines (phase5.md §1 shows both forms).
+    // '# '-prefixed continuation lines.
     std::string manifestJson;
     for (size_t i = 0; i < lines.size(); ++i) {
         const std::string& l = lines[i];
