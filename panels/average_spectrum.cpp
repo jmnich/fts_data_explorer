@@ -220,6 +220,7 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
         avgGridCol.w *= appState->gridAlpha;
         ImPlot::PushStyleColor(ImPlotCol_AxisGrid, avgGridCol);
     }
+    plot.armPendingLimits(f);
     if (ImPlot::BeginPlot(workspacePlotId("AverageViewPlot").c_str(), ImVec2(-1, -1), f.plotFlags)) {
 
         plot.setupAxes(f);

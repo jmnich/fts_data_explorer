@@ -172,31 +172,11 @@ void SpectralPlotView::tickPrePlot(const SpectralPlotFrame& f) {
         }
     }
 
-    // Pre-apply the armed axis limits BEFORE BeginPlot. ImPlotCond_Once means
-    // "once per runtime session" (silently ignored forever after the first
-    // call), so ImPlotCond_Always is used — each branch consumes its trigger
-    // immediately, leaving ImPlot's mouse pan/zoom free afterwards.
-    //
-    // Hidden dock tabs set SkipItems: arming SetNextAxisLimits here would be
-    // discarded by ImPlot's hidden-window early return, losing the restored X
-    // range. Keep it armed until the panel is actually visible.
-    if (shouldAutoscale) {
-        // Autoscale cancels any armed pending range: a stale restore/Match-X
-        // latch (armed with shouldAutoscale=false, later superseded by a
-        // shouldAutoscale=true setter such as the T100 reference setters or
-        // an env artifact switch) must never override the autoscale on the
-        // frame after it fired.
-        pendingNextXMin = 0.0;
-        pendingNextXMax = -1.0;
-    } else if (pendingNextXMin < pendingNextXMax &&
-               !ImGui::GetCurrentWindowRead()->SkipItems) {
-        ImPlot::SetNextAxisLimits(ImAxis_X1, pendingNextXMin, pendingNextXMax,
-                                  ImPlotCond_Always);
-        // Consumed only — manualX was written by whoever armed the range; the
-        // end-of-frame mirror (captureLimits) owns it afterwards.
-        pendingNextXMin = 0.0;
-        pendingNextXMax = -1.0;
-    }
+    // NOTE: the armed pending X range is applied by armPendingLimits(), which
+    // the panel calls immediately before BeginPlot — after every data-gated
+    // early return. Arming here would leak ImPlot's GLOBAL NextPlotData when
+    // the panel returns early (no data), landing on the next plot in the frame
+    // (the interferogram view saw the 100% T window).
 
     // X-unit switch: convert the current manual X limits to the new unit so
     // the user keeps looking at the equivalent spectral region (e.g. 1-30 um
@@ -206,15 +186,11 @@ void SpectralPlotView::tickPrePlot(const SpectralPlotFrame& f) {
     // new one. Data conversion + async invalidation is the panel's job via
     // onXUnitChanged (fired exactly once per change).
     if (f.xUnitEnabled && xUnitSelector != prevXUnitSelector) {
-        // Hidden dock tabs (SkipItems): the armed SetNextAxisLimits below is
-        // discarded by ImPlot's hidden-window early return. The converted
-        // window then sits in convertedXMin/Max until the tab is visible, but
-        // manualX keeps the OLD-unit values and the persisted view state goes
-        // inconsistent (e.g. um unit + cm-1 window → wrong region on reopen).
-        // Fix: write the converted window through to manualX immediately and
-        // defer the actual application via the pending latch (armed AFTER the
-        // stale-pending clear below).
-        bool deferPendingApply = false;
+        // The converted window is written through to manualX immediately and
+        // re-armed via the pending latch; armPendingLimits() applies it before
+        // the next BeginPlot (SkipItems keeps it armed for a hidden tab). The
+        // old pre-BeginPlot arm here is gone — it leaked NextPlotData whenever
+        // the panel returned early (no data).
         if (!shouldAutoscale && manualXMin < manualXMax) {
             auto oldUnit = static_cast<SpectralToolbox::SpectrumXUnit>(prevXUnitSelector);
             auto newUnit = static_cast<SpectralToolbox::SpectrumXUnit>(xUnitSelector);
@@ -233,10 +209,6 @@ void SpectralPlotView::tickPrePlot(const SpectralPlotFrame& f) {
             } else {
                 manualXMin = newMin;
                 manualXMax = newMax;
-                if (!ImGui::GetCurrentWindowRead()->SkipItems)
-                    ImPlot::SetNextAxisLimits(ImAxis_X1, newMin, newMax, ImPlotCond_Always);
-                else
-                    deferPendingApply = true;
                 xUnitSwitchedThisFrame = true;
                 convertedXMin = newMin;
                 convertedXMax = newMax;
@@ -244,7 +216,7 @@ void SpectralPlotView::tickPrePlot(const SpectralPlotFrame& f) {
         }
         pendingNextXMin = 0.0;
         pendingNextXMax = -1.0;
-        if (deferPendingApply) {
+        if (xUnitSwitchedThisFrame && !shouldAutoscale && manualXMin < manualXMax) {
             pendingNextXMin = manualXMin;
             pendingNextXMax = manualXMax;
         }
@@ -252,11 +224,39 @@ void SpectralPlotView::tickPrePlot(const SpectralPlotFrame& f) {
         prevXUnitSelector = xUnitSelector;
         if (f.onViewChanged) f.onViewChanged();
     }
+}
+
+// ── PHASE 1b — immediately before BeginPlot (after every early return) ───────
+//
+// ImPlot's SetNextAxisLimits/SetNextAxisToFit write into the GLOBAL NextPlotData
+// slot, consumed by the next BeginPlot anywhere in the frame. Arming from
+// tickPrePlot leaked a whole view window when a panel returned early (e.g. the
+// 100% T panel with no transmittance data), and the interferogram view — the
+// first plot of the next frame — rendered the leaked 100% T X window. Panels
+// call this only on the path that actually calls BeginPlot, so nothing leaks.
+void SpectralPlotView::armPendingLimits(const SpectralPlotFrame& f) {
+    // X window.
+    if (shouldAutoscale) {
+        // Autoscale cancels any armed pending range: a stale restore/Match-X
+        // latch (armed with shouldAutoscale=false, later superseded by a
+        // shouldAutoscale=true setter such as the T100 reference setters or
+        // an env artifact switch) must never override the autoscale on the
+        // frame after it fired.
+        pendingNextXMin = 0.0;
+        pendingNextXMax = -1.0;
+    } else if (pendingNextXMin < pendingNextXMax &&
+               !ImGui::GetCurrentWindowRead()->SkipItems) {
+        ImPlot::SetNextAxisLimits(ImAxis_X1, pendingNextXMin, pendingNextXMax,
+                                  ImPlotCond_Always);
+        // Consumed only — manualX was written by whoever armed the range; the
+        // end-of-frame mirror (captureLimits) owns it afterwards.
+        pendingNextXMin = 0.0;
+        pendingNextXMax = -1.0;
+    }
 
     // Y-scale change: re-fit Y only — keep the current X range intact so the
     // user keeps looking at the same spectral region. SkipItems-guarded
-    // (hidden dock tab) — see the unit-switch note above; the latch sync
-    // always runs.
+    // (hidden dock tab) so the refit survives until the panel is visible.
     if (yScaleSelector != prevYScaleSelector) {
         if (f.yScaleEnabled && yAxisMode != kYModeForce &&
             !ImGui::GetCurrentWindowRead()->SkipItems)

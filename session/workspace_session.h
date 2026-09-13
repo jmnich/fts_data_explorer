@@ -81,6 +81,19 @@ public:
     float prim_y_min = 0.0f, prim_y_max = 1.0f;
     bool autoFitYAxis = true;
     double last_x_min = 0.0, last_x_max = 0.0;
+    // One-shot: apply the workspace.json "interferogramView.zoomRange" window
+    // on the first rendered frame (armed by applyPanelViewState, consumed by
+    // the Interferogram View render — mirrors SpectralPlotView's pending latch).
+    // The render-time guard is required: app_loop re-arms shouldAutoscale after
+    // applyViewState on first load.
+    bool pendingIfgXRestore = false;
+    // Axis conventions / decimation the pending window was saved under. A
+    // mismatch at render time drops the latch: a sample-index window is
+    // meaningless in OPD mode (and vice versa), and a decimated window in
+    // full-resolution data (or the reverse) can land outside the data.
+    int  ifgRestoreAxisBase = 0;
+    bool ifgRestoreMaxAtZero = false;
+    bool ifgRestoreDownsampling = true;
     float last_ref_y_min = 0.0f, last_ref_y_max = 0.0f;
     float last_prim_y_min = 0.0f, last_prim_y_max = 0.0f;
     bool leftArrowPressedLastFrame = false;

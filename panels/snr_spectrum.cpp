@@ -158,6 +158,7 @@ void SnrSpectrum::renderSnrContents(bool showTrackingCursor) {
         ImPlot::PushStyleColor(ImPlotCol_AxisGrid, snrGridCol);
     }
     ImVec2 plotPos(0.0f, 0.0f), plotSize(0.0f, 0.0f);
+    plot.armPendingLimits(f);
     if (ImPlot::BeginPlot(workspacePlotId("SnrViewPlot").c_str(), ImVec2(-1, -1), f.plotFlags)) {
 
         plot.setupAxes(f);

@@ -26,6 +26,22 @@ void renderInterferogramPanel() {
             // Reset X-axis zoom when ESC is pressed (only for main window)
             appState.active->zoomRange = {0, 0};
             appState.active->shouldAutoscale = true; // Always force redraw with full range when ESC is pressed
+            appState.active->pendingIfgXRestore = false; // explicit reset beats a not-yet-applied restore
+        }
+
+        // A restored window is only meaningful in the axis convention and data
+        // decimation it was captured under. If any of these changed before the
+        // first data-bearing render (hidden dock tab + user toggle), drop the
+        // latch so the autoscale owns the view instead of applying a stale
+        // frame. A forced X refit beats the restore outright — otherwise the
+        // !pendingIfgXRestore guard below would skip the branch that clears
+        // forceXAutofit and strand it for the next frame.
+        if (appState.active->pendingIfgXRestore &&
+            (appState.active->forceXAutofit ||
+             appState.active->xAxisBase != appState.active->ifgRestoreAxisBase ||
+             appState.active->maxAtZero != appState.active->ifgRestoreMaxAtZero ||
+             appState.active->enableDownsampling != appState.active->ifgRestoreDownsampling)) {
+            appState.active->pendingIfgXRestore = false;
         }
         
         if (appState.active->dataLoaded && !appState.active->loadedData.empty()) {
@@ -287,7 +303,8 @@ void renderInterferogramPanel() {
                         // Optimize by reducing grid line rendering overhead for large datasets
                     }
 
-                    if (appState.active->shouldAutoscale || appState.active->forceXAutofit) {
+                    if ((appState.active->shouldAutoscale || appState.active->forceXAutofit)
+                        && !appState.active->pendingIfgXRestore) {
                         // Set initial view to show all data when new data is loaded or when downsampling is toggled
                         if (appState.active->xAxisBase == 1 && appState.active->dataLoaded) {
                             double xMin = std::numeric_limits<double>::max();
@@ -359,6 +376,13 @@ void renderInterferogramPanel() {
                                 xMin = 0.0;
                                 xMax = static_cast<double>(appState.active->loadedData[0].referenceDetector.size());
                             }
+                        }
+                        // Restored IFG X window (workspace.json §8
+                        // "interferogramView.zoomRange"): the one-shot latch
+                        // overrides the suppressed first-load autoscale here.
+                        // Last SetupAxisLimits call wins; ticks below are safe.
+                        if (appState.active->pendingIfgXRestore && xMin < xMax) {
+                            ImPlot::SetupAxisLimits(ImAxis_X1, xMin, xMax, ImPlotCond_Always);
                         }
                         float yMin = appState.active->last_ref_y_min;
                         float yMax = appState.active->last_ref_y_max;
@@ -586,7 +610,8 @@ void renderInterferogramPanel() {
                         }
                     }
 
-                    if (appState.active->shouldAutoscale || appState.active->forceXAutofit) {
+                    if ((appState.active->shouldAutoscale || appState.active->forceXAutofit)
+                        && !appState.active->pendingIfgXRestore) {
                         // Set initial view to show all data when new data is loaded or when downsampling is toggled
                         if (appState.active->xAxisBase == 1 && appState.active->dataLoaded) {
                             double xMin = std::numeric_limits<double>::max();
@@ -653,6 +678,10 @@ void renderInterferogramPanel() {
                                 xMin = 0.0;
                                 xMax = static_cast<double>(appState.active->loadedData[0].primaryDetector.size());
                             }
+                        }
+                        // Restored IFG X window — see the reference plot note.
+                        if (appState.active->pendingIfgXRestore && xMin < xMax) {
+                            ImPlot::SetupAxisLimits(ImAxis_X1, xMin, xMax, ImPlotCond_Always);
                         }
                         float yMin = appState.active->last_prim_y_min;
                         float yMax = appState.active->last_prim_y_max;
@@ -871,6 +900,11 @@ void renderInterferogramPanel() {
                 // Reset autoscale flag after use
                 if (appState.active->shouldAutoscale) {
                     appState.active->shouldAutoscale = false;
+                }
+                // Consume the restored-X latch only once a data-bearing frame
+                // has rendered (hidden dock tabs leave it armed for later).
+                if (appState.active->pendingIfgXRestore) {
+                    appState.active->pendingIfgXRestore = false;
                 }
                 
                 ImPlot::EndSubplots();

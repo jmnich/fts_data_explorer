@@ -337,6 +337,16 @@ double viewDouble(const nlohmann::json& vs, const char* sub, const char* key, do
     auto it = s->find(key);
     return it != s->end() && it->is_number() ? it->get<double>() : fallback;
 }
+// Two-level variant for nested objects (e.g. interferogramView.zoomRange.min).
+double viewNestedDouble(const nlohmann::json& vs, const char* sub, const char* obj,
+                        const char* key, double fallback) {
+    auto s = vs.find(sub);
+    if (s == vs.end() || !s->is_object()) return fallback;
+    auto o = s->find(obj);
+    if (o == s->end() || !o->is_object()) return fallback;
+    auto it = o->find(key);
+    return it != o->end() && it->is_number() ? it->get<double>() : fallback;
+}
 bool viewBool(const nlohmann::json& vs, const char* sub, const char* key, bool fallback) {
     auto s = vs.find(sub);
     if (s == vs.end() || !s->is_object()) return fallback;
@@ -472,6 +482,28 @@ void applyPanelViewState(WorkspaceSession& ws, const nlohmann::json& vs) {
                      ws.allanVariance.shouldAutoscale);
     restorePanelZoom(vs, "t100View", ws.t100.plot.manualXMin, ws.t100.plot.manualXMax,
                      ws.t100.plot.pendingNextXMin, ws.t100.plot.pendingNextXMax, ws.t100.plot.shouldAutoscale);
+
+    // Interferogram View X zoom (spec §8.0: interferogramView.zoomRange).
+    // Arm the one-shot latch; the render applies it (the autoscale re-armed by
+    // the first data load would otherwise overwrite a flag cleared here).
+    {
+        const double lo = viewNestedDouble(vs, "interferogramView", "zoomRange", "min",
+                                           std::numeric_limits<double>::lowest());
+        const double hi = viewNestedDouble(vs, "interferogramView", "zoomRange", "max",
+                                           std::numeric_limits<double>::lowest());
+        if (lo < hi) {
+            ws.last_x_min = lo;
+            ws.last_x_max = hi;
+            ws.pendingIfgXRestore = true;
+            ws.ifgRestoreAxisBase = ws.xAxisBase;
+            ws.ifgRestoreMaxAtZero = ws.maxAtZero;
+            // Saved under the decimation that was active at capture; a config
+            // change between sessions must make the guard reject the window.
+            // Older files lack the key — fall back to the current value.
+            ws.ifgRestoreDownsampling = viewBool(vs, "interferogramView",
+                                                 "enableDownsampling", ws.enableDownsampling);
+        }
+    }
 }
 
 void applyPanelViewState(AppState& s, const nlohmann::json& vs) {
@@ -604,6 +636,13 @@ nlohmann::json viewStateJson(const WorkspaceSession& ws) {
             {{"num", std::string(ws.t100.energyRatioNumB)}, {"den", std::string(ws.t100.energyRatioDenB)}},
             {{"num", std::string(ws.t100.energyRatioNumC)}, {"den", std::string(ws.t100.energyRatioDenC)}}
         })}
+    };
+    // Interferogram View X window (spec §8.0). enableDownsampling records the
+    // decimation the sample-index window was captured under, so the restore
+    // guard can reject it after a config change.
+    j["interferogramView"] = {
+        {"zoomRange", {{"min", ws.last_x_min}, {"max", ws.last_x_max}}},
+        {"enableDownsampling", ws.enableDownsampling}
     };
     return j;
 }

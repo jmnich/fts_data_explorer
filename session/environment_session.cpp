@@ -1787,6 +1787,7 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
     // — the ImPlot plot (and its axis limits) is retained per instance across
     // renames; with instanceName in the id a rename recreated the plot and
     // reset the X range to fit-all.
+    plot.armPendingLimits(f);
     if (ImPlot::BeginPlot(("##envPlot" + stripKey).c_str(), ImVec2(-1, -1),
                           f.plotFlags)) {
         plot.setupAxes(f);

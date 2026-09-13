@@ -136,6 +136,7 @@ void clearSessionPanels(WorkspaceSession& s) {
     s.selectedFiles.clear();
     s.selectedFilenames.clear();
     s.dataLoaded = false;
+    s.pendingIfgXRestore = false;
     s.averageSpectrum.reset();
     s.snrSpectrum.reset();
     s.allanVariance.reset();

@@ -52,10 +52,15 @@ struct SpectralPlotFrame {
 // one spectral plot, plus the canonical behavior. The panel drives it through
 // four phases per frame:
 //
-//   1. tickPrePlot(f)   — before BeginPlot: ESC, arrow pan, pending consume,
-//                         X-unit switch, Y-scale/Y-mode change (all pre-BeginPlot
-//                         SetNextAxisLimits / SetNextAxisToFit calls, SkipItems-
-//                         guarded so hidden dock tabs keep the armed range).
+//   1. tickPrePlot(f)   — before BeginPlot: ESC, arrow pan, X-unit switch,
+//                         Y-scale/Y-mode detection. No ImPlot calls — arming is
+//                         deferred to armPendingLimits() so a data-gated early
+//                         return can never leak a stale SetNextAxisLimits into
+//                         the next plot (ImPlot's NextPlotData is global).
+//   1b. armPendingLimits(f) — immediately before BeginPlot, after every early
+//                         return: applies the pending X range / Y refit via
+//                         ImPlot's SetNext* (SkipItems-guarded so hidden dock
+//                         tabs keep the armed range).
 //   2. setupAxes(f)     — inside BeginPlot, before data: axis flags, scale,
 //                         forced-Y, first-load latch (data-gated), autoscale,
 //                         unit-switch clamp, tick limiting.
@@ -108,6 +113,7 @@ public:
     // ── phases ──────────────────────────────────────────────────────────────
     void reset();                                  // ALL members to defaults (incl. selectors)
     void tickPrePlot(const SpectralPlotFrame& f);  // before BeginPlot
+    void armPendingLimits(const SpectralPlotFrame& f); // immediately before BeginPlot
     void setupAxes(const SpectralPlotFrame& f);    // inside BeginPlot, before data
     void tickInPlot(const SpectralPlotFrame& f);   // inside BeginPlot, after data
     void drawSelectionOverlay(const char* idSuffix);

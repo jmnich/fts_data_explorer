@@ -1127,6 +1127,7 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
     float rowRatios[2] = {plotHeight, stdPlotHeight};
     // Plot rect for the stale-warning overlay (main transmittance plot).
     ImVec2 mainPlotPos(0.0f, 0.0f), mainPlotSize(0.0f, 0.0f);
+    plot.armPendingLimits(f);
     if (ImPlot::BeginSubplots(workspacePlotId("T100Stack").c_str(), rows, 1,
             ImVec2(-1, stddevAvailable
                             ? plotHeight + stdPlotHeight +

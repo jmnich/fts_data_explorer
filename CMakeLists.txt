@@ -397,6 +397,7 @@ add_executable(fts_session_roundtrip
     session/cross_store.cpp
     session/batch_engine.cpp
     ui/layout_persistence.cpp
+    panels/interferogram_view.cpp
     panels/spectrum.cpp
     panels/spectral_plot.cpp
     panels/average_spectrum.cpp

@@ -8,6 +8,7 @@
 #include <cassert>
 #include <cstdio>
 #include <cstring>
+#include <algorithm>
 #include <chrono>
 #include <thread>
 #include <string>
@@ -21,6 +22,14 @@
 #include "hdf/h5_store.h"
 #include "hdf/hdf5_util.h"
 #include "workspace_reader.h"
+#include "panels/panels.h"
+#include "imgui.h"
+#include "implot.h"
+
+// The session harness deliberately does not link files_panel.cpp / window.cpp;
+// interferogram_view.cpp (linked for test18) needs these two symbols.
+InterferogramData loadInterferogram(AppState&, const std::string&) { return {}; }
+void SetupAxisTicksLimited(ImAxis, double, double, int) {}
 
 #define CHECK_EQ(a, b)                                                        \
     do {                                                                      \
@@ -124,6 +133,10 @@ void populateSession(WorkspaceSession& s, const std::string& tag, const std::str
     s.prim_y_min = 3.0f; s.prim_y_max = 4.0f;
     s.autoFitYAxis = false;
     s.last_x_min = 5.0; s.last_x_max = 6.0;
+    s.pendingIfgXRestore = true;
+    s.ifgRestoreAxisBase = 1;
+    s.ifgRestoreMaxAtZero = true;
+    s.ifgRestoreDownsampling = false;
     s.last_ref_y_min = 7.0f; s.last_ref_y_max = 8.0f;
     s.last_prim_y_min = 9.0f; s.last_prim_y_max = 10.0f;
     s.leftArrowPressedLastFrame = true;
@@ -477,6 +490,10 @@ void checkMirrored(const L& a, const R& b) {
     CHECK(a.prim_y_min == b.prim_y_min && a.prim_y_max == b.prim_y_max);
     CHECK(a.autoFitYAxis == b.autoFitYAxis);
     CHECK(a.last_x_min == b.last_x_min && a.last_x_max == b.last_x_max);
+    CHECK(a.pendingIfgXRestore == b.pendingIfgXRestore);
+    CHECK(a.ifgRestoreAxisBase == b.ifgRestoreAxisBase);
+    CHECK(a.ifgRestoreMaxAtZero == b.ifgRestoreMaxAtZero);
+    CHECK(a.ifgRestoreDownsampling == b.ifgRestoreDownsampling);
     CHECK(a.last_ref_y_min == b.last_ref_y_min && a.last_ref_y_max == b.last_ref_y_max);
     CHECK(a.last_prim_y_min == b.last_prim_y_min && a.last_prim_y_max == b.last_prim_y_max);
     CHECK(a.leftArrowPressedLastFrame == b.leftArrowPressedLastFrame);
@@ -2187,6 +2204,147 @@ void test16b_t100SyncCompletionRenders() {
     std::printf("test16b: std-batch completion render OK\n");
 }
 
+// Interferogram View X-window persistence (spec §8.0): viewStateJson writes
+// interferogramView.zoomRange + the decimation it was captured under, and
+// applyViewState re-arms the one-shot restore latch with that window. The
+// saved-vs-current decimation is what the render-time stale guard compares.
+void test17_ifgViewStateRoundTrip() {
+    std::printf("test17: IFG view-state save/restore round-trip...\n");
+
+    WorkspaceSession ws;
+    ws.key = "ifg-roundtrip";
+    ws.last_x_min = 1234.5;
+    ws.last_x_max = 6789.0;
+    ws.xAxisBase = 1;          // saved convention (OPD)
+    ws.maxAtZero = true;
+    ws.enableDownsampling = false;
+
+    const nlohmann::json vs = viewStateJson(ws);
+    CHECK(vs.contains("interferogramView"));
+    CHECK(vs["interferogramView"]["zoomRange"]["min"].get<double>() == 1234.5);
+    CHECK(vs["interferogramView"]["zoomRange"]["max"].get<double>() == 6789.0);
+    CHECK(vs["interferogramView"]["enableDownsampling"].get<bool>() == false);
+
+    // Restore into a fresh session: the latch arms with the window and the
+    // saved axis convention (plotDefaults restores xAxisBase/maxAtZero first).
+    WorkspaceSession ws2;
+    ws2.key = "ifg-roundtrip-2";
+    ws2.workspace.workspaceJson = {{"applications", {{"FTS Data Explorer", vs}}}};
+    ws2.enableDownsampling = false;   // matches the capture
+    applyViewState(ws2);
+    CHECK(ws2.pendingIfgXRestore);
+    CHECK(ws2.last_x_min == 1234.5 && ws2.last_x_max == 6789.0);
+    CHECK(ws2.xAxisBase == 1);
+    CHECK(ws2.maxAtZero == true);
+    CHECK(ws2.ifgRestoreAxisBase == 1);
+    CHECK(ws2.ifgRestoreMaxAtZero == true);
+    CHECK(ws2.ifgRestoreDownsampling == false);
+
+    // A decimation change between sessions is detectable: current=true while
+    // the saved window was captured with false → the render guard drops it.
+    WorkspaceSession ws3;
+    ws3.key = "ifg-roundtrip-3";
+    ws3.workspace.workspaceJson = ws2.workspace.workspaceJson;
+    ws3.enableDownsampling = true;
+    applyViewState(ws3);
+    CHECK(ws3.pendingIfgXRestore);
+    CHECK(ws3.ifgRestoreDownsampling == false);
+    CHECK(ws3.enableDownsampling != ws3.ifgRestoreDownsampling);
+
+    // No saved window -> no latch; the first-load autoscale owns the view.
+    WorkspaceSession ws4;
+    ws4.key = "ifg-roundtrip-4";
+    ws4.workspace.workspaceJson =
+        {{"applications", {{"FTS Data Explorer", nlohmann::json::object()}}}};
+    ws4.last_x_min = 5.0; ws4.last_x_max = 6.0;
+    applyViewState(ws4);
+    CHECK(!ws4.pendingIfgXRestore);
+    CHECK(ws4.last_x_min == 5.0 && ws4.last_x_max == 6.0);
+
+    // Legacy files lack enableDownsampling -> fall back to the current value.
+    WorkspaceSession ws5;
+    ws5.key = "ifg-roundtrip-5";
+    nlohmann::json legacy = vs;
+    legacy["interferogramView"].erase("enableDownsampling");
+    ws5.workspace.workspaceJson = {{"applications", {{"FTS Data Explorer", legacy}}}};
+    ws5.enableDownsampling = true;
+    applyViewState(ws5);
+    CHECK(ws5.pendingIfgXRestore);
+    CHECK(ws5.ifgRestoreDownsampling == true);
+
+    std::printf("test17: IFG view-state round-trip OK\n");
+}
+
+// A spectral panel that early-returns (no data) must not leak an armed
+// ImPlot::SetNextAxisLimits into the interferogram view. Regression for the
+// bug where the IFG reopened at the 100% T window (33..226): the T100 panel
+// armed its restored X window in tickPrePlot, then returned without BeginPlot,
+// and the next plot consumed the leaked global NextPlotData.
+void test18_noEarlyReturnLeakFromT100() {
+    std::printf("test18: early-returning spectral panel does not leak X window...\n");
+
+    WorkspaceSession ws;
+    wireSessionPanels(appState, ws);
+    ws.key = "ifg-leak";
+    ws.xAxisBase = 0;
+    ws.autoFitYAxis = true;
+    ws.dataLoaded = true;
+    ws.shouldAutoscale = false;
+    ws.pendingIfgXRestore = true;   // frame 0 applies [10,50]
+    ws.last_x_min = 10.0;
+    ws.last_x_max = 50.0;
+    ws.datasetInfo.hasInterferograms = true;
+    ws.datasetInfo.hasReferenceChannel = true;
+    InterferogramData d;
+    d.referenceDetector.assign(100, 0.0);
+    d.primaryDetector.assign(100, 0.0);
+    ws.loadedData.push_back(d);
+    ws.selectedFilenames.push_back("s1");
+    // T100 panel has an armed restore window but no reference data -> it
+    // tickPrePlots and then early-returns before BeginPlot.
+    ws.t100.referenceAvailable = false;
+    ws.t100.plot.shouldAutoscale = false;
+    ws.t100.plot.pendingNextXMin = 32.827426594377904;
+    ws.t100.plot.pendingNextXMax = 225.9153966978011;
+
+    appState.active = &ws;
+    appState.activeTabKind = ActiveTabKind::Workspace;
+    appState.showWelcomeScreen = false;
+    appState.welcomeScreenInitialized = true;
+
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImPlot::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.DisplaySize = ImVec2(1280, 720);
+    io.DeltaTime = 1.0f / 60.0f;
+    unsigned char* pixels = nullptr;
+    int fw = 0, fh = 0;
+    io.Fonts->GetTexDataAsRGBA32(&pixels, &fw, &fh);
+    io.Fonts->SetTexID((ImTextureID)(intptr_t)1);
+
+    for (int frame = 0; frame < 3; ++frame) {
+        ImGui::NewFrame();
+        // Frame 0 lets the IFG establish its window; later frames run the
+        // (early-returning) T100 first, which is the leak vector.
+        if (frame > 0) {
+            ImGui::Begin("100% T View");
+            if (ws.dataLoaded && !ws.selectedFilenames.empty())
+                ws.t100.renderT100Contents(false);
+            ImGui::End();
+        }
+        renderInterferogramPanel();
+        ImGui::Render();
+        CHECK(ws.last_x_min == 10.0);
+        CHECK(ws.last_x_max == 50.0);
+    }
+
+    ImPlot::DestroyContext();
+    ImGui::DestroyContext();
+    appState.active = nullptr;
+    std::printf("test18: no early-return leak OK\n");
+}
+
 }  // namespace
 
 int main() {
@@ -2208,6 +2366,8 @@ int main() {
     test15_datasetRename();
     test16_allanChainCompletesOnce();
     test16b_t100SyncCompletionRenders();
+    test17_ifgViewStateRoundTrip();
+    test18_noEarlyReturnLeakFromT100();
     std::printf("fts_session_roundtrip: all %d checks passed\n", g_checks);
     return 0;
 }
