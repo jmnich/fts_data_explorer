@@ -31,7 +31,7 @@ std::string selectionFilePath(const std::string& name) {
 }
 
 // Stable per-workspace snapshot name: hash the session key (a path, or
-// "cross.h5#sourceId") into a filename-safe suffix.
+// "multi-workspace .h5#sourceId") into a filename-safe suffix.
 std::string workspaceLayoutName(const std::string& key) {
     char hex[17];
     std::snprintf(hex, sizeof(hex), "%016zx", std::hash<std::string>{}(key));

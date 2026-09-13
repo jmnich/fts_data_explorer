@@ -10,7 +10,7 @@
 
 #include "app_state.h"
 #include "config.h"
-#include "cross_store.h"
+#include "multi_workspace_store.h"
 #include "environment_session.h"
 #include "file_browser.h"
 #include "layout_persistence.h"
@@ -78,11 +78,11 @@ void renderRemoveConfirm() {
         if (pressed == 0) {
             std::string err;
             const std::string id = g_removeSourceId;
-            if (crossRemoveSource(appState.sessionTab.multiWorkspacePath, id, err)) {
+            if (multiWorkspaceRemoveSource(appState.sessionTab.multiWorkspacePath, id, err)) {
                 // Discard any open tab for this source, then refresh the list.
                 // Direct removeTab (never closeTab): the source group is
                 // already gone from the file, so a dirty-tab "Save" via
-                // crossSaveSource would resurrect it as an orphaned group.
+                // multiWorkspaceSaveSource would resurrect it as an orphaned group.
                 const std::string key =
                     appState.sessionTab.multiWorkspacePath + "#" + id;
                 for (int i = 0; i < static_cast<int>(appState.sessions.size()); ++i) {
@@ -92,7 +92,7 @@ void renderRemoveConfirm() {
                     }
                 }
                 std::string err2;
-                crossLoad(appState, appState.sessionTab.multiWorkspacePath, err2);
+                multiWorkspaceLoad(appState, appState.sessionTab.multiWorkspacePath, err2);
                 refreshBatchRecipes(appState);
             } else {
                 appState.adapterErrorMsg = "Remove failed:\n" + err;
@@ -221,9 +221,9 @@ void addDatasetFromFileDialog() {
         glfwGetCurrentContext(), defaultFolder);
     if (!path.empty()) {
         std::string err, newId;
-        if (crossAddSource(appState.sessionTab.multiWorkspacePath, path, newId, err)) {
+        if (multiWorkspaceAddSource(appState.sessionTab.multiWorkspacePath, path, newId, err)) {
             std::string err2;
-            crossLoad(appState, appState.sessionTab.multiWorkspacePath, err2);
+            multiWorkspaceLoad(appState, appState.sessionTab.multiWorkspacePath, err2);
             refreshBatchRecipes(appState);
             appState.needsRedraw = true;
         } else {
@@ -266,7 +266,7 @@ void renderMultiWorkspaceCard(const std::string& path) {
     ImGui::PushStyleColor(ImGuiCol_ChildBg, GetAccentVeryMuted(ac));
     ImGui::PushStyleColor(ImGuiCol_Border, GetAccentSubtle(ac));
     const bool open = ImGui::BeginChild(
-        "##crossCard",
+        "##multiWorkspaceCard",
         ImVec2(0.0f, 16.0f + (nameLines.size() + pathLines.size() + 1) * lineH),
         true);
     ImGui::PopStyleColor(2);
@@ -470,8 +470,8 @@ void renderCreateMultiWorkspaceButton() {
                 // Embed a copy of the most relevant open dataset from disk.
                 const std::string srcPath = appState.sessions[src]->path;
                 std::string err;
-                if (crossCreateFromDataset(appState, path, srcPath, err)) {
-                    crossOpenProject(appState, path, err);
+                if (multiWorkspaceCreateFromDataset(appState, path, srcPath, err)) {
+                    multiWorkspaceOpenProject(appState, path, err);
                     rememberMultiWorkspace(appState, path);
                     appState.needsRedraw = true;
                 } else {
@@ -1159,7 +1159,7 @@ void SessionTab::renderBatchDeleteModal() {
             ImGui::CloseCurrentPopup();
         } else if (pressed == 1) {
             std::string err;
-            if (crossRecipeRemove(appState.sessionTab.multiWorkspacePath, name, err)) {
+            if (multiWorkspaceRecipeRemove(appState.sessionTab.multiWorkspacePath, name, err)) {
                 refreshBatchRecipes(appState);
                 b.showDeleteConfirm = false;
                 appState.needsRedraw = true;
@@ -1371,7 +1371,7 @@ void SessionTab::renderNewFromDatasetModals() {
                     b.importError = "A recipe named \"" + name + "\" already exists.";
                 } else {
                     std::string err;
-                    Workspace ws = crossLoadSource(appState.sessionTab.multiWorkspacePath,
+                    Workspace ws = multiWorkspaceLoadSource(appState.sessionTab.multiWorkspacePath,
                                                    b.pickedDatasetId, err);
                     if (!err.empty() || ws.format.empty()) {
                         b.importError = "load failed: " + err;
@@ -1383,7 +1383,7 @@ void SessionTab::renderNewFromDatasetModals() {
                         } else {
                             r.name = name;
                             r.comment = b.commentBuffer;
-                            if (crossRecipeWrite(appState.sessionTab.multiWorkspacePath,
+                            if (multiWorkspaceRecipeWrite(appState.sessionTab.multiWorkspacePath,
                                                  name, recipeToJson(r), err)) {
                                 refreshBatchRecipes(appState);
                                 b.showNewFromDatasetForm = false;
@@ -1418,7 +1418,7 @@ void SessionTab::renderNewFromDatasetModals() {
 void SessionTab::renderBatchImportExport() {
     BatchPanelState& b = appState.sessionTab.batch;
 
-    // Import: FileBrowser → recipeFromJson → crossRecipeWrite (no overwrite).
+    // Import: FileBrowser → recipeFromJson → multiWorkspaceRecipeWrite (no overwrite).
     if (g_batchImportRequested) {
         g_batchImportRequested = false;
         std::string path = FileBrowser::showFileOpenDialog(
@@ -1448,7 +1448,7 @@ void SessionTab::renderBatchImportExport() {
                                         "\" already exists.";
                         b.showImportError = true;
                         appState.needsRedraw = true;
-                    } else if (!crossRecipeWrite(appState.sessionTab.multiWorkspacePath,
+                    } else if (!multiWorkspaceRecipeWrite(appState.sessionTab.multiWorkspacePath,
                                                  r.name, recipeToJson(r), err)) {
                         b.importError = "save failed: " + err;
                         b.showImportError = true;

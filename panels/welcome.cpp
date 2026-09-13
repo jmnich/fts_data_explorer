@@ -6,7 +6,7 @@
 #include "config.h"
 #include "file_browser.h"
 #include "theme.h"
-#include "session/cross_store.h"
+#include "session/multi_workspace_store.h"
 #include "session/workspace_session.h"
 
 #include "imgui.h"
@@ -229,19 +229,19 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
     // One active side owns Up/Down/Enter; Left/Right jumps between the lists.
     static bool recentSideLeft = true;
     static int selectedIdx = 0;      // recent datasets (left)
-    static int crossSelectedIdx = 0; // recent multi-workspaces (right)
+    static int recentMwSelectedIdx = 0; // recent multi-workspaces (right)
 
     const int leftCount = (int)config.recentDatasets.size();
     const int rightCount = (int)config.recentMultiWorkspaces.size();
 
     // Keep stored indices valid, and keep focus on a non-empty list.
     if (leftCount > 0 && selectedIdx >= leftCount) selectedIdx = leftCount - 1;
-    if (rightCount > 0 && crossSelectedIdx >= rightCount) crossSelectedIdx = rightCount - 1;
+    if (rightCount > 0 && recentMwSelectedIdx >= rightCount) recentMwSelectedIdx = rightCount - 1;
     if (leftCount == 0 && rightCount > 0 && recentSideLeft) recentSideLeft = false;
     if (rightCount == 0 && leftCount > 0 && !recentSideLeft) recentSideLeft = true;
 
     const int leftBefore = selectedIdx;
-    const int crossBefore = crossSelectedIdx;
+    const int recentMwBefore = recentMwSelectedIdx;
 
     // Skip keyboard navigation while the UI-size combo popup is open: its
     // Up/Down/Enter select combo items, not list rows.
@@ -250,16 +250,16 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
     if (!uiComboOpen) {
         if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
             if (recentSideLeft) { if (selectedIdx > 0) selectedIdx--; }
-            else { if (crossSelectedIdx > 0) crossSelectedIdx--; }
+            else { if (recentMwSelectedIdx > 0) recentMwSelectedIdx--; }
         }
         if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
             if (recentSideLeft) { if (selectedIdx < leftCount - 1) selectedIdx++; }
-            else { if (crossSelectedIdx < rightCount - 1) crossSelectedIdx++; }
+            else { if (recentMwSelectedIdx < rightCount - 1) recentMwSelectedIdx++; }
         }
         // Jump to the other list only when it has entries.
         if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) && recentSideLeft && rightCount > 0) {
             recentSideLeft = false;
-            if (crossSelectedIdx >= rightCount) crossSelectedIdx = rightCount - 1;
+            if (recentMwSelectedIdx >= rightCount) recentMwSelectedIdx = rightCount - 1;
         }
         if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) && !recentSideLeft && leftCount > 0) {
             recentSideLeft = true;
@@ -270,7 +270,7 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
     // One-shot scroll-to-selection flags (SetScrollHereY applies next frame,
     // so calling it every frame would fight manual scrolling).
     const bool scrollLeft = selectedIdx != leftBefore;
-    const bool scrollCross = crossSelectedIdx != crossBefore;
+    const bool scrollRecentMw = recentMwSelectedIdx != recentMwBefore;
 
     // Enter opens only the active list's selection (a single flag per side so
     // one key press can never open two workspaces in the same frame).
@@ -420,7 +420,7 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
     ImGui::BeginChild("##welcomeRight", ImVec2(colW, colH), true);
     ImGui::Text("Recent Multi-Workspaces");
     ImGui::Separator();
-    if (ImGui::BeginChild("RecentCrossChild", ImVec2(0, 0), true)) {
+    if (ImGui::BeginChild("RecentMultiWorkspaceChild", ImVec2(0, 0), true)) {
         if (config.recentMultiWorkspaces.empty()) {
             float childHeight = ImGui::GetContentRegionAvail().y;
             float textHeight = ImGui::GetTextLineHeightWithSpacing() * 3;
@@ -436,7 +436,7 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                 float btnH = ImGui::GetFrameHeight();
 
                 // Highlight selected row (bright when the right list is active)
-                if ((int)i == crossSelectedIdx) {
+                if ((int)i == recentMwSelectedIdx) {
                     ImVec2 rowMin = ImGui::GetCursorScreenPos();
                     float rowH = ImGui::GetFrameHeight();
                     ImGui::GetWindowDrawList()->AddRectFilled(
@@ -448,7 +448,7 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                 if (ImGui::Button("×", ImVec2(btnH, btnH))) {
                     config.recentMultiWorkspaces.erase(config.recentMultiWorkspaces.begin() + i);
                     config.saveToFile(configFilePath);
-                    if (crossSelectedIdx > (int)i) crossSelectedIdx--;
+                    if (recentMwSelectedIdx > (int)i) recentMwSelectedIdx--;
                     ImGui::PopID();
                     continue;
                 }
@@ -466,10 +466,10 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                     bool shouldOpen = false;
                     if (ImGui::Button(displayName.c_str(), ImVec2(-FLT_MIN, 0))) {
                         shouldOpen = true;
-                        crossSelectedIdx = (int)i;
+                        recentMwSelectedIdx = (int)i;
                         recentSideLeft = false;
                     }
-                    if (!shouldOpen && (int)i == crossSelectedIdx && openRightSelection) {
+                    if (!shouldOpen && (int)i == recentMwSelectedIdx && openRightSelection) {
                         shouldOpen = true;
                     }
                     if (shouldOpen) {
@@ -487,7 +487,7 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
                     ImGui::SameLine();
                     ImGui::TextDisabled("(unreachable)");
                 }
-                if ((int)i == crossSelectedIdx && scrollCross) ImGui::SetScrollHereY(0.5f);
+                if ((int)i == recentMwSelectedIdx && scrollRecentMw) ImGui::SetScrollHereY(0.5f);
                 ImGui::PopID();
                 i++;
             }
@@ -524,8 +524,8 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
         if (!path.empty()) {
             ensureSessionTab(appState);
             std::string err;
-            if (crossCreate(path, err)) {
-                if (crossOpenProject(appState, path, err)) {
+            if (multiWorkspaceCreate(path, err)) {
+                if (multiWorkspaceOpenProject(appState, path, err)) {
                     focusSessionTab(appState);
                     config.lastMultiWorkspacePath = path;
                     config.addRecentMultiWorkspace(path);

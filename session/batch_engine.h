@@ -19,7 +19,7 @@ struct AppState;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Batch processing (M-batch): apply one *recipe* (spectrum settings + artifact
-// set) to many datasets embedded in the open .cross.h5.
+// set) to many datasets embedded in the open multi-workspace .h5.
 //
 // Dependency rule: this header NEVER includes app_state.h (AppState is only
 // forward-declared). The pure logic below (JSON round-trip, validation,
@@ -122,7 +122,7 @@ struct BatchJob {
     int totalDatasets() const { return static_cast<int>(sourceIds.size()); }
 
     // ── current-dataset sub-state (reset at each dataset boundary) ──────────
-    Workspace ws;                          // scratch copy loaded via crossLoadSource
+    Workspace ws;                          // scratch copy loaded via multiWorkspaceLoadSource
     std::vector<std::string> fileIds;      // workspaceFileList(ws), natural-sorted
     double datasetRefLaser = 1.55;         // resolved from the dataset's view state
     double datasetSensitivity = 0.0;       // dataset's detectorSensitivityKVPerW

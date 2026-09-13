@@ -10,7 +10,7 @@
 
 #include "app_state.h"
 #include "allan_variance.h"
-#include "cross_store.h"
+#include "multi_workspace_store.h"
 #include "running_stats.h"
 #include "workspace_reader.h"
 
@@ -262,7 +262,7 @@ void submitAllan(AppState& s) {
 }
 
 // Finalize + save the current dataset: average/SNR/t100/allan artifacts into
-// the scratch workspace, then crossSaveSource. Single terminal path.
+// the scratch workspace, then multiWorkspaceSaveSource. Single terminal path.
 void finalizeDataset(AppState& s) {
     BatchJob& j = s.sessionTab.batch.job;
     const size_t n = j.bins;
@@ -397,8 +397,8 @@ void finalizeDataset(AppState& s) {
 
     std::string err;
     try {
-        crossSaveSource(s.sessionTab.multiWorkspacePath, j.sourceIds[j.currentIdx], j.ws, err);
-    } catch (const std::exception& e) {                // crossSaveSource THROWS on failure
+        multiWorkspaceSaveSource(s.sessionTab.multiWorkspacePath, j.sourceIds[j.currentIdx], j.ws, err);
+    } catch (const std::exception& e) {                // multiWorkspaceSaveSource THROWS on failure
         err = e.what();
     }
     if (err.empty()) {
@@ -453,7 +453,7 @@ void finishDatasetFor(AppState& s, bool ok) {
         s.sessionTab.batch.phase = BatchPhase::Done;   // progress modal flips to OK
         // The batch rewrote every processed source in the archive — refresh
         // the Datasets-panel size cache so the "12.3 MB" figures are current.
-        crossRefreshSourceSizes(s.sessionTab, s.sessionTab.multiWorkspacePath);
+        multiWorkspaceRefreshSourceSizes(s.sessionTab, s.sessionTab.multiWorkspacePath);
     }
 }
 
@@ -486,7 +486,7 @@ void batchTick(AppState& s) {
         j.sourceSubmitted = true;
         std::string err;
         try {
-            j.ws = crossLoadSource(s.sessionTab.multiWorkspacePath,
+            j.ws = multiWorkspaceLoadSource(s.sessionTab.multiWorkspacePath,
                                    j.sourceIds[j.currentIdx], err);
         } catch (const std::exception& e) {
             err = e.what();
@@ -615,11 +615,11 @@ void refreshBatchRecipes(AppState& s) {
     if (s.sessionTab.multiWorkspaceOpen) {
         std::vector<std::string> names;
         std::string err;
-        if (crossRecipeList(s.sessionTab.multiWorkspacePath, names, err)) {
+        if (multiWorkspaceRecipeList(s.sessionTab.multiWorkspacePath, names, err)) {
             std::sort(names.begin(), names.end());
             for (const auto& n : names) {
                 nlohmann::json j;
-                if (!crossRecipeRead(s.sessionTab.multiWorkspacePath, n, j, err)) {
+                if (!multiWorkspaceRecipeRead(s.sessionTab.multiWorkspacePath, n, j, err)) {
                     fprintf(stderr, "WARNING: batch recipe '%s' unreadable: %s\n",
                             n.c_str(), err.c_str());
                     continue;

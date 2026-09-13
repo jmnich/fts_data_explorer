@@ -1,15 +1,15 @@
-// fts_cross_roundtrip — CLI driver for the .cross.h5 cross-store (M2.4),
-// driven by playground/multi_workspace_roundtrip.py (h5py can read the file
-// structure but cannot call the C++ cross-store API).
+// fts_multi_workspace_roundtrip — CLI driver for the multi-workspace .h5 store
+// (M2.4), driven by playground/multi_workspace_roundtrip.py (h5py can read the
+// file structure but cannot call the C++ store API).
 //
 // Usage:
-//   fts_cross_roundtrip create <path>
-//   fts_cross_roundtrip add <cross.h5> <src.h5> [--slow-save]
-//   fts_cross_roundtrip remove <cross.h5> <id>
-//   fts_cross_roundtrip list <cross.h5>
-//   fts_cross_roundtrip load <cross.h5> <id>
-//   fts_cross_roundtrip sniff <path>
-//   fts_cross_roundtrip save-source <cross.h5> <id> <src.h5>
+//   fts_multi_workspace_roundtrip create <path>
+//   fts_multi_workspace_roundtrip add <multi-workspace.h5> <src.h5> [--slow-save]
+//   fts_multi_workspace_roundtrip remove <multi-workspace.h5> <id>
+//   fts_multi_workspace_roundtrip list <multi-workspace.h5>
+//   fts_multi_workspace_roundtrip load <multi-workspace.h5> <id>
+//   fts_multi_workspace_roundtrip sniff <path>
+//   fts_multi_workspace_roundtrip save-source <multi-workspace.h5> <id> <src.h5>
 // Exit 0 = success, 1 = failure (message on stderr).
 
 #include <cinttypes>
@@ -18,7 +18,7 @@
 #include <string>
 
 #include "app_state.h"
-#include "cross_store.h"
+#include "multi_workspace_store.h"
 #include "hdf/h5_store.h"
 
 namespace {
@@ -30,48 +30,48 @@ int fail(const std::string& msg) {
 
 int cmdCreate(const std::string& path) {
     std::string err;
-    if (!crossCreate(path, err)) return fail(err);
+    if (!multiWorkspaceCreate(path, err)) return fail(err);
     std::printf("created %s\n", path.c_str());
     return 0;
 }
 
 int cmdAdd(const std::vector<std::string>& args) {
     bool slow = false;
-    std::string crossPath, srcPath;
+    std::string multiWorkspacePath, srcPath;
     for (const auto& a : args) {
         if (a == "--slow-save") slow = true;
-        else if (crossPath.empty()) crossPath = a;
+        else if (multiWorkspacePath.empty()) multiWorkspacePath = a;
         else if (srcPath.empty()) srcPath = a;
     }
-    if (crossPath.empty() || srcPath.empty())
-        return fail("usage: add <cross.h5> <src.h5> [--slow-save]");
+    if (multiWorkspacePath.empty() || srcPath.empty())
+        return fail("usage: add <multi-workspace.h5> <src.h5> [--slow-save]");
     std::string err, newId;
-    if (!crossAddSource(crossPath, srcPath, newId, err, slow)) return fail(err);
+    if (!multiWorkspaceAddSource(multiWorkspacePath, srcPath, newId, err, slow)) return fail(err);
     std::printf("%s\n", newId.c_str());
     if (slow) std::printf("slow-save: 2s window for the kill test\n");
     return 0;
 }
 
-int cmdRemove(const std::string& crossPath, const std::string& id) {
+int cmdRemove(const std::string& multiWorkspacePath, const std::string& id) {
     std::string err;
-    if (!crossRemoveSource(crossPath, id, err)) return fail(err);
+    if (!multiWorkspaceRemoveSource(multiWorkspacePath, id, err)) return fail(err);
     std::printf("removed %s\n", id.c_str());
     return 0;
 }
 
-int cmdList(const std::string& crossPath) {
+int cmdList(const std::string& multiWorkspacePath) {
     SessionTabState st;
     std::string err;
-    if (!crossLoadInto(st, crossPath, err)) return fail(err);
+    if (!multiWorkspaceLoadInto(st, multiWorkspacePath, err)) return fail(err);
     for (const auto& src : st.sources)
         std::printf("%s\t%s\t%zu\t%" PRIu64 "\n", src.id.c_str(), src.name.c_str(),
                     src.memberCount, src.sizeBytes);
     return 0;
 }
 
-int cmdLoad(const std::string& crossPath, const std::string& id) {
+int cmdLoad(const std::string& multiWorkspacePath, const std::string& id) {
     std::string err;
-    Workspace ws = crossLoadSource(crossPath, id, err);
+    Workspace ws = multiWorkspaceLoadSource(multiWorkspacePath, id, err);
     if (!err.empty()) return fail(err);
     std::printf("format=%s\n", ws.format.c_str());
     std::printf("comment=%s\n", ws.measurementComment.c_str());
@@ -84,11 +84,11 @@ int cmdLoad(const std::string& crossPath, const std::string& id) {
 }
 
 int cmdSniff(const std::string& path) {
-    std::printf(crossIsCrossFile(path) ? "cross\n" : "workspace\n");
+    std::printf(isMultiWorkspaceFile(path) ? "multi-workspace\n" : "workspace\n");
     return 0;
 }
 
-int cmdSaveSource(const std::string& crossPath, const std::string& id,
+int cmdSaveSource(const std::string& multiWorkspacePath, const std::string& id,
                   const std::string& srcPath) {
     Workspace ws;
     try {
@@ -98,7 +98,7 @@ int cmdSaveSource(const std::string& crossPath, const std::string& id,
     }
     std::string err;
     try {
-        crossSaveSource(crossPath, id, ws, err);
+        multiWorkspaceSaveSource(multiWorkspacePath, id, ws, err);
     } catch (const std::exception& e) {
         return fail(e.what());
     }
@@ -111,7 +111,7 @@ int cmdSaveSource(const std::string& crossPath, const std::string& id,
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        std::fprintf(stderr, "usage: fts_cross_roundtrip create|add|remove|list|load|sniff|save-source ...\n");
+        std::fprintf(stderr, "usage: fts_multi_workspace_roundtrip create|add|remove|list|load|sniff|save-source ...\n");
         return 1;
     }
     const std::string mode = argv[1];

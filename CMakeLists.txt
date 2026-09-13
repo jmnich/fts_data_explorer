@@ -294,7 +294,7 @@ add_executable(fts_data_explorer
     panels/interferogram_view.cpp
     panels/metadata_panel.cpp
     session/workspace_session.cpp
-    session/cross_store.cpp
+    session/multi_workspace_store.cpp
     session/session_tab.cpp
     session/spectral_pool.cpp
     session/environment_session.cpp
@@ -394,7 +394,7 @@ add_executable(fts_session_roundtrip
     session/spectral_pool.cpp
     session/environment_session.cpp
     session/wrap_text.cpp
-    session/cross_store.cpp
+    session/multi_workspace_store.cpp
     session/batch_engine.cpp
     ui/layout_persistence.cpp
     panels/interferogram_view.cpp
@@ -455,23 +455,23 @@ if(NOT WIN32)
     )
 endif()
 
-# ── fts_cross_roundtrip (M2.4): cross-store CLI driver for the h5py suite ───
+# ── fts_multi_workspace_roundtrip (M2.4): multi-workspace CLI driver for the h5py suite ───
 # Modes: create/add/remove/list/load/sniff/save-source (+ --slow-save kill test).
-# Links only the hdf layer + cross_store (no ImGui/GLFW).
-add_executable(fts_cross_roundtrip
-    session/cross_roundtrip.cpp
-    session/cross_store.cpp
+# Links only the hdf layer + multi_workspace_store (no ImGui/GLFW).
+add_executable(fts_multi_workspace_roundtrip
+    session/multi_workspace_roundtrip.cpp
+    session/multi_workspace_store.cpp
     ${PLATFORM_SOURCES}
 )
-target_link_libraries(fts_cross_roundtrip
+target_link_libraries(fts_multi_workspace_roundtrip
     fts_hdf
     nlohmann_json::nlohmann_json
 )
-target_compile_definitions(fts_cross_roundtrip PRIVATE
+target_compile_definitions(fts_multi_workspace_roundtrip PRIVATE
     FTS_BUILD_HDF5=1
     IMGUI_USER_CONFIG="imconfig_custom.h"
 )
-target_include_directories(fts_cross_roundtrip PRIVATE
+target_include_directories(fts_multi_workspace_roundtrip PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/core
     ${CMAKE_SOURCE_DIR}/session
@@ -482,8 +482,8 @@ target_include_directories(fts_cross_roundtrip PRIVATE
     ${CMAKE_SOURCE_DIR}/fftw-3.3.10/api
 )
 if(NOT WIN32)
-    target_link_options(fts_cross_roundtrip PRIVATE ${GLIBCOMPAT_WRAP})
-    target_compile_options(fts_cross_roundtrip PRIVATE
+    target_link_options(fts_multi_workspace_roundtrip PRIVATE ${GLIBCOMPAT_WRAP})
+    target_compile_options(fts_multi_workspace_roundtrip PRIVATE
         -U_GNU_SOURCE -D_DEFAULT_SOURCE -D_FORTIFY_SOURCE=0 -U_FORTIFY_SOURCE
         -march=x86-64-v3
     )

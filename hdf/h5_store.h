@@ -17,8 +17,8 @@ public:
     // on any violation and leaves the existing file untouched.
     static void save(const std::string& path, const Workspace& ws);
 
-    // ── Cross-store group access (M2.4) ─────────────────────────────────────
-    // Read one source group ("sources/<id>") of a .cross.h5 into RAM. The
+    // ── Multi-workspace store group access (M2.4) ─────────────────────────────────────
+    // Read one source group ("sources/<id>") of a multi-workspace .h5 into RAM. The
     // content is byte-identical to a standalone file's (same helpers, root
     // handle = the group), so embedded sources behave exactly like files.
     static Workspace loadGroup(const std::string& path, const std::string& prefix);

@@ -186,24 +186,24 @@ def main(argv=None):
 
     print()
     print("=" * 60)
-    print("Step 8 — Cross-store .cross.h5 suite (M2.4)")
+    print("Step 8 — Multi-workspace .h5 suite (M2.4)")
     print("=" * 60)
-    cross_rt = None
+    mwRt = None
     for cand in BIN_DIR_CANDIDATES:
-        cand_rt = cand / "fts_cross_roundtrip"
+        cand_rt = cand / "fts_multi_workspace_roundtrip"
         if cand_rt.exists():
-            cross_rt = cand_rt
+            mwRt = cand_rt
             break
-    if cross_rt is None:
-        print("fts_cross_roundtrip binary not found — skipping step 8")
+    if mwRt is None:
+        print("fts_multi_workspace_roundtrip binary not found — skipping step 8")
     else:
         run([PY, str(REPO_ROOT / "playground" / "multi_workspace_roundtrip.py"),
-             "--binary", str(cross_rt)], "8")
+             "--binary", str(mwRt)], "8")
 
     print()
     print("PASS: golden reproducible, python->C++ round-trip clean, "
           "C++-written file conforms, ArcOptix converters valid, "
-          "cross-store suite green.")
+          "multi-workspace suite green.")
 
 
 if __name__ == "__main__":

@@ -437,7 +437,7 @@ std::string joinDangling(const std::vector<std::string>& dangling) {
 }  // namespace
 
 // Read the whole workspace content under `root` (the file id for a standalone
-// .h5, or a source group id for a .cross.h5 source — the helpers use relative
+// .h5, or a source group id for a multi-workspace .h5 source — the helpers use relative
 // names, so both work unchanged).
 static Workspace readAll(hid_t root) {
     Workspace ws;

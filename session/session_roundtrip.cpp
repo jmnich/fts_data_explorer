@@ -18,7 +18,7 @@
 #include "workspace_session.h"
 #include "environment_session.h"
 #include "spectral_pool.h"
-#include "cross_store.h"
+#include "multi_workspace_store.h"
 #include "hdf/h5_store.h"
 #include "hdf/hdf5_util.h"
 #include "workspace_reader.h"
@@ -781,7 +781,7 @@ void test5_labels() {
     CHECK(fs.title() == "sample_2024 *");
 
     WorkspaceSession embedded;
-    embedded.key = "/data/cross.h5#source_0001";
+    embedded.key = "/data/multi_workspace.h5#source_0001";
     CHECK(embedded.label() == "source_0001");
 }
 
@@ -903,7 +903,7 @@ void test8_pool() {
     CHECK(s.poolCache.size() == 1);
 
     // Unit guard: panel unit um — the cache is display-unit, so the pool
-    // must re-convert X back to cm-1 (audit §3.2). <=1 ULP.
+    // must re-convert X back to cm-1. <=1 ULP.
     {
         s.sessions[0]->spectrum.plot.xUnitSelector = 1;   // um
         // Convert the panel cache in place the way the Spectrum panel does.
@@ -1385,13 +1385,13 @@ void test11_comparator() {
 }
 
 // M4.1: experiment persistence round-trip — save an Absorbance experiment
-// (config + results + fingerprints) into a .cross.h5, reload into a fresh
+// (config + results + fingerprints) into a multi-workspace .h5, reload into a fresh
 // AppState, verify bitwise-exact results (no recompute) + staleness flags;
 // then a Comparator config round-trip.
 void test12_experimentPersistence() {
     std::printf("test12: experiment persistence round-trip...\n");
-    const std::string crossPath = "/tmp/fts_exp_roundtrip.cross.h5";
-    std::remove(crossPath.c_str());
+    const std::string multiWorkspacePath = "/tmp/fts_exp_roundtrip.h5";
+    std::remove(multiWorkspacePath.c_str());
 
     AppState& s = ::appState;
     s.sessions.clear();
@@ -1467,16 +1467,16 @@ void test12_experimentPersistence() {
                                           refY.data(), refY.size()));
     CHECK(snap.effectiveParams.empty());   // fixture members carry no config
 
-    // Save into a fresh .cross.h5 (assigns the id; second save idempotent).
+    // Save into a fresh multi-workspace .h5 (assigns the id; second save idempotent).
     std::string err;
-    CHECK(crossCreate(crossPath, err));
-    CHECK(crossSaveExperiment(s, *env, crossPath, err));
+    CHECK(multiWorkspaceCreate(multiWorkspacePath, err));
+    CHECK(multiWorkspaceSaveExperiment(s, *env, multiWorkspacePath, err));
     CHECK(!env->id.empty());
     const std::string expId = env->id;
-    CHECK(crossSaveExperiment(s, *env, crossPath, err));
+    CHECK(multiWorkspaceSaveExperiment(s, *env, multiWorkspacePath, err));
     CHECK(env->id == expId);
     std::vector<nlohmann::json> entries;
-    CHECK(crossExperimentList(crossPath, entries, err));
+    CHECK(multiWorkspaceExperimentList(multiWorkspacePath, entries, err));
     CHECK(entries.size() == 1);
     CHECK(entries[0]["id"] == expId);
     CHECK(entries[0]["type"] == "Absorbance");
@@ -1484,7 +1484,7 @@ void test12_experimentPersistence() {
     // Structure check (h5py-equivalent): config/fingerprint/results content.
     nlohmann::json config, fps, stats;
     std::map<std::string, std::vector<double>> results;
-    CHECK(crossExperimentRead(crossPath, expId, config, fps, results, stats, err));
+    CHECK(multiWorkspaceExperimentRead(multiWorkspacePath, expId, config, fps, results, stats, err));
     CHECK(config["name"] == "Absorbance Roundtrip");
     CHECK(config["comment"] == "my experiment");
     CHECK(config["computed"] == true);
@@ -1503,7 +1503,7 @@ void test12_experimentPersistence() {
     // dirty=false; stale because /tmp/parity.h5 does not exist on disk
     // (stored K=2 vs unreachable default).
     AppState s2;
-    CHECK(crossLoadExperiments(s2, crossPath, err));
+    CHECK(multiWorkspaceLoadExperiments(s2, multiWorkspacePath, err));
     CHECK(s2.experiments.size() == 1);
     EnvironmentSession* e2 = s2.experiments[0].get();
     CHECK(e2->id == expId);
@@ -1580,7 +1580,7 @@ void test12_experimentPersistence() {
 
     // Comparator: config round-trip, no results group. Bugfix 2026-08-14:
     // creation marks the instance dirty so the BULK save path (dirty-gated
-    // crossSaveExperiments) persists it — a created-but-unmodified instance
+    // multiWorkspaceSaveExperiments) persists it — a created-but-unmodified instance
     // must not vanish from the project on save. Absorbance rides the same
     // path (both created dirty, both saved by one bulk call).
     AppState s3;
@@ -1619,14 +1619,14 @@ void test12_experimentPersistence() {
     // Tab-open state persists too (bugfix 2026-08-14): a closed-but-kept
     // experiment must not auto-reopen on project load.
     cmp->tabHidden = true;
-    CHECK(crossSaveExperiments(s3, crossPath, err));
+    CHECK(multiWorkspaceSaveExperiments(s3, multiWorkspacePath, err));
     CHECK(cmp->dirty == false);
     CHECK(abs->dirty == false);
     std::vector<nlohmann::json> entries2;
-    CHECK(crossExperimentList(crossPath, entries2, err));
+    CHECK(multiWorkspaceExperimentList(multiWorkspacePath, entries2, err));
     CHECK(entries2.size() == 3);   // absorbance + comparator + fresh absorbance
     AppState s4;
-    CHECK(crossLoadExperiments(s4, crossPath, err));
+    CHECK(multiWorkspaceLoadExperiments(s4, multiWorkspacePath, err));
     CHECK(s4.experiments.size() == 3);   // absorbance + comparator + fresh absorbance
     // The computed Absorbance restores its config + stored curves.
     EnvironmentSession* a2b = nullptr;
@@ -1681,11 +1681,11 @@ void test12_experimentPersistence() {
     CHECK(c2->tabHidden == true);       // closed tab stays closed after reload
     CHECK(a2b->tabHidden == false);     // legacy/default: visible
     // Save→reload→save: the range persists idempotently in config.json.
-    CHECK(crossSaveExperiment(s4, *c2, crossPath, err));
+    CHECK(multiWorkspaceSaveExperiment(s4, *c2, multiWorkspacePath, err));
     {
         nlohmann::json cfg2, fps2, stats2;
         std::map<std::string, std::vector<double>> res2;
-        CHECK(crossExperimentRead(crossPath, c2->id, cfg2, fps2, res2, stats2, err));
+        CHECK(multiWorkspaceExperimentRead(multiWorkspacePath, c2->id, cfg2, fps2, res2, stats2, err));
         CHECK(cfg2["manualXMin"] == 1500.0);
         CHECK(cfg2["manualXMax"] == 2000.0);
     }
@@ -1726,19 +1726,19 @@ void test12_experimentPersistence() {
     }
 
     // Dedupe: repeated loads add nothing.
-    CHECK(crossLoadExperiments(s4, crossPath, err));
+    CHECK(multiWorkspaceLoadExperiments(s4, multiWorkspacePath, err));
     CHECK(s4.experiments.size() == 3);
 
     // Bugfix 2026-08-14: Ctrl+H go-home clears experiments while the session
     // file stays open; re-entering it (welcome Recents click) must reload
-    // them. crossLoadExperiments is idempotent by id.
+    // them. multiWorkspaceLoadExperiments is idempotent by id.
     clearExperiments(s4);
     CHECK(s4.experiments.empty());
-    CHECK(crossLoadExperiments(s4, crossPath, err));
+    CHECK(multiWorkspaceLoadExperiments(s4, multiWorkspacePath, err));
     CHECK(s4.experiments.size() == 3);
     CHECK(s4.experiments[0]->id == expId);   // restored with ids intact
 
-    std::remove(crossPath.c_str());
+    std::remove(multiWorkspacePath.c_str());
 }
 
 // M4.3: staleness vs PERSISTED source state (source not open in a tab).
@@ -1749,9 +1749,9 @@ void test12_experimentPersistence() {
 void test13_stalenessPersisted() {
     std::printf("test13: staleness vs persisted source members...\n");
     const std::string srcPath = "/tmp/fts_exp_src.h5";
-    const std::string crossPath = "/tmp/fts_exp_stale.cross.h5";
+    const std::string multiWorkspacePath = "/tmp/fts_exp_stale.h5";
     std::remove(srcPath.c_str());
-    std::remove(crossPath.c_str());
+    std::remove(multiWorkspacePath.c_str());
     std::string err;
 
     const std::vector<double> refX = {1000.0, 1250.0, 1500.0, 1750.0, 2000.0};
@@ -1814,8 +1814,8 @@ void test13_stalenessPersisted() {
     env->plot.xUnitSelector = 0;
     env->computeAbsorbance(s);
     CHECK(env->computed == true);
-    CHECK(crossCreate(crossPath, err));
-    CHECK(crossSaveExperiment(s, *env, crossPath, err));
+    CHECK(multiWorkspaceCreate(multiWorkspacePath, err));
+    CHECK(multiWorkspaceSaveExperiment(s, *env, multiWorkspacePath, err));
 
     // Change the source MEMBER's data and persist it (the M4.3 flow: change a
     // source → save source → reopen project).
@@ -1825,7 +1825,7 @@ void test13_stalenessPersisted() {
     // Reload with the source NOT open: the snapshot derives from the member
     // in the .h5 → data hash differs → stale.
     AppState s2;
-    CHECK(crossLoadExperiments(s2, crossPath, err));
+    CHECK(multiWorkspaceLoadExperiments(s2, multiWorkspacePath, err));
     CHECK(s2.experiments.size() == 1);
     CHECK(s2.experiments[0]->stale == true);
     CHECK(!s2.experiments[0]->staleDetails.empty());
@@ -1855,7 +1855,7 @@ void test13_stalenessPersisted() {
     CHECK(s2.experiments[0]->stale == false);
 
     std::remove(srcPath.c_str());
-    std::remove(crossPath.c_str());
+    std::remove(multiWorkspacePath.c_str());
 }
 
 // M4.6 (bugfix 2026-08-14): the tab-strip's EXACT visual order persists in
@@ -1866,18 +1866,18 @@ void test13_stalenessPersisted() {
 void test14_openTabPersistence() {
     std::printf("test14: tab-strip order persistence...\n");
     const std::string srcPath = "/tmp/fts_open_src.h5";
-    const std::string crossPath = "/tmp/fts_open_tabs.cross.h5";
+    const std::string multiWorkspacePath = "/tmp/fts_open_tabs.h5";
     std::remove(srcPath.c_str());
-    std::remove(crossPath.c_str());
+    std::remove(multiWorkspacePath.c_str());
     std::string err;
 
     H5Store::save(srcPath, makeFixtureWorkspace("open"));
 
     AppState s;
-    CHECK(crossCreate(crossPath, err));
+    CHECK(multiWorkspaceCreate(multiWorkspacePath, err));
     std::string idA, idB;
-    CHECK(crossAddSource(crossPath, srcPath, idA, err));
-    CHECK(crossAddSource(crossPath, srcPath, idB, err));
+    CHECK(multiWorkspaceAddSource(multiWorkspacePath, srcPath, idA, err));
+    CHECK(multiWorkspaceAddSource(multiWorkspacePath, srcPath, idB, err));
     CHECK(!idA.empty() && idA != idB);
     // A persisted experiment (its id comes from the first save).
     EnvironmentSession* exp = createExperiment(s, EnvType::Absorbance);
@@ -1887,17 +1887,17 @@ void test14_openTabPersistence() {
     exp->curves[0].refMember = "specRef";
     exp->curves[0].sampleKey = srcPath;
     exp->curves[0].sampleMember = "specSmp";
-    CHECK(crossSaveExperiment(s, *exp, crossPath, err));
+    CHECK(multiWorkspaceSaveExperiment(s, *exp, multiWorkspacePath, err));
     const std::string expId = exp->id;
     CHECK(!expId.empty());
 
     // Save an interleaved order: experiment BETWEEN the two workspaces.
-    crossSaveTabOrder(crossPath,
+    multiWorkspaceSaveTabOrder(multiWorkspacePath,
         {"ws:" + idA, "exp:" + expId, "ws:" + idB}, err);   // void: throws
 
     // Reload: the ordered lists surface on SessionTabState.
     SessionTabState st;
-    CHECK(crossLoadInto(st, crossPath, err));
+    CHECK(multiWorkspaceLoadInto(st, multiWorkspacePath, err));
     CHECK(st.sources.size() == 2);
     CHECK(st.openTabIds == std::vector<std::string>({idA, idB}));
     CHECK(st.experimentTabOrder == std::vector<std::string>({expId}));
@@ -1906,24 +1906,24 @@ void test14_openTabPersistence() {
 
     // Reopen: sessions in openTabIds order, experiments reordered per
     // experimentTabOrder — the strip then rebuilds the exact interleave.
-    // (Same sequence as crossOpenProject: crossLoad → crossLoadExperiments →
+    // (Same sequence as multiWorkspaceOpenProject: multiWorkspaceLoad → multiWorkspaceLoadExperiments →
     // restoreOpenEmbeddedTabs → restoreTabStripOrder.)
     AppState s2;
-    CHECK(crossLoad(s2, crossPath, err));
-    CHECK(crossLoadExperiments(s2, crossPath, err));
+    CHECK(multiWorkspaceLoad(s2, multiWorkspacePath, err));
+    CHECK(multiWorkspaceLoadExperiments(s2, multiWorkspacePath, err));
     restoreOpenEmbeddedTabs(s2);
     restoreTabStripOrder(s2);
     CHECK(s2.sessions.size() == 2);
-    CHECK(s2.sessions[0]->key == crossPath + "#" + idA);
-    CHECK(s2.sessions[1]->key == crossPath + "#" + idB);
+    CHECK(s2.sessions[0]->key == multiWorkspacePath + "#" + idA);
+    CHECK(s2.sessions[1]->key == multiWorkspacePath + "#" + idB);
     CHECK(s2.experiments.size() == 1);
     CHECK(s2.experiments[0]->id == expId);
     // The strip's FIRST submission order = the saved interleave (bugfix
     // 2026-08-14: without restoreTabStripOrder this stays empty and the
     // strip falls back to workspaces-left-of-experiments).
     CHECK(s2.tabStripOrder == std::vector<std::string>(
-        {"ws:" + crossPath + "#" + idA, "exp:" + expId,
-         "ws:" + crossPath + "#" + idB}));
+        {"ws:" + multiWorkspacePath + "#" + idA, "exp:" + expId,
+         "ws:" + multiWorkspacePath + "#" + idB}));
     CHECK(!s2.sessions[0]->workspace.workspaceJson.empty());
     CHECK(s2.sessions[0]->csvFiles.size() == 1);   // engine-level load ran
     // Not activated: no swap queued, no active pointer.
@@ -1937,19 +1937,19 @@ void test14_openTabPersistence() {
 
     // A per-source save-back leaves the tab order untouched.
     s2.sessions[0]->workspace.workspaceJson["test"] = 1;
-    crossSaveSource(crossPath, idA, s2.sessions[0]->workspace, err);   // void
+    multiWorkspaceSaveSource(multiWorkspacePath, idA, s2.sessions[0]->workspace, err);   // void
     {
         SessionTabState st2;
-        CHECK(crossLoadInto(st2, crossPath, err));
+        CHECK(multiWorkspaceLoadInto(st2, multiWorkspacePath, err));
         CHECK(st2.openTabIds == std::vector<std::string>({idA, idB}));
         CHECK(st2.experimentTabOrder == std::vector<std::string>({expId}));
     }
 
     // Clearing the list closes every tab on the next load.
-    crossSaveTabOrder(crossPath, {}, err);   // void
+    multiWorkspaceSaveTabOrder(multiWorkspacePath, {}, err);   // void
     {
         SessionTabState st3;
-        CHECK(crossLoadInto(st3, crossPath, err));
+        CHECK(multiWorkspaceLoadInto(st3, multiWorkspacePath, err));
         CHECK(st3.openTabIds.empty());
         CHECK(st3.experimentTabOrder.empty());
     }
@@ -1963,7 +1963,7 @@ void test14_openTabPersistence() {
         createExperiment(s3, EnvType::Absorbance);   // "Absorbance 2", unsaved
         s3.tabStripOrder = {
             "ws:/tmp/standalone.h5",              // no '#' → dropped
-            "ws:" + crossPath + "#" + idA,        // embedded → kept as idA
+            "ws:" + multiWorkspacePath + "#" + idA,        // embedded → kept as idA
             "exp:" + expId,                       // persisted → kept
             "exp:Absorbance 2",                   // unsaved (id empty) → dropped
         };
@@ -1972,7 +1972,7 @@ void test14_openTabPersistence() {
         // Empty capture falls back to the sessions-only order.
         AppState s4;
         auto sess = std::make_unique<WorkspaceSession>();
-        sess->key = crossPath + "#" + idB;
+        sess->key = multiWorkspacePath + "#" + idB;
         s4.sessions.push_back(std::move(sess));
         CHECK(persistableTabOrder(s4) ==
               std::vector<std::string>({"ws:" + idB}));
@@ -1981,7 +1981,7 @@ void test14_openTabPersistence() {
     // Legacy format (per-source "open" booleans, no tabOrder array) still
     // loads — fallback in sources order.
     {
-        H5FileGuard file(H5Fopen(crossPath.c_str(), H5F_ACC_RDWR, H5P_DEFAULT));
+        H5FileGuard file(H5Fopen(multiWorkspacePath.c_str(), H5F_ACC_RDWR, H5P_DEFAULT));
         CHECK(file.id >= 0);
         nlohmann::json manifest = {{"version", 2}, {"tabOrder", nullptr},
             {"sources", nlohmann::json::array({
@@ -1993,62 +1993,62 @@ void test14_openTabPersistence() {
     }
     {
         SessionTabState st4;
-        CHECK(crossLoadInto(st4, crossPath, err));
+        CHECK(multiWorkspaceLoadInto(st4, multiWorkspacePath, err));
         CHECK(st4.openTabIds == std::vector<std::string>({idA}));
         CHECK(st4.experimentTabOrder.empty());
     }
 
     std::remove(srcPath.c_str());
-    std::remove(crossPath.c_str());
+    std::remove(multiWorkspacePath.c_str());
 }
 
-// Dataset rename (Session-tab right-click "Rename"): crossRenameSource patches
-// the manifest name (id untouched); a following crossSaveSource (Ctrl+S of the
+// Dataset rename (Session-tab right-click "Rename"): multiWorkspaceRenameSource patches
+// the manifest name (id untouched); a following multiWorkspaceSaveSource (Ctrl+S of the
 // embedded tab) must NOT revert it; with the source in the global sources the
 // embedded tab label resolves to the renamed name.
 void test15_datasetRename() {
     std::printf("test15: dataset rename + save-back preservation...\n");
     const std::string srcPath = "/tmp/fts_rename_src.h5";
-    const std::string crossPath = "/tmp/fts_rename.cross.h5";
+    const std::string multiWorkspacePath = "/tmp/fts_rename.h5";
     std::remove(srcPath.c_str());
-    std::remove(crossPath.c_str());
+    std::remove(multiWorkspacePath.c_str());
     std::string err;
 
     H5Store::save(srcPath, makeFixtureWorkspace("rename"));
-    CHECK(crossCreate(crossPath, err));
+    CHECK(multiWorkspaceCreate(multiWorkspacePath, err));
     std::string id;
-    CHECK(crossAddSource(crossPath, srcPath, id, err));
+    CHECK(multiWorkspaceAddSource(multiWorkspacePath, srcPath, id, err));
     CHECK(!id.empty());
 
     SessionTabState st0;
-    CHECK(crossLoadInto(st0, crossPath, err));
+    CHECK(multiWorkspaceLoadInto(st0, multiWorkspacePath, err));
     CHECK(st0.sources.size() == 1);
     CHECK(st0.sources[0].name == "fts_rename_src");   // stem of the source file
 
     // Rename the display name: reload sees it, the stable id is unchanged.
-    CHECK(crossRenameSource(crossPath, id, "renamed_dataset", err));
+    CHECK(multiWorkspaceRenameSource(multiWorkspacePath, id, "renamed_dataset", err));
     SessionTabState st1;
-    CHECK(crossLoadInto(st1, crossPath, err));
+    CHECK(multiWorkspaceLoadInto(st1, multiWorkspacePath, err));
     CHECK(st1.sources.size() == 1);
     CHECK(st1.sources[0].id == id);
     CHECK(st1.sources[0].name == "renamed_dataset");
 
     // Save-back (exactly what an embedded tab's Ctrl+S does) preserves it.
-    Workspace ws = crossLoadSource(crossPath, id, err);
+    Workspace ws = multiWorkspaceLoadSource(multiWorkspacePath, id, err);
     CHECK(err.empty());
-    crossSaveSource(crossPath, id, ws, err);   // void; throws on failure
+    multiWorkspaceSaveSource(multiWorkspacePath, id, ws, err);   // void; throws on failure
     SessionTabState st2;
-    CHECK(crossLoadInto(st2, crossPath, err));
+    CHECK(multiWorkspaceLoadInto(st2, multiWorkspacePath, err));
     CHECK(st2.sources[0].name == "renamed_dataset");
 
     // Embedded tab label resolves the renamed name through the global sources;
     // unknown ids fall back to the stable key suffix (harness baseline).
     ::appState.sessionTab.sources = st2.sources;
     WorkspaceSession embedded;
-    embedded.key = crossPath + "#" + id;
+    embedded.key = multiWorkspacePath + "#" + id;
     CHECK(embedded.label() == "renamed_dataset");
     WorkspaceSession missing;
-    missing.key = "/x.cross.h5#ghost";
+    missing.key = "/x.h5#ghost";
     CHECK(missing.label() == "ghost");
     ::appState.sessionTab.sources.clear();
 
@@ -2056,10 +2056,10 @@ void test15_datasetRename() {
     // currentDatasetName (Files-panel header / export names) in sync.
     {
         AppState a;
-        a.sessionTab.multiWorkspacePath = crossPath;
+        a.sessionTab.multiWorkspacePath = multiWorkspacePath;
         a.sessionTab.sources = st2.sources;   // name "renamed_dataset" loaded
         auto sA = std::make_unique<WorkspaceSession>();
-        sA->key = crossPath + "#" + id;
+        sA->key = multiWorkspacePath + "#" + id;
         sA->currentDatasetName = id;          // what a fresh open stored
         a.sessions.push_back(std::move(sA));
         std::string err2;
@@ -2069,12 +2069,12 @@ void test15_datasetRename() {
         CHECK(a.sessions[0]->currentDatasetName == "final_name");
     }
 
-    // Dataset EXPORT round-trip: crossLoadSource → H5Store::save produces a
+    // Dataset EXPORT round-trip: multiWorkspaceLoadSource → H5Store::save produces a
     // standalone single-workspace .h5 whose re-load equals the embedded source
     // (identical content on re-import — the export path used by the
     // Session-tab "Export" context menu).
     {
-        Workspace ws1 = crossLoadSource(crossPath, id, err);
+        Workspace ws1 = multiWorkspaceLoadSource(multiWorkspacePath, id, err);
         CHECK(err.empty());
         const std::string expPath = "/tmp/fts_exported.h5";
         std::remove(expPath.c_str());
@@ -2096,7 +2096,7 @@ void test15_datasetRename() {
     }
 
     std::remove(srcPath.c_str());
-    std::remove(crossPath.c_str());
+    std::remove(multiWorkspacePath.c_str());
 }
 
 // Regression: the recompute chain's completion check must OBSERVE the batch,

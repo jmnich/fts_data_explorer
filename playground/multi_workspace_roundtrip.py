@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Cross-store (.cross.h5) round-trip suite (M2.4/M2.7).
+"""Multi-workspace (.h5) round-trip suite (M2.4/M2.7).
 
-Drives the fts_cross_roundtrip C++ CLI and validates the file structure with
+Drives the fts_multi_workspace_roundtrip C++ CLI and validates the file structure with
 h5py (Python can reach the FILE level, never AppState):
 
   1. create            -> empty archive v2 (no root @format)
   2. add 2 sources     -> structure valid; workspace.json byte-identical
-                         (view-state fidelity, audit §2.3 item 6)
+                         (view-state fidelity)
   3. load a source     -> CLI dump matches the h5py-read content
   4. save-back         -> source group rewritten, structure still valid
   5. remove            -> group + manifest entry gone
@@ -43,18 +43,18 @@ BIN_DIR_CANDIDATES = (
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--binary", default=None, help="fts_cross_roundtrip binary")
+    ap.add_argument("--binary", default=None, help="fts_multi_workspace_roundtrip binary")
     args = ap.parse_args()
 
     binary = Path(args.binary) if args.binary else None
     if binary is None:
         for cand in BIN_DIR_CANDIDATES:
-            cand = cand / "fts_cross_roundtrip"
+            cand = cand / "fts_multi_workspace_roundtrip"
             if cand.exists():
                 binary = cand
                 break
     if binary is None:
-        print("fts_cross_roundtrip binary not found; build first")
+        print("fts_multi_workspace_roundtrip binary not found; build first")
         return 1
 
     shutil.rmtree(OUT, ignore_errors=True)
@@ -74,11 +74,11 @@ def main():
         return h5py.File(path, "r")
 
     # 1. create
-    cross = work / "cross.h5"
-    run("create", cross)
-    with h5open(cross) as f:
+    mw = work / "multi_workspace.h5"
+    run("create", mw)
+    with h5open(mw) as f:
         assert list(f.keys()) == ["archive.json"], f.keys()
-        assert "format" not in f.attrs, "cross root must not carry @format"
+        assert "format" not in f.attrs, "multi-workspace root must not carry @format"
         manifest = json.loads(f["archive.json"][()])
         assert manifest["version"] == 2
         assert manifest["sources"] == []
@@ -89,10 +89,10 @@ def main():
     src2 = work / "src_b.h5"
     make_source_workspace(src1, "source A", {"zoom": [1, 2, 3]})
     make_source_workspace(src2, "source B", {"zoom": [9, 8]})
-    assert run("add", cross, src1) == "src_a"
-    assert run("add", cross, src2) == "src_b"
-    assert run("add", cross, src1) == "src_a_2"
-    with h5open(cross) as f:
+    assert run("add", mw, src1) == "src_a"
+    assert run("add", mw, src2) == "src_b"
+    assert run("add", mw, src1) == "src_a_2"
+    with h5open(mw) as f:
         manifest = json.loads(f["archive.json"][()])
         assert [s["id"] for s in manifest["sources"]] == ["src_a", "src_b", "src_a_2"]
         for sid in ("src_a", "src_b"):
@@ -110,7 +110,7 @@ def main():
     print("2. add + dedupe + fidelity: OK")
 
     # 3. load a source: CLI dump must match the h5py-read content
-    dump = run("load", cross, "src_a")
+    dump = run("load", mw, "src_a")
     assert "uncorrected=2 corrected=0 spectra=0" in dump, dump
     assert "comment=source A" in dump, dump
     print("3. load: OK")
@@ -118,31 +118,31 @@ def main():
     # 4. save-back (whole-source rewrite) with a MODIFIED comment
     tweaked = work / "src_a_tweaked.h5"
     make_source_workspace(tweaked, "source A EDITED", {"zoom": [1, 2, 3]})
-    run("save-source", cross, "src_a", tweaked)
-    dump = run("load", cross, "src_a")
+    run("save-source", mw, "src_a", tweaked)
+    dump = run("load", mw, "src_a")
     assert "comment=source A EDITED" in dump, dump
-    with h5open(cross) as f:
+    with h5open(mw) as f:
         assert "src_b" in f["sources"], "save-back must not touch other sources"
     print("4. save-back: OK")
 
     # 5. remove
-    run("remove", cross, "src_a_2")
-    with h5open(cross) as f:
+    run("remove", mw, "src_a_2")
+    with h5open(mw) as f:
         manifest = json.loads(f["archive.json"][()])
         assert [s["id"] for s in manifest["sources"]] == ["src_a", "src_b"]
         assert "src_a_2" not in f["sources"]
     print("5. remove: OK")
 
     # 6. atomicity: kill during a slow save
-    before = cross.read_bytes()
+    before = mw.read_bytes()
     proc = subprocess.Popen(
-        [str(binary), "add", str(cross), str(src2), "--slow-save"],
+        [str(binary), "add", str(mw), str(src2), "--slow-save"],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     time.sleep(1.0)                       # inside the 2 s slow-save window
     proc.send_signal(signal.SIGKILL)
     proc.wait()
-    assert cross.read_bytes() == before, "archive modified by killed save"
-    with h5open(cross) as f:              # still opens + lists
+    assert mw.read_bytes() == before, "archive modified by killed save"
+    with h5open(mw) as f:              # still opens + lists
         assert len(json.loads(f["archive.json"][()])["sources"]) == 2
     print("6. atomicity: OK")
 

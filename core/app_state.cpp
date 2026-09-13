@@ -148,7 +148,7 @@ void clearWorkspacePanels(AppState& s) {
     clearSessionPanels(*s.active);
     // Pool entries of the active session are stale by definition (its panels
     // and caches just got cleared) — evict so poolSpectrum recomputes
-    // (audit §5.3 Amendment 4).
+    // (Amendment 4).
     poolEvictKey(s, s.active->key);
 }
 

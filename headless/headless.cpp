@@ -678,7 +678,7 @@ static void handleWorkspace(const HeadlessConfig& cfg) {
     appState.lastActiveSessionIdx = appState.activeSessionIdx;
     appState.activeTabKind = ActiveTabKind::Workspace;
 
-    // Note: -w stays single-workspace only; .cross.h5 multi-workspace export
+    // Note: -w stays single-workspace only; multi-workspace .h5 export
     // (P18, beyond committed scope) would land here as a new -w output type.
     // 3. Open workspace (loads, sets datasetInfo/csvFiles, applyViewState,
     //    seedPanels, AdapterRegistry::s_workspace, currentDatasetName)

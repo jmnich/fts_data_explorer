@@ -51,7 +51,7 @@
 #include "hdf/h5_store.h"
 #include "workspace_session.h"
 #include "hdf/hdf5_util.h"
-#include "session/cross_store.h"
+#include "session/multi_workspace_store.h"
 #endif
 
 // Include imgui and other dependencies
@@ -69,23 +69,23 @@
 // AFTER the swap (pendingOpenPath) so the previous tab's session is out of
 // AppState::active when openWorkspace loads into the new one (M4.5 canonical
 // model — the load writes the session's own fields).
-// M2.4 sniff: archive.json marks a .cross.h5 — route it to crossLoad (Session
+// M2.4 sniff: archive.json marks a multi-workspace .h5 — route it to multiWorkspaceLoad (Session
 // tab), never to H5Store::load (which throws on the missing root @format).
 void openWorkspaceInNewTab(AppState& s, const std::string& path) {
     ensureSessionTab(s);
-    if (crossIsCrossFile(path)) {
+    if (isMultiWorkspaceFile(path)) {
         if (s.sessionTab.multiWorkspaceOpen && s.sessionTab.multiWorkspacePath == path) {
             focusSessionTab(s);        // already the open session file
             // The Session tab state survives Ctrl+H go-home, so this branch
             // is also reachable from the launch welcome — dismissing it here
-            // is what makes the welcome's recent-cross click work (bugfix
+            // is what makes the welcome's recent multi-workspace click work (bugfix
             // 2026-08-13: focusSessionTab alone left the welcome overlay up).
             // Bugfix 2026-08-14: go-home clears the experiments while the
-            // session file stays open, so the welcome's recent-cross click
+            // session file stays open, so the welcome's recent multi-workspace click
             // would leave Active Experiments empty; reload the experiments.
-            // crossLoadExperiments dedupes by id — safe to run on every visit.
+            // multiWorkspaceLoadExperiments dedupes by id — safe to run on every visit.
             std::string err;
-            if (!crossLoadExperiments(s, path, err)) {
+            if (!multiWorkspaceLoadExperiments(s, path, err)) {
                 s.adapterErrorMsg = std::string("Failed to reload experiments:\n") + err;
                 s.showAdapterErrorPopup = true;
             }
@@ -101,12 +101,12 @@ void openWorkspaceInNewTab(AppState& s, const std::string& path) {
             requestWorkspaceDiscard(s, PendingWorkspaceAction::OpenMultiWorkspace, path);
         } else {
             std::string err;
-            if (crossOpenProject(s, path, err)) {
+            if (multiWorkspaceOpenProject(s, path, err)) {
                 focusSessionTab(s);
                 rememberMultiWorkspace(s, path);
                 // Leave the launch welcome (the Session tab takes over) — the
                 // workspace-tab open path does this via finishWorkspaceLoad;
-                // the cross path must do it explicitly or the welcome keeps
+                // the multi-workspace path must do it explicitly or the welcome keeps
                 // rendering and the dock/Session UI never appears.
                 s.showWelcomeScreen = false;
                 s.welcomeScreenInitialized = true;
@@ -135,7 +135,7 @@ void openWorkspaceInNewTab(AppState& s, const std::string& path) {
     s.needsRedraw = true;
 }
 
-// Remember an opened/created .cross.h5 (last path + recent list, persisted).
+// Remember an opened/created multi-workspace .h5 (last path + recent list, persisted).
 void rememberMultiWorkspace(AppState& s, const std::string& path) {
     if (!s.configPtr) return;
     s.configPtr->lastMultiWorkspacePath = path;
@@ -156,10 +156,10 @@ void executePendingOpen(AppState& s) {
             openWorkspace(s, path);
         } else {
             std::string err;
-            Workspace ws = crossLoadSource(path, sourceId, err);
+            Workspace ws = multiWorkspaceLoadSource(path, sourceId, err);
             if (!err.empty()) throw H5Error(err);
             // Same open flow as a filesystem workspace, minus the path-based
-            // bits: the tab's save target is the .cross.h5 itself (M2.4).
+            // bits: the tab's save target is the multi-workspace .h5 itself (M2.4).
             s.active->workspace = std::move(ws);
             s.active->workspacePath.clear();
             s.pendingWorkspaceAction = PendingWorkspaceAction::None;
@@ -188,10 +188,10 @@ void executePendingOpen(AppState& s) {
 // Shared tail of every workspace open (filesystem and embedded sources):
 // engine state, caches, view-state restore, metadata buffers, panel seeding.
 // `displayName` = currentDatasetName; `recentPath` = "" for embedded sources
-// (their home is the .cross.h5, not a recent-dataset entry).
+// (their home is the multi-workspace .h5, not a recent-dataset entry).
 // Session-level tail of the open flow (bugfix 2026-08-14): everything
 // finishWorkspaceLoad does that is session-scoped, extracted so RESTORED
-// multi-workspace tabs (reopened .cross.h5) get the same engine setup
+// multi-workspace tabs (reopened multi-workspace .h5) get the same engine setup
 // without an active pointer. Defined in workspace_session.cpp (the session
 // roundtrip harness links it without main.cpp). The AppState-level bits
 // (welcome flags, recent list) stay in finishWorkspaceLoad.
@@ -265,8 +265,8 @@ void clearPanelDerivedResults(AppState& s) {
 }
 
 // True when the ACTIVE tab is an embedded source (stable key
-// "<crossPath>#<sourceId>", no filesystem path) — its save target is the
-// .cross.h5 itself (M2.4 save-back).
+// "<multiWorkspacePath>#<sourceId>", no filesystem path) — its save target is the
+// multi-workspace .h5 itself (M2.4 save-back).
 static bool activeTabIsEmbedded(const AppState& s) {
     return s.activeTabKind == ActiveTabKind::Workspace && s.activeSessionIdx >= 0 &&
            s.activeSessionIdx < static_cast<int>(s.sessions.size()) &&
@@ -290,13 +290,13 @@ void doSaveWorkspace(AppState& s, const std::string& asPath) {
         toSave = &copy;
     }
     if (asPath.empty() && activeTabIsEmbedded(s)) {
-        // Save-back into the .cross.h5: whole-source atomic rewrite.
+        // Save-back into the multi-workspace .h5: whole-source atomic rewrite.
         const std::string& key = s.sessions[s.activeSessionIdx]->key;
         const size_t hash = key.find('#');
-        const std::string crossPath = key.substr(0, hash);
+        const std::string multiWorkspacePath = key.substr(0, hash);
         const std::string sourceId = key.substr(hash + 1);
         std::string err;
-        crossSaveSource(crossPath, sourceId, *toSave, err);
+        multiWorkspaceSaveSource(multiWorkspacePath, sourceId, *toSave, err);
         if (!err.empty()) throw H5Error(err);
         // The archive was rewritten: the comparator's sourceCache snapshots
         // for this source are stale — clear them so the next render re-reads.
@@ -328,9 +328,9 @@ void doSaveWorkspace(AppState& s, const std::string& asPath) {
 }
 
 // Ctrl+S / File→Save from ANY tab kind: everything dirty gets saved — every
-// workspace tab (embedded save-back via crossSaveSource, filesystem tabs via
+// workspace tab (embedded save-back via multiWorkspaceSaveSource, filesystem tabs via
 // H5Store::save) with per-session view-state capture and rebaseline, plus all
-// dirty experiments (crossSaveExperiments). No stale-drop prompt here: the
+// dirty experiments (multiWorkspaceSaveExperiments). No stale-drop prompt here: the
 // save writes stale categories verbatim instead of pruning (nothing silently
 // dropped; matches exit Save All). Throws H5Error on failure.
 void saveEverything(AppState& s) {
@@ -339,10 +339,10 @@ void saveEverything(AppState& s) {
         captureViewState(*sess);
         const size_t hash = sess->key.find('#');
         if (hash != std::string::npos) {
-            const std::string crossPath = sess->key.substr(0, hash);
+            const std::string multiWorkspacePath = sess->key.substr(0, hash);
             const std::string sourceId = sess->key.substr(hash + 1);
             std::string err;
-            crossSaveSource(crossPath, sourceId, sess->workspace, err);   // throws
+            multiWorkspaceSaveSource(multiWorkspacePath, sourceId, sess->workspace, err);   // throws
             // The archive was rewritten: the comparator's sourceCache
             // snapshots are stale — clear them so the next render re-reads.
             s.sessionTab.sourceCache.clear();
@@ -356,17 +356,17 @@ void saveEverything(AppState& s) {
     }
     if (s.sessionTab.multiWorkspaceOpen) {
         std::string err;
-        if (!crossSaveExperiments(s, s.sessionTab.multiWorkspacePath, err))
+        if (!multiWorkspaceSaveExperiments(s, s.sessionTab.multiWorkspacePath, err))
             throw H5Error(err);
         // Persist the exact tab-strip order (bugfix 2026-08-14) — NOT
         // dirty-gated: Ctrl+S means "save the project state", layout included.
-        crossSaveTabOrder(s.sessionTab.multiWorkspacePath,
+        multiWorkspaceSaveTabOrder(s.sessionTab.multiWorkspacePath,
                           persistableTabOrder(s), err);
         if (!err.empty()) throw H5Error(err);
         // The archive was rewritten — refresh the cached per-source sizes so
         // the Session tab reflects the new on-disk state.
-        crossRefreshSourceSizes(s.sessionTab, s.sessionTab.multiWorkspacePath);
-        crossRefreshExperimentSizes(s, s.sessionTab.multiWorkspacePath);
+        multiWorkspaceRefreshSourceSizes(s.sessionTab, s.sessionTab.multiWorkspacePath);
+        multiWorkspaceRefreshExperimentSizes(s, s.sessionTab.multiWorkspacePath);
     }
     s.needsRedraw = true;
     // Toast only when there is something that could hold state (launch welcome
@@ -468,11 +468,11 @@ void executePendingSave(AppState& s) {
             saveEverything(s);
         } else if (kind == AppState::PendingSaveKind::ExportDataset) {
             // Write the embedded source as a standalone single-workspace .h5:
-            // crossLoadSource reads sources/<id>; H5Store::save is the app's
+            // multiWorkspaceLoadSource reads sources/<id>; H5Store::save is the app's
             // canonical writer (exactly what "Add Dataset" re-imports), so the
             // exported file is spec-compliant with identical content.
             std::string err;
-            Workspace ws = crossLoadSource(s.sessionTab.multiWorkspacePath,
+            Workspace ws = multiWorkspaceLoadSource(s.sessionTab.multiWorkspacePath,
                                            srcId, err);
             if (!err.empty()) throw H5Error(err);
             H5Store::save(asPath, ws);
@@ -508,7 +508,7 @@ void saveWorkspaceAs(AppState& s, GLFWwindow* window) {
 // Per-action semantics:
 //   OpenPath           → new tab, NO discard confirmation (the active tab
 //                        stays open); dispatches immediately.
-//   OpenMultiWorkspace → replace the session file (M2.4 wires crossLoad);
+//   OpenMultiWorkspace → replace the session file (M2.4 wires multiWorkspaceLoad);
 //                        only the active workspace's dirty state prompts.
 //   CloseWorkspace     → close the ACTIVE tab (closeTab handles its modal).
 //   Exit               → handled by the multi-dirty exit modal in AppLoop;
@@ -567,7 +567,7 @@ void dispatchPendingAction(AppState& s) {
             break;
         case PendingWorkspaceAction::OpenMultiWorkspace: {
             std::string err;
-            if (crossOpenProject(s, path, err)) {
+            if (multiWorkspaceOpenProject(s, path, err)) {
                 focusSessionTab(s);
                 rememberMultiWorkspace(s, path);
                 s.showWelcomeScreen = false;

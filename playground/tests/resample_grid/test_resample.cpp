@@ -1,4 +1,4 @@
-// resampleToGrid contract check (audit appendix §5.4): ascending/descending,
+// resampleToGrid contract check: ascending/descending,
 // endpoint-clamp, empty input, degenerate size-1, and exact parity with the
 // pre-M1.3 inline formula. Run from the repo root:
 //   g++ -std=c++17 -I. -Ifftw-3.3.10/api playground/tests/resample_grid/test_resample.cpp \

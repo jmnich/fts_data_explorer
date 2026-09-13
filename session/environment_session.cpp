@@ -1,7 +1,7 @@
 // Phase-3 M3.2/M3.3/M3.4 — instantiable experiment tabs (Absorbance /
 // Comparator). LIVE objects: state is the instance itself, never folded.
 // Absorbance computes synchronously from already-computed artifacts (Average/
-// Raw spectra) — no FFT pool; T%/A math locked by audit §5.2. Comparator
+// Raw spectra) — no FFT pool; T%/A math is fixed by design. Comparator
 // gathers its overlay curves from the same artifact model each frame.
 #include "environment_session.h"
 
@@ -15,7 +15,7 @@
 
 #include "app_state.h"
 #include "config.h"
-#include "cross_store.h"
+#include "multi_workspace_store.h"
 #include "cursor_overlay.h"
 #include "file_browser.h"
 #include "hdf/h5_store.h"
@@ -94,8 +94,8 @@ int memberCountFromConfig(const MemberBase& m, const char* key) {
     return 0;
 }
 
-// One comparator source (open tab or embedded cross source) with its resolved
-// Workspace. Cross sources are loaded from the archive and cached.
+// One comparator source (open tab or embedded source) with its resolved
+// Workspace. Embedded sources are loaded from the archive and cached.
 struct ComparatorSource {
     std::string key, label;
     const Workspace* ws = nullptr;
@@ -111,7 +111,7 @@ std::vector<ComparatorSource> comparatorSources(AppState& s) {
         auto it = s.sessionTab.sourceCache.find(src.id);
         if (it == s.sessionTab.sourceCache.end()) {
             std::string err;
-            Workspace ws = crossLoadSource(s.sessionTab.multiWorkspacePath, src.id, err);
+            Workspace ws = multiWorkspaceLoadSource(s.sessionTab.multiWorkspacePath, src.id, err);
             if (!err.empty()) continue;
             it = s.sessionTab.sourceCache.emplace(src.id, std::move(ws)).first;
         }
@@ -222,7 +222,7 @@ std::vector<double> EnvironmentSession::derivedOpdAxis(const std::string& source
 }
 
 // Members available in a workspace for one artifact type (read from the
-// persisted model — works for both open tabs and embedded cross sources).
+// persisted model — works for both open tabs and embedded sources).
 // CorrectedInterferogram: the persisted igm_corrected_x/ group wins; datasets
 // without it derive corrected IFGs from the raw group (primary detector + the
 // source's Hilbert/peak OPD axis) — every raw interferogram has one.
@@ -442,7 +442,7 @@ bool snapshotOfMember(const ArtifactMember& am, MemberSnapshot& out) {
 }
 }  // namespace
 
-// Compute-time member snapshot for a source. Open tab / embedded cross source
+// Compute-time member snapshot for a source. Open tab / embedded source
 // → the live/persisted workspace model (extractArtifact resolution); a
 // NON-open filesystem source → the member read from the .h5 itself (the old
 // fingerprint did the same via H5Store::load — the experiment's curves came
@@ -541,8 +541,8 @@ EnvironmentSession* createExperiment(AppState& s, EnvType t) {
     }
     EnvironmentSession* raw = env.get();
     // Creation is an unsaved project change: without dirty, a fresh instance
-    // is invisible to every bulk save path (crossSaveExperiments, exit modal)
-    // and never reaches the .cross.h5.
+    // is invisible to every bulk save path (multiWorkspaceSaveExperiments, exit modal)
+    // and never reaches the multi-workspace .h5.
     env->dirty = true;
     s.experiments.push_back(std::move(env));
     activateExperiment(s, static_cast<int>(s.experiments.size()) - 1);
@@ -626,7 +626,7 @@ void EnvironmentSession::requestDelete() {
 
 // Close ALL experiment instances (project switch / go-home). RAM-only
 // instances reference the closing project's sources; persisted experiments
-// reload with the new project via crossLoadExperiments.
+// reload with the new project via multiWorkspaceLoadExperiments.
 void clearExperiments(AppState& s) {
     s.experiments.clear();
     s.activeExperimentIdx = -1;
@@ -748,7 +748,7 @@ void EnvironmentSession::computeAbsorbance(AppState& s) {
         for (size_t i = 0; i < smpY.size(); ++i) {
             const double rv = refY[i];
             double v = (rv > 1e-15) ? smpY[i] / rv : 0.0;
-            // audit §5.2: non-finite or <=1e-15 ratio clamped to 0 pre-log.
+            // non-finite or <=1e-15 ratio clamped to 0 pre-log.
             if (!std::isfinite(v) || v <= 1e-15) v = 0.0;
             ratio[i] = v;
         }
@@ -824,7 +824,7 @@ void EnvironmentSession::convertXInPlace() {
     dirty = true;
 }
 
-// Display label for a source key: open-tab label, embedded cross-source name,
+// Display label for a source key: open-tab label, embedded-source name,
 // or the raw key when neither resolves.
 std::string EnvironmentSession::sourceLabel(const std::string& key) const {
     for (const auto& sess : appState.sessions)
@@ -1262,8 +1262,8 @@ void EnvironmentSession::renderComparatorConfig() {
     renderCommentEditor();
 }
 
-// Comparator: checkbox list of available datasets (open tabs ∪ embedded cross
-// sources). comparatorKeys empty = "all open datasets". Cross sources need not
+// Comparator: checkbox list of available datasets (open tabs ∪ embedded
+// sources). comparatorKeys empty = "all open datasets". Embedded sources need not
 // be open in a tab — gatherCurves reads their artifacts from the archive.
 // Rows are greyed when the selected artifact is unavailable and yellow when it
 // is stale; multi-member artifacts get a per-dataset member dropdown.
@@ -1563,7 +1563,7 @@ void EnvironmentSession::renderExportWindow() {
 
 // Extract the overlay curves for the selected artifact from the selected
 // datasets. All artifact types read the persisted workspace model, so embedded
-// cross sources work without an open tab. Multi-member artifacts show one
+// embedded sources work without an open tab. Multi-member artifacts show one
 // curve per dataset (the picked member, default first).
 std::vector<ComparatorCurve> EnvironmentSession::gatherCurves(AppState& s) {
     using ST = SpectralToolbox::SpectrumXUnit;
@@ -2005,12 +2005,12 @@ void EnvironmentSession::exportCsv() {
     appState.needsRedraw = true;
 }
 
-// ── Phase 4: experiment persistence (cross_store.h wrappers) ────────────────
-// Defined HERE (not cross_store.cpp): serialization needs the live
-// EnvironmentSession object, and cross_store.cpp must stay linkable without
-// environment_session.cpp for the fts_cross_roundtrip CLI.
+// ── Phase 4: experiment persistence (multi_workspace_store.h wrappers) ────────────────
+// Defined HERE (not multi_workspace_store.cpp): serialization needs the live
+// EnvironmentSession object, and multi_workspace_store.cpp must stay linkable without
+// environment_session.cpp for the fts_multi_workspace_roundtrip CLI.
 
-// Full instance state minus transient plot flags (audit §3.3 → config.json).
+// Full instance state minus transient plot flags (config.json).
 static nlohmann::json experimentConfigJson(const EnvironmentSession& env) {
     nlohmann::json j;
     j["type"] = experimentTypeName(env.type);
@@ -2123,7 +2123,7 @@ static void experimentApplyConfig(EnvironmentSession& env, const nlohmann::json&
     }
 }
 
-// Light per-curve stats (audit §2.1 stats.json) — no consumer yet beyond the
+// Light per-curve stats (stats.json) — no consumer yet beyond the
 // schema contract; ponytail: expand when a consumer appears.
 static nlohmann::json experimentStatsJson(const EnvironmentSession& env) {
     nlohmann::json stats = nlohmann::json::array();
@@ -2151,12 +2151,12 @@ static nlohmann::json experimentStatsJson(const EnvironmentSession& env) {
     return stats;
 }
 
-bool crossSaveExperiment(AppState& s, EnvironmentSession& env,
+bool multiWorkspaceSaveExperiment(AppState& s, EnvironmentSession& env,
                          const std::string& path, std::string& err) {
     if (env.id.empty()) {
         std::vector<nlohmann::json> entries;
         std::vector<std::string> ids;
-        if (crossExperimentList(path, entries, err)) {
+        if (multiWorkspaceExperimentList(path, entries, err)) {
             for (const auto& e : entries) ids.push_back(e.value("id", ""));
             for (const auto& other : s.experiments)
                 if (!other->id.empty()) ids.push_back(other->id);
@@ -2177,22 +2177,22 @@ bool crossSaveExperiment(AppState& s, EnvironmentSession& env,
             ++k;
         }
     }
-    return crossExperimentWrite(path, env.id, experimentConfigJson(env), fps,
+    return multiWorkspaceExperimentWrite(path, env.id, experimentConfigJson(env), fps,
                                 results, experimentStatsJson(env), err);
 }
 
-bool crossSaveExperiments(AppState& s, const std::string& path, std::string& err) {
+bool multiWorkspaceSaveExperiments(AppState& s, const std::string& path, std::string& err) {
     for (auto& env : s.experiments) {
         if (!env->dirty) continue;
-        if (!crossSaveExperiment(s, *env, path, err)) return false;
+        if (!multiWorkspaceSaveExperiment(s, *env, path, err)) return false;
         env->dirty = false;
     }
     return true;
 }
 
-bool crossLoadExperiments(AppState& s, const std::string& path, std::string& err) {    try {
+bool multiWorkspaceLoadExperiments(AppState& s, const std::string& path, std::string& err) {    try {
         std::vector<nlohmann::json> entries;
-        if (!crossExperimentList(path, entries, err)) return false;
+        if (!multiWorkspaceExperimentList(path, entries, err)) return false;
         int restoredAbsorbance = 0, restoredComparator = 0;
         for (const auto& e : entries) {
             const std::string id = e.value("id", "");
@@ -2200,10 +2200,10 @@ bool crossLoadExperiments(AppState& s, const std::string& path, std::string& err
             bool have = false;
             for (const auto& env : s.experiments)
                 if (env->id == id) { have = true; break; }
-            if (have) continue;   // idempotent across repeated crossLoad calls
+            if (have) continue;   // idempotent across repeated multiWorkspaceLoad calls
             nlohmann::json config, fps, stats;
             std::map<std::string, std::vector<double>> results;
-            if (!crossExperimentRead(path, id, config, fps, results, stats, err))
+            if (!multiWorkspaceExperimentRead(path, id, config, fps, results, stats, err))
                 return false;
             const EnvType t = (config.value("type", "") == "Comparator")
                                   ? EnvType::Comparator
@@ -2272,7 +2272,7 @@ bool crossLoadExperiments(AppState& s, const std::string& path, std::string& err
                              });
         }
         if (!entries.empty()) s.needsRedraw = true;
-        crossRefreshExperimentSizes(s, path);   // sizes follow the archive
+        multiWorkspaceRefreshExperimentSizes(s, path);   // sizes follow the archive
         return true;
     } catch (const std::exception& e) {
         err = e.what();
@@ -2280,10 +2280,10 @@ bool crossLoadExperiments(AppState& s, const std::string& path, std::string& err
     }
 }
 
-bool crossOpenProject(AppState& s, const std::string& path, std::string& err) {
-    if (!crossLoad(s, path, err)) return false;
+bool multiWorkspaceOpenProject(AppState& s, const std::string& path, std::string& err) {
+    if (!multiWorkspaceLoad(s, path, err)) return false;
     clearExperiments(s);
-    if (!crossLoadExperiments(s, path, err)) return false;
+    if (!multiWorkspaceLoadExperiments(s, path, err)) return false;
     // Reopen the persisted open-source tabs (bugfix 2026-08-14) — loaded but
     // NOT activated: the caller focuses the Session tab.
     restoreOpenEmbeddedTabs(s);

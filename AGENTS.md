@@ -12,7 +12,7 @@
 
 # Project overview
 
-FTS Data Explorer is a scientific GUI for rapid exploration of fourier spectrometer data. It presents a navigable file list with metadata, plots interferograms, and provides spectrum computation (FFT), average/SNR/Allan/100% T analysis pipelines — all driven by HDF5 workspaces (`fts_hdf` exchange layer). Foreign datasets enter via Python converter scripts (`converters/`), never via the engine.
+FTS Data Explorer is a scientific GUI for rapid exploration of fourier spectrometer data. It presents a navigable file list with metadata, plots interferograms, and provides spectrum computation (FFT), average/SNR/Allan/100% T analysis pipelines — all driven by HDF5 workspaces (`fts_hdf` exchange layer). Foreign datasets enter via Python converter scripts (`converters/`), never via the engine. A `.h5` file is either a single-dataset workspace or a multi-workspace container; the app tells them apart by content (root `archive.json`, no root `@format`), never by the file extension.
 
 # Toolchain
 
@@ -50,7 +50,7 @@ panels/      spectrum, average_spectrum, snr_spectrum, allan_variance, t100,
              export, welcome, about, conversion_screen, files_panel,
              interferogram_view, metadata_panel
 session/     session_base, workspace_session, session_tab, environment_session,
-             spectral_pool, cross_store, wrap_text, round-trip harnesses
+             spectral_pool, multi_workspace_store, wrap_text, round-trip harnesses
 workspace/   workspace_reader, interferogram_data.h, spectral_toolbox,
              apodization, thread_pool.h
 io/          converter, app_dirs
@@ -197,7 +197,7 @@ Format: `<YY>.<MM>.<minor>` from `VERSION` file. `./build_script.sh` shows last 
 Test data lives in `playground/test_data/` (there is no `example_datasets/`). Visual plot verification is manual. The playground harnesses (each needs `FTS_CONVERTERS_DIR` pointing at a `fts_data_explorer_converters` checkout, plus h5py/numpy/matplotlib):
 
 - **Headless demos** (converter script invoked directly, then process `-w`): `python3 playground/headless_demo/basic_<name>/demo_<name>.py` (spectrum_hilbert, spectrum_peakfinding, average_spectrum, snr, t100, allan; outputs -> `playground/outputs/`). Batch-artifact outputs (Average/SNR/Allan/T100) are deterministic — the common grid is taken from the first file in natural sort order (`chooseCommonGrid`). Single-spectrum outputs are byte-stable.
-- **Resample check** (`resampleToGrid`, audit §5.4): `g++ -std=c++17 -I. -Ifftw-3.3.10/api playground/tests/resample_grid/test_resample.cpp -o /tmp/test_resample && /tmp/test_resample` (assert-based; no framework).
+- **Resample check** (`resampleToGrid`): `g++ -std=c++17 -I. -Iworkspace -Ifftw-3.3.10/api playground/tests/resample_grid/test_resample.cpp -o /tmp/test_resample && /tmp/test_resample` (assert-based; no framework).
 - **Session-tab text wrap** (`wrapToLinesCore`, session/wrap_text.h): `g++ -std=c++17 -I. playground/tests/wrap_text/test_wrap.cpp -o /tmp/test_wrap && /tmp/test_wrap` (assert-based; no framework).
 - **Batch recipe model** (recipe JSON/validation/built-ins/capture/strip, session/batch_engine.h — header-only, nothing to link): `g++ -std=c++17 -I. -Iworkspace -Ifftw-3.3.10/api -Ibuild/linux-release/_deps/nlohmann_json-src/include playground/tests/batch_recipes/test_batch_recipes.cpp -o /tmp/test_batch_recipes && /tmp/test_batch_recipes` (assert-based; no framework).
 - **Spectrum validation**: `python3 playground/tests/spectrum_validation/validate_spectrum.py`.

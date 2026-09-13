@@ -10,7 +10,7 @@
 bool isSessionPanelName(const char* name);
 
 // The unique, unclosable Session tab — the browser hub over the open
-// multi-workspace .cross.h5 (M2.5). Its STATE is global in
+// multi-workspace .h5 (M2.5). Its STATE is global in
 // AppState::sessionTab (never folded); this class only renders it.
 // Invariants: created lazily by ensureSessionTab on the first open/create,
 // never closable afterwards (no close affordance anywhere; closeRequest is

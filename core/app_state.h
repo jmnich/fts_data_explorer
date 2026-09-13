@@ -46,14 +46,14 @@ void openWorkspace(AppState& s, const std::string& path);
 // Open in a new workspace tab (M2.2): dedupes by stable key, queues the swap,
 // stashes the path; the load runs at frame top after the swap.
 void openWorkspaceInNewTab(AppState& s, const std::string& path);
-// Open an embedded source of a .cross.h5 in a new tab (M2.5): stable key
-// "<crossPath>#<sourceId>", in-memory load, save target = the .cross.h5.
-void openEmbeddedInNewTab(AppState& s, const std::string& crossPath,
+// Open an embedded source of a multi-workspace .h5 in a new tab (M2.5): stable key
+// "<multiWorkspacePath>#<sourceId>", in-memory load, save target = the multi-workspace .h5.
+void openEmbeddedInNewTab(AppState& s, const std::string& multiWorkspacePath,
                           const std::string& sourceId);
 // Frame-top executor for the stashed open; called by AppLoop after
 // executePendingSwap.
 void executePendingOpen(AppState& s);
-// Remember an opened/created .cross.h5: lastMultiWorkspacePath + recent list.
+// Remember an opened/created multi-workspace .h5: lastMultiWorkspacePath + recent list.
 void rememberMultiWorkspace(AppState& s, const std::string& path);
 // Shared open tail (filesystem + embedded): engine state, caches, view-state
 // restore, metadata buffers, panel seeding.
@@ -64,9 +64,9 @@ void requestSaveWorkspace(AppState& s, const std::string& asPath);
 void doSaveWorkspace(AppState& s, const std::string& asPath);
 void saveWorkspaceAs(AppState& s, GLFWwindow* window);
 // Ctrl+S / File→Save from ANY tab kind: saves every dirty workspace tab
-// (embedded save-back via crossSaveSource, filesystem tabs via H5Store::save;
+// (embedded save-back via multiWorkspaceSaveSource, filesystem tabs via H5Store::save;
 // per-session view-state capture + rebaseline) plus all dirty experiments
-// (crossSaveExperiments), then shows the "Saved" toast. Throws H5Error on
+// (multiWorkspaceSaveExperiments), then shows the "Saved" toast. Throws H5Error on
 // failure. Defined in main.cpp.
 void saveEverything(AppState& s);
 // Deferred-save entry points for MANUAL saves (Ctrl+S / File→Save / Save As):
@@ -124,7 +124,7 @@ void collectDirtyTabs(AppState& s, std::vector<int>& tabs,
 // — one switch, no ad-hoc -1 conventions.
 enum class ActiveTabKind { Session, Workspace, Experiment };
 
-// Session-tab browser state (data_structures_audit.md §1.4) — GLOBAL, never
+// Session-tab browser state — GLOBAL, never
 // folded: the Session tab is unique, so its state lives in AppState.
 struct SourceSummary {                  // mirrors @summary in the archive
     std::string id;                     // sources/<id>/ group name
@@ -141,14 +141,14 @@ struct SourceSummary {                  // mirrors @summary in the archive
 
 struct SessionTabState {
     bool multiWorkspaceOpen = false;    // mode: false = single-file, true = multi
-    std::string multiWorkspacePath;     // open .cross.h5
+    std::string multiWorkspacePath;     // open multi-workspace .h5
     std::vector<SourceSummary> sources; // column (a); manifest-derived, no data loaded
     // Open-source-tab set AND order (bugfix 2026-08-14): derived from the
     // manifest "tabOrder" ("ws:<sourceId>" entries, in order);
     // restoreOpenEmbeddedTabs rebuilds sessions in exactly this order.
     std::vector<std::string> openTabIds;
     // Experiment-tab order (bugfix 2026-08-14): "exp:<id>" entries from the
-    // manifest "tabOrder"; crossLoadExperiments reorders the vector so the
+    // manifest "tabOrder"; multiWorkspaceLoadExperiments reorders the vector so the
     // strip matches the saved interleave (workspaces/experiments mixed).
     std::vector<std::string> experimentTabOrder;
     // The RAW manifest "tabOrder" entries (bugfix 2026-08-14): the FULL
@@ -157,7 +157,7 @@ struct SessionTabState {
     // lists above cannot reproduce the interleave).
     std::vector<std::string> tabOrder;
     // Embedded-source workspaces not open in a tab (comparator reads raw
-    // artifacts from these without opening a tab). Cleared on crossLoad.
+    // artifacts from these without opening a tab). Cleared on multiWorkspaceLoad.
     std::map<std::string, Workspace> sourceCache;   // sourceId -> workspace
     // Batch-processing panel state (M-batch): global like the rest of this
     // struct — the Session tab is unique and never folded.
@@ -257,7 +257,7 @@ struct AppState {
     bool restoreLayoutRequested = false;
     
     // ── Multi-workspace tabs (Phase-2 M2.1; Phase-5 M4.5 live-object model) ──
-    // THE SESSIONS ARE CANONICAL (data_structures_audit.md §3.1b): every
+    // THE SESSIONS ARE CANONICAL: every
     // per-workspace field lives in WorkspaceSession; AppState holds NO flat
     // per-workspace fields. `active` points at the session whose tab is
     // focused (null unless a workspace tab is active) — tab switch is a
@@ -295,7 +295,7 @@ struct AppState {
     // Tab-strip visual order (bugfix 2026-08-14): stable keys in the LAST
     // rendered strip order — "ws:<sessionKey>" / "exp:<id-or-instanceName>".
     // Captured from the ImGui tab bar every frame (drags included); persisted
-    // into the .cross.h5 manifest so reopening rebuilds the exact interleave.
+    // into the multi-workspace .h5 manifest so reopening rebuilds the exact interleave.
     std::vector<std::string> tabStripOrder;
     // One-shot tab-bar rebuild request (bugfix 2026-08-14): set by
     // EnvironmentSession::rename (the tab label is part of the ImGui tab ID,
@@ -331,7 +331,7 @@ struct AppState {
     // swap; the load runs at frame top AFTER the swap so the previous tab's
     // fields are out of `active` when openWorkspace overwrites them.
     // pendingOpenSourceId non-empty = embedded source (pendingOpenPath = the
-    // .cross.h5 path); empty = filesystem workspace.
+    // multi-workspace .h5 path); empty = filesystem workspace.
     std::string pendingOpenPath;
     std::string pendingOpenSourceId;
     // Multi-dirty Exit modal + sequential Save All (runs at frame top).
@@ -339,7 +339,7 @@ struct AppState {
     std::vector<int> exitDirtyTabs;         // dirty tab indices (active first)
     std::vector<std::string> exitDirtyLabels;
     // Phase 4: dirty EXPERIMENTS ride the same modal (live objects — separate
-    // index list, saved via crossSaveExperiment, no swap needed).
+    // index list, saved via multiWorkspaceSaveExperiment, no swap needed).
     std::vector<int> exitDirtyExperiments;
     bool exitSaveAllRunning = false;
     size_t exitSaveAllCursor = 0;

@@ -14,16 +14,16 @@
 struct AppState;
 struct Workspace;
 
-// STABLE identity (Amendment 4): workspace path, or "cross.h5#sourceId" for
+// STABLE identity (Amendment 4): workspace path, or "multi-workspace .h5#sourceId" for
 // embedded sources. Resolved to a live session index at each use — never
-// cached across tab close/reorder (HL §4.1, audit §3.1). memberId is a
+// cached across tab close/reorder. memberId is a
 // workspace member id (e.g. "spectra/x" or "igm_uncorrected_x/y").
 struct SpectralRef {
     std::string workspaceKey;
     std::string memberId;
 };
 
-// The FFT param set that determines spectrum output (audit §4 — lands here
+// The FFT param set that determines spectrum output (lands here
 // in Phase 3; Phase 4 staleness reuses it). Deliberately EXCLUDES xUnit and
 // Y-scale/mode: they do not change computed data (the panel cache converts
 // in place; the pool re-converts explicitly). Exact equality, no tolerance.
@@ -41,7 +41,7 @@ struct ParamFingerprint {
     size_t hash() const;
 };
 
-// Pool cache entry — cm-1 canonical (audit §5.1): the panel cache is
+// Pool cache entry — cm-1 canonical: the panel cache is
 // display-unit, so the precomputed path re-converts X to cm-1 before the
 // pool stores it; poolSpectrum converts to the requested unit at return
 // time. A converted spectrum is never re-converted.
@@ -51,7 +51,7 @@ struct PoolEntry {
 };
 
 // Processed spectrum for any member of any session, using THAT session's
-// (parked or active) spectrum params as source of truth (audit §3.2).
+// (parked or active) spectrum params as source of truth.
 // Ownership rule: active session → flat fields; parked → session mirrors.
 // Returns empty ProcessedSpectrum when the workspace is not open (caller
 // degrades) or the member cannot be computed.
@@ -65,7 +65,7 @@ SpectralToolbox::ProcessedSpectrum poolSpectrum(AppState& s, const SpectralRef& 
 // the workspace is not open (degraded reference). The panel cache is
 // preferred when present (it is fresher than the saved workspace member —
 // unsaved panel computations); X is re-converted to cm-1 in poolPrepare
-// (audit §3.2 unit caveat), so the worker never sees a display-unit axis.
+// (unit caveat), so the worker never sees a display-unit axis.
 struct PoolInputs {
     bool fromPanelCache = false;        // cached holds the spectrum (cm-1)
     SpectralToolbox::ProcessedSpectrum cached;
@@ -92,7 +92,7 @@ void poolStore(AppState& s, const SpectralRef& ref,
                const SpectralToolbox::ProcessedSpectrum& cm1Spec,
                const ParamFingerprint& fp);
 
-// Main-thread cache read with fp re-verification (audit §5.3). Returns
+// Main-thread cache read with fp re-verification. Returns
 // false on miss/mismatch — the caller falls back to poolPrepare + compute.
 bool poolTryCache(AppState& s, const SpectralRef& ref,
                   SpectralToolbox::ProcessedSpectrum& cm1Out);
@@ -137,5 +137,5 @@ bool buildPoolMatrix(AppState& s, const std::vector<SpectralRef>& refs, int xUni
                      std::vector<double>& gridX, std::vector<std::vector<double>>& matrix);
 
 // Evict all pool entries of a workspace (tab close, source removal from the
-// cross file, clearWorkspacePanels).
+// multi-workspace file, clearWorkspacePanels).
 void poolEvictKey(AppState& s, const std::string& workspaceKey);

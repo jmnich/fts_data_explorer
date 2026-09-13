@@ -6,9 +6,9 @@
 #include "app_state.h"
 #include "workspace_reader.h"
 
-// M3.1 — spectral pool (audit §3.1/§3.2, §5.1/§5.3). The compute path
+// M3.1 — spectral pool. The compute path
 // mirrors t100.cpp:312-363 exactly; the precomputed path re-converts the
-// display-unit panel cache back to cm-1 (audit §3.2 unit caveat).
+// display-unit panel cache back to cm-1 (unit caveat).
 // D3 deviation: definitions live here (not header-only) because the bodies
 // need a complete AppState.
 
@@ -151,7 +151,7 @@ bool poolPrepare(AppState& s, const SpectralRef& ref, PoolInputs& out) {
 
     // Panel cache preferred when present (fresher than the saved member —
     // unsaved panel computations). X re-converted to cm-1 here; the worker
-    // never sees a display-unit axis (audit §3.2 unit caveat).
+    // never sees a display-unit axis (unit caveat).
     auto freqIt = r.sp->cachedFrequencies.find(ref.memberId);
     auto specIt = r.sp->cachedSpectra.find(ref.memberId);
     if (freqIt != r.sp->cachedFrequencies.end() &&

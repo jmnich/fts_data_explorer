@@ -1,5 +1,5 @@
-// Cross-store (.cross.h5) — embedded multi-workspace format (M2.4).
-#include "cross_store.h"
+// Multi-workspace store (.h5) — embedded multi-workspace format (M2.4).
+#include "multi_workspace_store.h"
 #include "app_state.h"
 
 #include <algorithm>
@@ -97,14 +97,14 @@ struct LinkNames {
 
 nlohmann::json readManifest(hid_t file) {
     if (!H5Lexists(file, "archive.json", H5P_DEFAULT))
-        throw H5Error("cross: missing archive.json (not a .cross.h5)");
+        throw H5Error("multi-workspace: missing archive.json (not a multi-workspace .h5)");
     nlohmann::json j = nlohmann::json::parse(h5ReadVlenString(file, "archive.json"),
                                              nullptr, false);
     if (j.is_discarded() || !j.is_object())
-        throw H5Error("cross: archive.json is not a JSON object");
+        throw H5Error("multi-workspace: archive.json is not a JSON object");
     const int version = j.value("version", 0);
     if (version != kManifestVersion)
-        throw H5Error("cross: unsupported archive version " + std::to_string(version) +
+        throw H5Error("multi-workspace: unsupported archive version " + std::to_string(version) +
                       " (expected " + std::to_string(kManifestVersion) + ")");
     return j;
 }
@@ -121,7 +121,7 @@ void writeManifest(hid_t file, const nlohmann::json& manifest) {
 void writeSourceSummary(hid_t file, const std::string& id, const Workspace& ws,
                         const std::string& name) {
     H5GroupGuard g(H5Gopen2(file, sourcePrefix(id).c_str(), H5P_DEFAULT));
-    if (g.id < 0) throw H5Error("cross: source group '" + id + "' missing");
+    if (g.id < 0) throw H5Error("multi-workspace: source group '" + id + "' missing");
     nlohmann::json summary = {
         {"id", id},
         {"name", name},
@@ -152,12 +152,12 @@ bool atomicMutate(const std::string& path,
     {
         H5FileGuard src(H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT));
         if (src.id < 0) {
-            err = "cross: copy to temp failed: open '" + path + "'";
+            err = "multi-workspace: copy to temp failed: open '" + path + "'";
             return false;
         }
         H5FileGuard dst(H5Fcreate(tmp.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT));
         if (dst.id < 0) {
-            err = "cross: copy to temp failed: create '" + tmp + "'";
+            err = "multi-workspace: copy to temp failed: create '" + tmp + "'";
             return false;
         }
         struct Ctx { hid_t dst; herr_t firstErr = 0; };
@@ -171,7 +171,7 @@ bool atomicMutate(const std::string& path,
         if (H5Literate(src.id, H5_INDEX_NAME, H5_ITER_INC, nullptr, visit, &ctx) < 0 ||
             ctx.firstErr < 0) {
             std::filesystem::remove(tmp);
-            err = "cross: copy to temp failed: H5Ocopy";
+            err = "multi-workspace: copy to temp failed: H5Ocopy";
             return false;
         }
     }
@@ -194,7 +194,7 @@ bool atomicMutate(const std::string& path,
         H5FileGuard heal(H5Fopen(tmp.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT));
         if (heal.id < 0) {
             std::filesystem::remove(tmp);
-            err = "cross: post-mutate reopen failed";
+            err = "multi-workspace: post-mutate reopen failed";
             return false;
         }
     }
@@ -207,7 +207,7 @@ bool atomicMutate(const std::string& path,
     }
     if (ec) {
         std::filesystem::remove(tmp);
-        err = "cross: rename failed: " + ec.message();
+        err = "multi-workspace: rename failed: " + ec.message();
         return false;
     }
     return true;
@@ -221,18 +221,18 @@ void appendSourceToManifest(hid_t file, const nlohmann::json& entry) {
 
 }  // namespace
 
-bool crossIsCrossFile(const std::string& path) {
+bool isMultiWorkspaceFile(const std::string& path) {
     H5FileGuard file(H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT));
     return file.id >= 0 && H5Lexists(file.id, "archive.json", H5P_DEFAULT);
 }
 
-bool crossCreate(const std::string& path, std::string& err) {
+bool multiWorkspaceCreate(const std::string& path, std::string& err) {
     const std::string tmp = path + ".tmp";
     std::error_code ec;
     std::filesystem::remove(tmp, ec);
     try {
         H5FileGuard file(H5Fcreate(tmp.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT));
-        if (file.id < 0) throw H5Error("crossCreate: H5Fcreate failed");
+        if (file.id < 0) throw H5Error("multiWorkspaceCreate: H5Fcreate failed");
         nlohmann::json manifest = {{"version", kManifestVersion}, {"sources", nlohmann::json::array()}};
         writeManifest(file.id, manifest);
     } catch (const std::exception& e) {
@@ -243,20 +243,20 @@ bool crossCreate(const std::string& path, std::string& err) {
     std::filesystem::rename(tmp, path, ec);
     if (ec) {
         std::filesystem::remove(tmp);
-        err = "crossCreate: rename failed: " + ec.message();
+        err = "multiWorkspaceCreate: rename failed: " + ec.message();
         return false;
     }
     return true;
 }
 
-bool crossCreateFromDataset(AppState&, const std::string& path,
+bool multiWorkspaceCreateFromDataset(AppState&, const std::string& path,
                             const std::string& srcPath, std::string& err) {
-    if (!crossCreate(path, err)) return false;
+    if (!multiWorkspaceCreate(path, err)) return false;
     std::string newId;
-    return crossAddSource(path, srcPath, newId, err);
+    return multiWorkspaceAddSource(path, srcPath, newId, err);
 }
 
-bool crossAddSource(const std::string& path, const std::string& srcPath,
+bool multiWorkspaceAddSource(const std::string& path, const std::string& srcPath,
                     std::string& newId, std::string& err, bool slowSave) {
     try {
         Workspace ws = H5Store::load(srcPath);   // throws H5Error on invalid input
@@ -265,7 +265,7 @@ bool crossAddSource(const std::string& path, const std::string& srcPath,
         std::vector<std::string> existingIds;
         {
             H5FileGuard file(H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT));
-            if (file.id < 0) throw H5Error("crossAddSource: cannot open '" + path + "'");
+            if (file.id < 0) throw H5Error("multiWorkspaceAddSource: cannot open '" + path + "'");
             for (const auto& e : readManifest(file.id).value("sources", nlohmann::json::array()))
                 existingIds.push_back(e.value("id", ""));
         }
@@ -277,7 +277,7 @@ bool crossAddSource(const std::string& path, const std::string& srcPath,
         if (!atomicMutate(path, [&](const std::string& tmp) {
             H5Store::saveGroup(tmp, prefix, ws);            // embed the content
             H5FileGuard file(H5Fopen(tmp.c_str(), H5F_ACC_RDWR, H5P_DEFAULT));
-            if (file.id < 0) throw H5Error("crossAddSource: reopen failed");
+            if (file.id < 0) throw H5Error("multiWorkspaceAddSource: reopen failed");
             writeSourceSummary(file.id, id, ws, name);
             appendSourceToManifest(file.id, {{"id", id}, {"name", name},
                                              {"memberCount", sourceMemberCount(ws)},
@@ -292,10 +292,10 @@ bool crossAddSource(const std::string& path, const std::string& srcPath,
     }
 }
 
-bool crossRemoveSource(const std::string& path, const std::string& id, std::string& err) {
+bool multiWorkspaceRemoveSource(const std::string& path, const std::string& id, std::string& err) {
     return atomicMutate(path, [&](const std::string& tmp) {
         H5FileGuard file(H5Fopen(tmp.c_str(), H5F_ACC_RDWR, H5P_DEFAULT));
-        if (file.id < 0) throw H5Error("crossRemoveSource: cannot open temp");
+        if (file.id < 0) throw H5Error("multiWorkspaceRemoveSource: cannot open temp");
         // Parent-aware existence check: H5Lexists on a slash path whose parent
         // group is missing fails with an error stack + auto-print.
         const std::string prefix = sourcePrefix(id);
@@ -314,21 +314,21 @@ bool crossRemoveSource(const std::string& path, const std::string& id, std::stri
     }, err);
 }
 
-bool crossRenameSource(const std::string& path, const std::string& id,
+bool multiWorkspaceRenameSource(const std::string& path, const std::string& id,
                        const std::string& newName, std::string& err) {
     if (newName.empty()) {
-        err = "cross: empty source name";
+        err = "multi-workspace: empty source name";
         return false;
     }
     return atomicMutate(path, [&](const std::string& tmp) {
         H5FileGuard file(H5Fopen(tmp.c_str(), H5F_ACC_RDWR, H5P_DEFAULT));
-        if (file.id < 0) throw H5Error("crossRenameSource: cannot open temp");
+        if (file.id < 0) throw H5Error("multiWorkspaceRenameSource: cannot open temp");
         nlohmann::json manifest = readManifest(file.id);
         bool found = false;
         for (auto& e : manifest["sources"]) {
             if (e.value("id", "") == id) { e["name"] = newName; found = true; break; }
         }
-        if (!found) throw H5Error("cross: source '" + id + "' not found");
+        if (!found) throw H5Error("multi-workspace: source '" + id + "' not found");
         writeManifest(file.id, manifest);
         // Best-effort @summary patch so the stored summary name follows the
         // manifest. The summary is informational (the Datasets list and tab
@@ -350,7 +350,7 @@ bool crossRenameSource(const std::string& path, const std::string& id,
 
 // Best-effort re-walk of every embedded source group after an archive save,
 // so the Session-tab sizes follow the on-disk state.
-void crossRefreshSourceSizes(SessionTabState& st, const std::string& path) {
+void multiWorkspaceRefreshSourceSizes(SessionTabState& st, const std::string& path) {
     try {
         H5FileGuard file(H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT));
         if (file.id < 0) return;
@@ -363,7 +363,7 @@ void crossRefreshSourceSizes(SessionTabState& st, const std::string& path) {
 
 // Same for persisted experiments — sizes shown in Active Experiments follow
 // the on-disk state (transient instances have no group: sizeBytes stays 0).
-void crossRefreshExperimentSizes(AppState& s, const std::string& path) {
+void multiWorkspaceRefreshExperimentSizes(AppState& s, const std::string& path) {
     try {
         H5FileGuard file(H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT));
         if (file.id < 0) return;
@@ -376,10 +376,10 @@ void crossRefreshExperimentSizes(AppState& s, const std::string& path) {
     }
 }
 
-bool crossLoadInto(SessionTabState& st, const std::string& path, std::string& err) {
+bool multiWorkspaceLoadInto(SessionTabState& st, const std::string& path, std::string& err) {
     try {
         H5FileGuard file(H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT));
-        if (file.id < 0) throw H5Error("crossLoad: cannot open '" + path + "'");
+        if (file.id < 0) throw H5Error("multiWorkspaceLoad: cannot open '" + path + "'");
         const nlohmann::json manifest = readManifest(file.id);
         st.sources.clear();
         st.sourceCache.clear();   // source workspaces may have changed
@@ -430,27 +430,27 @@ bool crossLoadInto(SessionTabState& st, const std::string& path, std::string& er
     }
 }
 
-bool crossLoad(AppState& s, const std::string& path, std::string& err) {
-    return crossLoadInto(s.sessionTab, path, err);
+bool multiWorkspaceLoad(AppState& s, const std::string& path, std::string& err) {
+    return multiWorkspaceLoadInto(s.sessionTab, path, err);
 }
 
-Workspace crossLoadSource(const std::string& crossPath, const std::string& sourceId,
+Workspace multiWorkspaceLoadSource(const std::string& multiWorkspacePath, const std::string& sourceId,
                           std::string& err) {
     try {
-        return H5Store::loadGroup(crossPath, sourcePrefix(sourceId));
+        return H5Store::loadGroup(multiWorkspacePath, sourcePrefix(sourceId));
     } catch (const std::exception& e) {
         err = e.what();
         return Workspace{};
     }
 }
 
-void crossSaveSource(const std::string& crossPath, const std::string& sourceId,
+void multiWorkspaceSaveSource(const std::string& multiWorkspacePath, const std::string& sourceId,
                      const Workspace& ws, std::string& err) {
     const std::string prefix = sourcePrefix(sourceId);
-    const bool ok = atomicMutate(crossPath, [&](const std::string& tmp) {
+    const bool ok = atomicMutate(multiWorkspacePath, [&](const std::string& tmp) {
         H5Store::saveGroup(tmp, prefix, ws);
         H5FileGuard file(H5Fopen(tmp.c_str(), H5F_ACC_RDWR, H5P_DEFAULT));
-        if (file.id < 0) throw H5Error("crossSaveSource: reopen failed");
+        if (file.id < 0) throw H5Error("multiWorkspaceSaveSource: reopen failed");
         // Preserve the source's DISPLAY name across save-backs (dataset rename
         // support): prefer the manifest's existing name; fall back to the id
         // stem only for legacy entries that predate rename (they are equal for
@@ -477,12 +477,12 @@ void crossSaveSource(const std::string& crossPath, const std::string& sourceId,
 // strip (including workspaces dragged to the right of experiment tabs).
 // Written on explicit saves (Ctrl+S / exit Save All / project-switch save) —
 // every write is a full-file copy.
-void crossSaveTabOrder(const std::string& path,
+void multiWorkspaceSaveTabOrder(const std::string& path,
                        const std::vector<std::string>& tabOrder,
                        std::string& err) {
     const bool ok = atomicMutate(path, [&](const std::string& tmp) {
         H5FileGuard file(H5Fopen(tmp.c_str(), H5F_ACC_RDWR, H5P_DEFAULT));
-        if (file.id < 0) throw H5Error("crossSaveTabOrder: cannot open temp");
+        if (file.id < 0) throw H5Error("multiWorkspaceSaveTabOrder: cannot open temp");
         nlohmann::json manifest = readManifest(file.id);
         manifest["tabOrder"] = tabOrder;
         writeManifest(file.id, manifest);
@@ -502,7 +502,7 @@ std::vector<std::string> openEmbeddedSourceIds(const AppState& s) {
     return ids;
 }
 
-// Reduce the captured strip order to what a .cross.h5 can restore: embedded
+// Reduce the captured strip order to what a multi-workspace .h5 can restore: embedded
 // workspace tabs ("ws:<sourceId>") + experiments with a persisted id
 // ("exp:<id>"). Standalone workspace tabs and unsaved experiments can't be
 // reopened — they are dropped (they re-append at the end after a reload).
@@ -539,7 +539,7 @@ std::vector<std::string> persistableTabOrder(const AppState& s) {
 
 // ── Phase 4: experiments ────────────────────────────────────────────────────
 
-bool crossExperimentWrite(const std::string& path, const std::string& expId,
+bool multiWorkspaceExperimentWrite(const std::string& path, const std::string& expId,
                           const nlohmann::json& config,
                           const nlohmann::json& fingerprints,
                           const std::map<std::string, std::vector<double>>& results,
@@ -547,7 +547,7 @@ bool crossExperimentWrite(const std::string& path, const std::string& expId,
     const std::string prefix = experimentPrefix(expId);
     return atomicMutate(path, [&](const std::string& tmp) {
         H5FileGuard file(H5Fopen(tmp.c_str(), H5F_ACC_RDWR, H5P_DEFAULT));
-        if (file.id < 0) throw H5Error("crossExperimentWrite: cannot open temp");
+        if (file.id < 0) throw H5Error("multiWorkspaceExperimentWrite: cannot open temp");
         // Parent-aware existence: H5Lexists on a slash path with a missing
         // parent errors out (hdf5 quirk fixed in Phase 2).
         const bool haveParent = H5Lexists(file.id, "experiments", H5P_DEFAULT) > 0;
@@ -555,15 +555,15 @@ bool crossExperimentWrite(const std::string& path, const std::string& expId,
             H5Ldelete(file.id, prefix.c_str(), H5P_DEFAULT);
         if (!haveParent &&
             H5Gcreate2(file.id, "experiments", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT) < 0)
-            throw H5Error("crossExperimentWrite: cannot create experiments/");
+            throw H5Error("multiWorkspaceExperimentWrite: cannot create experiments/");
         H5GroupGuard g(H5Gcreate2(file.id, prefix.c_str(), H5P_DEFAULT,
                                   H5P_DEFAULT, H5P_DEFAULT));
-        if (g.id < 0) throw H5Error("crossExperimentWrite: cannot create group '" + expId + "'");
+        if (g.id < 0) throw H5Error("multiWorkspaceExperimentWrite: cannot create group '" + expId + "'");
         h5WriteVlenString(g.id, "config.json", config.dump());
         h5WriteVlenString(g.id, "fingerprint.json", fingerprints.dump());
         if (!results.empty()) {
             H5GroupGuard rg(H5Gcreate2(g.id, "results", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT));
-            if (rg.id < 0) throw H5Error("crossExperimentWrite: cannot create results/");
+            if (rg.id < 0) throw H5Error("multiWorkspaceExperimentWrite: cannot create results/");
             for (const auto& [name, vec] : results)
                 h5WriteFp64Vector(rg.id, name.c_str(), vec);
         }
@@ -587,11 +587,11 @@ bool crossExperimentWrite(const std::string& path, const std::string& expId,
     }, err);
 }
 
-bool crossExperimentRemove(const std::string& path, const std::string& expId,
+bool multiWorkspaceExperimentRemove(const std::string& path, const std::string& expId,
                            std::string& err) {
     return atomicMutate(path, [&](const std::string& tmp) {
         H5FileGuard file(H5Fopen(tmp.c_str(), H5F_ACC_RDWR, H5P_DEFAULT));
-        if (file.id < 0) throw H5Error("crossExperimentRemove: cannot open temp");
+        if (file.id < 0) throw H5Error("multiWorkspaceExperimentRemove: cannot open temp");
         const std::string prefix = experimentPrefix(expId);
         if (H5Lexists(file.id, "experiments", H5P_DEFAULT) > 0 &&
             H5Lexists(file.id, prefix.c_str(), H5P_DEFAULT) > 0)
@@ -609,11 +609,11 @@ bool crossExperimentRemove(const std::string& path, const std::string& expId,
     }, err);
 }
 
-bool crossExperimentList(const std::string& path,
+bool multiWorkspaceExperimentList(const std::string& path,
                          std::vector<nlohmann::json>& entries, std::string& err) {
     try {
         H5FileGuard file(H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT));
-        if (file.id < 0) throw H5Error("crossExperimentList: cannot open '" + path + "'");
+        if (file.id < 0) throw H5Error("multiWorkspaceExperimentList: cannot open '" + path + "'");
         const nlohmann::json manifest = readManifest(file.id);
         entries.clear();
         for (const auto& e : manifest.value("experiments", nlohmann::json::array()))
@@ -625,16 +625,16 @@ bool crossExperimentList(const std::string& path,
     }
 }
 
-bool crossExperimentRead(const std::string& path, const std::string& expId,
+bool multiWorkspaceExperimentRead(const std::string& path, const std::string& expId,
                          nlohmann::json& config, nlohmann::json& fingerprints,
                          std::map<std::string, std::vector<double>>& results,
                          nlohmann::json& stats, std::string& err) {
     try {
         H5FileGuard file(H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT));
-        if (file.id < 0) throw H5Error("crossExperimentRead: cannot open '" + path + "'");
+        if (file.id < 0) throw H5Error("multiWorkspaceExperimentRead: cannot open '" + path + "'");
         const std::string prefix = experimentPrefix(expId);
         H5GroupGuard g(H5Gopen2(file.id, prefix.c_str(), H5P_DEFAULT));
-        if (g.id < 0) throw H5Error("crossExperimentRead: experiment group '" + expId + "' missing");
+        if (g.id < 0) throw H5Error("multiWorkspaceExperimentRead: experiment group '" + expId + "' missing");
         config = nlohmann::json::parse(h5ReadVlenString(g.id, "config.json"), nullptr, false);
         if (config.is_discarded()) config = nlohmann::json::object();
         fingerprints = nlohmann::json::parse(h5ReadVlenString(g.id, "fingerprint.json"),
@@ -665,10 +665,10 @@ bool crossExperimentRead(const std::string& path, const std::string& expId,
 
 // ── Batch-processing recipes (M-batch) ──────────────────────────────────────
 // Root group "recipes/", one vlen-string dataset per recipe (content = the
-// recipe JSON). Additive to the cross file: the manifest is untouched, and
-// H5Store::validate is never invoked on cross files.
+// recipe JSON). Additive to the multi-workspace file: the manifest is untouched, and
+// H5Store::validate is never invoked on multi-workspace files.
 
-bool crossRecipeWrite(const std::string& path, const std::string& name,
+bool multiWorkspaceRecipeWrite(const std::string& path, const std::string& name,
                       const nlohmann::json& recipe, std::string& err) {
     if (name.empty() || name.find('/') != std::string::npos) {
         err = "recipes: invalid recipe name";
@@ -693,7 +693,7 @@ bool crossRecipeWrite(const std::string& path, const std::string& name,
     }, err);
 }
 
-bool crossRecipeList(const std::string& path, std::vector<std::string>& names,
+bool multiWorkspaceRecipeList(const std::string& path, std::vector<std::string>& names,
                      std::string& err) {
     try {
         H5FileGuard f(H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT));
@@ -720,7 +720,7 @@ bool crossRecipeList(const std::string& path, std::vector<std::string>& names,
     }
 }
 
-bool crossRecipeRead(const std::string& path, const std::string& name,
+bool multiWorkspaceRecipeRead(const std::string& path, const std::string& name,
                      nlohmann::json& out, std::string& err) {
     try {
         H5FileGuard f(H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT));
@@ -743,7 +743,7 @@ bool crossRecipeRead(const std::string& path, const std::string& name,
     }
 }
 
-bool crossRecipeRemove(const std::string& path, const std::string& name,
+bool multiWorkspaceRecipeRemove(const std::string& path, const std::string& name,
                        std::string& err) {
     return atomicMutate(path, [&](const std::string& tmp) {
         H5FileGuard f(H5Fopen(tmp.c_str(), H5F_ACC_RDWR, H5P_DEFAULT));

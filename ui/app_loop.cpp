@@ -16,7 +16,7 @@
 #include "apodization.h"
 #include "app_dirs.h"
 #include "file_browser.h"
-#include "session/cross_store.h"
+#include "session/multi_workspace_store.h"
 #include "environment_session.h"
 #include "hitran_panel.h"
 #include "layout_persistence.h"
@@ -133,11 +133,11 @@ static void renderUnsavedPromptModal() {
                         appState.needsRedraw = true;
                     } else {
                         // Phase 4: the replace-project prompt also saves
-                        // unsaved experiments (they live in the .cross.h5).
+                        // unsaved experiments (they live in the multi-workspace .h5).
                         if (appState.pendingWorkspaceAction ==
                             PendingWorkspaceAction::OpenMultiWorkspace) {
                             std::string err;
-                            if (!crossSaveExperiments(
+                            if (!multiWorkspaceSaveExperiments(
                                     appState, appState.sessionTab.multiWorkspacePath, err)) {
                                 appState.adapterErrorMsg =
                                     std::string("Experiment save failed:\n") + err;
@@ -145,7 +145,7 @@ static void renderUnsavedPromptModal() {
                             } else {
                                 // Persist the exact tab-strip order with the
                                 // same save (bugfix 2026-08-14).
-                                crossSaveTabOrder(
+                                multiWorkspaceSaveTabOrder(
                                     appState.sessionTab.multiWorkspacePath,
                                     persistableTabOrder(appState), err);
                                 if (!err.empty()) {
@@ -345,7 +345,7 @@ static void renderExitDirtyModal() {
 
 // Phase-4 experiment delete confirmation: dirty or persisted experiments
 // confirm before removal (transient empty instances remove directly). On
-// Delete: remove the experiment group from the .cross.h5 (if persisted) and
+// Delete: remove the experiment group from the multi-workspace .h5 (if persisted) and
 // drop the instance.
 static void renderExperimentDeleteConfirmModal() {
     static int focus = 0;
@@ -382,7 +382,7 @@ static void renderExperimentDeleteConfirmModal() {
                 auto* env = appState.experiments[idx].get();
                 if (!env->id.empty() && appState.sessionTab.multiWorkspaceOpen) {
                     std::string err;
-                    if (!crossExperimentRemove(appState.sessionTab.multiWorkspacePath,
+                    if (!multiWorkspaceExperimentRemove(appState.sessionTab.multiWorkspacePath,
                                                env->id, err)) {
                         appState.adapterErrorMsg = "Delete failed:\n" + err;
                         appState.showAdapterErrorPopup = true;
@@ -423,15 +423,15 @@ static void advanceExitSaveAll() {
         // experiments are live objects, no swap needed; save them all in one
         // pass (best-effort, mirrors the workspace saves).
         appState.exitSaveAllCursor++;   // run once
-        const std::string& crossPath = appState.sessionTab.multiWorkspacePath;
-        if (!crossPath.empty()) {
+        const std::string& multiWorkspacePath = appState.sessionTab.multiWorkspacePath;
+        if (!multiWorkspacePath.empty()) {
             for (int idx : appState.exitDirtyExperiments) {
                 if (idx < 0 || idx >= static_cast<int>(appState.experiments.size()))
                     continue;
                 auto& env = appState.experiments[idx];
                 if (!env->dirty) continue;
                 std::string err;
-                if (!crossSaveExperiment(appState, *env, crossPath, err)) {
+                if (!multiWorkspaceSaveExperiment(appState, *env, multiWorkspacePath, err)) {
                     appState.adapterErrorMsg = std::string("Experiment save failed:\n") + err;
                     appState.showAdapterErrorPopup = true;
                     appState.exitSaveAllRunning = false;
@@ -446,7 +446,7 @@ static void advanceExitSaveAll() {
             // Persist the exact tab-strip order with the same Save All
             // (bugfix 2026-08-14) — best-effort, mirrors the workspace saves.
             std::string err;
-            crossSaveTabOrder(crossPath, persistableTabOrder(appState), err);
+            multiWorkspaceSaveTabOrder(multiWorkspacePath, persistableTabOrder(appState), err);
         }
         for (int idx : appState.exitDirtyExperiments) {
             if (idx >= 0 && idx < static_cast<int>(appState.experiments.size()))
@@ -1384,7 +1384,7 @@ void AppLoop::pollAsyncComputations() {
 // Per-tab async polls (M2.3): workspace tabs are no-ops here — their
 // polling runs on the flat fields in pollAsyncComputations while active;
 // Session/experiment tabs (M2.5/Phase 3) poll their own futures. The
-// ACTIVE experiment instance polls only (audit §5.5): inactive instances
+// ACTIVE experiment instance polls only: inactive instances
 // drain on re-activation.
 void AppLoop::tickSessions() {
     sessionTab_.tickAsync();

@@ -49,7 +49,7 @@ void restoreTabLayout(const char* type);
 
 // Per-workspace layout snapshots (bugfix 2026-08-15): each dataset keeps its
 // OWN docking arrangement, keyed by the session's stable `key` (workspace
-// path, or "cross.h5#sourceId"). A shared "workspace" snapshot would make
+// path, or "multi-workspace .h5#sourceId"). A shared "workspace" snapshot would make
 // every workspace reflect the last one's layout.
 void saveWorkspaceLayout(const std::string& key);
 void restoreWorkspaceLayout(const std::string& key);

@@ -11,7 +11,7 @@
 #include <utility>
 
 // Configuration structure for app settings
-// Cross-store sources/ live under a group prefix and are read/written via
+// Multi-workspace embedded sources/ live under a group prefix and are read/written via
 // H5Store::loadGroup/saveGroup (M2.4); experiments/ groups land in Phase 4.
 struct AppConfig {
     struct RecentDatasetEntry {
@@ -19,7 +19,7 @@ struct AppConfig {
     };
     std::vector<RecentDatasetEntry> recentDatasets;
     size_t maxRecentDatasets = 10;
-    // Recent multi-workspace (.cross.h5) files (M2.5) — the Welcome screen's
+    // Recent multi-workspace (.h5) files (M2.5) — the Welcome screen's
     // right column + the Session tab's file pickers.
     std::vector<std::string> recentMultiWorkspaces;
     // Last opened/created multi-workspace file (default folder hint).

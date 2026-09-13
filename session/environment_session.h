@@ -17,10 +17,10 @@
 struct AppState;
 struct InterferogramMember;
 
-// Phase-3 M3.2 — instantiable cross-workspace analysis tab (audit §3.3).
+// Phase-3 M3.2 — instantiable cross-workspace analysis tab.
 // LIVE object, never folded: multiple instances of a type coexist, each owns
 // its state + futures; tab switch only changes which instance renders.
-// Picks use STABLE keys (workspace path, or "cross.h5#sourceId") resolved to
+// Picks use STABLE keys (workspace path, or "multi-workspace .h5#sourceId") resolved to
 // live sessions at each use; a closed referenced session degrades the owning
 // rows (marked unavailable, removable) — never re-pointed.
 enum class EnvType { Absorbance, Comparator };   // Pca removed (Phase-2 user decision)
@@ -95,7 +95,7 @@ struct IfgDeriveParams {
 class EnvironmentSession : public SessionBase {
 public:
     EnvType type = EnvType::Absorbance;
-    std::string id;                      // stable experiment id in the .cross.h5
+    std::string id;                      // stable experiment id in the multi-workspace .h5
                                          // ("" = transient, never saved)
     // HDF5 storage footprint of the persisted experiments/<id> group,
     // recomputed on every project load and save (in-memory only).
@@ -210,7 +210,7 @@ public:
     // xUnit change: convert every curve's gridX in place (ratios are
     // unit-independent).
     void convertXInPlace();
-    // Display label for a curve's source key (open-tab label, cross-source
+    // Display label for a curve's source key (open-tab label, embedded-source
     // name, or the raw key).
     std::string sourceLabel(const std::string& key) const;
     // Legend/CSV label for one curve: the user-chosen name, or "Curve N"
@@ -301,4 +301,4 @@ void clearExperiments(AppState& s);
 // Project-open helper (main.cpp/session_tab/welcome open paths): load the
 // manifest, clear the current experiments, then restore the persisted
 // experiments from the file. Returns false on failure (err set).
-bool crossOpenProject(AppState& s, const std::string& path, std::string& err);
+bool multiWorkspaceOpenProject(AppState& s, const std::string& path, std::string& err);

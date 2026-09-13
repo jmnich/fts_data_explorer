@@ -26,7 +26,7 @@ struct AppState;
 enum class PanelKind : int { None = 0, Average, Snr, T100, Allan };
 
 // A workspace tab — THE canonical storage of every per-workspace field
-// (data_structures_audit.md §3.1b, Phase-5 M4.5 live-object model). AppState
+// (Phase-5 M4.5 live-object model). AppState
 // holds NO flat per-workspace fields; `AppState::active` points at the
 // focused session. Tab switch is a pointer assignment — never a copy, no
 // park/resume, no field checklist (the drift class is gone by construction).
@@ -36,7 +36,7 @@ enum class PanelKind : int { None = 0, Average, Snr, T100, Allan };
 // only.
 class WorkspaceSession : public SessionBase {
 public:
-    std::string key;            // STABLE identity: workspace path, or "cross.h5#sourceId" for embedded sources.
+    std::string key;            // STABLE identity: workspace path, or "multi-workspace .h5#sourceId" for embedded sources.
     std::string path;           // filesystem .h5 path; empty for embedded tabs.
 
     // ── workspace + dirty/view state ───────────────────────────────────────
@@ -201,7 +201,7 @@ void applySessionDefaults(AppState& s, WorkspaceSession& ws);
 // parked restored tabs (no active pointer needed).
 void finishSessionLoad(WorkspaceSession& ws, const std::string& displayName);
 
-// Reopen the .cross.h5's persisted open-source tabs (bugfix 2026-08-14):
+// Reopen the multi-workspace .h5's persisted open-source tabs (bugfix 2026-08-14):
 // creates loaded sessions for every source flagged "open" in the archive
 // manifest, WITHOUT activation — the Session tab keeps focus; the strip shows
 // the restored tabs. Dedupes by stable key; a failing source is skipped with
@@ -209,7 +209,7 @@ void finishSessionLoad(WorkspaceSession& ws, const std::string& displayName);
 void restoreOpenEmbeddedTabs(AppState& s);
 
 // Rename an embedded dataset's DISPLAY name (AppState-level wrapper for
-// crossRenameSource): persists to the archive, refreshes the in-memory
+// multiWorkspaceRenameSource): persists to the archive, refreshes the in-memory
 // sources[].name (Datasets list, embedded tab labels, pickers all re-read it),
 // and requests a strip rebuild (open tabs' labels changed their hashed IDs).
 void renameDatasetSource(AppState& s, const std::string& id,

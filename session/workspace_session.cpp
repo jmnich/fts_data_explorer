@@ -1,5 +1,5 @@
 // WorkspaceSession: the CANONICAL storage of every per-workspace field
-// (data_structures_audit.md §3.1b — Phase-5 M4.5 live-object model). AppState
+// (Phase-5 M4.5 live-object model). AppState
 // holds no flat per-workspace fields; AppState::active points at the focused
 // session. Tab switch is a pointer assignment — never a copy, no park/resume,
 // no field checklist (the drift class is gone by construction).
@@ -10,7 +10,7 @@
 #include <cstring>
 
 #include "app_state.h"
-#include "cross_store.h"
+#include "multi_workspace_store.h"
 #include "ui/layout_persistence.h"
 #include "spectral_pool.h"
 #include "workspace_reader.h"
@@ -44,7 +44,7 @@ void applySessionDefaults(AppState& s, WorkspaceSession& ws) {
 
 // Session-level open tail (bugfix 2026-08-14): everything finishWorkspaceLoad
 // used to do that is session-scoped — extracted so RESTORED multi-workspace
-// tabs (reopened .cross.h5) get the same engine setup without an active
+// tabs (reopened multi-workspace .h5) get the same engine setup without an active
 // pointer. finishWorkspaceLoad delegates for the active tab; the AppState-level
 // bits (welcome flags, recent list) stay there.
 void finishSessionLoad(WorkspaceSession& ws, const std::string& displayName) {
@@ -93,7 +93,7 @@ void finishSessionLoad(WorkspaceSession& ws, const std::string& displayName) {
     seedPanelsFromWorkspace(ws);
 }
 
-// Reopen the .cross.h5's persisted open-source tabs (bugfix 2026-08-14):
+// Reopen the multi-workspace .h5's persisted open-source tabs (bugfix 2026-08-14):
 // creates loaded sessions for every source listed in openTabIds — IN THAT
 // ORDER, so the strip's tab order survives the reopen — without activation
 // (the Session tab keeps focus). Dedupes by stable key; a failing source is
@@ -101,9 +101,9 @@ void finishSessionLoad(WorkspaceSession& ws, const std::string& displayName) {
 void restoreOpenEmbeddedTabs(AppState& s) {
     if (!s.sessionTab.multiWorkspaceOpen || s.sessionTab.multiWorkspacePath.empty())
         return;
-    const std::string crossPath = s.sessionTab.multiWorkspacePath;
+    const std::string multiWorkspacePath = s.sessionTab.multiWorkspacePath;
     for (const auto& id : s.sessionTab.openTabIds) {
-        const std::string key = crossPath + "#" + id;
+        const std::string key = multiWorkspacePath + "#" + id;
         bool have = false;
         for (const auto& sess : s.sessions)
             if (sess->key == key) { have = true; break; }
@@ -114,7 +114,7 @@ void restoreOpenEmbeddedTabs(AppState& s) {
         wireSessionPanels(s, *sess);
         applySessionDefaults(s, *sess);
         std::string err;
-        sess->workspace = crossLoadSource(crossPath, id, err);
+        sess->workspace = multiWorkspaceLoadSource(multiWorkspacePath, id, err);
         if (!err.empty()) {
             s.adapterErrorMsg = std::string("Failed to reopen source tab:\n") + err;
             s.showAdapterErrorPopup = true;
@@ -128,7 +128,7 @@ void restoreOpenEmbeddedTabs(AppState& s) {
 
 // Rebuild AppState::tabStripOrder from the loaded manifest (bugfix
 // 2026-08-14): the raw "tabOrder" entries are mapped back to strip keys
-// ("ws:<sourceId>" → "ws:<crossPath>#<sourceId>", "exp:<id>" passes through)
+// ("ws:<sourceId>" → "ws:<multiWorkspacePath>#<sourceId>", "exp:<id>" passes through)
 // so the strip's FIRST submission renders the saved interleave. Without it
 // tabStripOrder starts empty and the strip falls back to workspaces-then-
 // experiments. Entries that cannot resolve (dropped standalone/unsaved tabs)
@@ -158,7 +158,7 @@ void renameDatasetSource(AppState& s, const std::string& id,
         err = "No multi-workspace is open";
         return;
     }
-    if (!crossRenameSource(s.sessionTab.multiWorkspacePath, id, newName, err))
+    if (!multiWorkspaceRenameSource(s.sessionTab.multiWorkspacePath, id, newName, err))
         return;
     // In-memory refresh: the Datasets list, embedded tab labels (label()),
     // comparator/experiment pickers and batch pickers all read this live.
@@ -320,15 +320,15 @@ void ensureSessionTab(AppState& s) {
     s.needsRedraw = true;
 }
 
-// Open an EMBEDDED source of a .cross.h5 in a new workspace tab (M2.5;
+// Open an EMBEDDED source of a multi-workspace .h5 in a new workspace tab (M2.5;
 // moved here from main.cpp so the session harness can link it). Stable key:
-// "<crossPath>#<sourceId>"; path stays empty (the tab's save target is the
-// .cross.h5 itself). Loads in-memory via crossLoadSource — workspaceRead is
+// "<multiWorkspacePath>#<sourceId>"; path stays empty (the tab's save target is the
+// multi-workspace .h5 itself). Loads in-memory via multiWorkspaceLoadSource — workspaceRead is
 // in-memory, so no temp files exist.
-void openEmbeddedInNewTab(AppState& s, const std::string& crossPath,
+void openEmbeddedInNewTab(AppState& s, const std::string& multiWorkspacePath,
                           const std::string& sourceId) {
     ensureSessionTab(s);
-    const std::string key = crossPath + "#" + sourceId;
+    const std::string key = multiWorkspacePath + "#" + sourceId;
     for (int i = 0; i < static_cast<int>(s.sessions.size()); ++i) {
         if (s.sessions[i]->key == key) {
             swapInSession(s, i);      // duplicate → activate the existing tab
@@ -341,7 +341,7 @@ void openEmbeddedInNewTab(AppState& s, const std::string& crossPath,
     applySessionDefaults(s, *sess);
     s.sessions.push_back(std::move(sess));
     swapInSession(s, static_cast<int>(s.sessions.size()) - 1);
-    s.pendingOpenPath = crossPath;
+    s.pendingOpenPath = multiWorkspacePath;
     s.pendingOpenSourceId = sourceId;
     s.needsRedraw = true;
 }
@@ -353,7 +353,7 @@ void openEmbeddedInNewTab(AppState& s, const std::string& crossPath,
 
 // Remove a parked session. Indexes shift; cross-references never store raw
 // indices (they resolve via stable keys), so a simple index fix-up suffices.
-// Pool entries of the closed workspace are evicted (audit §5.3 Amendment 4).
+// Pool entries of the closed workspace are evicted.
 void removeTab(AppState& s, int idx) {
     if (idx < 0 || idx >= static_cast<int>(s.sessions.size())) return;
     poolEvictKey(s, s.sessions[idx]->key);
