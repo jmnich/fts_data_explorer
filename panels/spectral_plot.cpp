@@ -11,10 +11,12 @@
 #include <vector>
 
 // "Nice" tick step computation for an ImPlot axis (maxTicks grid lines).
-// File-local single copy for every panel that drives a SpectralPlotView
-// (replaces the per-panel static duplicates; Allan/Interferogram keep theirs —
-// ui/window.h's linkable copy stays with the interferogram panel).
-static void SetupAxisTicksLimited(ImAxis axis, double min, double max, int maxTicks = 12) {
+// Shared via SpectralPlotView::setupAxisTicksLimited — every panel that
+// drives a SpectralPlotView uses this copy (replaces the per-panel static
+// duplicates; Allan/Interferogram keep theirs — ui/window.h's linkable copy
+// stays with the interferogram panel).
+void SpectralPlotView::setupAxisTicksLimited(ImAxis axis, double min, double max,
+                                             int maxTicks) {
     double range = max - min;
     if (range <= 0.0) return;
 
@@ -391,8 +393,8 @@ void SpectralPlotView::setupAxes(const SpectralPlotFrame& f) {
         if (!(x0 < x1) && f.xDataRange) f.xDataRange(x0, x1);
         double y0 = savedYMin, y1 = savedYMax;
         if (!(y0 < y1) && f.yDataRange) f.yDataRange(y0, y1);
-        if (x0 < x1) SetupAxisTicksLimited(ImAxis_X1, x0, x1);
-        if (y0 < y1) SetupAxisTicksLimited(ImAxis_Y1, y0, y1);
+        if (x0 < x1) setupAxisTicksLimited(ImAxis_X1, x0, x1);
+        if (y0 < y1) setupAxisTicksLimited(ImAxis_Y1, y0, y1);
     }
 }
 

@@ -21,6 +21,7 @@
 #include "hdf/h5_store.h"
 #include "hitran_panel.h"
 #include "layout_persistence.h"
+#include "running_stats.h"
 #include "theme.h"
 #include "workspace_reader.h"
 #include "workspace_session.h"
@@ -318,12 +319,14 @@ const char* experimentTypeName(EnvType t) {
 
 // Stable window names of the experiment type's docked panels. These MUST stay
 // in sync with renderConfigWindow/renderViewWindow/renderRangingWindow/
-// renderExportWindow and app_loop.cpp's pre-DockSpace forced-selection list.
+// renderResidualWindow/renderExportWindow and app_loop.cpp's pre-DockSpace
+// forced-selection list.
 bool isExperimentPanelName(const char* name) {
     return name &&
            (std::strcmp(name, "Settings##envcfg") == 0 ||
             std::strcmp(name, "Viewer##envview") == 0 ||
             std::strcmp(name, "Plot Ranging##envrange") == 0 ||
+            std::strcmp(name, "Residual##envres") == 0 ||
             std::strcmp(name, "Export##envexp") == 0 ||
             std::strcmp(name, "HITRAN Gas Markers##envhitran") == 0);
 }
@@ -772,8 +775,102 @@ void EnvironmentSession::applyYMode() {
                                        : (r > 1e-15) ? -std::log10(r) : 0.0;
         }
     }
+    // Fit-affecting rewrite: keep 2 frames flowing so the EndPlot-time Y
+    // re-fit lands on screen even when the loop goes idle right after.
+    appState.pendingRedrawFrames = 2;
     dirty = true;
     appState.needsRedraw = true;
+}
+
+// Real-time residual (reference − subtracted) between two of the currently
+// visible curves. Synchronous per frame — no pool, no caching, no stale
+// overlay. Grid = reference points inside the overlap region (the
+// computeAbsorbance convention: the reference defines the axis); the
+// subtracted curve is resampled onto it. dB mode subtracts the DISPLAYED
+// values (same transform as the main plot — WYSIWYG with the view).
+// Refusing conditions (disabled, <2 curves, empty curves, no overlap,
+// resample failure) clear the vectors and invalidate the stats — the panel
+// falls back to its status text and showResidual keeps rows at 1.
+void EnvironmentSession::computeResidual(
+    const std::vector<ComparatorCurve>& curves, bool dBNormalize,
+    double dBRefMax) {
+    residualX.clear();
+    residualY.clear();
+    residualStatsValid = false;
+    if (!residualEnabled || curves.size() < 2) return;
+    residualRefIdx =
+        std::clamp(residualRefIdx, 0, static_cast<int>(curves.size()) - 1);
+    residualSubIdx =
+        std::clamp(residualSubIdx, 0, static_cast<int>(curves.size()) - 1);
+    const ComparatorCurve& ref = curves[static_cast<size_t>(residualRefIdx)];
+    const ComparatorCurve& sub = curves[static_cast<size_t>(residualSubIdx)];
+    if (ref.x.empty() || ref.y.empty() || sub.x.empty() || sub.y.empty()) return;
+
+    std::vector<double> refY = ref.y, subY = sub.y;
+    if (plot.yScaleSelector == kYScaleDb) {
+        const auto toDb = [&](double v) {
+            return dBNormalize
+                       ? 10.0 * std::log10(std::max(v / dBRefMax, 1e-300))
+                       : 10.0 * std::log10(std::max(v, 1e-300));
+        };
+        for (double& v : refY) v = toDb(v);
+        for (double& v : subY) v = toDb(v);
+    }
+
+    // Overlap interval (direction-safe via front/back min/max — descending
+    // um curves included).
+    const double lo = std::max(std::min(ref.x.front(), ref.x.back()),
+                               std::min(sub.x.front(), sub.x.back()));
+    const double hi = std::min(std::max(ref.x.front(), ref.x.back()),
+                               std::max(sub.x.front(), sub.x.back()));
+    std::vector<double> gridX, refYOverlap;
+    gridX.reserve(ref.x.size());
+    refYOverlap.reserve(ref.y.size());
+    for (size_t i = 0; i < ref.x.size() && i < refY.size(); ++i)
+        if (ref.x[i] >= lo && ref.x[i] <= hi) {
+            gridX.push_back(ref.x[i]);
+            refYOverlap.push_back(refY[i]);
+        }
+    if (gridX.size() < 2) return;
+
+    std::vector<double> subResampled = resampleToGrid(sub.x, subY, gridX);
+    if (subResampled.size() != gridX.size()) return;
+
+    residualX = std::move(gridX);
+    residualY.resize(residualX.size());
+    for (size_t i = 0; i < residualY.size(); ++i) {
+        double diff = refYOverlap[i] - subResampled[i];
+        if (residualMode == 1) diff = std::fabs(diff);
+        residualY[i] = diff;
+    }
+    computeResidualStats();
+}
+
+// Residual statistics: min/max/peak-peak + stddev (sample variance N-1 via
+// RunningStats, the T100/batch convention) in one pass. Region 0 filters to
+// the viewbox X window (viewXMin/Max are captured at the END of the main
+// plot's BeginPlot, so they lag one frame — invisible; first frame falls
+// back to all data).
+void EnvironmentSession::computeResidualStats() {
+    residualStatsValid = false;
+    if (residualX.empty() || residualY.size() != residualX.size()) return;
+    const bool filterView = residualStatsRegion == 0 && viewXMin < viewXMax;
+    RunningStats stats;
+    double mn = std::numeric_limits<double>::max();
+    double mx = std::numeric_limits<double>::lowest();
+    for (size_t i = 0; i < residualX.size(); ++i) {
+        if (filterView && (residualX[i] < viewXMin || residualX[i] > viewXMax))
+            continue;
+        stats.add(residualY[i]);
+        mn = std::min(mn, residualY[i]);
+        mx = std::max(mx, residualY[i]);
+    }
+    if (stats.n < 1) return;
+    residualMin = mn;
+    residualMax = mx;
+    residualPeakPeak = mx - mn;
+    residualStddev = stats.stddev();
+    residualStatsValid = true;
 }
 
 void EnvironmentSession::convertXInPlace() {
@@ -867,6 +964,9 @@ void EnvironmentSession::render() {
         dirty = true;
     renderExportWindow();
     renderViewWindow();
+    // Residual panel renders AFTER the Viewer: its comboboxes read the curve
+    // labels cached at the end of renderViewWindow (same frame, no delay).
+    renderResidualWindow();
 }
 
 // Config panel: pickers (absorbance) / artifact + dataset selectors
@@ -947,6 +1047,11 @@ void EnvironmentSession::renderViewWindow() {
             if (plot.yScaleSelector == 2) yLabel += " (dB)";
         }
         renderPlot(curves, xLabel, yLabel, hasGuideline, guideline, true);
+        // Cache the visible curve labels for renderResidualWindow (the curve
+        // vector is local to this function). An empty list clears the cache —
+        // the Residual panel then shows its "not enough curves" status.
+        residualCurveLabels_.clear();
+        for (const auto& c : curves) residualCurveLabels_.push_back(c.label);
     }
     ImGui::End();
 }
@@ -1354,6 +1459,12 @@ void EnvironmentSession::renderXUnitButtons() {
                 plot.prevXUnitSelector = plot.xUnitSelector;
                 plot.xUnitSelector = u;
                 convertXInPlace();
+                // Fit-affecting view change: keep 2 frames flowing so the
+                // armed X window + Y refit actually land on screen (the
+                // EndPlot-time fit only becomes visible on the NEXT frame —
+                // see app_state.h / app_loop's pendingRedrawFrames gate).
+                appState.pendingRedrawFrames = 2;
+                appState.needsRedraw = true;
             }
         }
         ImGui::PopStyleColor(3);
@@ -1385,6 +1496,7 @@ void EnvironmentSession::renderYModeButtons() {
 void EnvironmentSession::renderYAxisControls() {
     if (plot.renderYModeButtons("##EnvYAxis")) {
         dirty = true;
+        appState.pendingRedrawFrames = 2;   // EndPlot-time Y fit follow-up
         appState.needsRedraw = true;
     }
     if (plot.yAxisMode == kYModeForce) {
@@ -1393,6 +1505,7 @@ void EnvironmentSession::renderYAxisControls() {
         ImGui::SetNextItemWidth(80.0f);
         if (ImGui::InputDouble("##EnvForcedYMin", &plot.forcedYMin, 0.0, 0.0, "%.6g")) {
             dirty = true;
+            appState.pendingRedrawFrames = 2;   // EndPlot-time Y fit follow-up
             appState.needsRedraw = true;
         }
         ImGui::SameLine();
@@ -1401,6 +1514,7 @@ void EnvironmentSession::renderYAxisControls() {
         ImGui::SetNextItemWidth(80.0f);
         if (ImGui::InputDouble("##EnvForcedYMax", &plot.forcedYMax, 0.0, 0.0, "%.6g")) {
             dirty = true;
+            appState.pendingRedrawFrames = 2;   // EndPlot-time Y fit follow-up
             appState.needsRedraw = true;
         }
         if (plot.forcedYMin >= plot.forcedYMax) {
@@ -1429,6 +1543,7 @@ void EnvironmentSession::renderYScaleButtons() {
             if (plot.yScaleSelector != m) {
                 plot.yScaleSelector = m;
                 dirty = true;
+                appState.pendingRedrawFrames = 2;   // EndPlot-time Y refit
                 appState.needsRedraw = true;
             }
         }
@@ -1490,6 +1605,7 @@ void EnvironmentSession::renderRangingWindow() {
                         maxAtZeroIfg = on;
                         dirty = true;
                         plot.shouldAutoscale = true;
+                        appState.pendingRedrawFrames = 2;   // autoscale follow-up
                         appState.needsRedraw = true;
                     }
                 }
@@ -1519,6 +1635,7 @@ void EnvironmentSession::renderRangingWindow() {
                     if (downsampleDisplay != on) {
                         downsampleDisplay = on;
                         dirty = true;
+                        appState.pendingRedrawFrames = 2;   // curve-shape refit
                         appState.needsRedraw = true;
                     }
                 }
@@ -1582,6 +1699,135 @@ void EnvironmentSession::renderExportWindow() {
         ImGui::EndDisabled();
         if (ImGui::IsItemHovered() && exportXRangeMode == 2 && exportXMin >= exportXMax)
             ImGui::SetTooltip("Fix the manual X range first (min<max).");
+    }
+    ImGui::End();
+}
+
+// Residual panel: enable toggle, reference/subtracted curve comboboxes (from
+// the labels renderViewWindow cached THIS frame), signed/absolute mode,
+// stats region selector, and the statistics readout. Runs after the Viewer —
+// the combobox indices clamp to the current label count each frame, so a
+// changed visible-curve set self-heals without stale marking. Every mutation
+// also arms pendingRedrawFrames (EndPlot-time Y fits land on the next frame;
+// the idle loop must not sleep through it).
+void EnvironmentSession::renderResidualWindow() {
+    ImGui::SetNextWindowDockID(mainDockSpaceId(), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Residual##envres")) {
+        if (ImGui::IsWindowAppearing()) appState.needsRedraw = true;
+        forceDockSelection();
+        if (renderCursorTogglePair(residualEnabled,
+                                   "On##EnvResOn", "Off##EnvResOff",
+                                   "Residual")) {
+            dirty = true;
+            appState.pendingRedrawFrames = 2;
+            appState.needsRedraw = true;
+        }
+        if (residualEnabled) {
+            ImGui::Separator();
+            int maxIdx = static_cast<int>(residualCurveLabels_.size()) - 1;
+            if (maxIdx < 0) maxIdx = 0;
+            residualRefIdx = std::clamp(residualRefIdx, 0, maxIdx);
+            residualSubIdx = std::clamp(residualSubIdx, 0, maxIdx);
+
+            // Curve selector: label = the visible curve's display label; the
+            // preview and every dropdown row show the FULL label in a hover
+            // tooltip (long dataset/member names are truncated visually).
+            const auto combo = [&](const char* name, const char* id, int& idx) {
+                ImGui::TextUnformatted(name);
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+                const std::string preview =
+                    residualCurveLabels_.empty()
+                        ? std::string("\xE2\x80\x94")
+                        : residualCurveLabels_[static_cast<size_t>(idx)];
+                if (ImGui::BeginCombo(id, preview.c_str())) {
+                    for (int i = 0; i < static_cast<int>(residualCurveLabels_.size());
+                         ++i) {
+                        const char* label = residualCurveLabels_[i].c_str();
+                        if (ImGui::Selectable(label, i == idx)) {
+                            if (i != idx) {
+                                idx = i;
+                                dirty = true;
+                                appState.pendingRedrawFrames = 2;
+                                appState.needsRedraw = true;
+                            }
+                        }
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("%s", label);
+                    }
+                    ImGui::EndCombo();
+                }
+                if (ImGui::IsItemHovered() && !residualCurveLabels_.empty())
+                    ImGui::SetTooltip("%s",
+                                      residualCurveLabels_[static_cast<size_t>(idx)]
+                                          .c_str());
+            };
+            combo("Reference", "##resRef", residualRefIdx);
+            combo("Subtracted", "##resSub", residualSubIdx);
+
+            const ImVec4 colActive = ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive);
+            const ImVec4 colInactive(0.22f, 0.22f, 0.22f, 0.7f);
+            // Button-pair row; returns true when ANY button of the row is
+            // hovered (the tooltip then refers to the whole selector row).
+            const auto buttons = [&](const char* name, int& value,
+                                     const char* const* names, int count) -> bool {
+                ImGui::TextUnformatted(name);
+                ImGui::SameLine();
+                bool hovered = false;
+                for (int m = 0; m < count; ++m) {
+                    ImGui::PushStyleColor(ImGuiCol_Button,
+                                          value == m ? colActive : colInactive);
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                                          value == m ? colActive : colInactive);
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive, colActive);
+                    if (ImGui::Button(names[m])) {
+                        if (value != m) {
+                            value = m;
+                            dirty = true;
+                            appState.pendingRedrawFrames = 2;
+                            appState.needsRedraw = true;
+                        }
+                    }
+                    ImGui::PopStyleColor(3);
+                    if (ImGui::IsItemHovered()) hovered = true;
+                    if (m < count - 1) ImGui::SameLine();
+                }
+                return hovered;
+            };
+            const char* kModes[2] = {"Signed", "Absolute"};
+            buttons("Mode", residualMode, kModes, 2);
+            const char* kRegions[2] = {"Viewbox", "All"};
+            if (buttons("Stats from", residualStatsRegion, kRegions, 2))
+                ImGui::SetTooltip("Viewbox: statistics over the current X-axis\n"
+                                  "range shown in the plot. All: the full curves.");
+
+            // Statistics readout: two-column layout — the value column sits
+            // past the widest label ("Peak-peak") plus a clear gap (font-scale
+            // aware), so all four numbers align like a table at any UI scale
+            // and never crowd the label.
+            if (residualStatsValid) {
+                ImGui::Separator();
+                const float valColX =
+                    ImGui::CalcTextSize("Peak-peak").x +
+                    ImGui::GetStyle().ItemSpacing.x * 3.0f;
+                ImGui::TextUnformatted("Min");
+                ImGui::SameLine(valColX);
+                ImGui::Text("%.6g", residualMin);
+                ImGui::TextUnformatted("Max");
+                ImGui::SameLine(valColX);
+                ImGui::Text("%.6g", residualMax);
+                ImGui::TextUnformatted("Peak-peak");
+                ImGui::SameLine(valColX);
+                ImGui::Text("%.6g", residualPeakPeak);
+                ImGui::TextUnformatted("Stddev");
+                ImGui::SameLine(valColX);
+                ImGui::Text("%.6g", residualStddev);
+            } else if (residualCurveLabels_.size() < 2) {
+                ImGui::TextDisabled("Need at least 2 visible curves");
+            } else {
+                ImGui::TextDisabled("No residual data (no overlapping X region)");
+            }
+        }
     }
     ImGui::End();
 }
@@ -1694,6 +1940,9 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
                                     bool hasGuideline, double guideline,
                                     bool showLegend) {
     if (curves.empty()) {
+        residualX.clear();
+        residualY.clear();
+        residualStatsValid = false;
         ImVec2 avail = ImGui::GetContentRegionAvail();
         const ImVec2 contentMin = ImGui::GetCursorScreenPos();
         const char* msg = "No data to display yet.";
@@ -1717,6 +1966,13 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
             for (double v : c.y) dBRefMax = std::max(dBRefMax, v);
         if (dBRefMax <= 0.0) dBRefMax = 1.0;   // all-zero curves → floored at -300 dB
     }
+
+    // Residual: real-time compute AFTER the dB params (it subtracts the
+    // displayed values). showResidual keys the latch + row count, so it must
+    // reflect data validity, not just residualEnabled.
+    computeResidual(curves, dBNormalize, dBRefMax);
+    const bool showResidual = residualEnabled && !residualX.empty() &&
+                              residualY.size() == residualX.size();
 
     // Unified view/interaction phases (panels/spectral_plot.h). Env owns
     // unit switching (xUnitEnabled = false — the Ranging-window button handler
@@ -1827,118 +2083,253 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
     // — the ImPlot plot (and its axis limits) is retained per instance across
     // renames; with instanceName in the id a rename recreated the plot and
     // reset the X range to fit-all.
-    plot.armPendingLimits(f);
-    if (ImPlot::BeginPlot(("##envPlot" + stripKey).c_str(), ImVec2(-1, -1),
-                          f.plotFlags)) {
-        plot.setupAxes(f);
-
-        if (hasGuideline) ImPlot::PlotInfLines("##guideline", &guideline, 1);
-
-        // Per-curve line colors (captured right after each PlotLine — the
-        // cursor markers and info box reuse them). tab20 cyclic palette for
-        // comparator overlays (matplotlib convention); the cursor still reads
-        // the full-res curves below, so downsampling never skews its values.
-        if (showLegend) ImPlot::PushColormap(tab20Colormap());
-        std::vector<ImVec4> curveColors(curves.size());
-        for (size_t k = 0; k < curves.size(); ++k) {
-            const auto& c = curves[k];
-            const std::vector<double>* px = &c.x;
-            const std::vector<double>* py = &c.y;
-            std::vector<double> dx, dy;
-            if (downsampleDisplay) {
-                downsampleCurve(c.x, c.y, appState.maxPointsBeforeDownsampling, dx, dy);
-                px = &dx;
-                py = &dy;
+    // When the residual plot appears or disappears, BeginSubplots resets the
+    // shared ColLinkData to (0,1) ("check for change in rows and cols") —
+    // re-arm the TOP plot's current X window on BOTH transitions (the T100
+    // stdWasAvailable_ pattern), keyed on showResidual because the row count
+    // follows data validity, not just residualEnabled.
+    if (showResidual != residualWasShown_) {
+        residualWasShown_ = showResidual;
+        double x0 = plot.manualXMin, x1 = plot.manualXMax;
+        if (!(x0 < x1)) {
+            for (const auto& c : curves) {
+                if (c.x.empty()) continue;
+                const double lo = std::min(c.x.front(), c.x.back());
+                const double hi = std::max(c.x.front(), c.x.back());
+                if (!(x0 < x1)) { x0 = lo; x1 = hi; }
+                else { x0 = std::min(x0, lo); x1 = std::max(x1, hi); }
             }
-            if (plot.yScaleSelector == kYScaleDb) {
-                // dB needs a writable buffer: copy only when not downsampled.
-                if (px == &c.x) { dy = c.y; py = &dy; }
-                for (double& v : dy)
-                    v = dBNormalize
-                        ? 10.0 * std::log10(std::max(v / dBRefMax, 1e-300))
-                        : 10.0 * std::log10(std::max(v, 1e-300));
-            }
-            ImPlotSpec spec;
-            if (c.color.w > 0.0f) spec.LineColor = c.color;
-            ImPlot::PlotLine(c.label.c_str(), px->data(), py->data(),
-                             static_cast<int>(std::min(px->size(), py->size())), spec);
-            curveColors[k] = ImPlot::GetLastItemColor();
         }
-        if (showLegend) ImPlot::PopColormap();
+        if (x0 < x1) {
+            plot.pendingNextXMin = x0;
+            plot.pendingNextXMax = x1;
+            plot.shouldAutoscale = false;
+        }
+    }
 
-        // HITRAN gas-band markers (spectral artifacts only — interferograms
-        // have an OPD/sample X axis). Drawn before the interaction/cursor
-        // blocks so the tracking-cursor info box stays on top.
-        if (type == EnvType::Absorbance || artifactSelector < 4)
-            renderHitranMarkers(hitranGasEnabled, plot.xUnitSelector,
-                                hitranThresholdLevel, hitranSmoothLevel);
+    // Main plot (2/3) + residual plot (1/3) in a linked subplot when the
+    // residual is enabled (the T100 + std-dev pattern): LinkAllX owns the
+    // shared X window, each row keeps its own Y.
+    float remaining = ImGui::GetContentRegionAvail().y;
+    float mainHeight = remaining, residualHeight = 0.0f;
+    if (showResidual) {
+        const float spacing = ImGui::GetStyle().ItemSpacing.y;
+        mainHeight = (remaining - spacing) * (2.0f / 3.0f);
+        residualHeight = (remaining - spacing) * (1.0f / 3.0f);
+        if (mainHeight < 100.0f) mainHeight = 100.0f;
+        if (residualHeight < 60.0f) residualHeight = 60.0f;
+    }
+    const int resRows = showResidual ? 2 : 1;
+    float resRowRatios[2] = {mainHeight, residualHeight};
+    plot.armPendingLimits(f);
+    if (ImPlot::BeginSubplots(("##envResStack" + stripKey).c_str(), resRows, 1,
+            ImVec2(-1, showResidual ? mainHeight + residualHeight +
+                          ImGui::GetStyle().ItemSpacing.y
+                        : mainHeight),
+            ImPlotSubplotFlags_NoTitle | ImPlotSubplotFlags_LinkRows |
+                ImPlotSubplotFlags_LinkAllX | ImPlotSubplotFlags_NoLegend,
+            showResidual ? resRowRatios : nullptr)) {
+        if (ImPlot::BeginPlot(("##envPlot" + stripKey).c_str(), ImVec2(-1, -1),
+                              f.plotFlags)) {
+            plot.setupAxes(f);
 
-        plot.tickInPlot(f);
-        plot.drawSelectionOverlay(stripKey.c_str());
+            if (hasGuideline) ImPlot::PlotInfLines("##guideline", &guideline, 1);
 
-        // Tracking cursor (shared overlay): full-height vertical line (never
-        // affects Y autofit/range-fit), per-curve colored markers and an info
-        // box with color badges. All curves show badge + value only (labels
-        // are never drawn in the box).
-        if (showTrackingCursor && ImPlot::IsPlotHovered()) {
-            const double mx = clampedCursorX();
-
-            CursorHeaderSeg headerSegs[8];
-            int nSegs = 0;
-            if (artifactSelector == 4 /* corrected: OPD axis */) {
-                std::snprintf(headerSegs[0].text, sizeof(headerSegs[0].text), "OPD: %.4f ", mx);
-                headerSegs[1] = {"um"};
-                nSegs = 2;
-            } else if (artifactSelector == 5 /* raw: sample index */) {
-                std::snprintf(headerSegs[0].text, sizeof(headerSegs[0].text),
-                              "Index: %lld", static_cast<long long>(mx));
-                nSegs = 1;
-            } else {
-                nSegs = SpectralPlotView::formatCursorHeader(
-                    mx, plot.xUnitSelector, headerSegs, 8);
-            }
-
-            std::vector<CursorCurve> cursorCurves;
-            cursorCurves.reserve(curves.size());
+            // Per-curve line colors (captured right after each PlotLine — the
+            // cursor markers and info box reuse them). tab20 cyclic palette for
+            // comparator overlays (matplotlib convention); the cursor still reads
+            // the full-res curves below, so downsampling never skews its values.
+            if (showLegend) ImPlot::PushColormap(tab20Colormap());
+            std::vector<ImVec4> curveColors(curves.size());
             for (size_t k = 0; k < curves.size(); ++k) {
-                CursorCurve cc;
-                cc.x = &curves[k].x;
-                cc.y = &curves[k].y;
-                cc.color = curveColors[k];
-                if (plot.yScaleSelector == kYScaleDb)
-                    cc.transform = [dBNormalize, dBRefMax](double v) {
-                        return dBNormalize
+                const auto& c = curves[k];
+                const std::vector<double>* px = &c.x;
+                const std::vector<double>* py = &c.y;
+                std::vector<double> dx, dy;
+                if (downsampleDisplay) {
+                    downsampleCurve(c.x, c.y, appState.maxPointsBeforeDownsampling, dx, dy);
+                    px = &dx;
+                    py = &dy;
+                }
+                if (plot.yScaleSelector == kYScaleDb) {
+                    // dB needs a writable buffer: copy only when not downsampled.
+                    if (px == &c.x) { dy = c.y; py = &dy; }
+                    for (double& v : dy)
+                        v = dBNormalize
                             ? 10.0 * std::log10(std::max(v / dBRefMax, 1e-300))
                             : 10.0 * std::log10(std::max(v, 1e-300));
-                    };
-                cursorCurves.push_back(std::move(cc));
+                }
+                ImPlotSpec spec;
+                if (c.color.w > 0.0f) spec.LineColor = c.color;
+                ImPlot::PlotLine(c.label.c_str(), px->data(), py->data(),
+                                 static_cast<int>(std::min(px->size(), py->size())), spec);
+                curveColors[k] = ImPlot::GetLastItemColor();
             }
-            renderCursorOverlay(headerSegs, nSegs, cursorCurves,
-                                GetAccentBase(StringToAccentColor(appState.currentAccentColor)));
+            if (showLegend) ImPlot::PopColormap();
+
+            // HITRAN gas-band markers (spectral artifacts only — interferograms
+            // have an OPD/sample X axis). Drawn before the interaction/cursor
+            // blocks so the tracking-cursor info box stays on top.
+            if (type == EnvType::Absorbance || artifactSelector < 4)
+                renderHitranMarkers(hitranGasEnabled, plot.xUnitSelector,
+                                    hitranThresholdLevel, hitranSmoothLevel);
+
+            plot.tickInPlot(f);
+            plot.drawSelectionOverlay(stripKey.c_str());
+
+            // Tracking cursor (shared overlay): full-height vertical line (never
+            // affects Y autofit/range-fit), per-curve colored markers and an info
+            // box with color badges. All curves show badge + value only (labels
+            // are never drawn in the box).
+            if (showTrackingCursor && ImPlot::IsPlotHovered()) {
+                const double mx = clampedCursorX();
+
+                CursorHeaderSeg headerSegs[8];
+                int nSegs = 0;
+                if (artifactSelector == 4 /* corrected: OPD axis */) {
+                    std::snprintf(headerSegs[0].text, sizeof(headerSegs[0].text), "OPD: %.4f ", mx);
+                    headerSegs[1] = {"um"};
+                    nSegs = 2;
+                } else if (artifactSelector == 5 /* raw: sample index */) {
+                    std::snprintf(headerSegs[0].text, sizeof(headerSegs[0].text),
+                                  "Index: %lld", static_cast<long long>(mx));
+                    nSegs = 1;
+                } else {
+                    nSegs = SpectralPlotView::formatCursorHeader(
+                        mx, plot.xUnitSelector, headerSegs, 8);
+                }
+
+                std::vector<CursorCurve> cursorCurves;
+                cursorCurves.reserve(curves.size());
+                for (size_t k = 0; k < curves.size(); ++k) {
+                    CursorCurve cc;
+                    cc.x = &curves[k].x;
+                    cc.y = &curves[k].y;
+                    cc.color = curveColors[k];
+                    if (plot.yScaleSelector == kYScaleDb)
+                        cc.transform = [dBNormalize, dBRefMax](double v) {
+                            return dBNormalize
+                                ? 10.0 * std::log10(std::max(v / dBRefMax, 1e-300))
+                                : 10.0 * std::log10(std::max(v, 1e-300));
+                        };
+                    cursorCurves.push_back(std::move(cc));
+                }
+                renderCursorOverlay(headerSegs, nSegs, cursorCurves,
+                                    GetAccentBase(StringToAccentColor(appState.currentAccentColor)));
+            }
+
+            // Capture the current X limits every frame (the export "current plot
+            // area" source) and mirror them into the persisted manual range so
+            // wheel zoom / native pan survive save+reopen (captureLimits skips
+            // while a pending range/restore latch is armed). A changed range
+            // dirties the experiment (bugfix 2026-08-14): every save path is
+            // dirty-gated, so without dirty a wheel-zoomed view would never reach
+            // the saved config.
+            {
+                const double mx0 = plot.manualXMin, mx1 = plot.manualXMax;
+                plot.captureLimits();
+                if (plot.manualXMin != mx0 || plot.manualXMax != mx1)
+                    dirty = true;
+                const ImPlotRect lim = ImPlot::GetPlotLimits();
+                viewXMin = std::min(lim.X.Min, lim.X.Max);
+                viewXMax = std::max(lim.X.Min, lim.X.Max);
+            }
+            // Stale-warning rect: GetPlotPos/GetPlotSize lock the setup phase, so
+            // they must run AFTER every Setup* call (all PlotX already ran here).
+            plotShown = true;
+            plotPos = ImPlot::GetPlotPos();
+            plotSize = ImPlot::GetPlotSize();
+            ImPlot::EndPlot();
         }
 
-        // Capture the current X limits every frame (the export "current plot
-        // area" source) and mirror them into the persisted manual range so
-        // wheel zoom / native pan survive save+reopen (captureLimits skips
-        // while a pending range/restore latch is armed). A changed range
-        // dirties the experiment (bugfix 2026-08-14): every save path is
-        // dirty-gated, so without dirty a wheel-zoomed view would never reach
-        // the saved config.
-        {
-            const double mx0 = plot.manualXMin, mx1 = plot.manualXMax;
-            plot.captureLimits();
-            if (plot.manualXMin != mx0 || plot.manualXMax != mx1)
-                dirty = true;
-            const ImPlotRect lim = ImPlot::GetPlotLimits();
-            viewXMin = std::min(lim.X.Min, lim.X.Max);
-            viewXMax = std::max(lim.X.Min, lim.X.Max);
+        // Residual plot (row 1): X comes from the subplot link (no
+        // SetupAxisLimits). Y follows the MAIN plot's Y mode — All/Force →
+        // AutoFit, Tight → AutoFit|RangeFit (in Force mode the residual stays
+        // auto-fit: the forced range is in curve units, meaningless for the
+        // difference — the T100 std-dev exception). Always linear Y (the
+        // residual is signed; log/dB invalid). No NoInputs gating — the env
+        // has no large-data path; downsampleDisplay covers big curves.
+        const ImPlotFlags resFlags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend;
+        if (showResidual && ImPlot::BeginPlot(("##envResidual" + stripKey).c_str(),
+                                              ImVec2(-1, -1), resFlags)) {
+            ImPlotAxisFlags resYFlags =
+                ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
+            if (plot.yAxisMode == kYModeAll || plot.yAxisMode == kYModeForce)
+                resYFlags |= ImPlotAxisFlags_AutoFit;
+            else if (plot.yAxisMode == kYModeTight)
+                resYFlags |= ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_RangeFit;
+            ImPlot::SetupAxes(xLabel.c_str(), "Residual",
+                              ImPlotAxisFlags_NoTickMarks, resYFlags);
+
+            // X ticks match the primary plot: same window (manual else data
+            // range), same limited tick count — the grid push above already
+            // gives both plots the identical grid color.
+            double rx0 = plot.manualXMin, rx1 = plot.manualXMax;
+            if (!(rx0 < rx1) && f.xDataRange) f.xDataRange(rx0, rx1);
+            if (rx0 < rx1)
+                SpectralPlotView::setupAxisTicksLimited(ImAxis_X1, rx0, rx1);
+
+            const std::vector<double>* rpx = &residualX;
+            const std::vector<double>* rpy = &residualY;
+            std::vector<double> rdx, rdy;
+            if (downsampleDisplay) {
+                downsampleCurve(residualX, residualY,
+                                appState.maxPointsBeforeDownsampling, rdx, rdy);
+                rpx = &rdx;
+                rpy = &rdy;
+            }
+            ImPlotSpec resSpec;
+            resSpec.LineColor = ImVec4(0.1f, 0.6f, 0.7f, 1.0f);
+            resSpec.LineWeight = 2.0f;
+            ImPlot::PlotLine("##residualLine", rpx->data(), rpy->data(),
+                             static_cast<int>(std::min(rpx->size(), rpy->size())),
+                             resSpec);
+            const ImVec4 resLineColor = ImPlot::GetLastItemColor();
+
+            // Zero line in signed mode only (absolute values are >= 0).
+            if (residualMode == 0) {
+                double zero = 0.0;
+                ImPlotSpec zeroSpec;
+                zeroSpec.Flags = ImPlotInfLinesFlags_Horizontal;
+                ImPlot::PlotInfLines("##residualZero", &zero, 1, zeroSpec);
+            }
+
+            // Shift+drag on the residual plot zooms BOTH plots: the committed
+            // pending range is applied pre-BeginPlot on the shared X (LinkAllX).
+            plot.tickInPlot(f);
+            plot.drawSelectionOverlay(("##envRes" + stripKey).c_str());
+
+            // Tracking cursor (T100 std-dev parity): single curve, same
+            // header selection as the main plot (OPD/sample-index X axes).
+            if (showTrackingCursor && ImPlot::IsPlotHovered()) {
+                const double mx = clampedCursorX();
+                CursorHeaderSeg headerSegs[8];
+                int nSegs = 0;
+                if (type == EnvType::Comparator && artifactSelector == 4) {
+                    std::snprintf(headerSegs[0].text, sizeof(headerSegs[0].text),
+                                  "OPD: %.4f ", mx);
+                    headerSegs[1] = {"um"};
+                    nSegs = 2;
+                } else if (type == EnvType::Comparator && artifactSelector == 5) {
+                    std::snprintf(headerSegs[0].text, sizeof(headerSegs[0].text),
+                                  "Index: %lld", static_cast<long long>(mx));
+                    nSegs = 1;
+                } else {
+                    nSegs = SpectralPlotView::formatCursorHeader(
+                        mx, plot.xUnitSelector, headerSegs, 8);
+                }
+                std::vector<CursorCurve> resCurves;
+                CursorCurve rc;
+                rc.x = rpx;
+                rc.y = rpy;
+                rc.color = resLineColor;
+                resCurves.push_back(std::move(rc));
+                renderCursorOverlay(headerSegs, nSegs, resCurves,
+                                    GetAccentBase(StringToAccentColor(appState.currentAccentColor)));
+            }
+            ImPlot::EndPlot();
         }
-        // Stale-warning rect: GetPlotPos/GetPlotSize lock the setup phase, so
-        // they must run AFTER every Setup* call (all PlotX already ran here).
-        plotShown = true;
-        plotPos = ImPlot::GetPlotPos();
-        plotSize = ImPlot::GetPlotSize();
-        ImPlot::EndPlot();
+        ImPlot::EndSubplots();
     }
     ImPlot::PopStyleColor();
     if (plotShown && stale)
@@ -1977,6 +2368,17 @@ void EnvironmentSession::exportCsv() {
             cc.y = c.curveY;
             curves.push_back(std::move(cc));
         }
+    }
+    // Residual (when enabled): exported as an extra wide-table curve — the
+    // padding, X-range filter and header generation below apply unchanged.
+    if (residualEnabled && !residualX.empty() &&
+        residualY.size() == residualX.size()) {
+        ComparatorCurve resCurve;
+        resCurve.label = "Residual";
+        resCurve.shortLabel = "Residual";
+        resCurve.x = residualX;
+        resCurve.y = residualY;
+        curves.push_back(std::move(resCurve));
     }
 
     // X range filter: all / current plot area (viewXMin/Max) / manual.
@@ -2078,6 +2480,12 @@ static nlohmann::json experimentConfigJson(const EnvironmentSession& env) {
     // Tab-strip visibility (bugfix 2026-08-14): the open-tab set persists, so
     // a closed-but-kept experiment does not auto-reopen on project load.
     j["tabHidden"] = env.tabHidden;
+    // Residual (both experiment types; the curve itself lives in results/).
+    j["residualEnabled"] = env.residualEnabled;
+    j["residualRefIdx"] = env.residualRefIdx;
+    j["residualSubIdx"] = env.residualSubIdx;
+    j["residualMode"] = env.residualMode;
+    j["residualStatsRegion"] = env.residualStatsRegion;
     if (env.type == EnvType::Absorbance) {
         j["curves"] = nlohmann::json::array();
         for (const auto& c : env.curves) {
@@ -2135,6 +2543,12 @@ static void experimentApplyConfig(EnvironmentSession& env, const nlohmann::json&
     }
     // Legacy configs without the key default to visible (today's behavior).
     env.tabHidden = j.value("tabHidden", false);
+    // Residual (legacy configs: absent → disabled, default indices).
+    env.residualEnabled = j.value("residualEnabled", false);
+    env.residualRefIdx = std::max(j.value("residualRefIdx", 0), 0);
+    env.residualSubIdx = std::max(j.value("residualSubIdx", 1), 0);
+    env.residualMode = j.value("residualMode", 0);
+    env.residualStatsRegion = j.value("residualStatsRegion", 0);
     if (env.type == EnvType::Absorbance) {
         env.curves.clear();
         for (const auto& cc : j.value("curves", nlohmann::json::array())) {
@@ -2219,6 +2633,13 @@ bool multiWorkspaceSaveExperiment(AppState& s, EnvironmentSession& env,
             ++k;
         }
     }
+    // Residual curve (both experiment types): the live-computed vectors are
+    // full-res and post-mode — WYSIWYG with what the Viewer shows.
+    if (env.residualEnabled && !env.residualX.empty() &&
+        env.residualY.size() == env.residualX.size()) {
+        results["residual_x"] = env.residualX;
+        results["residual_y"] = env.residualY;
+    }
     return multiWorkspaceExperimentWrite(path, env.id, experimentConfigJson(env), fps,
                                 results, experimentStatsJson(env), err);
 }
@@ -2284,6 +2705,17 @@ bool multiWorkspaceLoadExperiments(AppState& s, const std::string& path, std::st
                     // latch; Y re-fits every frame via the yAxisMode flags.
                 } else {
                     env->computed = false;
+                }
+            }
+            // Residual results (both types): seeded so a pristine open shows
+            // the saved curve before the first live recompute overwrites it.
+            if (env->residualEnabled) {
+                auto rx = results.find("residual_x");
+                auto ry = results.find("residual_y");
+                if (rx != results.end() && ry != results.end() &&
+                    !rx->second.empty() && rx->second.size() == ry->second.size()) {
+                    env->residualX = rx->second;
+                    env->residualY = ry->second;
                 }
             }
             env->dirty = false;

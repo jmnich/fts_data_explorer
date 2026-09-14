@@ -73,15 +73,19 @@ inline double clampedCursorX() {
 }
 
 // Tracking-cursor On/Off toggle pair (same style as the navigation buttons).
-// Returns true when the value changed so the caller can redraw / persist.
-// Labels carry their own ## IDs, so every panel keeps a unique button ID.
-inline bool renderCursorTogglePair(bool& on, const char* onLabel, const char* offLabel) {
+// `rowLabel` names the row ("Cursor" by default; panels may rename it, e.g.
+// the Residual panel). Returns true when the value changed so the caller can
+// redraw / persist. Labels carry their own ## IDs, so every panel keeps a
+// unique button ID.
+inline bool renderCursorTogglePair(bool& on, const char* onLabel,
+                                   const char* offLabel,
+                                   const char* rowLabel = "Cursor") {
     const ImVec4 btnColors[2] = {
         ImVec4(0.22f, 0.22f, 0.22f, 0.7f),                // unselected
         ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)   // selected
     };
     bool changed = false;
-    ImGui::TextUnformatted("Cursor");
+    ImGui::TextUnformatted(rowLabel);
     ImGui::SameLine();
     for (int m = 0; m < 2; ++m) {
         const bool want = (m == 0);

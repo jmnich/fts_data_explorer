@@ -1632,6 +1632,16 @@ void test12_experimentPersistence() {
     // Tab-open state persists too (bugfix 2026-08-14): a closed-but-kept
     // experiment must not auto-reopen on project load.
     cmp->tabHidden = true;
+    // Residual (both types): config round-trips through config.json and the
+    // live vectors ride the results datasets (full-res, post-mode). Loaded
+    // data is a seed — the first render recomputes live.
+    cmp->residualEnabled = true;
+    cmp->residualRefIdx = 0;
+    cmp->residualSubIdx = 1;
+    cmp->residualMode = 1;          // absolute
+    cmp->residualStatsRegion = 1;   // all
+    cmp->residualX = {1500.0, 1750.0, 2000.0};
+    cmp->residualY = {0.1, 0.0, 0.25};
     CHECK(multiWorkspaceSaveExperiments(s3, multiWorkspacePath, err));
     CHECK(cmp->dirty == false);
     CHECK(abs->dirty == false);
@@ -1694,6 +1704,15 @@ void test12_experimentPersistence() {
     CHECK(c2->plot.shouldAutoscale == false);
     CHECK(c2->tabHidden == true);       // closed tab stays closed after reload
     CHECK(a2b->tabHidden == false);     // legacy/default: visible
+    // Residual round-trips (config + result datasets).
+    CHECK(c2->residualEnabled == true);
+    CHECK(c2->residualRefIdx == 0);
+    CHECK(c2->residualSubIdx == 1);
+    CHECK(c2->residualMode == 1);
+    CHECK(c2->residualStatsRegion == 1);
+    checkVecEq(c2->residualX, cmp->residualX, "restored residual_x");
+    checkVecEq(c2->residualY, cmp->residualY, "restored residual_y");
+    CHECK(a2b->residualEnabled == false);   // default: disabled
     // Save→reload→save: the range persists idempotently in config.json.
     CHECK(multiWorkspaceSaveExperiment(s4, *c2, multiWorkspacePath, err));
     {
@@ -1702,6 +1721,10 @@ void test12_experimentPersistence() {
         CHECK(multiWorkspaceExperimentRead(multiWorkspacePath, c2->id, cfg2, fps2, res2, stats2, err));
         CHECK(cfg2["manualXMin"] == 1500.0);
         CHECK(cfg2["manualXMax"] == 2000.0);
+        CHECK(cfg2["residualEnabled"] == true);
+        CHECK(res2.count("residual_x") == 1);
+        checkVecEq(res2["residual_x"], c2->residualX, "persisted residual_x");
+        checkVecEq(res2["residual_y"], c2->residualY, "persisted residual_y");
     }
 
     // X-unit change: convertXInPlace converts the manual zoom window AND

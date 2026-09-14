@@ -178,6 +178,22 @@ public:
     int exportXRangeMode = 0;
     double exportXMin = 0.0, exportXMax = 0.0;
 
+    // ── Residual (Comparator + Absorbance) ──
+    // Difference between two of the currently visible curves. Config persists
+    // in the experiment config.json (int selectors must NOT be renumbered —
+    // JSON stability convention, same as xUnitSelector/yScaleSelector); the
+    // curve itself is live-computed every render frame — no pool, no stale
+    // overlay.
+    bool residualEnabled = false;
+    int  residualRefIdx = 0;        // index into the visible-curve list
+    int  residualSubIdx = 1;        // index into the visible-curve list
+    int  residualMode = 0;          // 0 signed, 1 absolute
+    int  residualStatsRegion = 0;   // 0 viewbox (current X window), 1 all
+    // Live residual result (full-res, post-mode, recomputed every render
+    // frame). Public: the experiment save/load free functions read/write the
+    // archival copy in the .h5 results datasets.
+    std::vector<double> residualX, residualY;
+
     // Synchronous artifact-based compute (Average/Raw spectra, no FFT pool):
     // per curve, resample the sample onto the reference's overlapping X region
     // and divide (clamped). Idempotent; cheap enough to run on selector change.
@@ -228,6 +244,18 @@ public:
 
 private:
     std::string titleCache_;
+    // Residual statistics (computed together with the residual curve).
+    double residualMin = 0.0, residualMax = 0.0;
+    double residualPeakPeak = 0.0, residualStddev = 0.0;
+    bool   residualStatsValid = false;
+    // Subplot row-count transition latch (T100 stdWasAvailable_ pattern):
+    // LinkAllX resets the shared X to (0,1) when BeginSubplots' row count
+    // changes — re-arm the current X window on BOTH transitions.
+    bool residualWasShown_ = false;
+    // Curve labels cached at the end of renderViewWindow (the curve vector is
+    // local to it) so renderResidualWindow — which runs later in the SAME
+    // frame — can populate the reference/subtracted comboboxes.
+    std::vector<std::string> residualCurveLabels_;
     // Corrected-IFG derivation (sourceKey#memberId -> OPD axis um, RAM only):
     // rebuilt per entry when the source's correction params change.
     std::map<std::string, std::vector<double>> derivedOpdCache_;
@@ -280,6 +308,17 @@ private:
     // Docked "Plot Ranging" panel (comparator): X unit / Y scale / Y axis /
     // cursor — the spectrum-view navigation block, split into its own window.
     void renderRangingWindow();
+    // Real-time residual compute from the visible curves (called inside
+    // renderPlot, after the dB params). Synchronous; clears residualX/Y and
+    // invalidates stats on every refusing condition.
+    void computeResidual(const std::vector<ComparatorCurve>& curves,
+                         bool dBNormalize, double dBRefMax);
+    // Min/max/peak-peak/stddev (sample N-1 via RunningStats) over the residual
+    // curve; region = viewbox X window or all. Sets residualStatsValid.
+    void computeResidualStats();
+    // Docked "Residual" panel: enable, reference/subtracted comboboxes,
+    // signed/absolute, stats region + statistics display.
+    void renderResidualWindow();
     // Docked "Export" panel (comparator): X-range mode + manual min/max.
     void renderExportWindow();
     void renderCommentEditor();
