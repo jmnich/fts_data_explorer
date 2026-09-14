@@ -1335,6 +1335,24 @@ void test11_comparator() {
     for (size_t i = 0; i < 4; ++i) CHECK(curves[0].x[i] == (double)i);   // sample index
     CHECK(curves[0].y[0] == 5.0 && curves[0].y[3] == 8.0);               // col1
 
+    // "Max at zero" (bugfix 2026-09-14): raw-IFG curves shift so the peak
+    // (primary-detector max at index 3) sits at x = 0.
+    cmp.maxAtZeroIfg = true;
+    curves = cmp.gatherCurves(s);
+    CHECK(curves.size() == 1);
+    CHECK(curves[0].x.size() == 4);
+    CHECK(curves[0].x[3] == 0.0);                    // peak aligned at zero
+    CHECK(curves[0].x[0] == -3.0);                   // x -= peak index
+    CHECK(curves[0].y[3] == 8.0);                    // Y untouched
+    // Spectral artifacts are unaffected: the shift only applies to IFG
+    // members (xUnit == -1).
+    cmp.artifactSelector = static_cast<int>(ComparatorArtifact::AverageSpectrum);
+    curves = cmp.gatherCurves(s);
+    CHECK(curves.size() == 1);
+    CHECK(curves[0].x[0] == 1000.0);                 // no shift for spectra
+    cmp.maxAtZeroIfg = false;
+    cmp.artifactSelector = static_cast<int>(ComparatorArtifact::RawInterferogram);
+
     // Corrected artifact on a dataset WITHOUT a persisted corrected group:
     // derived from the raw IFG — primary detector + the Hilbert OPD axis
     // (mirror displacement ×2), same function the view/pipeline uses. The
@@ -1599,6 +1617,7 @@ void test12_experimentPersistence() {
     cmp->comparatorKeys = {"/tmp/parity.h5", "/tmp/other.h5"};
     cmp->comparatorKeysExplicit = true;
     cmp->memberPicks["/tmp/parity.h5"] = "specRef";
+    cmp->maxAtZeroIfg = true;                   // IFG alignment (bugfix 2026-09-14)
     cmp->plot.xUnitSelector = 1;
     cmp->plot.yAxisMode = 2;
     cmp->plot.forcedYMin = -1.0;
@@ -1655,6 +1674,7 @@ void test12_experimentPersistence() {
     CHECK(c2->comparatorKeysExplicit == true);
     CHECK(c2->memberPicks.count("/tmp/parity.h5") == 1);
     CHECK(c2->memberPicks["/tmp/parity.h5"] == "specRef");
+    CHECK(c2->maxAtZeroIfg == true);            // IFG alignment round-trips
     CHECK(c2->plot.xUnitSelector == 1);
     CHECK(c2->plot.yAxisMode == 2);
     CHECK(c2->plot.forcedYMin == -1.0 && c2->plot.forcedYMax == 5.0);
@@ -1946,6 +1966,23 @@ void test14_openTabPersistence() {
         CHECK(multiWorkspaceLoadInto(st3, multiWorkspacePath, err));
         CHECK(st3.openTabIds.empty());
         CHECK(st3.experimentTabOrder.empty());
+    }
+
+    // Diff-gated save (bugfix 2026-09-14): rewriting the identical order is a
+    // no-op (no full-file copy); a changed order is written. The read helper
+    // round-trips the manifest value.
+    {
+        SessionTabState st4;
+        multiWorkspaceSaveTabOrderIfChanged(multiWorkspacePath, {}, err);   // same as stored
+        CHECK(multiWorkspaceLoadInto(st4, multiWorkspacePath, err));
+        CHECK(st4.tabOrder.empty());
+        multiWorkspaceSaveTabOrderIfChanged(multiWorkspacePath,
+            {"ws:" + idA, "exp:" + expId}, err);                            // changed
+        CHECK(multiWorkspaceLoadInto(st4, multiWorkspacePath, err));
+        CHECK(st4.tabOrder == std::vector<std::string>({"ws:" + idA, "exp:" + expId}));
+        std::vector<std::string> readBack;
+        multiWorkspaceReadTabOrder(multiWorkspacePath, readBack);
+        CHECK(readBack == std::vector<std::string>({"ws:" + idA, "exp:" + expId}));
     }
 
     // persistableTabOrder reduces the captured strip order to restorable

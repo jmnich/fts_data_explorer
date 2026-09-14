@@ -12,7 +12,6 @@ AppState::AppState()
       aKeyPressedLastFrame(false),
       dKeyPressedLastFrame(false),
       qKeyPressedLastFrame(false),
-      sKeyPressedLastFrame(false),
       MAX_SELECTABLE_FILES(5),
       maxPointsBeforeDownsampling(50000),
       showFPS(false),

@@ -490,6 +490,38 @@ void multiWorkspaceSaveTabOrder(const std::string& path,
     if (!ok) throw H5Error(err);
 }
 
+// Read-only access to the persisted manifest "tabOrder" (best-effort; the
+// caller decides what a failed read means — the diff-gate below just falls
+// back to writing).
+void multiWorkspaceReadTabOrder(const std::string& path,
+                       std::vector<std::string>& out) {
+    out.clear();
+    try {
+        H5FileGuard file(H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT));
+        if (file.id < 0) return;
+        const nlohmann::json manifest = readManifest(file.id);
+        auto to = manifest.find("tabOrder");
+        if (to == manifest.end() || !to->is_array()) return;
+        for (const auto& k : *to)
+            if (k.is_string()) out.push_back(k.get<std::string>());
+    } catch (...) {
+        out.clear();
+    }
+}
+
+// Diff-gated tab-order save (bugfix 2026-09-14): the strip order is written
+// on every explicit save by design, but a full-file atomic copy just to
+// rewrite an unchanged "tabOrder" costs seconds on a network drive. Read the
+// stored order (cheap RO open — no copy) and skip the write when identical.
+void multiWorkspaceSaveTabOrderIfChanged(const std::string& path,
+                       const std::vector<std::string>& tabOrder,
+                       std::string& err) {
+    std::vector<std::string> stored;
+    multiWorkspaceReadTabOrder(path, stored);
+    if (stored == tabOrder) return;
+    multiWorkspaceSaveTabOrder(path, tabOrder, err);
+}
+
 // AppState-level helper: the ids of the currently-open embedded source tabs,
 // IN sessions[] order (the order the strip shows them in).
 std::vector<std::string> openEmbeddedSourceIds(const AppState& s) {

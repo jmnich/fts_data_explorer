@@ -102,6 +102,12 @@ void renderMainMenuBar(AppConfig& config, const std::string& configFilePath,
                     // Display FPS toggle
                     ImGui::MenuItem("Display fps", NULL, &appState.showFPS);
                     ImGui::MenuItem("Show timestamps", NULL, &appState.showTimestamps);
+                    ImGui::MenuItem("Focus panels on hover", NULL,
+                                    &appState.hoverFocusPanels);
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("The docked panel under the mouse receives\n"
+                                          "keyboard input (arrows, ESC, wheel) without\n"
+                                          "a click. Never switches dock tabs.");
                     ImGui::Text("Grid opacity");
                     ImGui::SameLine();
                     float gridPct = appState.gridAlpha * 100.0f;

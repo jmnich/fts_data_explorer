@@ -25,6 +25,10 @@ struct AppConfig {
     bool autoFitYAxis = true;
     bool showFPS = false; // FPS counter display setting
     bool showTimestamps = false; // "Show timestamps" ribbon toggle
+    // Focus-follows-hover for docked panels (bugfix 2026-09-14): the panel
+    // under the mouse becomes the focused window (keyboard nav applies)
+    // without a click. Docked-panel bodies only — never switches dock tabs.
+    bool hoverFocusPanels = true;
     float gridAlpha = 1.0f; // Grid opacity (0.0 = invisible, 1.0 = full)
     bool enableDownsampling = true;
     std::string lastWorkingDirectory;
@@ -158,6 +162,7 @@ struct AppConfig {
             configFile << "enable_downsampling=" << (enableDownsampling ? "true" : "false") << "\n";
             configFile << "show_fps=" << (showFPS ? "true" : "false") << "\n";
             configFile << "show_timestamps=" << (showTimestamps ? "true" : "false") << "\n";
+            configFile << "hover_focus_panels=" << (hoverFocusPanels ? "true" : "false") << "\n";
             configFile << "show_peak_indicators=" << (showPeakIndicators ? "true" : "false") << "\n";
             configFile << "grid_alpha=" << gridAlpha << "\n";
             configFile << "last_working_directory=" << lastWorkingDirectory << "\n";
@@ -263,6 +268,8 @@ struct AppConfig {
                             showFPS = (value == "true");
                         } else if (key == "show_timestamps") {
                             showTimestamps = (value == "true");
+                        } else if (key == "hover_focus_panels") {
+                            hoverFocusPanels = (value == "true");
                         } else if (key == "show_peak_indicators") {
                             showPeakIndicators = (value == "true");
                         } else if (key == "grid_alpha") {

@@ -27,6 +27,7 @@ private:
     void handleInput();            // keyboard shortcuts + navigation + file load
     void renderUI();               // NewFrame + menu bar + welcome + dock + panels
     void present();                // Render/swap/deferred export
+    void hoverFocusDockedPanel();  // focus docked panel under the mouse (Settings toggle)
 
     SessionTab sessionTab_;      // unique browser hub (M2.5); state in AppState
 

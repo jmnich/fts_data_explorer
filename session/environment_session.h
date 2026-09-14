@@ -146,6 +146,11 @@ public:
     // interferogram-view scheme). OFF by default: full-resolution display;
     // the cursor reads full-res data and CSV export never downsamples.
     bool downsampleDisplay = false;
+    // "Max at zero" (interferogram artifacts only, bugfix 2026-09-14): shift
+    // each curve's X so its peak (center burst) sits at 0 — the
+    // interferogram-view alignment. Applied in gatherCurves (display + CSV
+    // export stay WYSIWYG). Meaningless for spectral artifacts (xUnit >= 0).
+    bool maxAtZeroIfg = false;
 
     // Comparator selection.
     int artifactSelector = 0;            // ComparatorArtifact index

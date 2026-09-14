@@ -158,8 +158,19 @@ bool initializeApplication(AppConfig& config, GLFWwindow*& window) {
         state->lastScrollEventTime = glfwGetTime();
         state->needsRedraw = true;
     });
-    glfwSetKeyCallback(window, [](GLFWwindow* w, int, int, int, int) {
-        static_cast<AppState*>(glfwGetWindowUserPointer(w))->needsRedraw = true;
+    glfwSetKeyCallback(window, [](GLFWwindow* w, int key, int, int action, int mods) {
+        auto* state = static_cast<AppState*>(glfwGetWindowUserPointer(w));
+        // Ctrl+S / Ctrl+Shift+S edge capture (bugfix 2026-09-14): latch only
+        // on a real PRESS. GLFW_REPEAT (OS auto-repeat re-asserting a held
+        // key after focus regain) and the releases GLFW synthesizes on focus
+        // loss never re-arm the latch — one save per physical press,
+        // independent of mouse position / window focus.
+        if (action == GLFW_PRESS && key == GLFW_KEY_S &&
+            (mods & GLFW_MOD_CONTROL)) {
+            if (mods & GLFW_MOD_SHIFT) state->ctrlShiftSPending = true;
+            else state->ctrlSPending = true;
+        }
+        state->needsRedraw = true;
     });
     glfwSetCharCallback(window, [](GLFWwindow* w, unsigned int) {
         static_cast<AppState*>(glfwGetWindowUserPointer(w))->needsRedraw = true;
@@ -373,6 +384,7 @@ void setupApplication(AppConfig& config, GLFWwindow* window) {
     // see applySessionDefaults in workspace_session.cpp).
     appState.showFPS = config.showFPS; // Load from config
     appState.showTimestamps = config.showTimestamps; // Load from config
+    appState.hoverFocusPanels = config.hoverFocusPanels; // Load from config
     appState.gridAlpha = config.gridAlpha; // Load from config
     appState.currentAccentColor = config.accentColor; // Load accent color from config
 

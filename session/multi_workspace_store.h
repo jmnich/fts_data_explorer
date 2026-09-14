@@ -71,6 +71,16 @@ void multiWorkspaceSaveSource(const std::string& multiWorkspacePath, const std::
 void multiWorkspaceSaveTabOrder(const std::string& path,
                        const std::vector<std::string>& tabOrder,
                        std::string& err);
+// Read-only manifest "tabOrder" access (best-effort; out is cleared on any
+// failure). Used by the diff-gated save below.
+void multiWorkspaceReadTabOrder(const std::string& path,
+                       std::vector<std::string>& out);
+// Diff-gated variant (bugfix 2026-09-14): reads the stored order (cheap RO
+// open — no full-file copy) and skips the atomic write when unchanged. GUI
+// save flows use this; tests keep exercising the raw write.
+void multiWorkspaceSaveTabOrderIfChanged(const std::string& path,
+                       const std::vector<std::string>& tabOrder,
+                       std::string& err);
 // AppState-level helper: the ids of the currently-open embedded source tabs,
 // IN sessions[] order.
 std::vector<std::string> openEmbeddedSourceIds(const AppState& s);

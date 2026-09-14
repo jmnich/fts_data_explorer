@@ -144,8 +144,9 @@ static void renderUnsavedPromptModal() {
                                 appState.showErrorPopup = true;
                             } else {
                                 // Persist the exact tab-strip order with the
-                                // same save (bugfix 2026-08-14).
-                                multiWorkspaceSaveTabOrder(
+                                // same save (bugfix 2026-08-14); diff-gated
+                                // (bugfix 2026-09-14) — no copy when unchanged.
+                                multiWorkspaceSaveTabOrderIfChanged(
                                     appState.sessionTab.multiWorkspacePath,
                                     persistableTabOrder(appState), err);
                                 if (!err.empty()) {
@@ -445,8 +446,10 @@ static void advanceExitSaveAll() {
             }
             // Persist the exact tab-strip order with the same Save All
             // (bugfix 2026-08-14) — best-effort, mirrors the workspace saves.
+            // Diff-gated (bugfix 2026-09-14): no full-file copy when the
+            // strip is unchanged.
             std::string err;
-            multiWorkspaceSaveTabOrder(multiWorkspacePath, persistableTabOrder(appState), err);
+            multiWorkspaceSaveTabOrderIfChanged(multiWorkspacePath, persistableTabOrder(appState), err);
         }
         for (int idx : appState.exitDirtyExperiments) {
             if (idx >= 0 && idx < static_cast<int>(appState.experiments.size()))
@@ -1491,8 +1494,11 @@ void AppLoop::handleInput() {
             appState.pendingSaveKind != AppState::PendingSaveKind::None ||
             (appState.saveOverlayUntil > 0.0 && glfwGetTime() < appState.saveOverlayUntil);
         if (saveLockActive) {
-            appState.sKeyPressedLastFrame =
-                (glfwGetKey(window_, GLFW_KEY_S) == GLFW_PRESS) && io.KeyCtrl;
+            // A Ctrl+S pressed while "Saving..." is on screen is swallowed
+            // (same semantics as the old latch refresh): the save in flight
+            // already covers the user's intent.
+            appState.ctrlSPending = false;
+            appState.ctrlShiftSPending = false;
             return;
         }
 
@@ -1519,10 +1525,17 @@ void AppLoop::handleInput() {
 
         // Handle keyboard shortcuts - only trigger once per key press
         if ((wsActive || envActive) && !ImGui::GetIO().WantCaptureKeyboard) {
-            bool yKeyPressed = glfwGetKey(window_, GLFW_KEY_Y) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
-            bool aKeyPressed = glfwGetKey(window_, GLFW_KEY_A) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
-            bool dKeyPressed = glfwGetKey(window_, GLFW_KEY_D) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
-            bool qKeyPressed = glfwGetKey(window_, GLFW_KEY_Q) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
+            // Ctrl state read from GLFW directly (not io.KeyCtrl): the two
+            // conditions of each shortcut must share ONE state source, or a
+            // focus-loss / frame-lag desync can drop or double-fire toggles
+            // (same-source principle, bugfix 2026-09-14).
+            const bool ctrlHeld =
+                glfwGetKey(window_, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
+                glfwGetKey(window_, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
+            bool yKeyPressed = glfwGetKey(window_, GLFW_KEY_Y) == GLFW_PRESS && ctrlHeld;
+            bool aKeyPressed = glfwGetKey(window_, GLFW_KEY_A) == GLFW_PRESS && ctrlHeld;
+            bool dKeyPressed = glfwGetKey(window_, GLFW_KEY_D) == GLFW_PRESS && ctrlHeld;
+            bool qKeyPressed = glfwGetKey(window_, GLFW_KEY_Q) == GLFW_PRESS && ctrlHeld;
             
             // 'Ctrl+Y' - Toggle auto-fit Y-axis (only on initial press)
             if (wsActive) {
@@ -1636,26 +1649,29 @@ void AppLoop::handleInput() {
         // 'Ctrl+S' - Save EVERYTHING (any tab kind: workspace, session,
         // experiment): all dirty workspace tabs + all dirty experiments, one
         // toast. Also 'Ctrl+Shift+S' - Save As (active workspace only).
-        const bool sKeyPressed =
-            glfwGetKey(window_, GLFW_KEY_S) == GLFW_PRESS && ImGui::GetIO().KeyCtrl;
-        if (sKeyPressed && !appState.sKeyPressedLastFrame &&
+        // Event-based (bugfix 2026-09-14): the flags are set by the GLFW key
+        // callback on a real PRESS only — auto-repeat / focus flaps can never
+        // re-arm them, so a save fires exactly once per physical press,
+        // regardless of mouse position or window focus.
+        const bool sPress = appState.ctrlSPending;
+        const bool sShiftPress = appState.ctrlShiftSPending;
+        appState.ctrlSPending = false;
+        appState.ctrlShiftSPending = false;
+        if (sShiftPress && wsActive && appState.hasWorkspace() &&
             !ImGui::GetIO().WantCaptureKeyboard) {
-            if (wsActive && appState.hasWorkspace() && ImGui::GetIO().KeyShift) {
-                try {
-                    saveWorkspaceAs(appState, window_);   // dialog flow
-                } catch (const std::exception& e) {
-                    appState.errorMsg = std::string("Save failed:\n") + e.what();
-                    appState.showErrorPopup = true;
-                }
-            } else {
-                // Deferred manual save: the "Saving..." overlay draws this
-                // frame; executePendingSave runs the sync save at the next
-                // frame top and clears into the "Saved" toast.
-                requestSaveEverything(appState);
+            try {
+                saveWorkspaceAs(appState, window_);   // dialog flow
+            } catch (const std::exception& e) {
+                appState.errorMsg = std::string("Save failed:\n") + e.what();
+                appState.showErrorPopup = true;
             }
-            appState.needsRedraw = true;
+        } else if (sPress && !ImGui::GetIO().WantCaptureKeyboard) {
+            // Deferred manual save: the "Saving..." overlay draws this
+            // frame; executePendingSave runs the sync save at the next
+            // frame top and clears into the "Saved" toast.
+            requestSaveEverything(appState);
         }
-        appState.sKeyPressedLastFrame = sKeyPressed;
+        if (sPress || sShiftPress) appState.needsRedraw = true;
 
         // Reapply UI scaling if size changed
         handleUIScaling(io, appState.uiScale, appState.currentUiSize, appState.uiSizeChanged);
@@ -1903,6 +1919,61 @@ static void drawCenteredToast(const char* msg, float padX, float padY) {
     dl->AddText(pos, IM_COL32(255, 255, 255, 255), msg);
 }
 
+// Focus-follows-hover for docked panels (bugfix 2026-09-14, Settings →
+// "Focus panels on hover"): the docked panel body under the mouse becomes the
+// focused window (NavWindow) without a click, so plot keyboard interaction
+// (arrows/ESC/shift-drag/wheel, all gated on IsWindowFocused) works on hover.
+//
+// Safety contract (no regression on the app's documented FocusWindow warning
+// at the session-panel render block):
+//  - BODY rects only: the dock host, menu bar and the dock nodes' TAB BARS
+//    are not docked windows / not under a body rect — hovering a tab never
+//    switches tabs (no TabBar/NextSelectedTabId mutation anywhere here).
+//  - Only the node's ALREADY-VISIBLE window is ever focused (VisibleWindow
+//    check): FocusWindow's dock-tab activation is then a no-op — the feature
+//    cannot fight ImGui's click-based tab selection.
+//  - Fires only on the hover TRANSITION into a new window, and only while
+//    nothing is interactive: no mouse button down, no active item, no
+//    drag-drop, no open popup. A mid-drag/undock window can never be stolen.
+void AppLoop::hoverFocusDockedPanel() {
+    if (!appState.hoverFocusPanels) return;
+    ImGuiContext* g = ImGui::GetCurrentContext();
+    if (!g || g->ActiveId != 0 || g->DragDropActive) return;
+    if (ImGui::IsMouseDown(ImGuiMouseButton_Left) ||
+        ImGui::IsMouseDown(ImGuiMouseButton_Right) ||
+        ImGui::IsMouseDown(ImGuiMouseButton_Middle))
+        return;
+    if (ImGui::IsPopupOpen(ImGuiID(0), ImGuiPopupFlags_AnyPopup)) return;
+    static ImGuiWindow* lastHoverFocused = nullptr;
+
+    // Topmost (last in the draw-order list) docked, visible, non-floating
+    // window whose BODY rect contains the mouse. Hidden dock tabs are never
+    // rendered (Begin returns false), so they cannot match here.
+    ImGuiWindow* hovered = nullptr;
+    for (int i = 0; i < g->Windows.Size; ++i) {
+        ImGuiWindow* w = g->Windows[i];
+        if (!w || !w->WasActive || w->Hidden || w->BeginCountPreviousFrame == 0)
+            continue;
+        if (!w->DockNode || w->DockNode->IsFloatingNode()) continue;
+        if (w->DockNode->VisibleWindow != w) continue;   // visible tab only
+        if (ImGui::IsMouseHoveringRect(w->Pos,
+                                       ImVec2(w->Pos.x + w->Size.x,
+                                              w->Pos.y + w->Size.y),
+                                       false)) {
+            hovered = w;
+            break;
+        }
+    }
+    if (!hovered) {
+        lastHoverFocused = nullptr;
+        return;
+    }
+    if (hovered == lastHoverFocused) return;   // transition-only focus
+    if (hovered == g->NavWindow || hovered->RootWindow == g->NavWindow) return;
+    lastHoverFocused = hovered;
+    ImGui::FocusWindow(hovered);
+}
+
 void AppLoop::renderUI() {
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
@@ -2126,6 +2197,12 @@ void AppLoop::renderUI() {
                         }
                     }
                 }
+                // Focus-follows-hover (bugfix 2026-09-14): focus the docked
+                // panel body under the mouse — pre-DockSpace so the focused
+                // window's Begin this frame sees NavWindow already set. Never
+                // touches tab selection (visible tab only); guards prevent
+                // stealing active drags/undocks (see the helper's contract).
+                hoverFocusDockedPanel();
 
                 // Workspace kind: re-apply the per-node selected windows
                 // captured in the layout snapshot's sidecar (see

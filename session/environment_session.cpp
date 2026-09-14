@@ -1471,6 +1471,35 @@ void EnvironmentSession::renderRangingWindow() {
         if (ifgArtifact) ImGui::EndDisabled();
         if (ImGui::IsItemHovered() && ifgArtifact)
             ImGui::SetTooltip("X unit fixed for interferograms (sample index).");
+        // "Max at zero" (interferogram artifacts only, bugfix 2026-09-14):
+        // the interferogram-view alignment — each curve's peak (center
+        // burst) sits at x = 0. Active only for raw/corrected IFG artifacts.
+        if (ifgArtifact) {
+            const ImVec4 colActive = ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive);
+            const ImVec4 colInactive(0.22f, 0.22f, 0.22f, 0.7f);
+            ImGui::TextUnformatted("Max at zero");
+            ImGui::SameLine();
+            for (int m = 0; m < 2; ++m) {
+                const bool on = (m == 0);
+                const bool sel = (maxAtZeroIfg == on);
+                ImGui::PushStyleColor(ImGuiCol_Button, sel ? colActive : colInactive);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, sel ? colActive : colInactive);
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, colActive);
+                if (ImGui::Button(on ? "On##EnvMzOn" : "Off##EnvMzOff")) {
+                    if (maxAtZeroIfg != on) {
+                        maxAtZeroIfg = on;
+                        dirty = true;
+                        plot.shouldAutoscale = true;
+                        appState.needsRedraw = true;
+                    }
+                }
+                ImGui::PopStyleColor(3);
+                if (m < 1) ImGui::SameLine();
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Aligns each curve's center burst at x = 0\n"
+                                  "(applies to display and CSV export).");
+        }
         if (type == EnvType::Comparator) renderYScaleButtons();
         renderYAxisControls();
         ImGui::Separator();
@@ -1617,6 +1646,21 @@ std::vector<ComparatorCurve> EnvironmentSession::gatherCurves(AppState& s) {
                 v = SpectralToolbox::convertXValue(v, from, to);
         }
         c.y = pick->y;
+        // "Max at zero" (interferogram artifacts only — xUnit == -1 marks the
+        // OPD/sample-index axes): align each curve's peak (center burst) to
+        // x = 0, mirroring the interferogram view. Independent per curve —
+        // the offset is that curve's own peak position. Applied here so the
+        // plot, tracking cursor, downsample and CSV export all see the
+        // shifted axis (WYSIWYG).
+        if (maxAtZeroIfg && pick->xUnit == -1 && !c.y.empty()) {
+            const auto peakIt = std::max_element(c.y.begin(), c.y.end());
+            const size_t peakIdx =
+                static_cast<size_t>(std::distance(c.y.begin(), peakIt));
+            if (peakIdx < c.x.size()) {
+                const double off = c.x[peakIdx];
+                for (double& v : c.x) v -= off;
+            }
+        }
         curves.push_back(std::move(c));
     }
     return curves;
@@ -2050,6 +2094,7 @@ static nlohmann::json experimentConfigJson(const EnvironmentSession& env) {
         j["comparatorKeys"] = env.comparatorKeys;
         j["comparatorKeysExplicit"] = env.comparatorKeysExplicit;
         j["memberPicks"] = env.memberPicks;
+        j["maxAtZeroIfg"] = env.maxAtZeroIfg;
     }
     return j;
 }
@@ -2112,6 +2157,7 @@ static void experimentApplyConfig(EnvironmentSession& env, const nlohmann::json&
             env.plot.yScaleSelector = 0;
         env.comparatorKeys = j.value("comparatorKeys", std::vector<std::string>{});
         env.comparatorKeysExplicit = j.value("comparatorKeysExplicit", false);
+        env.maxAtZeroIfg = j.value("maxAtZeroIfg", false);
         auto mp = j.find("memberPicks");
         if (mp != j.end() && mp->is_object())
             for (auto it = mp->begin(); it != mp->end(); ++it)

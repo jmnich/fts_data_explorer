@@ -185,7 +185,13 @@ struct AppState {
     bool aKeyPressedLastFrame;
     bool dKeyPressedLastFrame;
     bool qKeyPressedLastFrame;
-    bool sKeyPressedLastFrame;
+    // Ctrl+S / Ctrl+Shift+S edge capture (bugfix 2026-09-14): set in the GLFW
+    // key callback on a real PRESS event (auto-repeat and focus-loss releases
+    // never latch), consumed in handleInput. Event-based — immune to the
+    // focus-flap + auto-repeat re-assertion that made the old glfwGetKey()
+    // state detection re-trigger saves while the mouse was outside the window.
+    bool ctrlSPending = false;
+    bool ctrlShiftSPending = false;
     // App-wide limits (identical across sessions, not per-workspace).
     const size_t MAX_SELECTABLE_FILES;
     const size_t maxPointsBeforeDownsampling;
@@ -195,6 +201,10 @@ struct AppState {
     // "Show timestamps" ribbon toggle (UI chrome; persisted in config). Effect
     // gated on hasWorkspace() — display-only, never written to the .h5.
     bool showTimestamps = false;
+    // Focus-follows-hover for docked panels (Settings menu, persisted in
+    // config): the panel body under the mouse becomes the focused window
+    // without a click. Never switches dock tabs.
+    bool hoverFocusPanels = true;
     float gridAlpha; // Grid opacity (0.0 = invisible, 1.0 = full)
     float fps;
     int frameCount;

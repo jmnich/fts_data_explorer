@@ -353,7 +353,9 @@ void saveEverything(AppState& s) {
             throw H5Error(err);
         // Persist the exact tab-strip order (bugfix 2026-08-14) — NOT
         // dirty-gated: Ctrl+S means "save the project state", layout included.
-        multiWorkspaceSaveTabOrder(s.sessionTab.multiWorkspacePath,
+        // Diff-gated (bugfix 2026-09-14): no full-file copy when the strip is
+        // unchanged.
+        multiWorkspaceSaveTabOrderIfChanged(s.sessionTab.multiWorkspacePath,
                           persistableTabOrder(s), err);
         if (!err.empty()) throw H5Error(err);
         // The archive was rewritten — refresh the cached per-source sizes so
@@ -400,6 +402,9 @@ static bool saveDeferAllowed(const AppState& s) {
 
 void requestSaveEverything(AppState& s) {
     if (!saveDeferAllowed(s)) return;
+    // Never stack onto an in-flight deferred save/export (mirrors
+    // requestExportDataset's guard).
+    if (s.pendingSaveKind != AppState::PendingSaveKind::None) return;
     s.pendingSaveKind = AppState::PendingSaveKind::Everything;
     s.saveOverlayUntil = glfwGetTime() + kSaveOverlayMinDisplay;
     s.needsRedraw = true;
@@ -407,6 +412,7 @@ void requestSaveEverything(AppState& s) {
 
 void requestSaveWorkspaceDeferred(AppState& s, const std::string& asPath) {
     if (!saveDeferAllowed(s)) return;
+    if (s.pendingSaveKind != AppState::PendingSaveKind::None) return;
     markConfigStale(s.active->workspace, s);
     if (!s.active->workspace.staleCategories().empty()) {
         // Stale categories need the confirmation modal first; its "Drop Stale
@@ -703,6 +709,7 @@ int main(int argc, char* argv[]) {
     // Update config with current FPS setting before saving
     config.showFPS = appState.showFPS;
     config.showTimestamps = appState.showTimestamps;
+    config.hoverFocusPanels = appState.hoverFocusPanels;
     config.gridAlpha = appState.gridAlpha;
     config.accentColor = appState.currentAccentColor;
 
