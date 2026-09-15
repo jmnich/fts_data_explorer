@@ -2249,7 +2249,7 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
         // difference — the T100 std-dev exception). Always linear Y (the
         // difference is signed; log/dB invalid). No NoInputs gating — the env
         // has no large-data path; downsampleDisplay covers big curves.
-        const ImPlotFlags resFlags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend;
+        const ImPlotFlags resFlags = ImPlotFlags_NoTitle;
         if (showDifference && ImPlot::BeginPlot(("##envDifference" + stripKey).c_str(),
                                               ImVec2(-1, -1), resFlags)) {
             ImPlotAxisFlags resYFlags =
@@ -2260,6 +2260,7 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
                 resYFlags |= ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_RangeFit;
             ImPlot::SetupAxes(xLabel.c_str(), "Difference",
                               ImPlotAxisFlags_NoTickMarks, resYFlags);
+            ImPlot::SetupLegend(ImPlotLocation_NorthEast);
 
             // X ticks match the primary plot: same window (manual else data
             // range), same limited tick count — the grid push above already
@@ -2279,9 +2280,9 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
                 rpy = &rdy;
             }
             ImPlotSpec resSpec;
-            resSpec.LineColor = ImVec4(0.1f, 0.6f, 0.7f, 1.0f);
+            resSpec.LineColor = ImVec4(0.753f, 0.055f, 0.055f, 1.0f);
             resSpec.LineWeight = 2.0f;
-            ImPlot::PlotLine("##differenceLine", rpx->data(), rpy->data(),
+            ImPlot::PlotLine("Difference", rpx->data(), rpy->data(),
                              static_cast<int>(std::min(rpx->size(), rpy->size())),
                              resSpec);
             const ImVec4 resLineColor = ImPlot::GetLastItemColor();
