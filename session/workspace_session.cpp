@@ -11,6 +11,7 @@
 
 #include "app_state.h"
 #include "multi_workspace_store.h"
+#include "hdf/h5_store.h"
 #include "ui/layout_persistence.h"
 #include "spectral_pool.h"
 #include "workspace_reader.h"
@@ -422,4 +423,17 @@ void closeTab(AppState& s, int idx) {
     } else {
         removeTab(s, idx);   // parked: remove directly
     }
+}
+
+// One standalone session's save: view-state capture, verbatim write (stale
+// categories included — Ctrl+S semantics, never a mid-flow §1.5 prompt),
+// dirty/changeLog clear, view-state re-baseline. Throws H5Error on failure.
+void saveSessionToDisk(AppState& s, WorkspaceSession& sess) {
+    captureViewState(sess);
+    H5Store::save(sess.workspacePath, sess.workspace);   // throws H5Error
+    sess.workspace.dirty = false;
+    sess.workspace.changeLog.clear();   // saved: the change list starts fresh
+    sess.viewStateBaseline = viewStateJson(sess);
+    sess.viewStateBaselinePending = false;
+    s.needsRedraw = true;
 }

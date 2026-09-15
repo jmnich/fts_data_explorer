@@ -250,9 +250,9 @@ bool multiWorkspaceCreate(const std::string& path, std::string& err) {
 }
 
 bool multiWorkspaceCreateFromDataset(const std::string& path,
-                            const std::string& srcPath, std::string& err) {
+                            const std::string& srcPath, std::string& newId,
+                            std::string& err) {
     if (!multiWorkspaceCreate(path, err)) return false;
-    std::string newId;
     return multiWorkspaceAddSource(path, srcPath, newId, err);
 }
 

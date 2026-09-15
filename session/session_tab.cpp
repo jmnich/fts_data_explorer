@@ -459,23 +459,59 @@ void renderCreateMultiWorkspaceButton() {
                 "New Multi-Workspace", "HDF5 files", "*.h5",
                 defaultFolder, "workspace.h5", glfwGetCurrentContext());
             if (!path.empty()) {
-                // Embed a copy of the most relevant open dataset from disk.
-                const std::string srcPath = appState.sessions[src]->path;
-                std::string err;
-                if (multiWorkspaceCreateFromDataset(path, srcPath, err)) {
-                    multiWorkspaceOpenProject(appState, path, err);
-                    rememberMultiWorkspace(appState, path);
-                    appState.needsRedraw = true;
-                } else {
-                    appState.errorMsg = "Create failed:\n" + err;
-                    appState.showErrorPopup = true;
+                // Autosave FIRST (before the archive is created): the embed is
+                // a copy from disk, so unsaved edits must reach `srcPath` —
+                // otherwise they would be lost when the dataset tab is
+                // dropped below. Stale categories are written verbatim
+                // (Ctrl+S semantics — never a mid-flow §1.5 prompt).
+                // proceed-flag, NOT an early return: this code runs between
+                // the button's PushStyleColor/PopStyleColor pair — an early
+                // return would skip the pop and corrupt the style stack.
+                auto& srcSess = *appState.sessions[src];
+                bool proceed = true;
+                if (srcSess.isDirty()) {
+                    try {
+                        saveSessionToDisk(appState, srcSess);
+                    } catch (const std::exception& e) {
+                        appState.errorMsg = std::string("Autosave failed:\n") + e.what();
+                        appState.showErrorPopup = true;
+                        proceed = false;
+                    }
+                }
+                if (proceed) {
+                    // Embed a copy of the most relevant open dataset from disk.
+                    const std::string srcPath = srcSess.path;
+                    std::string newId, err;
+                    if (multiWorkspaceCreateFromDataset(path, srcPath, newId, err)) {
+                        multiWorkspaceOpenProject(appState, path, err);
+                        // Drop the standalone session: the embedded copy takes
+                        // its place (Option B). The autosave above left the
+                        // session clean, so the parked-tab close removes it
+                        // directly.
+                        for (int i = 0;
+                             i < static_cast<int>(appState.sessions.size()); ++i) {
+                            if (appState.sessions[i]->path == srcPath) {
+                                closeTab(appState, i);
+                                break;
+                            }
+                        }
+                        // The embedded source is immediately opened in a tab
+                        // (queued swap + deferred load at frame top).
+                        openEmbeddedInNewTab(appState, path, newId);
+                        rememberMultiWorkspace(appState, path);
+                        appState.needsRedraw = true;
+                    } else {
+                        appState.errorMsg = "Create failed:\n" + err;
+                        appState.showErrorPopup = true;
+                    }
                 }
             }
         }
         ImGui::PopStyleColor(3);
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Creates an empty multi-workspace .h5 and embeds the currently "
-                              "open dataset into it.");
+                              "open dataset into it. The dataset tab is replaced by the "
+                              "embedded copy, opened as a tab.");
     } else if (refEmbedded) {
         ImGui::BeginDisabled(true);
         ImGui::Button("Create Multi-Workspace...", ImVec2(-FLT_MIN, 0));

@@ -30,8 +30,10 @@ bool isMultiWorkspaceFile(const std::string& path);
 bool multiWorkspaceCreate(const std::string& path, std::string& err);
 // New multi-workspace .h5 with the current dataset embedded (embeds FROM `srcPath` on
 // disk — the saved state). Route through this from the Session tab's single-file mode.
+// The new source id is returned via `newId` (the caller opens the embedded tab with it).
 bool multiWorkspaceCreateFromDataset(const std::string& path,
-                            const std::string& srcPath, std::string& err);
+                            const std::string& srcPath, std::string& newId,
+                            std::string& err);
 // Embed a copy of a standalone .h5 into the archive; returns the new source id.
 // slowSave pauses inside the atomic window (2 s) — test hook for the
 // kill-mid-save atomicity check in playground/multi_workspace_roundtrip.py.

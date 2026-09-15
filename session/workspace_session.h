@@ -227,6 +227,14 @@ void restoreTabStripOrder(AppState& s);
 void closeTab(AppState& s, int idx);
 void removeTab(AppState& s, int idx);
 
+// Save one (possibly parked) standalone workspace session to its filesystem
+// path: view-state capture, H5Store::save (stale categories written verbatim,
+// Ctrl+S semantics — no §1.5 prompt), dirty/changeLog clear, view-state
+// re-baseline. Shared by saveEverything's per-session loop and the
+// Create-Multi-Workspace autosave; embedded save-back stays in saveEverything
+// (it clears the comparator's sourceCache). Throws H5Error on failure.
+void saveSessionToDisk(AppState& s, WorkspaceSession& sess);
+
 // The Session tab is created lazily by the first open/create action and is
 // never closable afterwards; this is the single guard for every open path.
 void ensureSessionTab(AppState& s);

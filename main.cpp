@@ -329,23 +329,23 @@ void doSaveWorkspace(AppState& s, const std::string& asPath) {
 void saveEverything(AppState& s) {
     for (auto& sess : s.sessions) {
         if (!sess->workspace.dirty) continue;
-        captureViewState(*sess);
         const size_t hash = sess->key.find('#');
         if (hash != std::string::npos) {
+            captureViewState(*sess);
             const std::string multiWorkspacePath = sess->key.substr(0, hash);
             const std::string sourceId = sess->key.substr(hash + 1);
             std::string err;
             multiWorkspaceSaveSource(multiWorkspacePath, sourceId, sess->workspace, err);   // throws
+            sess->workspace.dirty = false;
+            sess->workspace.changeLog.clear();
+            sess->viewStateBaseline = viewStateJson(*sess);
+            sess->viewStateBaselinePending = false;
             // The archive was rewritten: the comparator's sourceCache
             // snapshots are stale — clear them so the next render re-reads.
             s.sessionTab.sourceCache.clear();
         } else {
-            H5Store::save(sess->workspacePath, sess->workspace);          // throws
+            saveSessionToDisk(s, *sess);   // throws H5Error
         }
-        sess->workspace.dirty = false;
-        sess->workspace.changeLog.clear();
-        sess->viewStateBaseline = viewStateJson(*sess);
-        sess->viewStateBaselinePending = false;
     }
     if (s.sessionTab.multiWorkspaceOpen) {
         std::string err;

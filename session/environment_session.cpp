@@ -1089,6 +1089,9 @@ void EnvironmentSession::renderAbsorbanceConfig() {
         if (ImGui::BeginCombo((std::string("##ds") + id).c_str(),
                               dsCur.empty() ? "Select dataset..." : dsCur.c_str())) {
             for (const auto& [k, label] : datasets) {
+                // Key-scoped ID: two datasets may share a display name (same
+                // stem embedded twice) — identical labels would collide.
+                ImGui::PushID(k.c_str());
                 if (ImGui::Selectable(label.c_str(), k == key)) {
                     if (k != key) {
                         key = k;
@@ -1096,6 +1099,7 @@ void EnvironmentSession::renderAbsorbanceConfig() {
                         changed = true;
                     }
                 }
+                ImGui::PopID();
             }
             ImGui::EndCombo();
         }
@@ -1381,6 +1385,10 @@ void EnvironmentSession::renderDatasetSelector() {
     const ImVec4 yellow(1.0f, 0.8f, 0.2f, 1.0f);
 
     for (const auto& src : sources) {
+        // Row-scoped ID: two datasets may share a display name (same stem
+        // embedded twice) — hashing the label alone would collide the
+        // checkbox (and nested widgets) IDs. The key is stable and unique.
+        ImGui::PushID(src.key.c_str());
         const bool isOpen = sessionOpen(src.key);
         bool checked = isOpen ? (autoAll || hasKey(src.key)) : hasKey(src.key);
         const ArtifactInfo info = artifactInfo(*src.ws, artifact, src.key);
@@ -1411,17 +1419,17 @@ void EnvironmentSession::renderDatasetSelector() {
         if (info.stale && ImGui::IsItemHovered())
             ImGui::SetTooltip("Stale — recompute this artifact in its workspace tab.");
 
-        // Per-dataset member dropdown for multi-member artifacts.
+        // Per-dataset member dropdown for multi-member artifacts (the pushed
+        // row ID already disambiguates across rows).
         if (checked && info.members.size() > 1) {
             ImGui::Indent();
-            const std::string comboId = "##cmpMember" + src.key;
             auto pit = memberPicks.find(src.key);
             std::string current = (pit != memberPicks.end()) ? pit->second : "";
             bool found = false;
             for (const auto& m : info.members)
                 if (m.id == current) { found = true; break; }
             if (!found) current.clear();
-            if (ImGui::BeginCombo(comboId.c_str(),
+            if (ImGui::BeginCombo("##cmpMember",
                                   (current.empty() ? info.members.front().id : current).c_str())) {
                 for (const auto& m : info.members) {
                     const bool sel = m.id == current;
@@ -1435,6 +1443,7 @@ void EnvironmentSession::renderDatasetSelector() {
             }
             ImGui::Unindent();
         }
+        ImGui::PopID();
     }
     if (sources.empty())
         ImGui::TextDisabled("No datasets available — open a workspace first.");
@@ -1908,6 +1917,23 @@ std::vector<ComparatorCurve> EnvironmentSession::gatherCurves(AppState& s) {
             }
         }
         curves.push_back(std::move(c));
+    }
+    // Unique labels: ImPlot item IDs and the Difference-panel pickers key on
+    // the label — two same-named datasets (same stem embedded twice) must not
+    // collide. On a clash, append " (2)", " (3)", … skipping labels in use.
+    for (size_t i = 0; i < curves.size(); ++i) {
+        bool dup = false;
+        for (size_t j = 0; j < i; ++j)
+            if (curves[j].label == curves[i].label) { dup = true; break; }
+        if (!dup) continue;
+        for (int n = 2; ; ++n) {
+            const std::string cand =
+                curves[i].label + " (" + std::to_string(n) + ")";
+            bool clash = false;
+            for (size_t j = 0; j < curves.size(); ++j)
+                if (j != i && curves[j].label == cand) { clash = true; break; }
+            if (!clash) { curves[i].label = cand; break; }
+        }
     }
     return curves;
 }
