@@ -1069,9 +1069,9 @@ static void rebuildDefaultLayout(ImGuiID dockspace_id, float topOffset) {
                                 &dock_env_range, &dock_env_export);
     ImGui::DockBuilderDockWindow("Settings##envcfg", dock_env_settings);
     ImGui::DockBuilderDockWindow("Plot Ranging##envrange", dock_env_range);
-    // Residual shares the Ranging node as a second tab (Ranging docked first
+    // Difference shares the Ranging node as a second tab (Ranging docked first
     // = the "on top" tab).
-    ImGui::DockBuilderDockWindow("Residual##envres", dock_env_range);
+    ImGui::DockBuilderDockWindow("Difference##envres", dock_env_range);
     // HITRAN stacks with the env's data-export panel (was on Settings).
     ImGui::DockBuilderDockWindow("Export##envexp", dock_env_export);
     ImGui::DockBuilderDockWindow("HITRAN Gas Markers##envhitran", dock_env_export);
@@ -2192,7 +2192,7 @@ void AppLoop::renderUI() {
                     appState.activeExperimentIdx >= 0 &&
                     appState.activeExperimentIdx < static_cast<int>(appState.experiments.size())) {
                     for (const char* n : {"Settings##envcfg", "Viewer##envview",
-                                          "Plot Ranging##envrange", "Residual##envres",
+                                          "Plot Ranging##envrange", "Difference##envres",
                                           "Export##envexp"}) {
                         if (ImGuiWindow* pw = ImGui::FindWindowByName(n)) {
                             if (pw->DockNode) {
@@ -2322,7 +2322,7 @@ void AppLoop::renderUI() {
                     // exist in the new tree, which the workspace snapshot lacks).
                     saveTabLayout(tabTypeName(static_cast<int>(ActiveTabKind::Experiment)));
                 }
-                // v7 (2026-09-14): "Residual" window added as a second tab in
+                // v7 (2026-09-14): "Difference" window added as a second tab in
                 // the Plot Ranging node (window name changed → one rebuild;
                 // stale experiment snapshot reset — same seeding as v6).
                 if (config_.sessionPanelLayoutVersion < 7) {

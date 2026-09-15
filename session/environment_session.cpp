@@ -319,14 +319,14 @@ const char* experimentTypeName(EnvType t) {
 
 // Stable window names of the experiment type's docked panels. These MUST stay
 // in sync with renderConfigWindow/renderViewWindow/renderRangingWindow/
-// renderResidualWindow/renderExportWindow and app_loop.cpp's pre-DockSpace
+// renderDifferenceWindow/renderExportWindow and app_loop.cpp's pre-DockSpace
 // forced-selection list.
 bool isExperimentPanelName(const char* name) {
     return name &&
            (std::strcmp(name, "Settings##envcfg") == 0 ||
             std::strcmp(name, "Viewer##envview") == 0 ||
             std::strcmp(name, "Plot Ranging##envrange") == 0 ||
-            std::strcmp(name, "Residual##envres") == 0 ||
+            std::strcmp(name, "Difference##envres") == 0 ||
             std::strcmp(name, "Export##envexp") == 0 ||
             std::strcmp(name, "HITRAN Gas Markers##envhitran") == 0);
 }
@@ -782,7 +782,7 @@ void EnvironmentSession::applyYMode() {
     appState.needsRedraw = true;
 }
 
-// Real-time residual (reference − subtracted) between two of the currently
+// Real-time difference (reference − subtracted) between two of the currently
 // visible curves. Synchronous per frame — no pool, no caching, no stale
 // overlay. Grid = reference points inside the overlap region (the
 // computeAbsorbance convention: the reference defines the axis); the
@@ -790,20 +790,20 @@ void EnvironmentSession::applyYMode() {
 // values (same transform as the main plot — WYSIWYG with the view).
 // Refusing conditions (disabled, <2 curves, empty curves, no overlap,
 // resample failure) clear the vectors and invalidate the stats — the panel
-// falls back to its status text and showResidual keeps rows at 1.
-void EnvironmentSession::computeResidual(
+// falls back to its status text and showDifference keeps rows at 1.
+void EnvironmentSession::computeDifference(
     const std::vector<ComparatorCurve>& curves, bool dBNormalize,
     double dBRefMax) {
-    residualX.clear();
-    residualY.clear();
-    residualStatsValid = false;
-    if (!residualEnabled || curves.size() < 2) return;
-    residualRefIdx =
-        std::clamp(residualRefIdx, 0, static_cast<int>(curves.size()) - 1);
-    residualSubIdx =
-        std::clamp(residualSubIdx, 0, static_cast<int>(curves.size()) - 1);
-    const ComparatorCurve& ref = curves[static_cast<size_t>(residualRefIdx)];
-    const ComparatorCurve& sub = curves[static_cast<size_t>(residualSubIdx)];
+    differenceX.clear();
+    differenceY.clear();
+    differenceStatsValid = false;
+    if (!differenceEnabled || curves.size() < 2) return;
+    differenceRefIdx =
+        std::clamp(differenceRefIdx, 0, static_cast<int>(curves.size()) - 1);
+    differenceSubIdx =
+        std::clamp(differenceSubIdx, 0, static_cast<int>(curves.size()) - 1);
+    const ComparatorCurve& ref = curves[static_cast<size_t>(differenceRefIdx)];
+    const ComparatorCurve& sub = curves[static_cast<size_t>(differenceSubIdx)];
     if (ref.x.empty() || ref.y.empty() || sub.x.empty() || sub.y.empty()) return;
 
     std::vector<double> refY = ref.y, subY = sub.y;
@@ -836,41 +836,41 @@ void EnvironmentSession::computeResidual(
     std::vector<double> subResampled = resampleToGrid(sub.x, subY, gridX);
     if (subResampled.size() != gridX.size()) return;
 
-    residualX = std::move(gridX);
-    residualY.resize(residualX.size());
-    for (size_t i = 0; i < residualY.size(); ++i) {
+    differenceX = std::move(gridX);
+    differenceY.resize(differenceX.size());
+    for (size_t i = 0; i < differenceY.size(); ++i) {
         double diff = refYOverlap[i] - subResampled[i];
-        if (residualMode == 1) diff = std::fabs(diff);
-        residualY[i] = diff;
+        if (differenceMode == 1) diff = std::fabs(diff);
+        differenceY[i] = diff;
     }
-    computeResidualStats();
+    computeDifferenceStats();
 }
 
-// Residual statistics: min/max/peak-peak + stddev (sample variance N-1 via
+// Difference statistics: min/max/peak-peak + stddev (sample variance N-1 via
 // RunningStats, the T100/batch convention) in one pass. Region 0 filters to
 // the viewbox X window (viewXMin/Max are captured at the END of the main
 // plot's BeginPlot, so they lag one frame — invisible; first frame falls
 // back to all data).
-void EnvironmentSession::computeResidualStats() {
-    residualStatsValid = false;
-    if (residualX.empty() || residualY.size() != residualX.size()) return;
-    const bool filterView = residualStatsRegion == 0 && viewXMin < viewXMax;
+void EnvironmentSession::computeDifferenceStats() {
+    differenceStatsValid = false;
+    if (differenceX.empty() || differenceY.size() != differenceX.size()) return;
+    const bool filterView = differenceStatsRegion == 0 && viewXMin < viewXMax;
     RunningStats stats;
     double mn = std::numeric_limits<double>::max();
     double mx = std::numeric_limits<double>::lowest();
-    for (size_t i = 0; i < residualX.size(); ++i) {
-        if (filterView && (residualX[i] < viewXMin || residualX[i] > viewXMax))
+    for (size_t i = 0; i < differenceX.size(); ++i) {
+        if (filterView && (differenceX[i] < viewXMin || differenceX[i] > viewXMax))
             continue;
-        stats.add(residualY[i]);
-        mn = std::min(mn, residualY[i]);
-        mx = std::max(mx, residualY[i]);
+        stats.add(differenceY[i]);
+        mn = std::min(mn, differenceY[i]);
+        mx = std::max(mx, differenceY[i]);
     }
     if (stats.n < 1) return;
-    residualMin = mn;
-    residualMax = mx;
-    residualPeakPeak = mx - mn;
-    residualStddev = stats.stddev();
-    residualStatsValid = true;
+    differenceMin = mn;
+    differenceMax = mx;
+    differencePeakPeak = mx - mn;
+    differenceStddev = stats.stddev();
+    differenceStatsValid = true;
 }
 
 void EnvironmentSession::convertXInPlace() {
@@ -964,9 +964,9 @@ void EnvironmentSession::render() {
         dirty = true;
     renderExportWindow();
     renderViewWindow();
-    // Residual panel renders AFTER the Viewer: its comboboxes read the curve
+    // Difference panel renders AFTER the Viewer: its comboboxes read the curve
     // labels cached at the end of renderViewWindow (same frame, no delay).
-    renderResidualWindow();
+    renderDifferenceWindow();
 }
 
 // Config panel: pickers (absorbance) / artifact + dataset selectors
@@ -1047,11 +1047,11 @@ void EnvironmentSession::renderViewWindow() {
             if (plot.yScaleSelector == 2) yLabel += " (dB)";
         }
         renderPlot(curves, xLabel, yLabel, hasGuideline, guideline, true);
-        // Cache the visible curve labels for renderResidualWindow (the curve
+        // Cache the visible curve labels for renderDifferenceWindow (the curve
         // vector is local to this function). An empty list clears the cache —
-        // the Residual panel then shows its "not enough curves" status.
-        residualCurveLabels_.clear();
-        for (const auto& c : curves) residualCurveLabels_.push_back(c.label);
+        // the Difference panel then shows its "not enough curves" status.
+        differenceCurveLabels_.clear();
+        for (const auto& c : curves) differenceCurveLabels_.push_back(c.label);
     }
     ImGui::End();
 }
@@ -1703,31 +1703,31 @@ void EnvironmentSession::renderExportWindow() {
     ImGui::End();
 }
 
-// Residual panel: enable toggle, reference/subtracted curve comboboxes (from
+// Difference panel: enable toggle, reference/subtracted curve comboboxes (from
 // the labels renderViewWindow cached THIS frame), signed/absolute mode,
 // stats region selector, and the statistics readout. Runs after the Viewer —
 // the combobox indices clamp to the current label count each frame, so a
 // changed visible-curve set self-heals without stale marking. Every mutation
 // also arms pendingRedrawFrames (EndPlot-time Y fits land on the next frame;
 // the idle loop must not sleep through it).
-void EnvironmentSession::renderResidualWindow() {
+void EnvironmentSession::renderDifferenceWindow() {
     ImGui::SetNextWindowDockID(mainDockSpaceId(), ImGuiCond_FirstUseEver);
-    if (ImGui::Begin("Residual##envres")) {
+    if (ImGui::Begin("Difference##envres")) {
         if (ImGui::IsWindowAppearing()) appState.needsRedraw = true;
         forceDockSelection();
-        if (renderCursorTogglePair(residualEnabled,
+        if (renderCursorTogglePair(differenceEnabled,
                                    "On##EnvResOn", "Off##EnvResOff",
-                                   "Residual")) {
+                                   "Difference")) {
             dirty = true;
             appState.pendingRedrawFrames = 2;
             appState.needsRedraw = true;
         }
-        if (residualEnabled) {
+        if (differenceEnabled) {
             ImGui::Separator();
-            int maxIdx = static_cast<int>(residualCurveLabels_.size()) - 1;
+            int maxIdx = static_cast<int>(differenceCurveLabels_.size()) - 1;
             if (maxIdx < 0) maxIdx = 0;
-            residualRefIdx = std::clamp(residualRefIdx, 0, maxIdx);
-            residualSubIdx = std::clamp(residualSubIdx, 0, maxIdx);
+            differenceRefIdx = std::clamp(differenceRefIdx, 0, maxIdx);
+            differenceSubIdx = std::clamp(differenceSubIdx, 0, maxIdx);
 
             // Curve selector: label = the visible curve's display label; the
             // preview and every dropdown row show the FULL label in a hover
@@ -1737,13 +1737,13 @@ void EnvironmentSession::renderResidualWindow() {
                 ImGui::SameLine();
                 ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
                 const std::string preview =
-                    residualCurveLabels_.empty()
+                    differenceCurveLabels_.empty()
                         ? std::string("\xE2\x80\x94")
-                        : residualCurveLabels_[static_cast<size_t>(idx)];
+                        : differenceCurveLabels_[static_cast<size_t>(idx)];
                 if (ImGui::BeginCombo(id, preview.c_str())) {
-                    for (int i = 0; i < static_cast<int>(residualCurveLabels_.size());
+                    for (int i = 0; i < static_cast<int>(differenceCurveLabels_.size());
                          ++i) {
-                        const char* label = residualCurveLabels_[i].c_str();
+                        const char* label = differenceCurveLabels_[i].c_str();
                         if (ImGui::Selectable(label, i == idx)) {
                             if (i != idx) {
                                 idx = i;
@@ -1757,13 +1757,13 @@ void EnvironmentSession::renderResidualWindow() {
                     }
                     ImGui::EndCombo();
                 }
-                if (ImGui::IsItemHovered() && !residualCurveLabels_.empty())
+                if (ImGui::IsItemHovered() && !differenceCurveLabels_.empty())
                     ImGui::SetTooltip("%s",
-                                      residualCurveLabels_[static_cast<size_t>(idx)]
+                                      differenceCurveLabels_[static_cast<size_t>(idx)]
                                           .c_str());
             };
-            combo("Reference", "##resRef", residualRefIdx);
-            combo("Subtracted", "##resSub", residualSubIdx);
+            combo("Reference", "##diffRef", differenceRefIdx);
+            combo("Subtracted", "##diffSub", differenceSubIdx);
 
             const ImVec4 colActive = ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive);
             const ImVec4 colInactive(0.22f, 0.22f, 0.22f, 0.7f);
@@ -1795,9 +1795,9 @@ void EnvironmentSession::renderResidualWindow() {
                 return hovered;
             };
             const char* kModes[2] = {"Signed", "Absolute"};
-            buttons("Mode", residualMode, kModes, 2);
+            buttons("Mode", differenceMode, kModes, 2);
             const char* kRegions[2] = {"Viewbox", "All"};
-            if (buttons("Stats from", residualStatsRegion, kRegions, 2))
+            if (buttons("Stats from", differenceStatsRegion, kRegions, 2))
                 ImGui::SetTooltip("Viewbox: statistics over the current X-axis\n"
                                   "range shown in the plot. All: the full curves.");
 
@@ -1805,27 +1805,27 @@ void EnvironmentSession::renderResidualWindow() {
             // past the widest label ("Peak-peak") plus a clear gap (font-scale
             // aware), so all four numbers align like a table at any UI scale
             // and never crowd the label.
-            if (residualStatsValid) {
+            if (differenceStatsValid) {
                 ImGui::Separator();
                 const float valColX =
                     ImGui::CalcTextSize("Peak-peak").x +
                     ImGui::GetStyle().ItemSpacing.x * 3.0f;
                 ImGui::TextUnformatted("Min");
                 ImGui::SameLine(valColX);
-                ImGui::Text("%.6g", residualMin);
+                ImGui::Text("%.6g", differenceMin);
                 ImGui::TextUnformatted("Max");
                 ImGui::SameLine(valColX);
-                ImGui::Text("%.6g", residualMax);
+                ImGui::Text("%.6g", differenceMax);
                 ImGui::TextUnformatted("Peak-peak");
                 ImGui::SameLine(valColX);
-                ImGui::Text("%.6g", residualPeakPeak);
+                ImGui::Text("%.6g", differencePeakPeak);
                 ImGui::TextUnformatted("Stddev");
                 ImGui::SameLine(valColX);
-                ImGui::Text("%.6g", residualStddev);
-            } else if (residualCurveLabels_.size() < 2) {
+                ImGui::Text("%.6g", differenceStddev);
+            } else if (differenceCurveLabels_.size() < 2) {
                 ImGui::TextDisabled("Need at least 2 visible curves");
             } else {
-                ImGui::TextDisabled("No residual data (no overlapping X region)");
+                ImGui::TextDisabled("No difference data (no overlapping X region)");
             }
         }
     }
@@ -1940,9 +1940,9 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
                                     bool hasGuideline, double guideline,
                                     bool showLegend) {
     if (curves.empty()) {
-        residualX.clear();
-        residualY.clear();
-        residualStatsValid = false;
+        differenceX.clear();
+        differenceY.clear();
+        differenceStatsValid = false;
         ImVec2 avail = ImGui::GetContentRegionAvail();
         const ImVec2 contentMin = ImGui::GetCursorScreenPos();
         const char* msg = "No data to display yet.";
@@ -1967,12 +1967,12 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
         if (dBRefMax <= 0.0) dBRefMax = 1.0;   // all-zero curves → floored at -300 dB
     }
 
-    // Residual: real-time compute AFTER the dB params (it subtracts the
-    // displayed values). showResidual keys the latch + row count, so it must
-    // reflect data validity, not just residualEnabled.
-    computeResidual(curves, dBNormalize, dBRefMax);
-    const bool showResidual = residualEnabled && !residualX.empty() &&
-                              residualY.size() == residualX.size();
+    // Difference: real-time compute AFTER the dB params (it subtracts the
+    // displayed values). showDifference keys the latch + row count, so it must
+    // reflect data validity, not just differenceEnabled.
+    computeDifference(curves, dBNormalize, dBRefMax);
+    const bool showDifference = differenceEnabled && !differenceX.empty() &&
+                              differenceY.size() == differenceX.size();
 
     // Unified view/interaction phases (panels/spectral_plot.h). Env owns
     // unit switching (xUnitEnabled = false — the Ranging-window button handler
@@ -2083,13 +2083,13 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
     // — the ImPlot plot (and its axis limits) is retained per instance across
     // renames; with instanceName in the id a rename recreated the plot and
     // reset the X range to fit-all.
-    // When the residual plot appears or disappears, BeginSubplots resets the
+    // When the difference plot appears or disappears, BeginSubplots resets the
     // shared ColLinkData to (0,1) ("check for change in rows and cols") —
     // re-arm the TOP plot's current X window on BOTH transitions (the T100
-    // stdWasAvailable_ pattern), keyed on showResidual because the row count
-    // follows data validity, not just residualEnabled.
-    if (showResidual != residualWasShown_) {
-        residualWasShown_ = showResidual;
+    // stdWasAvailable_ pattern), keyed on showDifference because the row count
+    // follows data validity, not just differenceEnabled.
+    if (showDifference != differenceWasShown_) {
+        differenceWasShown_ = showDifference;
         double x0 = plot.manualXMin, x1 = plot.manualXMax;
         if (!(x0 < x1)) {
             for (const auto& c : curves) {
@@ -2107,28 +2107,28 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
         }
     }
 
-    // Main plot (2/3) + residual plot (1/3) in a linked subplot when the
-    // residual is enabled (the T100 + std-dev pattern): LinkAllX owns the
+    // Main plot (2/3) + difference plot (1/3) in a linked subplot when the
+    // difference is enabled (the T100 + std-dev pattern): LinkAllX owns the
     // shared X window, each row keeps its own Y.
     float remaining = ImGui::GetContentRegionAvail().y;
-    float mainHeight = remaining, residualHeight = 0.0f;
-    if (showResidual) {
+    float mainHeight = remaining, differenceHeight = 0.0f;
+    if (showDifference) {
         const float spacing = ImGui::GetStyle().ItemSpacing.y;
         mainHeight = (remaining - spacing) * (2.0f / 3.0f);
-        residualHeight = (remaining - spacing) * (1.0f / 3.0f);
+        differenceHeight = (remaining - spacing) * (1.0f / 3.0f);
         if (mainHeight < 100.0f) mainHeight = 100.0f;
-        if (residualHeight < 60.0f) residualHeight = 60.0f;
+        if (differenceHeight < 60.0f) differenceHeight = 60.0f;
     }
-    const int resRows = showResidual ? 2 : 1;
-    float resRowRatios[2] = {mainHeight, residualHeight};
+    const int resRows = showDifference ? 2 : 1;
+    float resRowRatios[2] = {mainHeight, differenceHeight};
     plot.armPendingLimits(f);
     if (ImPlot::BeginSubplots(("##envResStack" + stripKey).c_str(), resRows, 1,
-            ImVec2(-1, showResidual ? mainHeight + residualHeight +
+            ImVec2(-1, showDifference ? mainHeight + differenceHeight +
                           ImGui::GetStyle().ItemSpacing.y
                         : mainHeight),
             ImPlotSubplotFlags_NoTitle | ImPlotSubplotFlags_LinkRows |
                 ImPlotSubplotFlags_LinkAllX | ImPlotSubplotFlags_NoLegend,
-            showResidual ? resRowRatios : nullptr)) {
+            showDifference ? resRowRatios : nullptr)) {
         if (ImPlot::BeginPlot(("##envPlot" + stripKey).c_str(), ImVec2(-1, -1),
                               f.plotFlags)) {
             plot.setupAxes(f);
@@ -2242,15 +2242,15 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
             ImPlot::EndPlot();
         }
 
-        // Residual plot (row 1): X comes from the subplot link (no
+        // Difference plot (row 1): X comes from the subplot link (no
         // SetupAxisLimits). Y follows the MAIN plot's Y mode — All/Force →
-        // AutoFit, Tight → AutoFit|RangeFit (in Force mode the residual stays
+        // AutoFit, Tight → AutoFit|RangeFit (in Force mode the difference stays
         // auto-fit: the forced range is in curve units, meaningless for the
         // difference — the T100 std-dev exception). Always linear Y (the
-        // residual is signed; log/dB invalid). No NoInputs gating — the env
+        // difference is signed; log/dB invalid). No NoInputs gating — the env
         // has no large-data path; downsampleDisplay covers big curves.
         const ImPlotFlags resFlags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend;
-        if (showResidual && ImPlot::BeginPlot(("##envResidual" + stripKey).c_str(),
+        if (showDifference && ImPlot::BeginPlot(("##envDifference" + stripKey).c_str(),
                                               ImVec2(-1, -1), resFlags)) {
             ImPlotAxisFlags resYFlags =
                 ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks;
@@ -2258,7 +2258,7 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
                 resYFlags |= ImPlotAxisFlags_AutoFit;
             else if (plot.yAxisMode == kYModeTight)
                 resYFlags |= ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_RangeFit;
-            ImPlot::SetupAxes(xLabel.c_str(), "Residual",
+            ImPlot::SetupAxes(xLabel.c_str(), "Difference",
                               ImPlotAxisFlags_NoTickMarks, resYFlags);
 
             // X ticks match the primary plot: same window (manual else data
@@ -2269,11 +2269,11 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
             if (rx0 < rx1)
                 SpectralPlotView::setupAxisTicksLimited(ImAxis_X1, rx0, rx1);
 
-            const std::vector<double>* rpx = &residualX;
-            const std::vector<double>* rpy = &residualY;
+            const std::vector<double>* rpx = &differenceX;
+            const std::vector<double>* rpy = &differenceY;
             std::vector<double> rdx, rdy;
             if (downsampleDisplay) {
-                downsampleCurve(residualX, residualY,
+                downsampleCurve(differenceX, differenceY,
                                 appState.maxPointsBeforeDownsampling, rdx, rdy);
                 rpx = &rdx;
                 rpy = &rdy;
@@ -2281,20 +2281,20 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
             ImPlotSpec resSpec;
             resSpec.LineColor = ImVec4(0.1f, 0.6f, 0.7f, 1.0f);
             resSpec.LineWeight = 2.0f;
-            ImPlot::PlotLine("##residualLine", rpx->data(), rpy->data(),
+            ImPlot::PlotLine("##differenceLine", rpx->data(), rpy->data(),
                              static_cast<int>(std::min(rpx->size(), rpy->size())),
                              resSpec);
             const ImVec4 resLineColor = ImPlot::GetLastItemColor();
 
             // Zero line in signed mode only (absolute values are >= 0).
-            if (residualMode == 0) {
+            if (differenceMode == 0) {
                 double zero = 0.0;
                 ImPlotSpec zeroSpec;
                 zeroSpec.Flags = ImPlotInfLinesFlags_Horizontal;
-                ImPlot::PlotInfLines("##residualZero", &zero, 1, zeroSpec);
+                ImPlot::PlotInfLines("##differenceZero", &zero, 1, zeroSpec);
             }
 
-            // Shift+drag on the residual plot zooms BOTH plots: the committed
+            // Shift+drag on the difference plot zooms BOTH plots: the committed
             // pending range is applied pre-BeginPlot on the shared X (LinkAllX).
             plot.tickInPlot(f);
             plot.drawSelectionOverlay(("##envRes" + stripKey).c_str());
@@ -2369,15 +2369,15 @@ void EnvironmentSession::exportCsv() {
             curves.push_back(std::move(cc));
         }
     }
-    // Residual (when enabled): exported as an extra wide-table curve — the
+    // Difference (when enabled): exported as an extra wide-table curve — the
     // padding, X-range filter and header generation below apply unchanged.
-    if (residualEnabled && !residualX.empty() &&
-        residualY.size() == residualX.size()) {
+    if (differenceEnabled && !differenceX.empty() &&
+        differenceY.size() == differenceX.size()) {
         ComparatorCurve resCurve;
-        resCurve.label = "Residual";
-        resCurve.shortLabel = "Residual";
-        resCurve.x = residualX;
-        resCurve.y = residualY;
+        resCurve.label = "Difference";
+        resCurve.shortLabel = "Difference";
+        resCurve.x = differenceX;
+        resCurve.y = differenceY;
         curves.push_back(std::move(resCurve));
     }
 
@@ -2480,12 +2480,12 @@ static nlohmann::json experimentConfigJson(const EnvironmentSession& env) {
     // Tab-strip visibility (bugfix 2026-08-14): the open-tab set persists, so
     // a closed-but-kept experiment does not auto-reopen on project load.
     j["tabHidden"] = env.tabHidden;
-    // Residual (both experiment types; the curve itself lives in results/).
-    j["residualEnabled"] = env.residualEnabled;
-    j["residualRefIdx"] = env.residualRefIdx;
-    j["residualSubIdx"] = env.residualSubIdx;
-    j["residualMode"] = env.residualMode;
-    j["residualStatsRegion"] = env.residualStatsRegion;
+    // Difference (both experiment types; the curve itself lives in results/).
+    j["differenceEnabled"] = env.differenceEnabled;
+    j["differenceRefIdx"] = env.differenceRefIdx;
+    j["differenceSubIdx"] = env.differenceSubIdx;
+    j["differenceMode"] = env.differenceMode;
+    j["differenceStatsRegion"] = env.differenceStatsRegion;
     if (env.type == EnvType::Absorbance) {
         j["curves"] = nlohmann::json::array();
         for (const auto& c : env.curves) {
@@ -2543,12 +2543,12 @@ static void experimentApplyConfig(EnvironmentSession& env, const nlohmann::json&
     }
     // Legacy configs without the key default to visible (today's behavior).
     env.tabHidden = j.value("tabHidden", false);
-    // Residual (legacy configs: absent → disabled, default indices).
-    env.residualEnabled = j.value("residualEnabled", false);
-    env.residualRefIdx = std::max(j.value("residualRefIdx", 0), 0);
-    env.residualSubIdx = std::max(j.value("residualSubIdx", 1), 0);
-    env.residualMode = j.value("residualMode", 0);
-    env.residualStatsRegion = j.value("residualStatsRegion", 0);
+    // Difference (legacy configs: absent → disabled, default indices).
+    env.differenceEnabled = j.value("differenceEnabled", false);
+    env.differenceRefIdx = std::max(j.value("differenceRefIdx", 0), 0);
+    env.differenceSubIdx = std::max(j.value("differenceSubIdx", 1), 0);
+    env.differenceMode = j.value("differenceMode", 0);
+    env.differenceStatsRegion = j.value("differenceStatsRegion", 0);
     if (env.type == EnvType::Absorbance) {
         env.curves.clear();
         for (const auto& cc : j.value("curves", nlohmann::json::array())) {
@@ -2633,12 +2633,12 @@ bool multiWorkspaceSaveExperiment(AppState& s, EnvironmentSession& env,
             ++k;
         }
     }
-    // Residual curve (both experiment types): the live-computed vectors are
+    // Difference curve (both experiment types): the live-computed vectors are
     // full-res and post-mode — WYSIWYG with what the Viewer shows.
-    if (env.residualEnabled && !env.residualX.empty() &&
-        env.residualY.size() == env.residualX.size()) {
-        results["residual_x"] = env.residualX;
-        results["residual_y"] = env.residualY;
+    if (env.differenceEnabled && !env.differenceX.empty() &&
+        env.differenceY.size() == env.differenceX.size()) {
+        results["difference_x"] = env.differenceX;
+        results["difference_y"] = env.differenceY;
     }
     return multiWorkspaceExperimentWrite(path, env.id, experimentConfigJson(env), fps,
                                 results, experimentStatsJson(env), err);
@@ -2707,15 +2707,15 @@ bool multiWorkspaceLoadExperiments(AppState& s, const std::string& path, std::st
                     env->computed = false;
                 }
             }
-            // Residual results (both types): seeded so a pristine open shows
+            // Difference results (both types): seeded so a pristine open shows
             // the saved curve before the first live recompute overwrites it.
-            if (env->residualEnabled) {
-                auto rx = results.find("residual_x");
-                auto ry = results.find("residual_y");
+            if (env->differenceEnabled) {
+                auto rx = results.find("difference_x");
+                auto ry = results.find("difference_y");
                 if (rx != results.end() && ry != results.end() &&
                     !rx->second.empty() && rx->second.size() == ry->second.size()) {
-                    env->residualX = rx->second;
-                    env->residualY = ry->second;
+                    env->differenceX = rx->second;
+                    env->differenceY = ry->second;
                 }
             }
             env->dirty = false;

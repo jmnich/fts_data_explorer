@@ -146,7 +146,7 @@ public:
     static const char* defaultXLabel(int unit);   // cm-1 / µm / THz labels
     // "Nice" tick step limiting for one axis (labels only): shared by every
     // SpectralPlotView-driven panel so stacked sub-plots can match the
-    // primary plot's X tick density (e.g. the residual plot).
+    // primary plot's X tick density (e.g. the difference plot).
     static void setupAxisTicksLimited(ImAxis axis, double min, double max,
                                       int maxTicks = 12);
     // Tracking-cursor header split into segments (CursorHeaderSeg in

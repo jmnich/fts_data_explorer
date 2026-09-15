@@ -74,7 +74,7 @@ inline double clampedCursorX() {
 
 // Tracking-cursor On/Off toggle pair (same style as the navigation buttons).
 // `rowLabel` names the row ("Cursor" by default; panels may rename it, e.g.
-// the Residual panel). Returns true when the value changed so the caller can
+// the Difference panel). Returns true when the value changed so the caller can
 // redraw / persist. Labels carry their own ## IDs, so every panel keeps a
 // unique button ID.
 inline bool renderCursorTogglePair(bool& on, const char* onLabel,
