@@ -7,8 +7,9 @@
 // same position at smooth 1); threshold selectivity changes coverage.
 // Mirrors hitran/generate_gas_bands.py --check.
 //
-// Build: g++ -std=c++17 -I. -Ihitran playground/tests/hitran_bands/test_bands.cpp \
-//            -o /tmp/test_bands && /tmp/test_bands
+// Build (from repo root): g++ -std=c++17 -I. -Ihitran \
+//     test_harness/tests/test15_hitran_bands/test_bands.cpp \
+//     -o /tmp/test_bands && /tmp/test_bands
 
 #include <cassert>
 #include <cstdio>

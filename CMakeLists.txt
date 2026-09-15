@@ -190,6 +190,8 @@ add_subdirectory(fftw-3.3.10)
 
 # Download and include GLFW
 set(GLFW_USE_STATIC_LIBS ON CACHE BOOL "Use static GLFW libraries")
+set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "Build the GLFW example programs" FORCE)
+set(GLFW_BUILD_TESTS    OFF CACHE BOOL "Build the GLFW test programs"    FORCE)
 FetchContent_Declare(
     glfw
     GIT_REPOSITORY https://github.com/glfw/glfw.git

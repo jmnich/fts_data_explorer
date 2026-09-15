@@ -1,10 +1,10 @@
 // Standalone assert check for the batch recipe model (session/batch_engine.h):
 // JSON validation, round-trip identity, built-ins, capture-from-workspace, and
 // derivative stripping. The pure logic is header-only — nothing to link.
-// Build:
+// Build (from repo root):
 //   g++ -std=c++17 -I. -Ifftw-3.3.10/api \
 //       -Ibuild/linux-release/_deps/nlohmann_json-src/include \
-//       playground/tests/batch_recipes/test_batch_recipes.cpp \
+//       test_harness/tests/test14_batch_recipes/test_batch_recipes.cpp \
 //       -o /tmp/test_batch_recipes && /tmp/test_batch_recipes
 #include "session/batch_engine.h"
 

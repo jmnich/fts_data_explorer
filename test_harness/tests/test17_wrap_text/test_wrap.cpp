@@ -1,5 +1,5 @@
 // Standalone assert check for wrapToLinesCore (session/wrap_text.h).
-// Build: g++ -std=c++17 -I. playground/tests/wrap_text/test_wrap.cpp \
+// Build: g++ -std=c++17 -I. test_harness/tests/test17_wrap_text/test_wrap.cpp \
 //            -o /tmp/test_wrap && /tmp/test_wrap
 #include "session/wrap_text.h"
 #include <cassert>

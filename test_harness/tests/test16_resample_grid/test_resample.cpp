@@ -1,7 +1,8 @@
 // resampleToGrid contract check: ascending/descending,
 // endpoint-clamp, empty input, degenerate size-1, and exact parity with the
 // pre-M1.3 inline formula. Run from the repo root:
-//   g++ -std=c++17 -I. -Ifftw-3.3.10/api playground/tests/resample_grid/test_resample.cpp \
+//   g++ -std=c++17 -I. -Ifftw-3.3.10/api \
+//       test_harness/tests/test16_resample_grid/test_resample.cpp \
 //       -o /tmp/test_resample && /tmp/test_resample
 #include "spectral_toolbox.h"
 #include <cassert>

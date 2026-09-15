@@ -4,7 +4,7 @@
 Checks every format rule from hdf_spectral_specification.md: root attributes
 and datasets, group schemas, kind/columns/units attributes, dtypes, shapes,
 rule-10 inputs path existence, and t100 reference presence. Structural only —
-no numeric reimplementation (that lives in playground/tests/spectrum_validation/).
+no numeric reimplementation (that lives in test_harness/tests/test1_single_spectrum/).
 
 Usage:
     python3 validate_h5.py <file.h5>

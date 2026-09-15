@@ -199,29 +199,31 @@ Format: `<YY>.<MM>.<minor>` from `VERSION` file. `./build_script.sh` shows last 
 
 # Testing
 
-Test data lives in `playground/test_data/` (there is no `example_datasets/`). Visual plot verification is manual. See `playground/README.md` for the harness index. Converter-dependent harnesses need `FTS_CONVERTERS_DIR` pointing at a `fts_data_explorer_converters` checkout; Python harnesses need h5py/numpy/matplotlib:
+Test data lives in `playground/test_data/` (there is no `example_datasets/`). Visual plot verification is manual. See `playground/README.md` for the demo index. All regression tests live in `test_harness/` (tests 1-18). Converter-dependent tests (test18) need `FTS_CONVERTERS_DIR` pointing at a `fts_data_explorer_converters` checkout; Python tests need h5py/numpy/matplotlib:
 
 - **Headless demos** (converter script invoked directly, then process `-w`): `python3 playground/headless_demo/basic_<name>/demo_<name>.py` (spectrum_hilbert, spectrum_peakfinding, average_spectrum, snr, t100, allan; outputs -> `playground/outputs/`). Batch-artifact outputs (Average/SNR/Allan/T100) are deterministic — the common grid is taken from the first file in natural sort order (`chooseCommonGrid`). Single-spectrum outputs are byte-stable.
-- **Resample check** (`resampleToGrid`): `g++ -std=c++17 -I. -Iworkspace -Ifftw-3.3.10/api playground/tests/resample_grid/test_resample.cpp -o /tmp/test_resample && /tmp/test_resample` (assert-based; no framework).
-- **Session-tab text wrap** (`wrapToLinesCore`, session/wrap_text.h): `g++ -std=c++17 -I. playground/tests/wrap_text/test_wrap.cpp -o /tmp/test_wrap && /tmp/test_wrap` (assert-based; no framework).
-- **Batch recipe model** (recipe JSON/validation/built-ins/capture/strip, session/batch_engine.h — header-only, nothing to link): `g++ -std=c++17 -I. -Iworkspace -Ifftw-3.3.10/api -Ibuild/linux-release/_deps/nlohmann_json-src/include playground/tests/batch_recipes/test_batch_recipes.cpp -o /tmp/test_batch_recipes && /tmp/test_batch_recipes` (assert-based; no framework).
-- **HITRAN bands** (band/peak extraction, hitran/hitran_bands.h): `g++ -std=c++17 -I. -Ihitran playground/tests/hitran_bands/test_bands.cpp -o /tmp/test_bands && /tmp/test_bands` (assert-based; mirrors `hitran/generate_gas_bands.py --check`).
-- **Spectrum validation**: `python3 playground/tests/spectrum_validation/validate_spectrum.py`.
-- **HDF5 conformance**: `python3 playground/tests/hdf_conformance/run_conformance.py` (regenerates the golden from the parser, validates Python- and C++-written `.h5` files via `validate_h5.py`, runs `fts_hdf_roundtrip` and a headless `-w` pass). Manual like the other playground scripts.
-- **Multi-workspace round-trip** (h5py, drives `fts_multi_workspace_roundtrip`): `python3 playground/multi_workspace_roundtrip.py`.
 
-## Mathematical-accuracy regression harness
+## Regression harness
 
-`test_harness/` is the numeric-fidelity regression harness (separate from the
-playground). It drives the real headless binary on real datasets and compares
-against an independent Python reimplementation + frozen golden `.h5` archives.
+`test_harness/` is the regression harness (separate from the playground). It
+drives the real headless binary on real datasets and compares against an
+independent Python reimplementation + frozen golden `.h5` archives. Tests
+11-13 drive the three roundtrip binaries (`fts_hdf_roundtrip`,
+`fts_multi_workspace_roundtrip`, `fts_session_roundtrip`). Tests 14-17
+compile and run standalone C++ assert tests (batch recipes, HITRAN bands,
+resample grid, text wrapping). Test 18 runs the HDF5 conformance closed
+loop (converter -> .h5 -> C++ -w -> validator). Tests 11-18 are skipped
+gracefully when their binary/dependency is absent.
 
 ```
 python3 test_harness/run_tests.py [-v] [--only test1,test4] [--list]
 ```
 
-10 tests covering the full pipeline (spectrum, X-correction, parameter matrix,
-average, SNR, T100, T100-stddev, Allan, absorbance/transmittance, comparator).
+18 tests covering the full pipeline (spectrum, X-correction, parameter matrix,
+average, SNR, T100, T100-stddev, Allan, absorbance/transmittance, comparator),
+structural round-trips (HDF5 exchange layer, multi-workspace container,
+session park/resume), standalone unit checks (batch recipes, HITRAN bands,
+resample grid, text wrapping), and HDF5 conformance (converter closed loop).
 See `test_harness/test_instruction.md` for the canonical standards and the
 how-to-add-a-test recipe. `reference_input/` and `reference_output/` hold
 git-tracked data; `output/` and `temporary/` are gitignored runtime artifacts.
