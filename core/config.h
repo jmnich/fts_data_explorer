@@ -33,7 +33,7 @@ struct AppConfig {
     bool enableDownsampling = true;
     std::string lastWorkingDirectory;
     std::string uiSize = "normal"; // tiny, small, normal, large, huge
-    std::string accentColor = "default"; // default, green, purple, red, brown
+    std::string accentColor = "green"; // green (default), default (blue), purple, red, brown, cyan
 
     // X correction config (peak indicator visibility only; the method and
     // prominence values live per-workspace in WorkspaceSession)

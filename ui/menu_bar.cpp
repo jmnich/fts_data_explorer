@@ -151,12 +151,12 @@ void renderMainMenuBar(AppConfig& config, const std::string& configFilePath,
                     {
                         struct AccentOption { const char* name; const char* key; AccentColor color; };
                         AccentOption options[] = {
-                            {"Default (Blue)", "default", AccentColor::DefaultBlue},
-                            {"Green",          "green",   AccentColor::Green},
-                            {"Purple",         "purple",  AccentColor::Purple},
-                            {"Red",            "red",     AccentColor::Red},
-                            {"Brown",          "brown",   AccentColor::Brown},
-                            {"Cyan",           "cyan",    AccentColor::Cyan},
+                            {"Green", "green",   AccentColor::Green},
+                            {"Blue",  "default", AccentColor::DefaultBlue},
+                            {"Purple","purple",  AccentColor::Purple},
+                            {"Red",   "red",     AccentColor::Red},
+                            {"Brown", "brown",   AccentColor::Brown},
+                            {"Cyan",  "cyan",    AccentColor::Cyan},
                         };
                         for (const auto& opt : options) {
                             bool isSelected = (appState.currentAccentColor == opt.key);

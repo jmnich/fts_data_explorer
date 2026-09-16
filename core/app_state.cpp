@@ -6,7 +6,7 @@ AppState::AppState()
     : currentUiSize("normal"),
       uiScale(1.0f),
       uiSizeChanged(false),
-      currentAccentColor("default"),
+      currentAccentColor("green"),
       accentColorChanged(false),
       yKeyPressedLastFrame(false),
       aKeyPressedLastFrame(false),

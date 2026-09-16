@@ -16,13 +16,13 @@ enum class AccentColor : int {
 
 inline const char* AccentColorToString(AccentColor color) {
     switch (color) {
-        case AccentColor::DefaultBlue: return "Default (Blue)";
+        case AccentColor::DefaultBlue: return "Blue";
         case AccentColor::Green:       return "Green";
         case AccentColor::Purple:      return "Purple";
         case AccentColor::Red:         return "Red";
         case AccentColor::Brown:       return "Brown";
         case AccentColor::Cyan:        return "Cyan";
-        default:                       return "Default (Blue)";
+        default:                       return "Blue";
     }
 }
 
