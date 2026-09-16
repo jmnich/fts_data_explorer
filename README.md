@@ -1,66 +1,92 @@
 # FTS Data Explorer
 
 A free and open source scientific application for rapid exploration of raw data produced by Fourier spectrometers.
-Almost dependency-free builds for Linux and Windows
+Almost dependency-free builds are available for Linux and Windows.
 
-![Primary1](screenshots/scr_primary1.png)
+![Welcome](screenshots/1_welcome_screen.png)
 
 ## The pitch
-It is a long-standing tradition to ship spectrometers with old, glitchy, almost useless software. FTS Data Explorer cannot solve your problems with extracting raw data from instruments but it will help you rapidly process and analyze interferograms. Lightning-fast  multithreading, FFTW3-powered math engine with GPU-accelerated plots save you time and frustration, and preserve your focus for things that actually matter. 
 
-The application is designed to help with handling data from DIY lab instruments but can be adapted to load raw interferograms and spectra in almost any form.
+It is a long-standing tradition to ship spectrometers with old, glitchy, almost useless
+software. FTS Data Explorer cannot solve your problems with extracting raw data from
+instruments but it will help you rapidly process and analyze it to produce useful insights.
+Lightning-fast multithreading and an FFTW3-powered math engine with GPU-accelerated plots
+save you time and frustration and preserve your focus for things that actually matter.
+
+The application is designed to help with handling data from DIY lab instruments but can be
+adapted to load raw interferograms and spectra in almost any form.
+
+## Workflow
+
+Data must be delivered in a compliant HDF5 (.h5) format. Non-compliant sources must first be
+converted using the built-in data adapter solution invoking external python scripts. Such
+prepared data is loaded into a workspace where processing settings can be tuned by hand. Once
+a method works, it is replicated across all datasets with batch processing and analytical
+features allow you to quickly extract the information you need. Results are easily exported
+to .csv for further analysis or publication. The entire workspace is saved back to a single
+HDF5 file for later access and archiving.
+
+![Workflow](screenshots/workflow_diagram.png)
 
 ## Features
 
-- Docking interface with customizable layout 
-- Dark mode (with customizable accent color)
-- Switching spectrum x-axis between cm⁻¹, µm and THz
-- Switching spectrum y-axis between lin, log and dB
-- Workspaces in the unified spectral HDF5 container (`.h5`); foreign data enters
-  through the built-in **Conversion screen** with scripted converters (WUST raw CSV,
-  ArcOptix IGMs and spectra; extensible via self-contained `.py` converters from the
-  [fts_data_explorer_converters](https://github.com/jmnich/fts_data_explorer_converters)
-  repo or a local user dir)
-- **Multi-workspace sessions** (`.h5`, auto-detected by root `archive.json`): multiple datasets embedded in one
-  self-contained archive, browsed from the always-present **Session** tab — add/remove
-  datasets, open each in its own workspace tab, and run **Absorbance** / **Comparator**
-  environment analyses across workspaces; results persist as named **experiments**
-  (Save Experiment, staleness badges, per-tab-type dock layouts)
-- Basic plotting of reference and primary detector signals
-- Advanced spectrum calculation capabilities giving the user control over zero-padding, apodization, reference laser tuning and detector sensitivity
-- Rapid average spectrum calculation
-- Spectral SNR calculation
-- 100 % transmission line analysis for investigating spectrometer stability with built-in 100 % transmission line standard deviation plotting
+**Performance & portability** — fully C++, multithreaded to all CPU cores, FFTW3 math
+engine, GPU-accelerated plotting; ships as static executables (native Linux build,
+MinGW cross-compiled Windows build) with no installation requirements.
 
-![Primary1](screenshots/scr_primary2.png)
+**Data handling** —
+- Workspaces in a unified, self-describing HDF5 container (`.h5`): every artifact, plot
+  setting, comment and metadata round-trips in a single copyable file.
+- Foreign data enters through the built-in **Conversion screen** with scripted converters
+  (WUST raw CSV, ArcOptix IGMs and spectra), extensible via self-contained `.py` converters
+  from the [converters repo](https://github.com/jmnich/fts_data_explorer_converters) or a
+  local user directory.
+- Everything visible on screen can be exported to `.csv`.
 
-- Custom energy ratio calculation with statistics, with presets defined in ASTM E1421 for FTS-MIR
-- Allan plots calculated from T100% and spectral brightness to aid you in finding optimal integration time
-- HITRAN gas absorption markers overlaid on the Spectrum/Average plots (8 gases, adjustable strength threshold and smoothing)
+**Spectrum processing** —
+- Dual-interferogram (reference + primary) input with Hilbert-transform and peak-finding
+  X-axis correction, adjustable reference laser wavelength.
+- Full control over zero-padding, parametric apodization windows (Norton-Beer,
+  Dolph-Chebyshev, Hamming, Blackman-Harris, Happ-Genzel, …) and detector sensitivity.
+- Switchable x-axis (cm⁻¹, µm, THz) and y-axis (lin, log, dB).
+- Raw measurements can be selectively included, excluded or deleted from any calculation.
 
-![Primary1](screenshots/scr_primary3.png)
+![Workspace](screenshots/3_single_dataset_workspace.png)
 
-- Everything that you see on the screen can be exported to .csv
-- Headless mode lets you use the application as a shell-operated calculation engine, without GUI, for automation, verification and advanced integration purposes
-- Persistent configuration and a recently-opened dataset list
+**Spectral data processing** — many calculation artifacts are available: average spectrum,
+spectral SNR, 100 % transmission line with standard deviation and ASTM E1421 energy ratios,
+and 3D Allan variance plots from either T100 % lines or spectral brightness to find the
+optimal integration time.
 
-![Welcome](screenshots/scr_welcome.png)
+HITRAN gas markers may be invoked for 8 popular gases in overlay on any spectral plot to help
+distinguish real features from interference.
 
-## Multi-workspace workflow (`.h5`)
+**Experiments** — cross-dataset analyses in dedicated tabs with results saved as named,
+recomputable experiments inside the archive:
+- **Comparator** — overlays any artifact (interferograms, spectra, T100 %, SNR, …) between
+  datasets, with an automatic difference curve.
+- **Absorbance** — absorbance/transmittance of samples against any reference, with
+  residual-error curves.
 
-1. **Create** a multi-workspace file from the Welcome screen's right column
-   (`New Multi-Workspace…`) or from the Session tab (`Create Multi-Workspace…`,
-   embeds the currently open dataset).
-2. **Add datasets** in the Session tab's *Datasets* column (`+ Add Dataset`) — each
-   source is embedded into the archive (self-contained; opens on any machine).
-3. **Open** a dataset by clicking it — it opens on demand in its own workspace tab
-   (deduplicated: clicking again just activates the tab). Single `.h5` files open
-   the same way via File → Open Workspace.
-4. **Analyze across workspaces** in the *Available Environments* column — create
-   Absorbance (T%/absorbance vs a reference) or Comparator (overlay of averages)
-   tabs; pick sources from any open workspace tab.
-5. **Save experiments** with `Save Experiment` (persisted into the multi-workspace `.h5`),
-   renamed inline, recreated via `[Compute]`; a ⚠ badge flags results whose source
-   FFT parameters have changed. Per-tab-type dock layouts restore on tab switch.
-6. Close datasets or environments from their tabs (dirty state is confirmed first);
-   the Session tab itself is never closable.
+![Comparator](screenshots/4_comparator_experiment.png)
+
+![Absorbance](screenshots/5_absorbance_experiment.png)
+
+**Workflow tools** —
+- **Multi-workspace sessions**: many datasets embedded in one `.h5`, browsed from the
+  always-present Session tab; each opens on demand in its own workspace tab. Datasets are
+  deep-copied into the archive so experiments survive copying between machines.
+- **Batch processing**: apply a processing recipe to every dataset at once — with standard
+  recipes, derived ones, and human-readable `.json` import/export.
+- Headless mode runs the same calculation engine without the GUI for automated workflows.
+- Dockable, resizable interface with dark theme and customizable accent color; persistent
+  configuration and recently-opened list make your work faster.
+
+![Session](screenshots/2_session_screen.png)
+
+## Building
+
+```
+./build_script.sh            # Linux release build (fetches all dependencies)
+./build_script.sh -w         # cross-compile the Windows executable
+```
