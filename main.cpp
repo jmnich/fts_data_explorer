@@ -603,7 +603,7 @@ int main(int argc, char* argv[]) {
     setenv("__VK_LAYER_NV_optimus", "NVIDIA_only", 1);
     #endif
 
-    std::cout << "FTS Data Explorer " << APP_VERSION << " - Starting application..." << std::endl;
+    // Console output stays silent except for errors and warnings.
 
     // Initialize configuration
     AppConfig config;
@@ -612,16 +612,12 @@ int main(int argc, char* argv[]) {
     // Load existing config if available
     if (std::filesystem::exists(configFilePath)) {
         config.loadFromFile(configFilePath);
-        std::cout << "Loaded configuration from " << configFilePath << std::endl;
-    } else {
-        std::cout << "No existing config found, using defaults" << std::endl;
     }
 
     // Auto-cleanup: only regular .h5 workspaces stay in the recent list
     // (legacy dataset directories are no longer openable in-app).
     if (config.pruneRecentToH5()) {
         config.saveToFile(configFilePath);
-        std::cout << "Pruned non-.h5 entries from recent datasets" << std::endl;
     }
 
     // Store config pointers for use by the app
@@ -719,8 +715,6 @@ int main(int argc, char* argv[]) {
     // Save config to file
     if (!config.saveToFile(configFilePath)) {
         std::cerr << "Failed to save configuration to " << configFilePath << std::endl;
-    } else {
-        std::cout << "Configuration saved to " << configFilePath << std::endl;
     }
 
     return 0;

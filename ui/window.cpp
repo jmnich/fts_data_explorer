@@ -105,8 +105,6 @@ void applyWindowIcon(GLFWwindow* window, const ImVec4& accent) {
 }
 
 bool initializeApplication(AppConfig& config, GLFWwindow*& window) {
-    std::cout << "FTS Data Explorer " << APP_VERSION << " - Starting application..." << std::endl;
-
     // Initialize GLFW
     if (!glfwInit()) {
         std::cerr << "Failed to initialize GLFW" << std::endl;

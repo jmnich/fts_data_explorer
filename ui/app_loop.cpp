@@ -1623,8 +1623,6 @@ void AppLoop::handleInput() {
                         appState.active->zoomRange = {0, 0};
                         appState.active->shouldAutoscale = true;
                         appState.active->forceXAutofit = true; // Set global flag to force X-axis autofit
-                        std::cout << "Reloaded " << appState.active->loadedData.size() << " datasets with " 
-                                  << (appState.active->enableDownsampling ? "enabled" : "disabled") << " downsampling" << std::endl;
                     }
                 }
             }
@@ -1812,8 +1810,6 @@ void AppLoop::handleInput() {
                     }
                     processedData.referenceDetector = downsampledRef;
                     processedData.primaryDetector = downsampledPrim;
-                    std::cout << "Downsampled dataset from " << (downsampledRef.size() * localDownsampleFactor) 
-                              << " to " << downsampledRef.size() << " points (factor: " << localDownsampleFactor << ")" << std::endl;
                 }
                 
                 // For single selection (no Ctrl), replace current selection
@@ -2474,7 +2470,6 @@ ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
             ImGui::End();
         }
         if (appState.active && appState.active->exportPanel.exportPending) {
-            fprintf(stderr, "DEBUG: Export progress overlay rendering\n");
             ImDrawList* dl = ImGui::GetForegroundDrawList();
             ImVec2 size = ImGui::GetIO().DisplaySize;
             dl->AddRectFilled(ImVec2(0, 0), size, IM_COL32(0, 0, 0, 160));

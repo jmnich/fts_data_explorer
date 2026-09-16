@@ -108,9 +108,6 @@ void T100Spectrum::setReferenceFromCurrentSpectrum() {
         refDescription = std::string("From file: ") + shortName;
     }
 
-    fprintf(stderr, "[t100] setReferenceFromCurrentSpectrum: refX.size=%zu refY.size=%zu refXUnit=%d spectrumXUnit=%d\n",
-            refX.size(), refY.size(), refXUnit, appState->active->spectrum.plot.xUnitSelector);
-
     cachedTransX.clear();
     cachedTransY.clear();
     fullResCachedTransX.clear();
@@ -179,9 +176,6 @@ void T100Spectrum::setReferenceFromCSV(const std::string& path) {
             v = SpectralToolbox::convertXValue(v, csvU, specU);
     }
 
-    fprintf(stderr, "[t100] setReferenceFromCSV: path=%s rawX.size=%zu csvUnit=%d spectrumUnit=%d\n",
-            path.c_str(), rawX.size(), csvUnit, spectrumUnit);
-
     refX = std::move(rawX);
     refY = std::move(rawY);
     refXUnit = spectrumUnit;
@@ -223,9 +217,6 @@ void T100Spectrum::setReferenceFromAverage() {
         for (auto& v : x)
             v = SpectralToolbox::convertXValue(v, avgU, specU);
     }
-
-    fprintf(stderr, "[t100] setReferenceFromAverage: x.size=%zu avgXUnit=%d spectrumUnit=%d\n",
-            x.size(), avg.plot.xUnitSelector, spectrumUnit);
 
     refX = std::move(x);
     refY = std::move(y);
@@ -332,9 +323,6 @@ bool T100Spectrum::acquireSpectrumForT100(const std::string& fileId,
 }
 
 bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
-    using Clock = std::chrono::high_resolution_clock;
-    auto t0 = Clock::now();
-
     if (!referenceAvailable || refX.empty() || refY.empty())
         return false;
 
@@ -391,7 +379,6 @@ bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
     if (newX.empty() || newY.empty())
         return false;
 
-    size_t origSize = newX.size();
     // F2: the workspace member must persist FULL resolution — the batch engine
     // writes full-res members, and the export writers already recompute
     // full-res (computeTransmittanceFullRes). Store the pre-decimation curves
@@ -413,17 +400,6 @@ bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
         newX = std::move(dsX);
         newY = std::move(dsY);
     }
-
-    auto t1 = Clock::now();
-    double elapsed = std::chrono::duration<double>(t1 - t0).count();
-
-    fprintf(stderr, "[t100] computeTransmittanceForFile: done in %.3fs  orig=%zu  final=%zu  ",
-            elapsed, origSize, newX.size());
-    if (!newY.empty()) {
-        auto mm = std::minmax_element(newY.begin(), newY.end());
-        fprintf(stderr, "Yrange=[%.6f, %.6f]", *mm.first, *mm.second);
-    }
-    fprintf(stderr, "\n");
 
     cachedTransX[fileId] = std::move(newX);
     cachedTransY[fileId] = std::move(newY);

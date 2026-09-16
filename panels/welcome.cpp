@@ -100,9 +100,6 @@ void initWelcomeBackground() {
         {0.55f, 0.78f, 0.12f, 83},
         {0.78f, 0.86f, 0.18f, 98},
     };
-
-    std::cout << "Welcome background texture loaded (" << w << "x" << h
-              << ") with " << g_bg.scatterCopies.size() << " scatter copies" << std::endl;
 }
 
 void destroyWelcomeBackground() {

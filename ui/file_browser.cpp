@@ -8,6 +8,7 @@
 #include "tinyfiledialogs.h"
 #else
 #include <csignal>
+#include <fcntl.h>
 #include <unistd.h>
 #include <sys/wait.h>
 #include <sys/types.h>
@@ -64,6 +65,14 @@ static std::string runForkedDialog(GLFWwindow* window,
         close(pipefd[0]);
         dup2(pipefd[1], STDOUT_FILENO);
         close(pipefd[1]);
+        // Dialog backends (zenity/kdialog) are chatty on stderr (e.g. the
+        // libadwaita GtkSettings warning fires on every open). None of it is
+        // actionable in the parent console — keep the app's stderr clean.
+        int devnull = open("/dev/null", O_WRONLY);
+        if (devnull >= 0) {
+            dup2(devnull, STDERR_FILENO);
+            close(devnull);
+        }
 
         execvp("zenity", const_cast<char* const*>(argvZenity));
         execvp("kdialog", const_cast<char* const*>(argvKdialog));
