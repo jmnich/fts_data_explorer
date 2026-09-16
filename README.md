@@ -3,7 +3,6 @@
 A free and open source scientific application for rapid exploration of raw data produced by Fourier spectrometers.
 Almost dependency-free builds are available for Linux and Windows.
 
-Download from:
 [![Release](https://img.shields.io/github/v/release/jmnich/fts_data_explorer)](https://github.com/jmnich/fts_data_explorer/releases/latest)
 
 ![Welcome](screenshots/1_welcome_screen.png)
