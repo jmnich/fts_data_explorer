@@ -122,12 +122,11 @@ void T100Spectrum::setReferenceFromCurrentSpectrum() {
     // frame-top tick, and the idle-render gate skips frames without
     // needsRedraw ("does not redraw until mouse is moved"). Also covers the
     // config-panel buttons (redundant there — belt and braces).
-    // pendingRedrawFrames keeps ONE follow-up frame flowing: ImPlot applies
+    // requestViewChangeRedraw keeps follow-up frames flowing: ImPlot applies
     // AutoFit/RangeFit at EndPlot — AFTER the plot drew — so the fitted Y
-    // range appears one frame late (same pattern as the Y-mode toggles).
+    // range (and its ticks) appears one frame late (see app_state.h).
     if (appState) {
-        appState->needsRedraw = true;
-        appState->pendingRedrawFrames = 2;
+        appState->requestViewChangeRedraw();
     }
     wsUpsertT100FromPanel(*appState);
 }
@@ -196,9 +195,8 @@ void T100Spectrum::setReferenceFromCSV(const std::string& path) {
     clearStdDev();
     // Recompute completion must render (see setReferenceFromCurrentSpectrum).
     if (appState) {
-        appState->needsRedraw = true;
-        // One follow-up frame for the EndPlot-time Y fit.
-        appState->pendingRedrawFrames = 2;
+        // Follow-up frames for the EndPlot-time Y fit.
+        appState->requestViewChangeRedraw();
     }
     wsUpsertT100FromPanel(*appState);
 }
@@ -242,9 +240,8 @@ void T100Spectrum::setReferenceFromAverage() {
     clearStdDev();
     // Recompute completion must render (see setReferenceFromCurrentSpectrum).
     if (appState) {
-        appState->needsRedraw = true;
-        // One follow-up frame for the EndPlot-time Y fit.
-        appState->pendingRedrawFrames = 2;
+        // Follow-up frames for the EndPlot-time Y fit.
+        appState->requestViewChangeRedraw();
     }
     wsUpsertT100FromPanel(*appState);
 }
@@ -753,8 +750,7 @@ bool T100Spectrum::tickStdCalculation() {
             wsUpsertT100FromPanel(*appState);
         // Std batch completion must render (see setReferenceFrom* note).
         if (appState) {
-            appState->needsRedraw = true;
-            appState->pendingRedrawFrames = 2;   // EndPlot-time Y fit
+            appState->requestViewChangeRedraw();   // EndPlot-time Y fit
         }
         batchActive_ = false;
         calcStdInProgress = false;
@@ -1626,8 +1622,7 @@ void renderT100Panel() {
                 }
 
                 if (t100Plot.renderYModeButtons("##T100YAxis")) {
-                        appState.needsRedraw = true;
-                        appState.pendingRedrawFrames = 2;   // EndPlot-time fit
+                        appState.requestViewChangeRedraw();   // EndPlot-time fit
                     }
             }
 

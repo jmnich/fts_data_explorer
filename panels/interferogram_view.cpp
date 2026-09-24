@@ -1014,8 +1014,7 @@ void renderInterferogramConfigPanel() {
                     appState.active->autoFitYAxis = false;
                     // Fit applies at EndPlot AFTER drawing — render the
                     // follow-up frames so the fitted Y shows immediately.
-                    appState.pendingRedrawFrames = 2;
-                    appState.needsRedraw = true;
+                    appState.requestViewChangeRedraw();
                 }
             }
             ImGui::PopStyleColor(3);
@@ -1029,7 +1028,7 @@ void renderInterferogramConfigPanel() {
                     appState.active->autoFitYAxis = true;
                     // Fit applies at EndPlot AFTER drawing — render the
                     // follow-up frames so the fitted Y shows immediately.
-                    appState.pendingRedrawFrames = 2;
+                    appState.requestViewChangeRedraw();
                     if (appState.active->dataLoaded) {
                         if (!appState.active->loadedData[0].referenceDetector.empty()) {
                             auto ref_min_max = std::minmax_element(appState.active->loadedData[0].referenceDetector.begin(), appState.active->loadedData[0].referenceDetector.end());
@@ -1040,7 +1039,6 @@ void renderInterferogramConfigPanel() {
                         appState.active->prim_y_min = *prim_min_max.first;
                         appState.active->prim_y_max = *prim_min_max.second;
                     }
-                    appState.needsRedraw = true;
                 }
             }
             ImGui::PopStyleColor(3);

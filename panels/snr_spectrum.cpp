@@ -430,8 +430,7 @@ void renderSnrPanel() {
 
             auto& snrPlot = appState.active->snrSpectrum.plot;
             if (snrPlot.renderYScaleButtons("##Snr", /*withDb=*/false)) {
-                    appState.needsRedraw = true;
-                    appState.pendingRedrawFrames = 2;   // EndPlot-time fit (see app_state.h)
+                    appState.requestViewChangeRedraw();   // EndPlot-time fit (see app_state.h)
                 }
 
             if (snrPlot.renderXUnitButtons("##SnrXUnit"))
@@ -466,8 +465,7 @@ void renderSnrPanel() {
             }
 
             if (snrPlot.renderYModeButtons("##SnrYAxis")) {
-                    appState.needsRedraw = true;
-                    appState.pendingRedrawFrames = 2;   // EndPlot-time fit
+                    appState.requestViewChangeRedraw();   // EndPlot-time fit
                 }
 
             if (snrPlot.yAxisMode == kYModeForce) {

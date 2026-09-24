@@ -221,16 +221,15 @@ struct AppState {
     // result is on screen.
     int pendingRedrawFrames = 0;
     // Wake the idle loop for a user-driven plot view change (zoom select,
-    // arrow pan, unit switch, wheel zoom, ESC). Where the change arms a
-    // pending X window it applies on the NEXT frame; where it applies
-    // same-frame (wheel zoom, ESC autoscale) only the tight-Y refit —
-    // computed at EndPlot — still needs the frame after. Two follow-up
-    // frames cover both; harmless where everything applies same-frame
-    // since the extra frames redraw identical content. max() keeps a longer
-    // in-flight countdown alive if one is ever added.
+    // arrow pan, unit switch, wheel zoom, ESC, fit-affecting toggles).
+    // Frame math: where a pending X window is armed it applies on the NEXT
+    // frame (N+1); an EndPlot-time tight-Y refit draws at N+2; and the Y
+    // tick limiter — which reads the last-rendered range (savedY et al.) —
+    // only catches up at N+3. max() keeps a longer in-flight countdown
+    // alive if one is ever added.
     void requestViewChangeRedraw() {
         needsRedraw = true;
-        pendingRedrawFrames = std::max(pendingRedrawFrames, 2);
+        pendingRedrawFrames = std::max(pendingRedrawFrames, 3);
     }
     // Raw scroll deltas accumulated from the GLFW callback (main-thread only),
     // drained at one wheel notch per frame by the rate limiter in main.cpp.

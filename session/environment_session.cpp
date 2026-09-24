@@ -775,11 +775,10 @@ void EnvironmentSession::applyYMode() {
                                        : (r > 1e-15) ? -std::log10(r) : 0.0;
         }
     }
-    // Fit-affecting rewrite: keep 2 frames flowing so the EndPlot-time Y
-    // re-fit lands on screen even when the loop goes idle right after.
-    appState.pendingRedrawFrames = 2;
+    // Fit-affecting rewrite: keep follow-up frames flowing so the
+    // EndPlot-time Y re-fit lands on screen even when the loop goes idle.
+    appState.requestViewChangeRedraw();
     dirty = true;
-    appState.needsRedraw = true;
 }
 
 // Real-time difference (reference − subtracted) between two of the currently
@@ -1468,12 +1467,11 @@ void EnvironmentSession::renderXUnitButtons() {
                 plot.prevXUnitSelector = plot.xUnitSelector;
                 plot.xUnitSelector = u;
                 convertXInPlace();
-                // Fit-affecting view change: keep 2 frames flowing so the
-                // armed X window + Y refit actually land on screen (the
-                // EndPlot-time fit only becomes visible on the NEXT frame —
-                // see app_state.h / app_loop's pendingRedrawFrames gate).
-                appState.pendingRedrawFrames = 2;
-                appState.needsRedraw = true;
+                // Fit-affecting view change: keep follow-up frames flowing
+                // so the armed X window + Y refit actually land on screen
+                // (the EndPlot-time fit only becomes visible on the NEXT
+                // frame — see app_state.h / app_loop's gate).
+                appState.requestViewChangeRedraw();
             }
         }
         ImGui::PopStyleColor(3);
@@ -1505,8 +1503,7 @@ void EnvironmentSession::renderYModeButtons() {
 void EnvironmentSession::renderYAxisControls() {
     if (plot.renderYModeButtons("##EnvYAxis")) {
         dirty = true;
-        appState.pendingRedrawFrames = 2;   // EndPlot-time Y fit follow-up
-        appState.needsRedraw = true;
+        appState.requestViewChangeRedraw();   // EndPlot-time Y fit follow-up
     }
     if (plot.yAxisMode == kYModeForce) {
         ImGui::Text("min:");
@@ -1514,8 +1511,7 @@ void EnvironmentSession::renderYAxisControls() {
         ImGui::SetNextItemWidth(80.0f);
         if (ImGui::InputDouble("##EnvForcedYMin", &plot.forcedYMin, 0.0, 0.0, "%.6g")) {
             dirty = true;
-            appState.pendingRedrawFrames = 2;   // EndPlot-time Y fit follow-up
-            appState.needsRedraw = true;
+            appState.requestViewChangeRedraw();   // EndPlot-time Y fit follow-up
         }
         ImGui::SameLine();
         ImGui::Text("max:");
@@ -1523,8 +1519,7 @@ void EnvironmentSession::renderYAxisControls() {
         ImGui::SetNextItemWidth(80.0f);
         if (ImGui::InputDouble("##EnvForcedYMax", &plot.forcedYMax, 0.0, 0.0, "%.6g")) {
             dirty = true;
-            appState.pendingRedrawFrames = 2;   // EndPlot-time Y fit follow-up
-            appState.needsRedraw = true;
+            appState.requestViewChangeRedraw();   // EndPlot-time Y fit follow-up
         }
         if (plot.forcedYMin >= plot.forcedYMax) {
             ImGui::SameLine();
@@ -1552,8 +1547,7 @@ void EnvironmentSession::renderYScaleButtons() {
             if (plot.yScaleSelector != m) {
                 plot.yScaleSelector = m;
                 dirty = true;
-                appState.pendingRedrawFrames = 2;   // EndPlot-time Y refit
-                appState.needsRedraw = true;
+                appState.requestViewChangeRedraw();   // EndPlot-time Y refit
             }
         }
         ImGui::PopStyleColor(3);
@@ -1614,8 +1608,7 @@ void EnvironmentSession::renderRangingWindow() {
                         maxAtZeroIfg = on;
                         dirty = true;
                         plot.shouldAutoscale = true;
-                        appState.pendingRedrawFrames = 2;   // autoscale follow-up
-                        appState.needsRedraw = true;
+                        appState.requestViewChangeRedraw();   // autoscale follow-up
                     }
                 }
                 ImGui::PopStyleColor(3);
@@ -1644,8 +1637,7 @@ void EnvironmentSession::renderRangingWindow() {
                     if (downsampleDisplay != on) {
                         downsampleDisplay = on;
                         dirty = true;
-                        appState.pendingRedrawFrames = 2;   // curve-shape refit
-                        appState.needsRedraw = true;
+                        appState.requestViewChangeRedraw();   // curve-shape refit
                     }
                 }
                 ImGui::PopStyleColor(3);
@@ -1728,8 +1720,7 @@ void EnvironmentSession::renderDifferenceWindow() {
                                    "On##EnvResOn", "Off##EnvResOff",
                                    "Difference")) {
             dirty = true;
-            appState.pendingRedrawFrames = 2;
-            appState.needsRedraw = true;
+            appState.requestViewChangeRedraw();
         }
         if (differenceEnabled) {
             ImGui::Separator();
@@ -1757,8 +1748,7 @@ void EnvironmentSession::renderDifferenceWindow() {
                             if (i != idx) {
                                 idx = i;
                                 dirty = true;
-                                appState.pendingRedrawFrames = 2;
-                                appState.needsRedraw = true;
+                                appState.requestViewChangeRedraw();
                             }
                         }
                         if (ImGui::IsItemHovered())
@@ -1793,8 +1783,7 @@ void EnvironmentSession::renderDifferenceWindow() {
                         if (value != m) {
                             value = m;
                             dirty = true;
-                            appState.pendingRedrawFrames = 2;
-                            appState.needsRedraw = true;
+                            appState.requestViewChangeRedraw();
                         }
                     }
                     ImGui::PopStyleColor(3);
