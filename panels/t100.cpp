@@ -916,7 +916,7 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
         // main curves, std-dev curve and buffered std results (L3 shared helper).
         convertCachedXUnits(fromUnit, toUnit);
     };
-    f.onViewChanged = [this]() { appState->needsRedraw = true; };
+    f.onViewChanged = [this]() { appState->requestViewChangeRedraw(); };
 
     // Lazy-compute: recompute all if stale, then fill missing per-file caches.
     // H1.1: runs BEFORE the frame build so every data-gated early return

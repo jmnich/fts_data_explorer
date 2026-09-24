@@ -27,6 +27,10 @@ void renderInterferogramPanel() {
             appState.active->zoomRange = {0, 0};
             appState.active->shouldAutoscale = true; // Always force redraw with full range when ESC is pressed
             appState.active->pendingIfgXRestore = false; // explicit reset beats a not-yet-applied restore
+            // X resets same-frame (SetupAxisLimits), but the Auto-fit-Y refit
+            // (RangeFit — "on") lands at EndPlot and only draws on the NEXT
+            // frame — arm it so the fitted Y shows without a mouse move.
+            appState.requestViewChangeRedraw();
         }
 
         // A restored window is only meaningful in the axis convention and data
@@ -188,6 +192,10 @@ void renderInterferogramPanel() {
                 // Only finalize if we have valid selection
                 if(appState.active->selectionStartX != appState.active->selectionEndX) {
                     appState.active->applyXRangeSelection = true;
+                    // New X applies same-frame (SetupAxisLimits), but the
+                    // Auto-fit-Y refit (RangeFit — "on") lands at EndPlot and
+                    // only draws on the NEXT frame; nothing else arms it.
+                    appState.requestViewChangeRedraw();
                     
                     if(appState.active->selectionStartX > appState.active->selectionEndX)
                     {
@@ -942,7 +950,7 @@ void renderInterferogramConfigPanel() {
                 if (!xSample && !axisCorrected) {
                     appState.active->xAxisBase = 0;
                     appState.active->shouldAutoscale = true;
-                    appState.needsRedraw = true;
+                    appState.requestViewChangeRedraw();
                 }
             }
             ImGui::PopStyleColor(3);
@@ -956,7 +964,7 @@ void renderInterferogramConfigPanel() {
                 if (!xOPD) {
                     appState.active->xAxisBase = 1;
                     appState.active->shouldAutoscale = true;
-                    appState.needsRedraw = true;
+                    appState.requestViewChangeRedraw();
                 }
             }
             ImGui::PopStyleColor(3);
@@ -974,7 +982,7 @@ void renderInterferogramConfigPanel() {
                 if (appState.active->maxAtZero) {
                     appState.active->maxAtZero = false;
                     appState.active->shouldAutoscale = true;
-                    appState.needsRedraw = true;
+                    appState.requestViewChangeRedraw();
                 }
             }
             ImGui::PopStyleColor(3);
@@ -987,7 +995,7 @@ void renderInterferogramConfigPanel() {
                 if (!appState.active->maxAtZero) {
                     appState.active->maxAtZero = true;
                     appState.active->shouldAutoscale = true;
-                    appState.needsRedraw = true;
+                    appState.requestViewChangeRedraw();
                 }
             }
             ImGui::PopStyleColor(3);
@@ -1109,7 +1117,7 @@ void renderInterferogramConfigPanel() {
                             appState.active->forceXAutofit = true;
                         }
                     }
-                    appState.needsRedraw = true;
+                    appState.requestViewChangeRedraw();
                 }
             }
             ImGui::PopStyleColor(3);
@@ -1173,7 +1181,7 @@ void renderInterferogramConfigPanel() {
                             appState.active->forceXAutofit = true;
                         }
                     }
-                    appState.needsRedraw = true;
+                    appState.requestViewChangeRedraw();
                 }
             }
             ImGui::PopStyleColor(3);

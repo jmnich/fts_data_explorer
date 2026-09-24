@@ -394,7 +394,7 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
             // Discard in-flight async results (they would overwrite with old-unit data)
             pendingSpectra_.clear();
         };
-        f.onViewChanged = [this]() { appState->needsRedraw = true; };
+        f.onViewChanged = [this]() { appState->requestViewChangeRedraw(); };
 
         plot.tickPrePlot(f);
 

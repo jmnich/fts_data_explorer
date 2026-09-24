@@ -105,7 +105,7 @@ void SnrSpectrum::renderSnrContents(bool showTrackingCursor) {
         for (double& x : calcCommonX)
             x = SpectralToolbox::convertXValue(x, oldU, newU);
     };
-    f.onViewChanged = [this]() { appState->needsRedraw = true; };
+    f.onViewChanged = [this]() { appState->requestViewChangeRedraw(); };
 
     plot.tickPrePlot(f);
 

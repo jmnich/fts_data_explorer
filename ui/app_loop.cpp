@@ -2014,6 +2014,14 @@ void AppLoop::renderUI() {
 
                 appState.scrollAccumY += std::clamp(totalY - io.MouseWheel, -60.0f, 60.0f);
                 appState.scrollAccumX += std::clamp(totalX - io.MouseWheelH, -60.0f, 60.0f);
+
+                // A wheel notch applied this frame zooms X now, but a
+                // tight-Y (RangeFit) refit lands at EndPlot and only draws
+                // on the NEXT frame — arm it so the fitted Y shows without
+                // a further mouse event (the drain below stops arming
+                // frames once the accumulator empties).
+                if (io.MouseWheel != 0.0f || io.MouseWheelH != 0.0f)
+                    appState.requestViewChangeRedraw();
             }
         }
 

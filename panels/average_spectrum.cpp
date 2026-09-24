@@ -145,7 +145,7 @@ void AverageSpectrum::renderAverageContents(bool showTrackingCursor) {
         for (double& x : calcCommonX)
             x = SpectralToolbox::convertXValue(x, oldU, newU);
     };
-    f.onViewChanged = [this]() { appState->needsRedraw = true; };
+    f.onViewChanged = [this]() { appState->requestViewChangeRedraw(); };
     f.yDataRange = [this, &toDisplayValue](double& y0, double& y1) -> bool {
         if (cachedAverageY.empty()) return false;
         // Hoist max_element out of the per-point loop (C2): calling

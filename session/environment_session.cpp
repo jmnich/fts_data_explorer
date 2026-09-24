@@ -2048,7 +2048,7 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
         return have;
     };
     f.onXUnitChanged = nullptr;   // unit switching handled by the button path
-    f.onViewChanged  = [this]() { dirty = true; appState.needsRedraw = true; };
+    f.onViewChanged  = [this]() { dirty = true; appState.requestViewChangeRedraw(); };
 
     // Legend row ABOVE the plot (workspace-viewer style: colored square
     // patches + labels, wrapping to the next line when the row overflows).

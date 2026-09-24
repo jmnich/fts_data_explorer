@@ -45,6 +45,11 @@ struct SpectralPlotFrame {
     std::function<void(int fromUnit, int toUnit)> onXUnitChanged;
 
     // Fired on every user-driven view change (ESC / pan / select / unit switch).
+    // Contract: the callback must keep FOLLOW-UP frames flowing (e.g.
+    // AppState::requestViewChangeRedraw) — the pending X window applies on
+    // the next frame and an EndPlot-time tight-Y refit only draws on the
+    // frame after; a plain needsRedraw stalls one frame short and the
+    // fitted Y waits for the next mouse event.
     std::function<void()> onViewChanged;
 };
 

@@ -505,6 +505,10 @@ void AllanVariance::renderAllanContents(bool showTrackingCursor) {
                         manualXMin = sX;
                         manualXMax = eX;
                         shouldAutoscale = false;
+                        // The armed X window applies on the NEXT frame's
+                        // SetNextAxisLimits — without this the zoom never
+                        // renders until the next input event wakes the loop.
+                        appState->requestViewChangeRedraw();
                     }
                 }
             }

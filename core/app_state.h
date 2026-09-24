@@ -3,6 +3,7 @@
 #include <vector>
 #include <string>
 #include <map>
+#include <algorithm>
 #include <filesystem>
 #include "config.h"
 #include "thread_pool.h"
@@ -219,6 +220,18 @@ struct AppState {
     // frame; pendingRedrawFrames keeps the loop rendering until the fitted
     // result is on screen.
     int pendingRedrawFrames = 0;
+    // Wake the idle loop for a user-driven plot view change (zoom select,
+    // arrow pan, unit switch, wheel zoom, ESC). Where the change arms a
+    // pending X window it applies on the NEXT frame; where it applies
+    // same-frame (wheel zoom, ESC autoscale) only the tight-Y refit —
+    // computed at EndPlot — still needs the frame after. Two follow-up
+    // frames cover both; harmless where everything applies same-frame
+    // since the extra frames redraw identical content. max() keeps a longer
+    // in-flight countdown alive if one is ever added.
+    void requestViewChangeRedraw() {
+        needsRedraw = true;
+        pendingRedrawFrames = std::max(pendingRedrawFrames, 2);
+    }
     // Raw scroll deltas accumulated from the GLFW callback (main-thread only),
     // drained at one wheel notch per frame by the rate limiter in main.cpp.
     // lastScrollEventTime gates the drain: excess is discarded once no fresh
