@@ -1943,10 +1943,17 @@ static void drawCenteredToast(const char* msg, float padX, float padY) {
 //  - Fires only on the hover TRANSITION into a new window, and only while
 //    nothing is interactive: no mouse button down, no active item, no
 //    drag-drop, no open popup. A mid-drag/undock window can never be stolen.
+//  - Never while Shift is held: shift+drag X-range selection starts on any
+//    FOCUSED panel under the mouse (no mouse button involved), so moving
+//    focus mid-selection would arm a second selection in the panel the mouse
+//    wanders into and both would zoom on Shift release. Freezing focus for
+//    the duration of the Shift press keeps the selection in the panel where
+//    it started.
 void AppLoop::hoverFocusDockedPanel() {
     if (!appState.hoverFocusPanels) return;
     ImGuiContext* g = ImGui::GetCurrentContext();
     if (!g || g->ActiveId != 0 || g->DragDropActive) return;
+    if (ImGui::GetIO().KeyShift) return;
     if (ImGui::IsMouseDown(ImGuiMouseButton_Left) ||
         ImGui::IsMouseDown(ImGuiMouseButton_Right) ||
         ImGui::IsMouseDown(ImGuiMouseButton_Middle))
