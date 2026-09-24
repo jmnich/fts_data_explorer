@@ -284,8 +284,13 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
     const float colGap = ImGui::GetStyle().ItemSpacing.x;
     const float colW = (ImGui::GetContentRegionAvail().x - colGap) * 0.5f;
     const float rowH = ImGui::GetFrameHeightWithSpacing();
-    // Reserve the button strip + bottom bar (plus separators) for the columns.
-    const float bottomAreaH = rowH * 2.0f + ImGui::GetStyle().ItemSpacing.y * 4.0f + 6.0f;
+    // Reserve the button strip + bottom bar (plus separators) for the
+    // columns. The Open .h5 button is double-height (bottom bar) — reserve
+    // its extra frame height too so the columns shrink instead of the
+    // fixed-size window overflowing.
+    const float openBtnExtraH = ImGui::GetFrameHeight();
+    const float bottomAreaH = rowH * 2.0f + openBtnExtraH +
+                              ImGui::GetStyle().ItemSpacing.y * 4.0f + 6.0f;
     const float colH = std::max(120.0f, ImGui::GetContentRegionAvail().y - bottomAreaH);
 
     // ── Left: recent single-dataset workspaces ──────────────────────────────
@@ -550,7 +555,8 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, GetAccentHovered(accent));
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, GetAccentActive(accent));
     const float openW = ImGui::GetContentRegionAvail().x * (2.0f / 3.0f);
-    if (ImGui::Button("Open .h5", ImVec2(openW, 0))) {
+    const float openH = 2.0f * ImGui::GetFrameHeight();
+    if (ImGui::Button("Open .h5", ImVec2(openW, openH))) {
         std::string defaultFolder;
         if (std::filesystem::is_directory(config.lastWorkingDirectory))
             defaultFolder = config.lastWorkingDirectory;
@@ -564,9 +570,24 @@ void renderWelcomeScreen(AppState& appState, AppConfig& config,
     }
     ImGui::PopStyleColor(3);
     ImGui::SameLine();
-
-    ImGui::Text("UI Size:");
+    // Vertically center the UI-size label + combo against the double-height
+    // button. SameLine inherits the button line's text-base offset (its
+    // vertically-centered text makes it ~half the button height), which
+    // pushes Text() below the combo and no public API can lower it — so the
+    // label is drawn via the draw list at an explicitly centered position
+    // (a Dummy reserves its footprint) and the combo frame is centered
+    // directly.
+    const float uiFrameH = ImGui::GetFrameHeight();
+    const float uiTextH = ImGui::GetTextLineHeight();
+    const float btnTopY = ImGui::GetItemRectMin().y;   // still the button
+    ImGui::GetWindowDrawList()->AddText(
+        ImVec2(ImGui::GetCursorScreenPos().x,
+               btnTopY + (openH - uiTextH) * 0.5f),
+        ImGui::GetColorU32(ImGuiCol_Text), "UI Size:");
+    ImGui::Dummy(ImGui::CalcTextSize("UI Size:"));
     ImGui::SameLine();
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() +
+                         (openH - uiFrameH) * 0.5f);
     if (ImGui::BeginCombo("##UISizeCombo", appState.currentUiSize.c_str())) {
         if (ImGui::Selectable("tiny", appState.currentUiSize == "tiny")) {
             appState.currentUiSize = "tiny";
