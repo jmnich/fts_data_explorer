@@ -57,6 +57,8 @@ void forceDockSelection() {
     appState.needsRedraw = true;
 }
 
+// Display-only unit label (plot axes). Contains UTF-8 µ for on-screen
+// rendering — never use for CSV/file output, which must stay pure ASCII ("um").
 const char* xUnitLabel(int unit) {
     return unit == 0 ? "Wavenumber (cm-1)"
                      : unit == 1 ? "Wavelength (\xC2\xB5" "m)"
@@ -2438,7 +2440,7 @@ void EnvironmentSession::exportCsv() {
     }
     if (xUnit.empty())
         xUnit = (plot.xUnitSelector == 0) ? "cm-1"
-                                     : (plot.xUnitSelector == 1) ? "\xC2\xB5" "m" : "THz";
+                                     : (plot.xUnitSelector == 1) ? "um" : "THz";
     size_t hc = 0;
     for (const auto& c : curves) {
         ofs << (hc++ ? "," : "") << "\"" << c.label << " x [" << xUnit << "]\",\""
