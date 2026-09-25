@@ -16,6 +16,49 @@
 #include <limits>
 #include <vector>
 
+namespace {
+
+// Full-res peak index (raw primary if available, else loaded), cached per
+// fileId — replaces the per-frame std::max_element over every file's raw
+// detector. Keyed on the source vector sizes (content is immutable once
+// loaded, so sizes are a sufficient change proxy — see the WorkspaceSession
+// cache-declaration invariant).
+size_t cachedPeakIdx(WorkspaceSession& ws, size_t i, const std::string& fileId) {
+    const bool useRaw = i < ws.rawDataCache.size() && !ws.rawDataCache[i].primaryDetector.empty();
+    const std::vector<double>& src = useRaw ? ws.rawDataCache[i].primaryDetector
+                                            : ws.loadedData[i].primaryDetector;
+    auto& e = ws.peakIdxCache[fileId];
+    if (e.srcSize != src.size() || e.loadedSize != ws.loadedData[i].primaryDetector.size()) {
+        auto peakIt = std::max_element(src.begin(), src.end());
+        e.idx = static_cast<size_t>(std::distance(src.begin(), peakIt));
+        e.srcSize = src.size();
+        e.loadedSize = ws.loadedData[i].primaryDetector.size();
+    }
+    return e.idx;
+}
+
+// Evict plot-X / peak entries for files no longer selected. The caches are
+// keyed per fileId and would otherwise grow for every file ever visited —
+// each plot-X entry holds two full-length arrays (up to ~800 KB per file at
+// 50k points). The selection is capped at MAX_SELECTABLE_FILES, so the
+// per-frame scan is cheap. Re-selecting a file simply rebuilds its entry.
+void pruneUnselectedIfgCaches(WorkspaceSession& ws) {
+    const auto selected = [&ws](const std::string& id) {
+        return std::find(ws.selectedFilenames.begin(), ws.selectedFilenames.end(), id) !=
+               ws.selectedFilenames.end();
+    };
+    for (auto it = ws.ifgPlotXCache.begin(); it != ws.ifgPlotXCache.end();) {
+        if (selected(it->first)) ++it;
+        else it = ws.ifgPlotXCache.erase(it);
+    }
+    for (auto it = ws.peakIdxCache.begin(); it != ws.peakIdxCache.end();) {
+        if (selected(it->first)) ++it;
+        else it = ws.peakIdxCache.erase(it);
+    }
+}
+
+} // namespace
+
 void renderInterferogramPanel() {
         bool isMainWindowFocused = false;
         ImGui::Begin("Interferogram View");
@@ -55,22 +98,23 @@ void renderInterferogramPanel() {
             // Y-axis limits are now handled by the auto-fit toggle
             // When autoFitYAxis is true, ImPlot will auto-calculate Y-axis limits
             // When autoFitYAxis is false, we use the manually calculated limits
-            
+            pruneUnselectedIfgCaches(*appState.active);
+
             // Determine zoom range
             size_t ref_start =  0;
             size_t ref_end =  appState.active->datasetInfo.hasReferenceChannel
                               ? appState.active->loadedData[0].referenceDetector.size()
                               : appState.active->loadedData[0].dataSize();
-            // Compute peak positions for X-axis alignment (from raw data for OPD accuracy)
+            // Compute peak positions for X-axis alignment (from raw data for
+            // OPD accuracy) — cached per fileId (cachedPeakIdx); same source
+            // selection (raw if non-empty, else loaded) as the old per-frame
+            // max_element.
             std::vector<size_t> peakPositions;
             if (appState.active->maxAtZero) {
-                for (size_t i = 0; i < appState.active->loadedData.size(); i++) {
-                    const auto& prim = (i < appState.active->rawDataCache.size() && !appState.active->rawDataCache[i].primaryDetector.empty())
-                        ? appState.active->rawDataCache[i].primaryDetector
-                        : appState.active->loadedData[i].primaryDetector;
-                    auto peakIt = std::max_element(prim.begin(), prim.end());
-                    peakPositions.push_back(static_cast<size_t>(std::distance(prim.begin(), peakIt)));
-                }
+                peakPositions.reserve(appState.active->loadedData.size());
+                for (size_t i = 0; i < appState.active->loadedData.size(); i++)
+                    peakPositions.push_back(
+                        cachedPeakIdx(*appState.active, i, appState.active->selectedFilenames[i]));
             }
             // Map raw peak index to downsampled space for sample-mode X-axis shifts
             auto getDsPeak = [&](size_t i) -> size_t {
@@ -81,6 +125,112 @@ void renderInterferogramPanel() {
                 size_t ls = appState.active->loadedData[i].primaryDetector.size();
                 if (rs <= ls || ls == 0) return peakPositions[i];
                 return static_cast<size_t>(static_cast<double>(peakPositions[i]) * ls / rs + 0.5);
+            };
+
+            // Cached plotted-X accessor: returns file i's ref/prim X arrays
+            // under the current axis conventions, rebuilding once per (file,
+            // convention) change — the old code rebuilt both arrays for both
+            // subplots every frame. Mirrors the historical construction
+            // exactly (same proportional mapX + clamping, same peak-offset
+            // formulas). The key comparison is the mandatory defensive
+            // backstop for any future mutator that misses touchIfgView().
+            auto plotXFor = [&](size_t i, const std::string& fileId)
+                -> WorkspaceSession::IfgPlotXEntry& {
+                WorkspaceSession& ws = *appState.active;
+                auto hxit = ws.hilbertXCache.find(fileId);
+                const bool hasHilb = hxit != ws.hilbertXCache.end() && !hxit->second.empty();
+                auto& e = ws.ifgPlotXCache[fileId];
+                const size_t rawRefSize = (i < ws.rawDataCache.size())
+                    ? ws.rawDataCache[i].referenceDetector.size() : 0;
+                const size_t rawPrimSize = (i < ws.rawDataCache.size())
+                    ? ws.rawDataCache[i].primaryDetector.size() : 0;
+                const size_t peakIdx = ws.maxAtZero ? peakPositions[i] : 0;
+                const size_t hilbSize = hasHilb ? hxit->second.size() : 0;
+                if (e.rev == ws.ifgViewRevision &&
+                    e.axisBase == ws.xAxisBase &&
+                    e.maxAtZero == ws.maxAtZero &&
+                    e.downsampling == ws.enableDownsampling &&
+                    e.laserWavelength == ws.hilbertCacheLaserWavelength &&
+                    e.correctionMethod == ws.hilbertCacheMethod &&
+                    e.prominence == ws.hilbertCacheProminence &&
+                    e.refEnd == ref_end &&
+                    e.refSize == ws.loadedData[i].referenceDetector.size() &&
+                    e.primSize == ws.loadedData[i].primaryDetector.size() &&
+                    e.rawRefSize == rawRefSize &&
+                    e.rawPrimSize == rawPrimSize &&
+                    e.peakIdx == peakIdx &&
+                    e.hasHilb == hasHilb &&
+                    e.hilbSize == hilbSize) {
+                    return e;
+                }
+                e.rev = ws.ifgViewRevision;
+                e.axisBase = ws.xAxisBase;
+                e.maxAtZero = ws.maxAtZero;
+                e.downsampling = ws.enableDownsampling;
+                e.laserWavelength = ws.hilbertCacheLaserWavelength;
+                e.correctionMethod = ws.hilbertCacheMethod;
+                e.prominence = ws.hilbertCacheProminence;
+                e.refEnd = ref_end;
+                e.refSize = ws.loadedData[i].referenceDetector.size();
+                e.primSize = ws.loadedData[i].primaryDetector.size();
+                e.rawRefSize = rawRefSize;
+                e.rawPrimSize = rawPrimSize;
+                e.peakIdx = peakIdx;
+                e.hasHilb = hasHilb;
+                e.hilbSize = hilbSize;
+                e.refX.clear();
+                e.primX.clear();
+                if (ws.xAxisBase == 1) {
+                    // OPD mode: map downsampled index to the full-res OPD
+                    // cache proportionally; without a hilbert entry nothing
+                    // is plotted (as before — no index fallback).
+                    if (hasHilb) {
+                        const auto& hilbX = hxit->second;
+                        const bool shift = ws.maxAtZero && peakIdx < hilbX.size();
+                        const double peakHilbX = shift ? hilbX[peakIdx] : 0.0;
+                        {
+                            const auto& refData = ws.loadedData[i].referenceDetector;
+                            const size_t n = std::min(ref_end, refData.size());
+                            double ratio = static_cast<double>(hilbX.size()) / refData.size();
+                            e.refX.resize(n);
+                            for (size_t j = 0; j < n; j++) {
+                                size_t idx = static_cast<size_t>(j * ratio);
+                                if (idx >= hilbX.size()) idx = hilbX.size() - 1;
+                                e.refX[j] = hilbX[idx] - peakHilbX;
+                            }
+                        }
+                        {
+                            const auto& primData = ws.loadedData[i].primaryDetector;
+                            const size_t n = std::min(ref_end, primData.size());
+                            double ratio = static_cast<double>(hilbX.size()) / primData.size();
+                            e.primX.resize(n);
+                            for (size_t j = 0; j < n; j++) {
+                                size_t idx = static_cast<size_t>(j * ratio);
+                                if (idx >= hilbX.size()) idx = hilbX.size() - 1;
+                                e.primX[j] = hilbX[idx] - peakHilbX;
+                            }
+                        }
+                    }
+                } else {
+                    // Sample-num mode: index X (the old implicit xscale=1
+                    // plot); max at zero shifts by the ds-space peak.
+                    const int peak = ws.maxAtZero ? static_cast<int>(getDsPeak(i)) : 0;
+                    {
+                        const auto& refData = ws.loadedData[i].referenceDetector;
+                        const size_t n = std::min(ref_end, refData.size());
+                        e.refX.resize(n);
+                        for (size_t j = 0; j < n; j++)
+                            e.refX[j] = static_cast<double>(static_cast<int>(j) - peak);
+                    }
+                    {
+                        const auto& primData = ws.loadedData[i].primaryDetector;
+                        const size_t n = std::min(ref_end, primData.size());
+                        e.primX.resize(n);
+                        for (size_t j = 0; j < n; j++)
+                            e.primX[j] = static_cast<double>(static_cast<int>(j) - peak);
+                    }
+                }
+                return e;
             };
             
             if (appState.active->loadedData.size() > 1) {
@@ -233,6 +383,7 @@ void renderInterferogramPanel() {
                     if (appState.active->hilbertCacheLaserWavelength != appState.active->spectrum.refLaserTextbox ||
                         appState.active->hilbertCacheMethod != appState.active->xCorrectionMethod ||
                         appState.active->hilbertCacheProminence != appState.active->peakProminenceThreshold) {
+                        appState.active->touchIfgView();
                         appState.active->hilbertXCache.clear();
                         appState.active->peakPositionsCache.clear();
                         appState.active->hilbertCacheLaserWavelength = appState.active->spectrum.refLaserTextbox;
@@ -271,10 +422,12 @@ void renderInterferogramPanel() {
             }
 
             // Shared tracking cursor: reuse the workspace cursor flag (Ctrl+Q /
-            // the Spectrum panel toggle). Plotted X arrays are captured below.
+            // the Spectrum panel toggle). The cursor X arrays point into the
+            // plot-X cache below — no per-frame copies (full-res semantics
+            // preserved: the cursor reads exactly what the plot draws).
             const bool cursorOn = appState.active->spectrum.showTrackingCursor;
-            std::vector<std::vector<double>> refCursorX(appState.active->loadedData.size());
-            std::vector<std::vector<double>> primCursorX(appState.active->loadedData.size());
+            std::vector<const std::vector<double>*> refCursorX(appState.active->loadedData.size(), nullptr);
+            std::vector<const std::vector<double>*> primCursorX(appState.active->loadedData.size(), nullptr);
 
             if (ImPlot::BeginSubplots(workspacePlotId("Detector Plots").c_str(), numRows, 1, ImVec2(-1, -1), ImPlotSubplotFlags_NoTitle | ImPlotSubplotFlags_LinkAllX | ImPlotSubplotFlags_NoLegend, hasRef ? row_ratios : row_ratios1)) {
 
@@ -406,49 +559,13 @@ void renderInterferogramPanel() {
                             for (size_t i = 0; i < appState.active->loadedData.size(); i++) {
                                 const auto& refData = appState.active->loadedData[i].referenceDetector;
                                 if (ref_start < refData.size()) {
-                                    size_t actual_count = std::min(data_count, refData.size() - ref_start);
-                                    if (appState.active->xAxisBase == 1) {
-                                        auto hxit = appState.active->hilbertXCache.find(appState.active->selectedFilenames[i]);
-                                        if (hxit != appState.active->hilbertXCache.end() && !hxit->second.empty()) {
-                                            const auto& hilbX = hxit->second;
-                                            // Map downsampled index to full-res OPD cache proportionally
-                                            double ratio = static_cast<double>(hilbX.size()) / refData.size();
-                                            auto mapX = [&](size_t j) -> double {
-                                                size_t idx = static_cast<size_t>((ref_start + j) * ratio);
-                                                if (idx >= hilbX.size()) idx = hilbX.size() - 1;
-                                                return hilbX[idx];
-                                            };
-                                            if (appState.active->maxAtZero && !peakPositions.empty() && i < peakPositions.size() && peakPositions[i] < hilbX.size()) {
-                                                std::vector<double> shiftedX(actual_count);
-                                                double peakHilbX = hilbX[peakPositions[i]];
-                                                for (size_t j = 0; j < actual_count; j++)
-                                                    shiftedX[j] = mapX(j) - peakHilbX;
-                                                ImPlot::PlotLine("", shiftedX.data(), &refData[ref_start], static_cast<int>(actual_count), plotSpecs[i]);
-                                                if (cursorOn) refCursorX[i] = std::move(shiftedX);
-                                            } else {
-                                                std::vector<double> mappedX(actual_count);
-                                                for (size_t j = 0; j < actual_count; j++)
-                                                    mappedX[j] = mapX(j);
-                                                ImPlot::PlotLine("", mappedX.data(), &refData[ref_start], static_cast<int>(actual_count), plotSpecs[i]);
-                                                if (cursorOn) refCursorX[i] = std::move(mappedX);
-                                            }
-                                        }
-                                    } else if (appState.active->maxAtZero && !peakPositions.empty()) {
-                                        std::vector<double> shiftedX(actual_count);
-                                        int peak = static_cast<int>(getDsPeak(i));
-                                        for (size_t j = 0; j < actual_count; j++)
-                                            shiftedX[j] = static_cast<double>(static_cast<int>(ref_start + j) - peak);
-                                        ImPlot::PlotLine("", shiftedX.data(), &refData[ref_start], static_cast<int>(actual_count), plotSpecs[i]);
-                                        if (cursorOn) refCursorX[i] = std::move(shiftedX);
-                                    } else {
-                                        ImPlot::PlotLine("", 
-                                                       &refData[ref_start], 
-                                                       actual_count, 1.0, 0.0, plotSpecs[i]);
-                                        if (cursorOn) {
-                                            refCursorX[i].resize(actual_count);
-                                            for (size_t j = 0; j < actual_count; j++)
-                                                refCursorX[i][j] = static_cast<double>(ref_start + j);
-                                        }
+                                    // Cached plotted X (OPD / shifted sample num /
+                                    // plain index — mirrors the old per-frame
+                                    // construction; empty = nothing plotted).
+                                    const auto& e = plotXFor(i, appState.active->selectedFilenames[i]);
+                                    if (!e.refX.empty()) {
+                                        ImPlot::PlotLine("", e.refX.data(), &refData[ref_start], static_cast<int>(e.refX.size()), plotSpecs[i]);
+                                        if (cursorOn) refCursorX[i] = &e.refX;
                                     }
                                 }
                             }
@@ -551,9 +668,9 @@ void renderInterferogramPanel() {
                         std::vector<CursorCurve> cursorCurves;
                         for (size_t i = 0; i < appState.active->loadedData.size(); ++i) {
                             const auto& refData = appState.active->loadedData[i].referenceDetector;
-                            if (refData.empty() || refCursorX[i].empty()) continue;
+                            if (refData.empty() || !refCursorX[i] || refCursorX[i]->empty()) continue;
                             CursorCurve cc;
-                            cc.x = &refCursorX[i];
+                            cc.x = refCursorX[i];
                             cc.y = &refData;
                             cc.color = plotSpecs[i].LineColor;
                             cursorCurves.push_back(std::move(cc));
@@ -706,54 +823,16 @@ void renderInterferogramPanel() {
                             for (size_t i = 0; i < appState.active->loadedData.size(); i++) {
                                 const auto& primData = appState.active->loadedData[i].primaryDetector;
                                 if (ref_start < primData.size()) {
-                                    size_t actual_count = std::min(data_count, primData.size() - ref_start);
-                                    if (appState.active->xAxisBase == 1) {
-                                        auto hxit = appState.active->hilbertXCache.find(appState.active->selectedFilenames[i]);
-                                        if (hxit != appState.active->hilbertXCache.end() && !hxit->second.empty()) {
-                                            const auto& hilbX = hxit->second;
-                                            // Map downsampled index to full-res OPD cache proportionally
-                                            double ratio = static_cast<double>(hilbX.size()) / primData.size();
-                                            auto mapX = [&](size_t j) -> double {
-                                                size_t idx = static_cast<size_t>((ref_start + j) * ratio);
-                                                if (idx >= hilbX.size()) idx = hilbX.size() - 1;
-                                                return hilbX[idx];
-                                            };
-                                            if (appState.active->maxAtZero && !peakPositions.empty() && i < peakPositions.size() && peakPositions[i] < hilbX.size()) {
-                                                std::vector<double> shiftedX(actual_count);
-                                                double peakHilbX = hilbX[peakPositions[i]];
-                                                for (size_t j = 0; j < actual_count; j++)
-                                                    shiftedX[j] = mapX(j) - peakHilbX;
-                                                ImPlot::PlotLine("", shiftedX.data(), &primData[ref_start], static_cast<int>(actual_count), plotSpecs[i]);
-                                                if (cursorOn) primCursorX[i] = std::move(shiftedX);
-                                            } else {
-                                                std::vector<double> mappedX(actual_count);
-                                                for (size_t j = 0; j < actual_count; j++)
-                                                    mappedX[j] = mapX(j);
-                                                ImPlot::PlotLine("", mappedX.data(), &primData[ref_start], static_cast<int>(actual_count), plotSpecs[i]);
-                                                if (cursorOn) primCursorX[i] = std::move(mappedX);
-                                            }
-                                        }
-                                    } else if (appState.active->maxAtZero && !peakPositions.empty()) {
-                                        std::vector<double> shiftedX(actual_count);
-                                        int peak = static_cast<int>(getDsPeak(i));
-                                        for (size_t j = 0; j < actual_count; j++)
-                                            shiftedX[j] = static_cast<double>(static_cast<int>(ref_start + j) - peak);
-                                        ImPlot::PlotLine("", shiftedX.data(), &primData[ref_start], static_cast<int>(actual_count), plotSpecs[i]);
-                                        if (cursorOn) primCursorX[i] = std::move(shiftedX);
-                                    } else {
-                                        ImPlot::PlotLine("", 
-                                                       &primData[ref_start], 
-                                                         actual_count, 1.0, 0.0, plotSpecs[i]);
-                                        if (cursorOn) {
-                                            primCursorX[i].resize(actual_count);
-                                            for (size_t j = 0; j < actual_count; j++)
-                                                primCursorX[i][j] = static_cast<double>(ref_start + j);
-                                        }
+                                    // Cached plotted X — see the reference plot note.
+                                    const auto& e = plotXFor(i, appState.active->selectedFilenames[i]);
+                                    if (!e.primX.empty()) {
+                                        ImPlot::PlotLine("", e.primX.data(), &primData[ref_start], static_cast<int>(e.primX.size()), plotSpecs[i]);
+                                        if (cursorOn) primCursorX[i] = &e.primX;
                                     }
                                 }
                             }
                         }
-                        
+
                         // Draw apodization window overlay (spectrum view is always available)
                         if (appState.active->dataLoaded) {
                             const auto& primDataOverlay = appState.active->loadedData[0].primaryDetector;
@@ -872,9 +951,9 @@ void renderInterferogramPanel() {
                         std::vector<CursorCurve> cursorCurves;
                         for (size_t i = 0; i < appState.active->loadedData.size(); ++i) {
                             const auto& primData = appState.active->loadedData[i].primaryDetector;
-                            if (primData.empty() || primCursorX[i].empty()) continue;
+                            if (primData.empty() || !primCursorX[i] || primCursorX[i]->empty()) continue;
                             CursorCurve cc;
-                            cc.x = &primCursorX[i];
+                            cc.x = primCursorX[i];
                             cc.y = &primData;
                             cc.color = plotSpecs[i].LineColor;
                             cursorCurves.push_back(std::move(cc));
@@ -949,6 +1028,7 @@ void renderInterferogramConfigPanel() {
             if (ImGui::Button("sample##XBaseSample")) {
                 if (!xSample && !axisCorrected) {
                     appState.active->xAxisBase = 0;
+                    appState.active->touchIfgView();
                     appState.active->shouldAutoscale = true;
                     appState.requestViewChangeRedraw();
                 }
@@ -963,6 +1043,7 @@ void renderInterferogramConfigPanel() {
             if (ImGui::Button("OPD##XBaseOPD")) {
                 if (!xOPD) {
                     appState.active->xAxisBase = 1;
+                    appState.active->touchIfgView();
                     appState.active->shouldAutoscale = true;
                     appState.requestViewChangeRedraw();
                 }
@@ -981,6 +1062,7 @@ void renderInterferogramConfigPanel() {
             if (ImGui::Button("off##AlignOff")) {
                 if (appState.active->maxAtZero) {
                     appState.active->maxAtZero = false;
+                    appState.active->touchIfgView();
                     appState.active->shouldAutoscale = true;
                     appState.requestViewChangeRedraw();
                 }
@@ -994,6 +1076,7 @@ void renderInterferogramConfigPanel() {
             if (ImGui::Button("on##AlignOn")) {
                 if (!appState.active->maxAtZero) {
                     appState.active->maxAtZero = true;
+                    appState.active->touchIfgView();
                     appState.active->shouldAutoscale = true;
                     appState.requestViewChangeRedraw();
                 }
@@ -1061,6 +1144,7 @@ void renderInterferogramConfigPanel() {
             if (ImGui::Button("off##DsOff")) {
                 if (appState.active->enableDownsampling) {
                     appState.active->enableDownsampling = false;
+                    appState.active->touchIfgView();
                     appState.active->hilbertXCache.clear();
                     appState.active->peakPositionsCache.clear();
                     if (appState.active->dataLoaded) {
@@ -1127,6 +1211,7 @@ void renderInterferogramConfigPanel() {
             if (ImGui::Button("on##DsOn")) {
                 if (!appState.active->enableDownsampling) {
                     appState.active->enableDownsampling = true;
+                    appState.active->touchIfgView();
                     appState.active->hilbertXCache.clear();
                     appState.active->peakPositionsCache.clear();
                     if (appState.active->dataLoaded) {
@@ -1202,7 +1287,7 @@ void renderInterferogramConfigPanel() {
                         appState.active->peakPositionsCache.clear();
                         appState.active->spectrum.cachedFrequencies.clear();
                         appState.active->spectrum.cachedSpectra.clear();
-                        appState.active->spectrum.lastPrimaryDetectors.clear();
+                        appState.active->spectrum.lastPrimaryPrints.clear();
                         appState.active->spectrum.lastSpectrumParams.clear();
                         appState.active->spectrum.pendingSpectra_.clear();
                         appState.needsRedraw = true;
@@ -1221,7 +1306,7 @@ void renderInterferogramConfigPanel() {
                         appState.active->peakPositionsCache.clear();
                         appState.active->spectrum.cachedFrequencies.clear();
                         appState.active->spectrum.cachedSpectra.clear();
-                        appState.active->spectrum.lastPrimaryDetectors.clear();
+                        appState.active->spectrum.lastPrimaryPrints.clear();
                         appState.active->spectrum.lastSpectrumParams.clear();
                         appState.active->spectrum.pendingSpectra_.clear();
                         appState.needsRedraw = true;
@@ -1242,7 +1327,7 @@ void renderInterferogramConfigPanel() {
                             appState.active->peakPositionsCache.clear();
                             appState.active->spectrum.cachedFrequencies.clear();
                             appState.active->spectrum.cachedSpectra.clear();
-                            appState.active->spectrum.lastPrimaryDetectors.clear();
+                            appState.active->spectrum.lastPrimaryPrints.clear();
                             appState.active->spectrum.lastSpectrumParams.clear();
                             appState.active->spectrum.pendingSpectra_.clear();
                             appState.needsRedraw = true;

@@ -309,7 +309,7 @@ bool T100Spectrum::acquireSpectrumForT100(const std::string& fileId,
         // with the sync/async paths in renderSpectrumContents).
         appState->active->spectrum.cachedFrequencies[fileId] = freq;
         appState->active->spectrum.cachedSpectra[fileId] = spec;
-        appState->active->spectrum.lastPrimaryDetectors[fileId] = raw.primaryDetector;
+        appState->active->spectrum.lastPrimaryPrints[fileId] = fingerprintOf(raw.primaryDetector);
         appState->active->spectrum.lastSpectrumParams[fileId] =
             appState->active->spectrum.currentSpectrumParams();
         return true;

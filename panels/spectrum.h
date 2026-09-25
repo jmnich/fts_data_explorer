@@ -19,15 +19,37 @@
 class AppState;
 struct InterferogramData;
 
+// Staleness fingerprint of a primary-detector vector: its size plus the exact
+// sampled iteration set isSpectrumDirty uses (see fingerprintOf). Replaces the
+// old full-vector copies in Spectrum::lastPrimaryPrints — the map used to hold
+// a complete duplicate of every file's raw detector.
+// Construct only via fingerprintOf() so every stamp site and the dirty check
+// sample the same point set.
+struct PrimaryFingerprint {
+    std::size_t size = 0;
+    std::vector<double> samples;   // exact iteration set, see fingerprintOf()
+    // C++17: defaulted comparisons need C++20 — written by hand.
+    bool operator==(const PrimaryFingerprint& o) const {
+        return size == o.size && samples == o.samples;
+    }
+    bool operator!=(const PrimaryFingerprint& o) const { return !(*this == o); }
+};
+
+// Reproduces isSpectrumDirty's exact iteration: stride = max(1, n/10),
+// i = 0, stride, 2*stride, ... while i < n — ceil(n / stride) samples:
+// n=19 -> 19 samples, n=29 -> 15, n=101 -> 11; 10..15 for n in [20, 99],
+// 10..11 for n >= 100. Do not "simplify" to a fixed sample count.
+PrimaryFingerprint fingerprintOf(const std::vector<double>& v);
+
 class Spectrum {
 public:
     // Reference to app state for accessing raw data cache
     class AppState* appState;
-    
+
     // Spectrum data caching for multiple files
     std::map<std::string, std::vector<double>> cachedSpectra;
     std::map<std::string, std::vector<double>> cachedFrequencies;
-    std::map<std::string, std::vector<double>> lastPrimaryDetectors;
+    std::map<std::string, PrimaryFingerprint> lastPrimaryPrints;
     bool spectrumDirty;
     
     // Unified view/interaction state (zoom window, selectors, unit switch,
@@ -55,7 +77,7 @@ public:
     struct PendingSpectrum {
         std::future<SpectralToolbox::ProcessedSpectrum> future;
         std::string fileId;
-        std::vector<double> primaryDetector; // cached for updating lastPrimaryDetectors on completion
+        PrimaryFingerprint primaryPrint;  // captured at submit; stamps lastPrimaryPrints on completion
         std::array<double, 8> params;         // fingerprint captured at submit time
     };
     std::vector<PendingSpectrum> pendingSpectra_;

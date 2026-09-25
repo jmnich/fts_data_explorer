@@ -381,7 +381,7 @@ static void applyJsonConfig(AppState& state, const json& j) {
         // saved spectra (test3 K1/K4 regression).
         state.active->spectrum.cachedSpectra.clear();
         state.active->spectrum.cachedFrequencies.clear();
-        state.active->spectrum.lastPrimaryDetectors.clear();
+        state.active->spectrum.lastPrimaryPrints.clear();
         state.active->spectrum.lastSpectrumParams.clear();
         state.active->spectrum.pendingSpectra_.clear();
     }

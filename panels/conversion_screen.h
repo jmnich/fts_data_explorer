@@ -60,6 +60,12 @@ struct ConversionScreenState {
 // Render the modal every frame (no-op when closed). Must be called after
 // ImGui::NewFrame(); opens the popup when state.open is set.
 void renderConversionScreen(AppState& s);
+// True while the startup repo-sync thread or one of the screen's
+// converter/repo job threads is in flight (running or finished but not yet
+// joined by pollJobs). The startup job runs at boot before any screen exists,
+// so conversionScreen.open alone does not cover it. Used by the frame loop's
+// idle gate to keep pollJobs serviced.
+bool conversionJobsInFlight(const AppState& s);
 // Open the modal; prefillInput (e.g. a recent legacy directory) sets the
 // converter input path.
 void openConversionScreen(AppState& s, const std::string& prefillInput = "");

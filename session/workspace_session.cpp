@@ -52,10 +52,13 @@ void finishSessionLoad(WorkspaceSession& ws, const std::string& displayName) {
     // Populate engine state
     ws.datasetInfo = workspaceDatasetInfo(ws.workspace);
     ws.csvFiles = workspaceFileList(ws.workspace);
+    ++ws.csvFilesVersion;
 
     // Feature gate
-    if (ws.datasetInfo.axisIsCorrected)
+    if (ws.datasetInfo.axisIsCorrected) {
         ws.xAxisBase = 1; // Force OPD mode
+        ws.touchIfgView();
+    }
 
     // Clear all caches
     clearSessionPanels(ws);

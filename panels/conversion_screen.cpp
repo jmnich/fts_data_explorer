@@ -131,6 +131,16 @@ static ConverterJob& startupJob() {
     return job;
 }
 
+bool conversionJobsInFlight(const AppState& s) {
+    // Startup repo pull (file-static, launched at boot before any screen
+    // exists) or a screen job still joinable. pollJobs keeps
+    // conversionScreen.open true while its jobs run, but the frame loop needs
+    // to service the join on the false edge regardless.
+    return startupJob().thread.joinable() ||
+           s.conversionScreen.job.thread.joinable() ||
+           s.conversionScreen.syncJob.thread.joinable();
+}
+
 static void pollJobs(AppState& s) {
     ConversionScreenState& st = s.conversionScreen;
 

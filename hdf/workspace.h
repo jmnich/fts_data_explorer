@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <map>
 #include <optional>
 #include <string>
@@ -76,6 +77,18 @@ struct MemberGroup {
     std::string origin;     // JSON string, written once at creation (pool-level for IFGs)
     std::string config;     // JSON string, group-level settings
     std::vector<T> members;
+
+    // RAM-only content revision, bumped by every member upsert (the single
+    // mutation choke point, workspace_reader.cpp `upsert`). Never serialized.
+    // A Workspace *copy* carries the counter along (batch sourceCache / j.ws
+    // propagation), so a comparison detects the replacement. A Workspace
+    // *reloaded* from disk starts at 0, so a comparison is only conclusive
+    // when the previous value was nonzero — watchers (e.g. the Experiment
+    // Viewer curve cache) keep the light member scan (ids/stale/xUnit/sizes)
+    // as the primary content check and use this counter to catch in-place
+    // rewrites. NOTE: direct member erasures (member deletion) do NOT bump it
+    // — watchers must also compare the member id list.
+    std::uint64_t memberRevision = 0;
 };
 
 // The in-memory model — the single object the app engine will talk to.
@@ -118,6 +131,17 @@ struct Workspace {
     bool hasReferenceChannel() const;
     bool axisIsCorrected() const;
     bool hasPrecomputedSpectra() const;
+
+    // Aggregate content revision over all member groups — cache key for
+    // main-thread watchers of this workspace (Experiment Viewer). Catches
+    // every upsert (batch/panel finalize, wsMirrorSpectrum); NOT direct
+    // member erasures (deletion) — watchers must also compare member ids.
+    std::uint64_t memberRevision() const {
+        return uncorrectedIfg.memberRevision + correctedIfg.memberRevision +
+               spectra.memberRevision + averageSpectra.memberRevision +
+               snrSpectra.memberRevision + allanWerle.memberRevision +
+               t100.memberRevision;
+    }
 
     // inputs bookkeeping (spec rule 10).
     bool inputsAreValid() const;

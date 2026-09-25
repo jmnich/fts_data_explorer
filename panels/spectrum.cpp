@@ -89,14 +89,23 @@ std::array<double, 8> Spectrum::currentSpectrumParams() const {
              0.0 };
 }
 
+PrimaryFingerprint fingerprintOf(const std::vector<double>& v) {
+    PrimaryFingerprint fp;
+    fp.size = v.size();
+    const std::size_t stride = std::max<std::size_t>(1UL, v.size() / 10);
+    for (std::size_t i = 0; i < v.size(); i += stride)
+        fp.samples.push_back(v[i]);
+    return fp;
+}
+
 bool Spectrum::isSpectrumDirty(const std::string& fileId, const std::vector<double>& primaryDetector) {
     // Check if we have cached data for this file
     auto cachedSpectrumIt = cachedSpectra.find(fileId);
     auto cachedFrequenciesIt = cachedFrequencies.find(fileId);
-    auto lastDetectorIt = lastPrimaryDetectors.find(fileId);
+    auto lastDetectorIt = lastPrimaryPrints.find(fileId);
 
     if (cachedSpectrumIt == cachedSpectra.end() || cachedFrequenciesIt == cachedFrequencies.end() ||
-        lastDetectorIt == lastPrimaryDetectors.end()) {
+        lastDetectorIt == lastPrimaryPrints.end()) {
         return true; // No cached data for this file, need to calculate
     }
 
@@ -113,18 +122,14 @@ bool Spectrum::isSpectrumDirty(const std::string& fileId, const std::vector<doub
         return true;
     }
 
-    // Check if the input data has changed (size or sampled points)
-    if (primaryDetector.size() != lastDetectorIt->second.size()) {
+    // Check if the input data has changed (size first, then the exact
+    // sampled iteration set — at equal size the stride, and hence the
+    // index set, is identical on both sides).
+    const PrimaryFingerprint live = fingerprintOf(primaryDetector);
+    if (live.size != lastDetectorIt->second.size) {
         return true;
     }
-    std::size_t checkPoints = std::min(primaryDetector.size(), lastDetectorIt->second.size());
-    for (std::size_t i = 0; i < checkPoints; i += std::max<std::size_t>(1UL, checkPoints / 10)) {
-        if (primaryDetector[i] != lastDetectorIt->second[i]) {
-            return true;
-        }
-    }
-
-    return false;
+    return live != lastDetectorIt->second;
 }
 
 void Spectrum::pollPendingSpectra() {
@@ -147,7 +152,7 @@ void Spectrum::pollPendingSpectra() {
                 // Stamp the fingerprint CAPTURED AT SUBMIT TIME, not the
                 // current selectors — a param change mid-compute must not mark
                 // the stale result as fresh.
-                lastPrimaryDetectors[it->fileId] = it->primaryDetector;
+                lastPrimaryPrints[it->fileId] = it->primaryPrint;
                 lastSpectrumParams[it->fileId] = it->params;
             } catch (const std::exception& e) {
                 fprintf(stderr, "WARNING: Spectrum computation failed for %s: %s\n",
@@ -172,8 +177,11 @@ bool Spectrum::computeAndCacheSpectrum(const std::string& filePath, const std::s
             for (double& f : freqs)
                 f = SpectralToolbox::convertXValue(f, SpectralToolbox::SpectrumXUnit::CmInv, targetUnit);
             cachedFrequencies[fileId] = std::move(freqs);
+            // Stamp BEFORE the move below — the old code stamped from the
+            // moved-from vector (always empty; harmless only because the
+            // precomputed branch short-circuits isSpectrumDirty).
+            lastPrimaryPrints[fileId] = fingerprintOf(raw.primaryDetector);
             cachedSpectra[fileId] = std::move(raw.primaryDetector);
-            lastPrimaryDetectors[fileId] = raw.primaryDetector;
         } else if (appState->active->datasetInfo.axisIsCorrected) {
             for (auto& v : raw.opdAxis) v *= 1e6;
             auto ps = SpectralToolbox::processSpectrumFromCorrectedAxis(
@@ -184,7 +192,7 @@ bool Spectrum::computeAndCacheSpectrum(const std::string& filePath, const std::s
                 apodizationParams);
             cachedFrequencies[fileId] = std::move(ps.spectrumX);
             cachedSpectra[fileId] = std::move(ps.spectrumY);
-            lastPrimaryDetectors[fileId] = raw.primaryDetector;
+            lastPrimaryPrints[fileId] = fingerprintOf(raw.primaryDetector);
         } else {
             auto ps = SpectralToolbox::processSpectrum(
                 raw.primaryDetector, raw.referenceDetector,
@@ -197,7 +205,7 @@ bool Spectrum::computeAndCacheSpectrum(const std::string& filePath, const std::s
                 appState->active->peakProminenceThreshold);
             cachedFrequencies[fileId] = std::move(ps.spectrumX);
             cachedSpectra[fileId] = std::move(ps.spectrumY);
-            lastPrimaryDetectors[fileId] = raw.primaryDetector;
+            lastPrimaryPrints[fileId] = fingerprintOf(raw.primaryDetector);
         }
 
         wsMirrorSpectrum(*appState, fileId, cachedFrequencies[fileId], cachedSpectra[fileId]);
@@ -225,14 +233,18 @@ bool Spectrum::ensureSpectraFresh(const std::vector<std::string>& fileIds) {
             if (fn == fileId) { fullPath = sp; break; }
         }
         // Parallel to selectedFilenames, like renderSpectrumContents uses.
-        std::vector<double> primary;
+        // Const pointer, NOT a copy: isSpectrumDirty only samples ~10-19
+        // points, so copying the full primaryDetector per file was pure
+        // overhead on the T100 recompute chain.
+        const std::vector<double>* primary = nullptr;
         for (size_t i = 0; i < appState->active->selectedFilenames.size(); ++i) {
             if (appState->active->selectedFilenames[i] != fileId) continue;
             if (i < appState->active->rawDataCache.size())
-                primary = appState->active->rawDataCache[i].primaryDetector;
+                primary = &appState->active->rawDataCache[i].primaryDetector;
             break;
         }
-        if (isSpectrumDirty(fileId, primary))
+        static const std::vector<double> kNoPrimary;   // absent -> empty -> dirty
+        if (isSpectrumDirty(fileId, primary ? *primary : kNoPrimary))
             allOk = computeAndCacheSpectrum(fullPath, fileId) && allOk;
     }
     return allOk;
@@ -474,7 +486,7 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                                 f = SpectralToolbox::convertXValue(f,
                                     SpectralToolbox::SpectrumXUnit::CmInv, targetUnit);
                             cachedFrequencies[fileId] = std::move(freqs);
-                            lastPrimaryDetectors[fileId] = rawData.primaryDetector;
+                            lastPrimaryPrints[fileId] = fingerprintOf(rawData.primaryDetector);
                             lastSpectrumParams[fileId]   = currentSpectrumParams();
                         } else {
                         // No cached data at all → compute synchronously to avoid one-frame gap
@@ -503,7 +515,7 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                         wsMirrorSpectrum(*appState, fileId,
                                          cachedFrequencies[fileId], cachedSpectra[fileId]);
 
-                        lastPrimaryDetectors[fileId] = rawData.primaryDetector;
+                        lastPrimaryPrints[fileId] = fingerprintOf(rawData.primaryDetector);
                         lastSpectrumParams[fileId]   = currentSpectrumParams();
                         }
                     } else {
@@ -538,7 +550,7 @@ void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, s
                             PendingSpectrum ps;
                             ps.future = std::move(fut);
                             ps.fileId = fileId;
-                            ps.primaryDetector = rawData.primaryDetector;
+                            ps.primaryPrint = fingerprintOf(rawData.primaryDetector);
                             ps.params = curParams;   // captured at submit time
                             pendingSpectra_.push_back(std::move(ps));
                         }
@@ -645,7 +657,7 @@ void Spectrum::renderPanel(AppState& s) {
             auto invalidateSpectrumCaches = [&]() {
                 s.active->spectrum.cachedSpectra.clear();
                 s.active->spectrum.cachedFrequencies.clear();
-                s.active->spectrum.lastPrimaryDetectors.clear();
+                s.active->spectrum.lastPrimaryPrints.clear();
                 s.active->spectrum.lastSpectrumParams.clear();
                 s.active->spectrum.pendingSpectra_.clear();
                 s.needsRedraw = true;

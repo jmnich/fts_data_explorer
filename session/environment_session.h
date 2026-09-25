@@ -2,6 +2,7 @@
 
 #include "pthread_compat.h"   // GCC 16+: must precede <mutex> (_GNU_SOURCE undefined)
 #include <array>
+#include <cstdint>
 #include <map>
 #include <string>
 #include <utility>
@@ -194,6 +195,55 @@ public:
     // archival copy in the .h5 results datasets.
     std::vector<double> differenceX, differenceY;
 
+    // ── Gathered-curve cache (per-frame recompute elimination) ────────────
+    // Revision counter bumped by every mutator of the Absorbance `curves`
+    // DISPLAY content: applyYMode, convertXInPlace, applyCurveName (only on
+    // an actual change) and computeAbsorbance. Additive — resultsDirty_
+    // semantics are untouched.
+    std::uint64_t curvesRevision_ = 0;
+    // Cached gather of the display curves (full-res, display unit — cursor
+    // + export are WYSIWYG). Comparator: re-gather when the fold-signature
+    // of the comparatorSources walk changes (incl. each source Workspace's
+    // memberRevision); Absorbance: re-copy on curvesRevision_ / yMode / name
+    // changes. differenceCurveLabels_ is still rebuilt from the returned
+    // vector every frame (renderViewWindow).
+    std::vector<ComparatorCurve> gatheredCurves_;
+    bool   gatheredValid_ = false;
+    std::string gatheredSig_;          // signature gatheredCurves_ was built from
+    // dB global reference max — pure function of the gathered curve Y,
+    // computed unconditionally at every re-gather (NOT only in dB mode, so
+    // toggling dB on with an otherwise-unchanged gather serves a value).
+    double gatheredDbRefMax_ = 0.0;
+    // Downsampled display buffers (A2), parallel to gatheredCurves_; keyed
+    // on (downsampleDisplay, maxPointsBeforeDownsampling) via gatheredDsMax_.
+    std::vector<std::vector<double>> gatheredDsX_, gatheredDsY_;
+    bool   gatheredDsValid_ = false;
+    size_t gatheredDsMax_ = 0;
+    // dB-transformed display buffers (A2), parallel to gatheredCurves_;
+    // keyed on (yScaleSelector==kYScaleDb, dBNormalize, dBRefMax,
+    // downsampleDisplay) via the gatheredDb* fields below — the last key
+    // matters because the buffer is built from the downsampled Y when that
+    // setting is on (a mismatch would pair a full-res X with a ds Y).
+    std::vector<std::vector<double>> gatheredDbY_;
+    bool   gatheredDbValid_ = false;
+    bool   gatheredDbNormalize_ = false;
+    double gatheredDbRefMaxKey_ = 0.0;
+    bool   gatheredDbDs_ = false;
+    // Difference cache (A2): the public differenceX/Y ARE the cache value;
+    // recompute only when the A1 signature or a difference/dB param changes.
+    // Stats stay per-frame (view-window-dependent region mode).
+    bool   diffCacheValid_ = false;
+    std::string diffSig_;              // gatheredSig_ the difference was built from
+    bool   diffDbMode_ = false;        // plot.yScaleSelector == kYScaleDb
+    bool   diffDbNormalize_ = false;
+    double diffDbRefMax_ = 0.0;
+    int    diffRef_ = -1, diffSub_ = -1, diffMode_ = -1;
+    bool   diffEnabled_ = false;
+    // Difference downsampled buffers (parallel to differenceX/Y).
+    std::vector<double> diffDsX_, diffDsY_;
+    bool   diffDsValid_ = false;
+    size_t diffDsMax_ = 0;
+
     // Synchronous artifact-based compute (Average/Raw spectra, no FFT pool):
     // per curve, resample the sample onto the reference's overlapping X region
     // and divide (clamped). Idempotent; cheap enough to run on selector change.
@@ -243,6 +293,18 @@ public:
     std::vector<ComparatorCurve> gatherCurves(AppState& s);
 
 private:
+    // Cached display curves for the Viewer (and, force-fresh, for exportCsv).
+    // Re-gathers on signature change; renderPlot/difference consumers read
+    // the same vector. Full-res, display unit — WYSIWYG.
+    const std::vector<ComparatorCurve>& curvesForDisplay(bool forceFresh);
+    // Signature of the inputs the gather depends on (fold of the
+    // comparatorSources walk / the Absorbance curve records). Deterministic —
+    // no point sampling.
+    std::string buildCurveSignature();
+    // (Re)build gatheredCurves_ + gatheredDbRefMax_; clears the A2 buffers
+    // and the difference cache.
+    void rebuildGatheredCurves();
+
     std::string titleCache_;
     // Difference statistics (computed together with the difference curve).
     double differenceMin = 0.0, differenceMax = 0.0;

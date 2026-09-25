@@ -26,6 +26,31 @@ int clampLevel(int level, int count) {
     return std::max(0, std::min(level, count - 1));
 }
 
+// Memoized hitranBandsForLevel results, keyed by (threshold, smoothing) per gas
+// array index. UI-thread only: both call sites run inside the frame loop — change
+// this to a thread-safe scheme if a worker ever calls it.
+struct BandCacheEntry {
+    bool valid = false;
+    float thr = 0.0f;    // key: strength threshold
+    int smooth = 0;      // key: smoothing range in cm-1
+    std::vector<HitranBand> bands;
+    std::vector<double> peaks;
+};
+BandCacheEntry g_bandCache[kHitranGasCount];
+
+const BandCacheEntry& cachedBands(const HitranGas& gas, int gasIndex, float thr, int smooth) {
+    BandCacheEntry& e = g_bandCache[gasIndex];
+    if (!e.valid || e.thr != thr || e.smooth != smooth) {
+        e.bands.clear();
+        e.peaks.clear();
+        hitranBandsForLevel(gas, thr, smooth, e.bands, e.peaks);
+        e.thr = thr;
+        e.smooth = smooth;
+        e.valid = true;
+    }
+    return e;
+}
+
 // Segmented toggle-button group (IMGUI_GUIDE 12) for a level selector.
 bool segmentedButtons(const char* id, const char* const* labels, int count, int& level) {
     bool changed = false;
@@ -85,19 +110,17 @@ bool renderHitranPanel(const char* title, std::array<bool, 8>& enabled,
                 appState.needsRedraw = true;
             }
             if (ImGui::IsItemHovered()) {
-                std::vector<HitranBand> bands;
-                std::vector<double> peaks;
-                hitranBandsForLevel(kHitranGases[i],
-                                    kHitranThresholds[clampLevel(thresholdLevel, kHitranLevelCount)],
-                                    kHitranSmoothOptions[clampLevel(smoothLevel, kHitranSmoothLevelCount)],
-                                    bands, peaks);
+                const BandCacheEntry& e = cachedBands(
+                    kHitranGases[i], i,
+                    kHitranThresholds[clampLevel(thresholdLevel, kHitranLevelCount)],
+                    kHitranSmoothOptions[clampLevel(smoothLevel, kHitranSmoothLevelCount)]);
                 double coverage = 0.0;
-                for (const auto& b : bands) coverage += b.cmMax - b.cmMin;
+                for (const auto& b : e.bands) coverage += b.cmMax - b.cmMin;
                 ImGui::SetTooltip("%d band%s, %.0f cm-1 coverage, %d peak%s",
-                                  static_cast<int>(bands.size()),
-                                  bands.size() == 1 ? "" : "s", coverage,
-                                  static_cast<int>(peaks.size()),
-                                  peaks.size() == 1 ? "" : "s");
+                                  static_cast<int>(e.bands.size()),
+                                  e.bands.size() == 1 ? "" : "s", coverage,
+                                  static_cast<int>(e.peaks.size()),
+                                  e.peaks.size() == 1 ? "" : "s");
             }
             ImGui::PopID();
         }
@@ -148,14 +171,17 @@ void renderHitranMarkers(const std::array<bool, 8>& enabled, int xUnit,
     // Peak-location ticks: fixed width everywhere, full color.
     const float tickHalfW = 3.0f;   // 6 px
 
-    for (size_t row = 0; row < active.size(); ++row) {
-        const HitranGas& gas = *active[row];
+    int row = 0;
+    for (int i = 0; i < kHitranGasCount; ++i) {
+        if (!enabled[i]) continue;
+        const HitranGas& gas = kHitranGases[i];
         const float y0 = plotPos.y + 4.0f + static_cast<float>(row) * pitch;
         const ImU32 color = static_cast<ImU32>(gas.color);
         const ImU32 dimColor = (color & 0x00FFFFFFu) | (0x59u << 24);  // ~35% alpha
-        std::vector<HitranBand> bands;
-        std::vector<double> peaks;
-        hitranBandsForLevel(gas, thr, smoothCm, bands, peaks);
+        const BandCacheEntry& e = cachedBands(gas, i, thr, smoothCm);
+        const std::vector<HitranBand>& bands = e.bands;
+        const std::vector<double>& peaks = e.peaks;
+        ++row;
         if (bands.empty()) continue;
         // Full band at reduced alpha.
         for (const auto& b : bands) {

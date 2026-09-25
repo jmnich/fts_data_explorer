@@ -692,6 +692,7 @@ void EnvironmentSession::computeAbsorbance(AppState& s) {
     using ST = SpectralToolbox::SpectrumXUnit;
     const auto dst = static_cast<ST>(plot.xUnitSelector);
     bool any = false;
+    ++curvesRevision_;   // content mutator (cache key, additive to resultsDirty_)
     captureSnapshots(s);
     for (auto& c : curves) {
         c.gridX.clear();
@@ -769,6 +770,7 @@ void EnvironmentSession::computeAbsorbance(AppState& s) {
 }
 
 void EnvironmentSession::applyYMode() {
+    ++curvesRevision_;   // display-content mutator (cache key, additive to resultsDirty_)
     for (auto& c : curves) {
         c.curveY.resize(c.ratioY.size());
         for (size_t i = 0; i < c.ratioY.size(); ++i) {
@@ -795,6 +797,11 @@ void EnvironmentSession::applyYMode() {
 void EnvironmentSession::computeDifference(
     const std::vector<ComparatorCurve>& curves, bool dBNormalize,
     double dBRefMax) {
+    // [audit2] Refuse-path insurance: every path below that clears
+    // differenceX/Y must also drop the cache/ds flags — cheap, and guards
+    // against a refusal the signature key cannot distinguish.
+    diffCacheValid_ = false;
+    diffDsValid_ = false;
     differenceX.clear();
     differenceY.clear();
     differenceStatsValid = false;
@@ -875,6 +882,7 @@ void EnvironmentSession::computeDifferenceStats() {
 }
 
 void EnvironmentSession::convertXInPlace() {
+    ++curvesRevision_;   // display-content mutator (cache key, additive to resultsDirty_)
     auto oldU = static_cast<SpectralToolbox::SpectrumXUnit>(plot.prevXUnitSelector);
     auto newU = static_cast<SpectralToolbox::SpectrumXUnit>(plot.xUnitSelector);
     for (auto& c : curves)
@@ -943,6 +951,7 @@ void EnvironmentSession::applyCurveName(AbsorbanceCurve& c) {
     s = (b == std::string::npos) ? "" : s.substr(b);
     while (!s.empty() && s.back() == ' ') s.pop_back();
     if (s == c.name) return;
+    ++curvesRevision_;   // label mutator: curveLabel() output changes (cache key)
     c.name = s;
     std::snprintf(c.nameBuf, sizeof(c.nameBuf), "%s", s.c_str());
     dirty = true;
@@ -1016,28 +1025,18 @@ void EnvironmentSession::renderViewWindow() {
     ImGui::SetNextWindowDockID(mainDockSpaceId(), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Viewer##envview")) {
         forceDockSelection();
-        std::vector<ComparatorCurve> curves;
+        // [A1] Cached display curves — the gather (deep member copies, unit
+        // conversion, label dedup) runs only when the signature changed.
+        const std::vector<ComparatorCurve>& curves = curvesForDisplay(false);
         std::string xLabel, yLabel;
         bool hasGuideline = false;
         double guideline = 0.0;
         if (type == EnvType::Absorbance) {
-            for (size_t ci = 0; ci < this->curves.size(); ++ci) {
-                const auto& c = this->curves[ci];
-                if (c.gridX.empty() || c.curveY.empty()) continue;
-                ComparatorCurve cc;
-                cc.label = curveLabel(c, ci);
-                cc.shortLabel = cc.label;
-                cc.x = c.gridX;
-                cc.y = c.curveY;
-                cc.color = tab20Color(ci);   // matches the Settings accent line
-                curves.push_back(std::move(cc));
-            }
             xLabel = xUnitLabel(plot.xUnitSelector);
             yLabel = (yMode == 0) ? "Transmittance [%]" : "Absorbance";
             hasGuideline = true;
             guideline = (yMode == 0) ? 100.0 : 0.0;
         } else {
-            curves = gatherCurves(appState);
             const auto artifact = static_cast<ComparatorArtifact>(artifactSelector);
             xLabel = (artifact == ComparatorArtifact::CorrectedInterferogram)
                          ? "OPD (um)"
@@ -1949,6 +1948,172 @@ void EnvironmentSession::renderStaleWarning(ImDrawList* dl, const ImVec2& rectMi
                            });
 }
 
+// ── Gathered-curve cache (A1) ────────────────────────────────────────────────
+
+// Deterministic signature of every input the gather depends on. No point
+// sampling: Absorbance keys on the curves revision + per-curve identity,
+// Comparator folds the comparatorSources walk plus a LIGHT member scan
+// (ids / stale / xUnit / vector sizes — never the x/y copies) with each
+// source Workspace's memberRevision (the upsert choke point).
+std::string EnvironmentSession::buildCurveSignature() {
+    std::string sig;
+    const auto append = [&sig](const auto& v) {
+        sig += std::to_string(v);
+        sig += '\x1f';
+    };
+    if (type == EnvType::Absorbance) {
+        sig += "A";
+        append(curvesRevision_);
+        append(yMode);
+        append(curves.size());
+        for (const auto& c : curves) {
+            sig += c.refKey; sig += '\x1f';
+            append(c.refArtifact);
+            sig += c.refMember; sig += '\x1f';
+            sig += c.sampleKey; sig += '\x1f';
+            append(c.sampleArtifact);
+            sig += c.sampleMember; sig += '\x1f';
+            sig += c.name; sig += '\x1f';
+            append(c.gridX.size());
+            append(c.curveY.size());
+        }
+        return sig;
+    }
+    sig += "C";
+    const auto artifact = static_cast<ComparatorArtifact>(artifactSelector);
+    append(artifactSelector);
+    append(plot.xUnitSelector);
+    append(static_cast<int>(maxAtZeroIfg));
+    append(static_cast<int>(comparatorKeysExplicit));
+    for (const auto& k : comparatorKeys) { sig += k; sig += '\x1f'; }
+    for (const auto& [k, m] : memberPicks) { sig += k; sig += '#'; sig += m; sig += '\x1f'; }
+    append(appState.sessions.size());
+    for (const auto& sess : appState.sessions) { sig += sess->key; sig += '\x1f'; }
+    for (const auto& src : comparatorSources(appState)) {
+        sig += src.key; sig += '\x1f';
+        sig += src.label; sig += '\x1f';
+        const bool included = comparatorKeys.empty()
+            ? (!comparatorKeysExplicit && sessionOpen(src.key))
+            : std::find(comparatorKeys.begin(), comparatorKeys.end(), src.key) !=
+                  comparatorKeys.end();
+        append(static_cast<int>(included));
+        append(src.ws->memberRevision());
+        if (!included) continue;
+        const Workspace& ws = *src.ws;
+        const auto twoCol = [&](const TwoColumnMember& m) {
+            sig += m.id; sig += '\x1f';
+            append(static_cast<int>(m.stale));
+            append(memberXUnit(m));
+            append(m.x.size());
+            append(m.y.size());
+        };
+        switch (artifact) {
+        case ComparatorArtifact::AverageSpectrum:
+            for (const auto& m : ws.averageSpectra.members) {
+                twoCol(m);
+                append(memberCountFromConfig(m, "count"));
+            }
+            break;
+        case ComparatorArtifact::Snr:
+            for (const auto& m : ws.snrSpectra.members) {
+                twoCol(m);
+                append(memberCountFromConfig(m, "fileCount"));
+            }
+            break;
+        case ComparatorArtifact::RawSpectrum:
+            for (const auto& m : ws.spectra.members) twoCol(m);
+            break;
+        case ComparatorArtifact::T100:
+            for (const auto& m : ws.t100.members) {
+                // Member id FIRST: direct erasures do not bump memberRevision,
+                // and two T100 members may share curve metadata (same fileIds
+                // and sizes) — without the id a deletion would be invisible.
+                sig += m.id; sig += '\x1f';
+                for (const auto& c : m.curves) {
+                    sig += c.fileId; sig += '\x1f';
+                    append(static_cast<int>(m.stale));
+                    append(memberXUnit(m.reference));
+                    append(c.x.size());
+                    append(c.y.size());
+                }
+            }
+            break;
+        case ComparatorArtifact::CorrectedInterferogram: {
+            for (const auto& m : ws.correctedIfg.members) {
+                sig += m.id; sig += '\x1f';
+                append(static_cast<int>(m.stale));
+                append(m.col0.size());
+                append(m.col1.size());
+            }
+            if (ws.correctedIfg.members.empty()) {
+                // Fallback derives the OPD axis from the uncorrected group:
+                // the derivation params are part of the content key.
+                const IfgDeriveParams p = ifgDeriveParamsFor(src.key, ws);
+                append(p.laserUm);
+                append(p.method);
+                append(p.prominence);
+                for (const auto& m : ws.uncorrectedIfg.members) {
+                    sig += m.id; sig += '\x1f';
+                    append(static_cast<int>(m.stale));
+                    append(m.col1.size());
+                }
+            }
+            break;
+        }
+        case ComparatorArtifact::RawInterferogram:
+            for (const auto& m : ws.uncorrectedIfg.members) {
+                sig += m.id; sig += '\x1f';
+                append(static_cast<int>(m.stale));
+                append(m.col1.size());
+            }
+            break;
+        }
+    }
+    return sig;
+}
+
+// (Re)build the cached display curves + the unconditional dB reference max;
+// every A2 buffer and the difference cache key off this.
+void EnvironmentSession::rebuildGatheredCurves() {
+    gatheredCurves_.clear();
+    if (type == EnvType::Absorbance) {
+        for (size_t ci = 0; ci < curves.size(); ++ci) {
+            const auto& c = curves[ci];
+            if (c.gridX.empty() || c.curveY.empty()) continue;
+            ComparatorCurve cc;
+            cc.label = curveLabel(c, ci);
+            cc.shortLabel = cc.label;
+            cc.x = c.gridX;
+            cc.y = c.curveY;
+            cc.color = tab20Color(ci);   // matches the Settings accent line
+            gatheredCurves_.push_back(std::move(cc));
+        }
+    } else {
+        gatheredCurves_ = gatherCurves(appState);
+    }
+    // dB global reference max — pure function of the gathered Y. Computed
+    // UNCONDITIONALLY at every re-gather (not only while dB is active), so
+    // toggling dB on with an otherwise-unchanged gather serves a value.
+    gatheredDbRefMax_ = 0.0;
+    for (const auto& c : gatheredCurves_)
+        for (double v : c.y) gatheredDbRefMax_ = std::max(gatheredDbRefMax_, v);
+    gatheredValid_ = true;
+    // A2 buffers/difference cache are keyed to the gather — drop them.
+    gatheredDsValid_ = false;
+    gatheredDbValid_ = false;
+    diffCacheValid_ = false;
+    diffDsValid_ = false;
+}
+
+const std::vector<ComparatorCurve>& EnvironmentSession::curvesForDisplay(bool forceFresh) {
+    const std::string sig = buildCurveSignature();
+    if (forceFresh || !gatheredValid_ || sig != gatheredSig_) {
+        rebuildGatheredCurves();
+        gatheredSig_ = sig;
+    }
+    return gatheredCurves_;
+}
+
 // Common overlay plot with spectrum-view navigation: all/tight/force Y,
 // shift+drag area zoom, ESC fit-all, arrows pan, wheel zoom, downsample.
 void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
@@ -1957,6 +2122,8 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
                                     bool hasGuideline, double guideline,
                                     bool showLegend) {
     if (curves.empty()) {
+        diffCacheValid_ = false;   // [audit2] refuse-path clear
+        diffDsValid_ = false;
         differenceX.clear();
         differenceY.clear();
         differenceStatsValid = false;
@@ -1975,19 +2142,45 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
     // Comparator dB mode: normalize the GLOBAL curve maximum to 0 dB — same
     // convention as the spectrum/average dB modes (max = 0 dB). Absorbance
     // keeps raw dB (transmittance % has an absolute reference).
-    const bool dBNormalize = (type == EnvType::Comparator) &&
-                             plot.yScaleSelector == kYScaleDb;
-    double dBRefMax = 0.0;
-    if (dBNormalize) {
-        for (const auto& c : curves)
-            for (double v : c.y) dBRefMax = std::max(dBRefMax, v);
-        if (dBRefMax <= 0.0) dBRefMax = 1.0;   // all-zero curves → floored at -300 dB
-    }
+    // [A2] The global max is computed once per re-gather (see
+    // rebuildGatheredCurves), not per frame.
+    const bool dbMode = plot.yScaleSelector == kYScaleDb;
+    const bool dBNormalize = (type == EnvType::Comparator) && dbMode;
+    double dBRefMax = gatheredDbRefMax_;
+    if (dBNormalize && dBRefMax <= 0.0) dBRefMax = 1.0;   // all-zero curves → floored at -300 dB
 
     // Difference: real-time compute AFTER the dB params (it subtracts the
-    // displayed values). showDifference keys the latch + row count, so it must
-    // reflect data validity, not just differenceEnabled.
-    computeDifference(curves, dBNormalize, dBRefMax);
+    // displayed values). [A2] Cached — the full pipeline (copies, dB pass,
+    // overlap filter, resample, difference) reruns only when the gather
+    // signature or a difference/dB param changed. Stats stay per-frame: they
+    // depend on the view window in region mode and are a single
+    // allocation-free O(n) pass, so the documented one-frame lag is
+    // preserved exactly. NOTE: computeDifference keys its dB pass on
+    // plot.yScaleSelector (NOT on dBNormalize — Absorbance keeps raw dB), so
+    // the raw mode must be part of the key too.
+    const bool diffKeyChanged =
+        !diffCacheValid_ || diffSig_ != gatheredSig_ ||
+        diffDbMode_ != dbMode ||
+        diffDbNormalize_ != dBNormalize || diffDbRefMax_ != dBRefMax ||
+        diffRef_ != differenceRefIdx || diffSub_ != differenceSubIdx ||
+        diffMode_ != differenceMode || diffEnabled_ != differenceEnabled;
+    if (diffKeyChanged) {
+        computeDifference(curves, dBNormalize, dBRefMax);
+        // Record the key AFTER the compute: computeDifference clamps the
+        // ref/sub indices in place, so storing afterwards keys the state the
+        // difference was actually built from (no extra recompute next frame).
+        diffSig_ = gatheredSig_;
+        diffDbMode_ = dbMode;
+        diffDbNormalize_ = dBNormalize;
+        diffDbRefMax_ = dBRefMax;
+        diffRef_ = differenceRefIdx;
+        diffSub_ = differenceSubIdx;
+        diffMode_ = differenceMode;
+        diffEnabled_ = differenceEnabled;
+        diffCacheValid_ = true;   // refusal results are stable under this key too
+    } else {
+        computeDifferenceStats();
+    }
     const bool showDifference = differenceEnabled && !differenceX.empty() &&
                               differenceY.size() == differenceX.size();
 
@@ -2156,26 +2349,51 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
             // cursor markers and info box reuse them). tab20 cyclic palette for
             // comparator overlays (matplotlib convention); the cursor still reads
             // the full-res curves below, so downsampling never skews its values.
+            // [A2] The downsampled and dB display buffers are materialized
+            // once per (gather, settings) change beside the cache — never
+            // per frame, and never through the const curve ref.
+            if (downsampleDisplay &&
+                (!gatheredDsValid_ ||
+                 gatheredDsMax_ != appState.maxPointsBeforeDownsampling ||
+                 gatheredDsX_.size() != curves.size())) {
+                gatheredDsX_.assign(curves.size(), {});
+                gatheredDsY_.assign(curves.size(), {});
+                for (size_t k = 0; k < curves.size(); ++k)
+                    downsampleCurve(curves[k].x, curves[k].y,
+                                    appState.maxPointsBeforeDownsampling,
+                                    gatheredDsX_[k], gatheredDsY_[k]);
+                gatheredDsValid_ = true;
+                gatheredDsMax_ = appState.maxPointsBeforeDownsampling;
+                gatheredDbValid_ = false;   // dB buffers derive from the ds Y
+            }
+            if (dbMode &&
+                (!gatheredDbValid_ || gatheredDbNormalize_ != dBNormalize ||
+                 gatheredDbRefMaxKey_ != dBRefMax ||
+                 gatheredDbDs_ != downsampleDisplay ||
+                 gatheredDbY_.size() != curves.size())) {
+                gatheredDbY_.assign(curves.size(), {});
+                for (size_t k = 0; k < curves.size(); ++k) {
+                    const std::vector<double>& srcY =
+                        downsampleDisplay ? gatheredDsY_[k] : curves[k].y;
+                    gatheredDbY_[k] = srcY;
+                    for (double& v : gatheredDbY_[k])
+                        v = dBNormalize
+                            ? 10.0 * std::log10(std::max(v / dBRefMax, 1e-300))
+                            : 10.0 * std::log10(std::max(v, 1e-300));
+                }
+                gatheredDbValid_ = true;
+                gatheredDbNormalize_ = dBNormalize;
+                gatheredDbRefMaxKey_ = dBRefMax;
+                gatheredDbDs_ = downsampleDisplay;
+            }
             if (showLegend) ImPlot::PushColormap(tab20Colormap());
             std::vector<ImVec4> curveColors(curves.size());
             for (size_t k = 0; k < curves.size(); ++k) {
                 const auto& c = curves[k];
                 const std::vector<double>* px = &c.x;
                 const std::vector<double>* py = &c.y;
-                std::vector<double> dx, dy;
-                if (downsampleDisplay) {
-                    downsampleCurve(c.x, c.y, appState.maxPointsBeforeDownsampling, dx, dy);
-                    px = &dx;
-                    py = &dy;
-                }
-                if (plot.yScaleSelector == kYScaleDb) {
-                    // dB needs a writable buffer: copy only when not downsampled.
-                    if (px == &c.x) { dy = c.y; py = &dy; }
-                    for (double& v : dy)
-                        v = dBNormalize
-                            ? 10.0 * std::log10(std::max(v / dBRefMax, 1e-300))
-                            : 10.0 * std::log10(std::max(v, 1e-300));
-                }
+                if (downsampleDisplay) { px = &gatheredDsX_[k]; py = &gatheredDsY_[k]; }
+                if (dbMode) py = &gatheredDbY_[k];
                 ImPlotSpec spec;
                 if (c.color.w > 0.0f) spec.LineColor = c.color;
                 ImPlot::PlotLine(c.label.c_str(), px->data(), py->data(),
@@ -2287,14 +2505,21 @@ void EnvironmentSession::renderPlot(const std::vector<ComparatorCurve>& curves,
             if (rx0 < rx1)
                 SpectralPlotView::setupAxisTicksLimited(ImAxis_X1, rx0, rx1);
 
+            // [A2] Difference downsampled buffers cache beside the difference
+            // itself (cleared on every difference recompute).
+            if (downsampleDisplay &&
+                (!diffDsValid_ || diffDsMax_ != appState.maxPointsBeforeDownsampling ||
+                 diffDsX_.size() != differenceX.size())) {
+                downsampleCurve(differenceX, differenceY,
+                                appState.maxPointsBeforeDownsampling, diffDsX_, diffDsY_);
+                diffDsValid_ = true;
+                diffDsMax_ = appState.maxPointsBeforeDownsampling;
+            }
             const std::vector<double>* rpx = &differenceX;
             const std::vector<double>* rpy = &differenceY;
-            std::vector<double> rdx, rdy;
-            if (downsampleDisplay) {
-                downsampleCurve(differenceX, differenceY,
-                                appState.maxPointsBeforeDownsampling, rdx, rdy);
-                rpx = &rdx;
-                rpy = &rdy;
+            if (downsampleDisplay && diffDsValid_) {
+                rpx = &diffDsX_;
+                rpy = &diffDsY_;
             }
             ImPlotSpec resSpec;
             resSpec.LineColor = ImVec4(0.753f, 0.055f, 0.055f, 1.0f);
@@ -2371,22 +2596,11 @@ void EnvironmentSession::exportCsv() {
         return;
     }
 
-    // Build the display curves to export (Comparator: gatherCurves respects
-    // the Included datasets checkboxes; Absorbance: every computed curve).
-    std::vector<ComparatorCurve> curves;
-    if (type == EnvType::Comparator) {
-        curves = gatherCurves(appState);
-    } else {
-        for (size_t k = 0; k < this->curves.size(); ++k) {
-            const auto& c = this->curves[k];
-            if (c.gridX.empty() || c.curveY.empty()) continue;
-            ComparatorCurve cc;
-            cc.label = curveLabel(c, k);
-            cc.x = c.gridX;
-            cc.y = c.curveY;
-            curves.push_back(std::move(cc));
-        }
-    }
+    // Build the display curves to export — FORCE-FRESH ([A1] event-driven,
+    // zero display cost): Comparator re-gathers (respects the Included
+    // datasets checkboxes), Absorbance re-copies every computed curve. Both
+    // see the exact current data (WYSIWYG with the plot).
+    std::vector<ComparatorCurve> curves = curvesForDisplay(true);
     // Difference (when enabled): exported as an extra wide-table curve — the
     // padding, X-range filter and header generation below apply unchanged.
     if (differenceEnabled && !differenceX.empty() &&

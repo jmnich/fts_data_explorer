@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <deque>
 #include <map>
 #include <memory>
@@ -52,6 +53,12 @@ public:
     // ── files / selection ──────────────────────────────────────────────────
     std::string currentDirectory;
     std::vector<std::string> csvFiles;
+    // Bumped at every csvFiles ASSIGNMENT (finishSessionLoad, original-member
+    // deletion re-derive, roundtrip populateSession). Element erases
+    // (removeFileFromEngine) are covered by the frame loop's size guard
+    // instead. Any future csvFiles mutation must either bump this version or
+    // change the vector's size — the Files panel order depends on it.
+    int csvFilesVersion = 0;
     std::vector<InterferogramData> loadedData;
     std::vector<InterferogramData> rawDataCache;
     std::vector<std::string> selectedFiles;
@@ -66,6 +73,23 @@ public:
     size_t lastSelectedIndex = 0;
     bool maxAtZero = false;
     std::vector<std::string> sortedFiles;
+    // csvFilesVersion sortedFiles was last sorted under (frame-loop cache key;
+    // -1 forces the first sort). Kept in lockstep through park/resume since
+    // the whole struct moves intact.
+    int sortedFilesVersion_ = -1;
+
+    // Files panel row-label cache (member id → display name). Keyed on the
+    // global showTimestamps flag at build time so the ribbon toggle re-labels
+    // in both directions without an explicit clear; entries are erased per
+    // key in removeFileFromEngine (never outlive deleted members) and the
+    // whole map is cleared with the other session caches.
+    struct FilesDisplayName {
+        bool valid = false;
+        bool withTimestamps = false;   // key: appState.showTimestamps at build
+        std::string full;              // basename, unshortened (tooltips)
+        std::string label;             // shortened + optional " [hh:mm:ss]"
+    };
+    std::map<std::string, FilesDisplayName> filesDisplayNameCache;
     std::vector<bool> filesSelectedForAveraging;
 
     // ── zoom / axis / interaction state ────────────────────────────────────
@@ -122,6 +146,52 @@ public:
     float peakProminenceThreshold = 0.02f;
     bool showPeakIndicators = false;
     std::map<std::string, std::vector<size_t>> peakPositionsCache;
+
+    // ── interferogram plot-input caches (per-frame X recompute elimination) ──
+    // Revision bumped by touchIfgView() at every xAxisBase / maxAtZero /
+    // enableDownsampling / selection mutator (interferogram_view buttons,
+    // Ctrl+A / Ctrl+D, view-state restore, selection reloads). A missed bump
+    // shows as a silently wrong X axis that survives zoom/pan, so the
+    // per-frame key check in interferogram_view.cpp is a mandatory defensive
+    // backstop on top of the revision.
+    std::uint64_t ifgViewRevision = 0;
+    void touchIfgView() { ++ifgViewRevision; }
+
+    // INVARIANT (per-fileId keying is valid only because of this): per-file
+    // loaded data is IMMUTABLE once loaded — raw loads are synchronous at
+    // selection (files-panel row click / handleKeyboardNavigation push_back
+    // paths). Any future in-place data refresh for a kept fileId silently
+    // goes stale in these caches (sizes are the only content proxy checked).
+    struct IfgPlotXEntry {
+        // Key — compare every field before reusing refX/primX.
+        std::uint64_t rev = 0;
+        int axisBase = -1;
+        bool maxAtZero = false;
+        bool downsampling = false;
+        float laserWavelength = 0.0f;
+        int correctionMethod = -1;
+        float prominence = 0.0f;
+        size_t refEnd = 0;              // per-frame plot window end (file 0)
+        size_t refSize = 0, primSize = 0;       // loadedData[i] sizes
+        size_t rawRefSize = 0, rawPrimSize = 0; // rawDataCache[i] sizes
+        size_t peakIdx = 0;             // full-res peak (maxAtZero only)
+        bool   hasHilb = false;         // hilbertXCache entry present/non-empty
+        size_t hilbSize = 0;            // ... and its size (clear/refill guard)
+        // Value — plotted X arrays (display units), ref/prim variants sized
+        // to their respective detector arrays; empty = no X array is plotted
+        // (OPD mode without a hilbert entry).
+        std::vector<double> refX;
+        std::vector<double> primX;
+    };
+    std::map<std::string, IfgPlotXEntry> ifgPlotXCache;
+
+    // Full-res peak index per fileId (replaces the per-frame max_element).
+    struct PeakIdxEntry {
+        size_t srcSize = static_cast<size_t>(-1);     // chosen source vector size
+        size_t loadedSize = static_cast<size_t>(-1);  // loaded primary size
+        size_t idx = 0;
+    };
+    std::map<std::string, PeakIdxEntry> peakIdxCache;
 
     // ── panels by value (futures & caches included) ────────────────────────
     Spectrum spectrum;

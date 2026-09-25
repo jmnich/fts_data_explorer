@@ -123,12 +123,16 @@ void clearSessionPanels(WorkspaceSession& s) {
     s.spectrum.pendingSpectra_.clear();
     s.spectrum.cachedSpectra.clear();
     s.spectrum.cachedFrequencies.clear();
-    s.spectrum.lastPrimaryDetectors.clear();
+    s.spectrum.lastPrimaryPrints.clear();
     s.spectrum.lastSpectrumParams.clear();
     s.loadedData.clear();
     s.rawDataCache.clear();
     s.hilbertXCache.clear();
     s.peakPositionsCache.clear();
+    s.ifgPlotXCache.clear();
+    s.peakIdxCache.clear();
+    s.filesDisplayNameCache.clear();
+    s.touchIfgView();
     s.hilbertCacheLaserWavelength = 0.0f;
     s.selectedFiles.clear();
     s.selectedFilenames.clear();

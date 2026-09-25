@@ -91,6 +91,7 @@ void populateSession(WorkspaceSession& s, const std::string& tag, const std::str
     s.workspacePath = h5Path;
     s.datasetInfo = workspaceDatasetInfo(s.workspace);
     s.csvFiles = workspaceFileList(s.workspace);
+    ++s.csvFilesVersion;
     s.sortedFiles = s.csvFiles;
     s.currentDirectory = "/data/" + tag;
     s.currentDatasetName = tag;
@@ -268,7 +269,7 @@ void checkSpectrumEq(const Spectrum& a, const Spectrum& b) {
     CHECK(a.plot.rightArrowHandleFlag == b.plot.rightArrowHandleFlag);
     CHECK(a.cachedSpectra == b.cachedSpectra);
     CHECK(a.cachedFrequencies == b.cachedFrequencies);
-    CHECK(a.lastPrimaryDetectors == b.lastPrimaryDetectors);
+    CHECK(a.lastPrimaryPrints == b.lastPrimaryPrints);
     CHECK(a.lastSpectrumParams == b.lastSpectrumParams);
     // pendingSpectra_ (futures) excluded by contract — both must be empty here.
     CHECK(a.pendingSpectra_.empty() && b.pendingSpectra_.empty());

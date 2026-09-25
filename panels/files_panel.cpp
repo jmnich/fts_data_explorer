@@ -70,10 +70,14 @@ static void removeFileFromEngine(AppState& s, const std::string& id) {
     s.active->dataLoaded = !s.active->loadedData.empty();
     s.active->spectrum.cachedSpectra.erase(id);
     s.active->spectrum.cachedFrequencies.erase(id);
-    s.active->spectrum.lastPrimaryDetectors.erase(id);
+    s.active->spectrum.lastPrimaryPrints.erase(id);
     s.active->spectrum.lastSpectrumParams.erase(id);
     s.active->hilbertXCache.erase(id);
     s.active->peakPositionsCache.erase(id);
+    s.active->ifgPlotXCache.erase(id);   // mirror per-key erases: entries
+    s.active->peakIdxCache.erase(id);    // never outlive deleted members
+    s.active->filesDisplayNameCache.erase(id);
+    s.active->touchIfgView();
     s.active->t100.cachedTransX.erase(id);
     s.active->t100.cachedTransY.erase(id);
     s.active->t100.fullResCachedTransX.erase(id);
@@ -100,6 +104,7 @@ void performWorkspaceMemberDeletion(AppState& s, const std::string& absPath) {
     if (isOriginal) {
         s.active->datasetInfo = workspaceDatasetInfo(s.active->workspace);
         s.active->csvFiles = workspaceFileList(s.active->workspace);
+        ++s.active->csvFilesVersion;
         clearPanelCaches(s);
         s.active->filesChanged = true;
     }
@@ -186,20 +191,37 @@ void renderFilesPanel() {
         
         for (size_t i = 0; i < appState.active->sortedFiles.size(); ) {
             const auto& file = appState.active->sortedFiles[i];
-            // Extract just the filename without path
-            std::string filename = file;
-            size_t last_slash = filename.find_last_of("/\\");
-            if (last_slash != std::string::npos) {
-                filename = filename.substr(last_slash + 1);
+            // Cached row label (member id keyed — an index-aligned cache would
+            // desync on the removeFileFromEngine erase path). The timestamp
+            // suffix is part of the cached value and re-built when the
+            // showTimestamps flag flips.
+            auto& nameEntry = appState.active->filesDisplayNameCache[file];
+            if (!nameEntry.valid || nameEntry.withTimestamps != appState.showTimestamps) {
+                std::string base = file;
+                size_t last_slash = base.find_last_of("/\\");
+                if (last_slash != std::string::npos)
+                    base = base.substr(last_slash + 1);
+                std::string rowLabel = shortenFilename(base);
+                if (appState.hasWorkspace() && appState.showTimestamps) {
+                    std::string ts = memberTimestampHMS(appState.active->workspace, file);
+                    if (!ts.empty()) rowLabel += " [" + ts + "]";
+                }
+                nameEntry.full = base;
+                nameEntry.label = rowLabel;
+                nameEntry.withTimestamps = appState.showTimestamps;
+                nameEntry.valid = true;
             }
-            std::string fullFilename = filename;
-            filename = shortenFilename(filename);
-            
-            // Delete button (left) — unique label per row avoids needing PushID.
-            // Member delete (always confirms, decision 1).
+            const std::string& fullFilename = nameEntry.full;
+            const std::string& filename = nameEntry.label;
+
+            // Delete button (left) — under the row PushID so the label can
+            // stay the constant "×##del" (no per-row std::to_string alloc).
+            // Member delete (always confirms, decision 1). No early `continue`
+            // between here and the matching PopID below — the stack stays
+            // balanced.
             float btnH = ImGui::GetFrameHeight();
-            std::string delBtnId = "×##del" + std::to_string(i);
-            if (ImGui::Button(delBtnId.c_str(), ImVec2(btnH, btnH))) {
+            ImGui::PushID(static_cast<int>(i));
+            if (ImGui::Button("×##del", ImVec2(btnH, btnH))) {
                 appState.active->pendingWorkspaceDeletionPath = memberPathOf(appState.active->workspace, file);
                 if (!appState.active->pendingWorkspaceDeletionPath.empty()) {
                     appState.active->showWorkspaceDeleteConfirmPopup = true;
@@ -207,17 +229,15 @@ void renderFilesPanel() {
                 }
             }
             ImGui::SameLine();
-            
-            ImGui::PushID(static_cast<int>(i));
-            
+
             // Enhanced highlighting for the currently selected file
             int stylesPushed = 1; // Default: push 1 style
-            bool isFileSelected = (std::find(appState.active->selectedFiles.begin(), appState.active->selectedFiles.end(), file) != appState.active->selectedFiles.end());
-            
+            auto selIt = std::find(appState.active->selectedFiles.begin(), appState.active->selectedFiles.end(), file);
+            const bool isFileSelected = selIt != appState.active->selectedFiles.end();
+
             if (isFileSelected) {
                 // Find the index of this file in the selectedFiles vector to determine its color
-                auto it = std::find(appState.active->selectedFiles.begin(), appState.active->selectedFiles.end(), file);
-                size_t fileIndex = std::distance(appState.active->selectedFiles.begin(), it);
+                size_t fileIndex = static_cast<size_t>(std::distance(appState.active->selectedFiles.begin(), selIt));
                 
                 // Get the color matching the plot curve color
                 ImVec4 buttonColor;
@@ -252,15 +272,11 @@ void renderFilesPanel() {
             float chkWidth = ImGui::GetFrameHeight();
             float btnWidth = ImGui::GetContentRegionAvail().x - chkWidth - ImGui::GetStyle().ItemSpacing.x;
 
-            // "Show timestamps" ribbon: append the member's hh:mm:ss to the row
-            // label (original records only — memberTimestampHMS returns "" for
-            // derivatives / empty timestamps). Rows are under PushID(i), so the
-            // label text change never shifts widget IDs (IMGUI_GUIDE §3).
-            std::string rowLabel = filename;
-            if (appState.hasWorkspace() && appState.showTimestamps) {
-                std::string ts = memberTimestampHMS(appState.active->workspace, file);
-                if (!ts.empty()) rowLabel += " [" + ts + "]";
-            }
+            // The cached `filename` already carries the "Show timestamps"
+            // ribbon suffix (built above with the label). Rows are under
+            // PushID(i), so the label text change never shifts widget IDs
+            // (IMGUI_GUIDE §3).
+            const std::string& rowLabel = filename;
             if (ImGui::Button(rowLabel.c_str(), ImVec2(btnWidth, 0))) {
                 // Handle multi-select with Ctrl key
                 if (appState.active->multiSelectMode) {
@@ -375,6 +391,9 @@ void renderFilesPanel() {
                     // Update last selected index for future Shift+Click
                     appState.active->lastSelectedIndex = i;
                 }
+                // Selection mutated — invalidate the interferogram plot-input
+                // caches (row-click paths rebuild the selection arrays directly).
+                appState.active->touchIfgView();
             }
             
             if (ImGui::IsItemHovered())

@@ -253,6 +253,8 @@ bool allanMemberFresh(const AppState& s, const MemberBase& m,
 
 
 // Upsert helper: erase any member with `id`, push the new one, dirty.
+// Also bumps the group's memberRevision — the content choke point every
+// watcher (Experiment Viewer curve cache) keys on.
 template <typename T>
 void upsert(MemberGroup<T>& group, T&& member) {
     group.members.erase(
@@ -260,6 +262,7 @@ void upsert(MemberGroup<T>& group, T&& member) {
                        [&](const T& m) { return m.id == member.id; }),
         group.members.end());
     group.members.push_back(std::move(member));
+    ++group.memberRevision;
 }
 
 std::string memberOriginJson() {
@@ -645,6 +648,7 @@ void applyViewState(WorkspaceSession& sess) {
 
     sess.maxAtZero = viewBool(vs, "plotDefaults", "maxAtZero", sess.maxAtZero);
     sess.xAxisBase = viewInt(vs, "plotDefaults", "xAxisBase", sess.xAxisBase);
+    sess.touchIfgView();   // axis conventions changed — drop cached plot X
     sess.xCorrectionMethod = viewInt(vs, "plotDefaults", "xCorrectionMethod", sess.xCorrectionMethod);
     sess.peakProminenceThreshold = static_cast<float>(
         viewDouble(vs, "plotDefaults", "peakProminence", sess.peakProminenceThreshold));
@@ -1069,9 +1073,9 @@ void seedPanelsFromWorkspace(WorkspaceSession& sess) {
         // primary detector is immutable for originals, so capture it now.
         try {
             InterferogramData raw = workspaceRead(ws, ifgId);
-            sess.spectrum.lastPrimaryDetectors[ifgId] = raw.primaryDetector;
+            sess.spectrum.lastPrimaryPrints[ifgId] = fingerprintOf(raw.primaryDetector);
         } catch (...) {
-            sess.spectrum.lastPrimaryDetectors.erase(ifgId);
+            sess.spectrum.lastPrimaryPrints.erase(ifgId);
             continue;
         }
         double activeParam = 0.0;

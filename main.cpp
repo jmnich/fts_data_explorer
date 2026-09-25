@@ -249,7 +249,7 @@ void clearPanelDerivedResults(AppState& s) {
     s.clearT100Spectrum();
     s.active->spectrum.cachedSpectra.clear();
     s.active->spectrum.cachedFrequencies.clear();
-    s.active->spectrum.lastPrimaryDetectors.clear();
+    s.active->spectrum.lastPrimaryPrints.clear();
     s.active->spectrum.lastSpectrumParams.clear();
     s.active->spectrum.pendingSpectra_.clear();
     s.active->t100.cachedTransX.clear();

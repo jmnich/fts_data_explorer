@@ -1124,7 +1124,7 @@ static void renderSpectrumViewPanel() {
                                 SpectralToolbox::SpectrumXUnit::CmInv, targetUnit);
                         appState.active->spectrum.cachedFrequencies[fid] = std::move(freqs);
                         appState.active->spectrum.cachedSpectra[fid] = appState.active->rawDataCache[i].primaryDetector;
-                        appState.active->spectrum.lastPrimaryDetectors[fid] = appState.active->rawDataCache[i].primaryDetector;
+                        appState.active->spectrum.lastPrimaryPrints[fid] = fingerprintOf(appState.active->rawDataCache[i].primaryDetector);
                         double activeParam = 0.0;
                         if (appState.active->spectrum.apodizationSelector == static_cast<int>(ApodizationWindow::Gauss))
                             activeParam = static_cast<double>(appState.active->spectrum.apodizationParams.gaussSigma);
@@ -1259,9 +1259,11 @@ bool AppLoop::runFrame() {
     }
     if (appState.pendingRedrawFrames > 0)
         --appState.pendingRedrawFrames;
-    if (!appState.showWelcomeScreen || appState.welcomeScreenInitialized) {
-        appState.needsRedraw = false;
-    }
+    // Always clear: input wakeups come from the GLFW callbacks, and
+    // scheduleRedraws re-arms for any state that must keep frames flowing
+    // (the old welcome-screen special case rendered a static screen at full
+    // rate — see scheduleRedraws for the gates that replaced it).
+    appState.needsRedraw = false;
 
     handleInput();
     renderUI();
@@ -1489,6 +1491,15 @@ void AppLoop::scheduleRedraws() {
             appState.sessionTab.batch.phase == BatchPhase::Running) {
             appState.needsRedraw = true;
         }
+
+        // Conversion screen + startup repo pull: job poll/join runs inside the
+        // render pass (renderConversionScreen -> pollJobs). Keep frames flowing
+        // while any converter thread is in flight, not just while the screen is
+        // open — the startup pull runs at boot before the screen ever opens,
+        // and its join-on-false-edge must not wait for an input event.
+        if (!appState.needsRedraw &&
+            (appState.conversionScreen.open || conversionJobsInFlight(appState)))
+            appState.needsRedraw = true;
 }
 
 
@@ -1568,12 +1579,14 @@ void AppLoop::handleInput() {
             // 'Ctrl+A' - Toggle max at zero (only on initial press)
             if (aKeyPressed && !appState.aKeyPressedLastFrame) {
                 appState.active->maxAtZero = !appState.active->maxAtZero;
+                appState.active->touchIfgView();
                 appState.active->shouldAutoscale = true;
             }
             
             // 'Ctrl+D' - Toggle downsampling (only on initial press)
             if (dKeyPressed && !appState.dKeyPressedLastFrame) {
                 appState.active->enableDownsampling = !appState.active->enableDownsampling;
+                appState.active->touchIfgView();
                 appState.active->hilbertXCache.clear();
                 if (appState.active->dataLoaded) {
                     // Reload all selected files with new downsampling setting while preserving selection
@@ -1709,12 +1722,19 @@ void AppLoop::handleInput() {
         handleWindowEvents(window_, config_);
         
         // Update sorted files list for keyboard navigation (active workspace
-        // tab only — no tab exists at launch / go-home).
+        // tab only — no tab exists at launch / go-home). Natural sort only
+        // when csvFiles changed (version bump on assignment, size change on
+        // element erase — removeFileFromEngine erases both vectors in
+        // lockstep, so the size guard alone covers it).
         if (wsActive) {
+        if (appState.active->sortedFilesVersion_ != appState.active->csvFilesVersion ||
+            appState.active->sortedFiles.size() != appState.active->csvFiles.size()) {
         appState.active->sortedFiles = appState.active->csvFiles;
         std::sort(appState.active->sortedFiles.begin(), appState.active->sortedFiles.end(), [](const std::string& a, const std::string& b) {
             return naturalBasenameLess(a, b);
         });
+        appState.active->sortedFilesVersion_ = appState.active->csvFilesVersion;
+        }
         }
         
         // Ensure averaging checkboxes match the sorted files size
@@ -1725,9 +1745,16 @@ void AppLoop::handleInput() {
         }
 
 // Handle keyboard navigation for file selection
-        handleKeyboardNavigation(appState.active->csvFiles, appState.active->currentSortedFileIndex, appState.active->filesChanged, appState.active->keyboardNavigation, 
+        // Bump the interferogram plot-input revision when the keyboard path
+        // changed the selection (its FIFO/push code mutates the selection
+        // arrays directly — not covered by the panel-button touchIfgView
+        // sites). Cheap: the list is capped at MAX_SELECTABLE_FILES entries.
+        const std::vector<std::string> selBeforeNav = appState.active->selectedFiles;
+        handleKeyboardNavigation(appState.active->csvFiles, appState.active->currentSortedFileIndex, appState.active->filesChanged, appState.active->keyboardNavigation,
                                 appState.active->shiftSelectMode, appState.active->selectedFiles, appState.active->selectedFilenames, appState.active->loadedData, appState.active->rawDataCache, appState.active->dataLoaded, 
                                 appState.active->sortedFiles, appState.active->enableDownsampling, appState.maxPointsBeforeDownsampling, appState.MAX_SELECTABLE_FILES);
+        if (appState.active->selectedFiles != selBeforeNav)
+            appState.active->touchIfgView();
         
 
         
@@ -2560,10 +2587,9 @@ void AppLoop::present() {
         }
         
         // Force redraw every frame while welcome screen is active (pattern persistence)
-        if (appState.showWelcomeScreen && !appState.welcomeScreenInitialized) {
-            appState.needsRedraw = true;
-        }
-        
+        // Removed (perf plan item C): the welcome screen is static; the idle
+        // gate now covers it and scheduleRedraws keeps frames flowing for the
+        // conversion jobs instead.
         // Reset keyboard navigation flag after rendering
         if (appState.active) appState.active->keyboardNavigation = false;
 }
