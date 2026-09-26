@@ -1168,6 +1168,27 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
         ImPlot::SetupAxes(SpectralPlotView::defaultXLabel(plot.xUnitSelector),
                           "Std Dev T(%)", ImPlotAxisFlags_NoTickMarks, stdYFlags);
 
+        // Match the main plot's grid (gridlines are drawn at tick
+        // positions): X takes the same window the main plot's setupAxes
+        // limited (manualXMin/Max mirror the rendered limits by now —
+        // captureLimits ran before the main plot's EndPlot; data-range
+        // fallback identical), so the vertical gridlines line up across
+        // the subplot stack. Y is limited on the std curve's own range —
+        // same tick density style as the main plot's Y limiting.
+        {
+            double x0 = plot.manualXMin, x1 = plot.manualXMax;
+            if (!(x0 < x1) && f.xDataRange) f.xDataRange(x0, x1);
+            if (x0 < x1)
+                SpectralPlotView::setupAxisTicksLimited(ImAxis_X1, x0, x1);
+            if (!cachedStdY.empty()) {
+                auto mmStd = std::minmax_element(cachedStdY.begin(),
+                                                 cachedStdY.end());
+                if (*mmStd.first < *mmStd.second)
+                    SpectralPlotView::setupAxisTicksLimited(
+                        ImAxis_Y1, *mmStd.first, *mmStd.second);
+            }
+        }
+
         ImPlotSpec stdSpec;
         stdSpec.LineColor = ImVec4(0.1f, 0.6f, 0.7f, 1.0f);
         stdSpec.LineWeight = 2.0f;
