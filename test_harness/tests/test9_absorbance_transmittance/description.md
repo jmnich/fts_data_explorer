@@ -52,9 +52,10 @@ dominated by unstable noise-floor / T≈0 / T≈1 bins and are retired.
 
 ## Export resolution (history)
 Previously the per-file transmittance/absorbance exports read the T100 panel's
-cached curves, which are display-downsampled when the grid exceeds
-`maxPointsBeforeDownsampling` (50k points — ceramicLPF's 54900-bin grid was
-halved to 27450). The harness compared the decimated curve against the
+cached curves, which were display-downsampled at the time when the grid
+exceeded `maxPointsBeforeDownsampling` (50k points — ceramicLPF's 54900-bin grid
+was halved to 27450; the panel no longer downsamples its display caches). The
+harness compared the decimated curve against the
 full-resolution Python reference, inflating the residual to 0.30% (T) / 16.7%
 (A). The exports now recompute at full resolution
 (`T100Spectrum::computeTransmittanceFullRes`), collapsing the residual to the

@@ -33,11 +33,13 @@ public:
     std::map<std::string, std::vector<double>> cachedTransY;
     bool transmittanceAvailable;
 
-    // Full-resolution transmittance curves (never decimated) for the workspace
-    // mirror. The display caches above are downsampled past
-    // maxPointsBeforeDownsampling; the t100 workspace member must persist FULL
-    // resolution (the batch engine writes full-res), so wsUpsertT100FromPanel
-    // reads these maps instead of the display cache (F2).
+    // Full-resolution transmittance curves for the workspace mirror. The T100
+    // panel behaves like the Spectrum view (no display downsampling): the
+    // display caches above hold the same full-resolution curves. The
+    // duplication is intentional — the mirror is the workspace member's
+    // source of truth: the t100 member must persist FULL resolution (the
+    // batch engine writes full-res), so wsUpsertT100FromPanel reads these maps
+    // first (F2), independent of whatever the display caches hold.
     std::map<std::string, std::vector<double>> fullResCachedTransX;
     std::map<std::string, std::vector<double>> fullResCachedTransY;
 
@@ -110,9 +112,9 @@ public:
     bool computeTransmittanceForFile(const std::string& fileId);
 
     // Full-resolution transmittance of fileId against the current reference.
-    // computeTransmittanceForFile downsamples the result for display when the
-    // grid exceeds maxPointsBeforeDownsampling; exports must NOT lose that
-    // resolution, so they call this instead (same math, no decimation).
+    // The panel's display caches are NOT decimated (Spectrum-view behavior), so
+    // the exports could read them directly; they still call this so an export
+    // never depends on which curves happen to be cached for display.
     bool computeTransmittanceFullRes(const std::string& fileId,
                                      std::vector<double>& outX,
                                      std::vector<double>& outY) const;

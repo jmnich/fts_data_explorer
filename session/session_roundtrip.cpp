@@ -10,6 +10,7 @@
 #include <cstring>
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <thread>
 #include <string>
 #include <vector>
@@ -25,6 +26,7 @@
 #include "panels/panels.h"
 #include "imgui.h"
 #include "implot.h"
+#include "implot_internal.h"   // GImPlot plot-rect probe (test19 input simulation)
 
 // The session harness deliberately does not link files_panel.cpp / window.cpp;
 // interferogram_view.cpp (linked for test18) needs these two symbols.
@@ -2400,6 +2402,130 @@ void test18_noEarlyReturnLeakFromT100() {
     std::printf("test18: no early-return leak OK\n");
 }
 
+// Regression for the inert 100% T view (2026-09): the >50k large-data gate
+// (ImPlotFlags_NoInputs + the removed SpectralPlotFrame::enabled=false) made
+// the panel ignore the wheel and never arm shift+drag selection whenever the
+// transmittance grid exceeded 50k points. The panel now behaves like the
+// Spectrum view. Pins both properties: the display caches hold the full
+// resolution with downsampling on AND off, and the plot stays live at >50k
+// points (shift+drag arms the selection, a wheel notch zooms).
+void test19_t100FullResInteractive() {
+    std::printf("test19: T100 full-res caches + live input at >50k points...\n");
+
+    WorkspaceSession ws;
+    wireSessionPanels(appState, ws);
+    ws.key = "t100-fullres";
+    ws.dataLoaded = true;
+    ws.selectedFilenames.push_back("s1");
+
+    appState.active = &ws;
+    appState.activeTabKind = ActiveTabKind::Workspace;
+    appState.showWelcomeScreen = false;
+    appState.welcomeScreenInitialized = true;
+
+    // >50k reference grid; the file's spectrum is pre-cached so
+    // computeTransmittanceForFile takes the cached-spectrum path (no
+    // workspace read).
+    const size_t N = 60001;
+    std::vector<double> grid(N), ref(N, 1.0), spec(N, 1.0);
+    for (size_t i = 0; i < N; ++i)
+        grid[i] = 400.0 + static_cast<double>(i) * 0.01;
+    ws.t100.referenceAvailable = true;
+    ws.t100.refXUnit = 0;
+    ws.t100.refX = grid;
+    ws.t100.refY = ref;
+    ws.spectrum.plot.xUnitSelector = 0;
+    ws.spectrum.cachedFrequencies["s1"] = grid;
+    ws.spectrum.cachedSpectra["s1"] = spec;
+    ws.t100.lastKnownSelection = std::vector<std::string>{"s1"};
+
+    for (int variant = 0; variant < 2; ++variant) {
+        ws.enableDownsampling = (variant == 0);
+        ws.t100.cachedTransX.clear();
+        ws.t100.cachedTransY.clear();
+        ws.t100.fullResCachedTransX.clear();
+        ws.t100.fullResCachedTransY.clear();
+        ws.t100.transmittanceAvailable = false;
+        CHECK(ws.t100.computeTransmittanceForFile("s1"));
+        CHECK(ws.t100.cachedTransX["s1"].size() == N);
+        CHECK(ws.t100.cachedTransY["s1"].size() == N);
+        CHECK(ws.t100.cachedTransX["s1"] == ws.t100.fullResCachedTransX["s1"]);
+        CHECK(ws.t100.cachedTransY["s1"] == ws.t100.fullResCachedTransY["s1"]);
+    }
+    std::printf("test19: display caches full-res (downsampling on and off) OK\n");
+
+    // Live input at >50k points, headless: click to focus, scan for the plot
+    // rect, then hold Shift while moving the mouse — the selection must arm
+    // (the old NoInputs gate never let it start) — and a wheel notch must move
+    // the mirrored X window (captureLimits proves ImPlot processed the zoom).
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImPlot::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.DisplaySize = ImVec2(1280, 720);
+    io.DeltaTime = 1.0f / 60.0f;
+    unsigned char* pixels = nullptr; int fw = 0, fh = 0;
+    io.Fonts->GetTexDataAsRGBA32(&pixels, &fw, &fh);
+    io.Fonts->SetTexID((ImTextureID)(intptr_t)1);
+
+    auto renderFrame = [&](double mx, double my, bool shift, float wheel) {
+        io.AddMousePosEvent((float)mx, (float)my);
+        io.AddKeyEvent(ImGuiMod_Shift, shift);
+        ImGui::NewFrame();
+        io.MouseWheel = wheel;   // mimic the app's wheel rate limiter
+        ImGui::SetNextWindowPos(ImVec2(60, 60), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(900, 500), ImGuiCond_Always);
+        ImGui::Begin("100% T View", nullptr, ImGuiWindowFlags_NoCollapse);
+        ws.t100.renderT100Contents(false);
+        ImGui::End();
+        bool hovered = false;
+        for (int i = 0; i < GImPlot->Plots.GetBufSize(); ++i) {
+            const ImPlotPlot* p = GImPlot->Plots.GetByIndex(i);
+            if (p->PlotRect.Contains(io.MousePos))
+                hovered = true;
+        }
+        ImGui::Render();
+        return hovered;
+    };
+
+    bool hoverSeen = false;
+    double hoverY = -1.0;
+    for (int frame = 0; frame < 14; ++frame) {
+        const double my = 80.0 + frame * 30.0;
+        if (frame == 0) { io.AddMouseButtonEvent(0, true); io.AddMouseButtonEvent(0, false); }
+        if (renderFrame(640.0, my, false, 0.0f)) {
+            hoverSeen = true;
+            hoverY = my;
+        }
+    }
+    CHECK(hoverSeen);
+
+    bool selectingSeen = false;
+    const double xMin0 = ws.t100.plot.manualXMin;
+    const double xMax0 = ws.t100.plot.manualXMax;
+    for (int frame = 0; frame < 5; ++frame)
+        if (renderFrame(560.0 + frame * 30.0, hoverY, true, 0.0f))
+            selectingSeen = selectingSeen || ws.t100.plot.isSelectingXRange;
+    CHECK(selectingSeen);
+
+    // Shift release commits the selected window into manualX (IMGUI_GUIDE §8).
+    for (int frame = 0; frame < 3; ++frame)
+        renderFrame(640.0, hoverY, false, 0.0f);
+    CHECK(ws.t100.plot.manualXMin != xMin0 || ws.t100.plot.manualXMax != xMax0);
+
+    const double wMin0 = ws.t100.plot.manualXMin, wMax0 = ws.t100.plot.manualXMax;
+    for (int frame = 0; frame < 2; ++frame)
+        renderFrame(640.0, hoverY, false, 1.0f);
+    for (int frame = 0; frame < 2; ++frame)
+        renderFrame(640.0, hoverY, false, 0.0f);
+    CHECK(ws.t100.plot.manualXMin != wMin0 || ws.t100.plot.manualXMax != wMax0);
+
+    ImPlot::DestroyContext();
+    ImGui::DestroyContext();
+    appState.active = nullptr;
+    std::printf("test19: live shift-select + wheel zoom at >50k points OK\n");
+}
+
 }  // namespace
 
 int main() {
@@ -2423,6 +2549,7 @@ int main() {
     test16b_t100SyncCompletionRenders();
     test17_ifgViewStateRoundTrip();
     test18_noEarlyReturnLeakFromT100();
+    test19_t100FullResInteractive();
     std::printf("fts_session_roundtrip: all %d checks passed\n", g_checks);
     return 0;
 }

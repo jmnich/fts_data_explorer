@@ -25,7 +25,6 @@ struct SpectralPlotFrame {
     bool windowFocused = false;     // ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows)
     bool yScaleEnabled = true;      // false -> fixed linear Y (T100); log/dB gated off
     bool xUnitEnabled  = true;      // false -> env (owns unit switching) / non-spectral X
-    bool enabled       = true;      // false -> NoInputs (large data); skips hover phases
 
     // Data-range suppliers. Return false when there is no plottable data.
     // xDataRange returns the range in the panel's AXIS CONVENTION — may be

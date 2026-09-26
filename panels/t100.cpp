@@ -377,26 +377,12 @@ bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
         return false;
 
     // F2: the workspace member must persist FULL resolution — the batch engine
-    // writes full-res members, and the export writers already recompute
-    // full-res (computeTransmittanceFullRes). Store the pre-decimation curves
-    // for the mirror (wsUpsertT100FromPanel reads these maps); the display
-    // cache below stays decimated for large grids.
+    // writes full-res members, and the export writers recompute full-res
+    // (computeTransmittanceFullRes). The T100 panel behaves like the Spectrum
+    // view: the display caches are never decimated (no >50k NoInputs gate),
+    // so the mirror and the display caches hold the same full-res curves.
     fullResCachedTransX[fileId] = newX;
     fullResCachedTransY[fileId] = newY;
-
-    if (appState && appState->active->enableDownsampling &&
-        newX.size() > appState->maxPointsBeforeDownsampling) {
-        size_t factor = newX.size() / appState->maxPointsBeforeDownsampling + 1;
-        std::vector<double> dsX, dsY;
-        dsX.reserve(newX.size() / factor + 1);
-        dsY.reserve(newY.size() / factor + 1);
-        for (size_t i = 0; i < newX.size(); i += factor) {
-            dsX.push_back(newX[i]);
-            dsY.push_back(newY[i]);
-        }
-        newX = std::move(dsX);
-        newY = std::move(dsY);
-    }
 
     cachedTransX[fileId] = std::move(newX);
     cachedTransY[fileId] = std::move(newY);
@@ -863,13 +849,6 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
 
     bool isFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
 
-    // Compute max data size across all cached files for large-data flag
-    size_t maxDataSize = 0;
-    for (const auto& kv : cachedTransY)
-        if (kv.second.size() > maxDataSize)
-            maxDataSize = kv.second.size();
-    bool largeData = maxDataSize > 50000;
-
     // Unified view/interaction phases (spectral_plot.h). T100 is always
     // linear Y (T% around 100%) — log/dB are gated off.
     // Built BEFORE the no-data early return (C1 — same as Average/SNR): the
@@ -882,10 +861,6 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
     f.windowFocused = isFocused;
     f.yScaleEnabled = false;
     f.yLabel = "T(%)";
-    if (largeData) {
-        f.plotFlags |= ImPlotFlags_NoInputs;
-        f.enabled = false;
-    }
     f.xDataRange = [this](double& x0, double& x1) -> bool {
         bool have = false;
         for (const auto& kv : cachedTransX) {
@@ -1111,7 +1086,7 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
 
             ImPlotSpec spec;
             spec.LineColor = getT100LineColor(i);
-            spec.LineWeight = largeData ? 1.0f : 2.0f;
+            spec.LineWeight = 2.0f;
             ImPlot::PlotLine(fileId.c_str(), xIt->second.data(), yIt->second.data(),
                              yIt->second.size(), spec);
         }
@@ -1157,13 +1132,6 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
                                 GetAccentBase(StringToAccentColor(appState->currentAccentColor)));
         }
 
-        if (largeData) {
-            ImVec2 txtSz = ImGui::CalcTextSize("LARGE DATA");
-            float xPos = ImGui::GetCursorPosX() + ImGui::GetColumnWidth() - txtSz.x - ImGui::GetStyle().ItemSpacing.x;
-            ImGui::SetCursorPosX(xPos);
-            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "LARGE DATA");
-        }
-
         plot.captureLimits();
 
         // Stale-warning rect: GetPlotPos/GetPlotSize lock the setup phase, so
@@ -1177,10 +1145,10 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
     // old per-frame force-lock made this plot inert, N1). Y follows the MAIN
     // plot's Y mode (all/tight/force — see below). Shift+drag remains a
     // main-plot gesture; X interaction reaches this plot through LinkAllX.
-    // NoTitle (L1) + NoInputs on large data (H4: the LARGE-DATA contract is
-    // per-panel, not per-plot; the indicator text stays on the main plot).
-    const ImPlotFlags stdFlags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend |
-                                 (largeData ? ImPlotFlags_NoInputs : 0);
+    // NoTitle (L1). The std-dev plot stays interactive at any data size: the
+    // T100 panel has no large-data NoInputs contract (it behaves like the
+    // Spectrum view).
+    const ImPlotFlags stdFlags = ImPlotFlags_NoTitle | ImPlotFlags_NoLegend;
     if (stddevAvailable && ImPlot::BeginPlot(
             workspacePlotId("100% transmission line standard deviation").c_str(),
             ImVec2(-1, -1), stdFlags)) {
@@ -1208,8 +1176,7 @@ void T100Spectrum::renderT100Contents(bool showTrackingCursor) {
 
         // Shift+drag X-range selection (bugfix: was main-plot-only). The
         // committed pending range is applied pre-BeginPlot on the shared X
-        // (LinkAllX), so a drag on the std plot zooms both plots. f.enabled
-        // (false on large data) keeps this inert when NoInputs is set.
+        // (LinkAllX), so a drag on the std plot zooms both plots.
         plot.tickInPlot(f);
         plot.drawSelectionOverlay("##T100Std");
 

@@ -408,7 +408,7 @@ void SpectralPlotView::tickInPlot(const SpectralPlotFrame& f) {
     const bool shiftPressed = ImGui::GetIO().KeyShift;
     const bool isOverPlot = ImPlot::IsPlotHovered();
 
-    if (f.enabled && f.windowFocused && isOverPlot && shiftPressed && !isSelectingXRange) {
+    if (f.windowFocused && isOverPlot && shiftPressed && !isSelectingXRange) {
         isSelectingXRange = true;
         selectionStartX = ImPlot::GetPlotMousePos().x;
         selectionEndX = selectionStartX;

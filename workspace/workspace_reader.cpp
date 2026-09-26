@@ -954,10 +954,12 @@ nlohmann::json makeT100Config(const AppState& s, const std::vector<std::string>&
 void wsUpsertT100FromPanel(AppState& s) {
     if (!s.hasWorkspace() || !s.active->t100.referenceAvailable) return;
     std::vector<T100Member::Curve> curves;
-    // F2: persist the FULL-RESOLUTION curves (the display cache is decimated
-    // past maxPointsBeforeDownsampling). Fall back to the display cache only
-    // if a path left the full-res maps empty — both are kept in sync by every
-    // mutation site (compute, reference changes, refresh, unit switch, seed).
+    // F2: persist the FULL-RESOLUTION curves from the full-res mirror. The
+    // display caches hold the same full-res curves since the panel dropped
+    // display decimation (Spectrum-view behavior); the mirror stays the
+    // canonical source for the workspace member, with the display caches as
+    // the fallback — both are kept in sync by every mutation site (compute,
+    // reference changes, refresh, unit switch, seed).
     const auto& srcX = !s.active->t100.fullResCachedTransX.empty()
         ? s.active->t100.fullResCachedTransX : s.active->t100.cachedTransX;
     const auto& srcY = !s.active->t100.fullResCachedTransY.empty()

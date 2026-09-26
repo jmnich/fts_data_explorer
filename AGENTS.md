@@ -36,7 +36,7 @@ FTS Data Explorer is a scientific GUI for rapid exploration of fourier spectrome
 | **100% T** | Transmittance curves, energy ratios, std dev. |
 | **HITRAN Gas Markers** | Per-gas checkbox overlays (8 gases), strength threshold + smoothing; markers drawn on Spectrum/Average plots. |
 
-**Interaction (all plots):** Shift+drag = X range select. Mouse wheel = zoom. Arrows = pan (10%) / navigate files. ESC = reset zoom. Ctrl+Y = auto-fit Y, Ctrl+A = max-at-zero, Ctrl+D = downsample. >50k points: auto-downsample, no AA, `NoInputs`, "LARGE DATA" indicator.
+**Interaction (all plots):** Shift+drag = X range select. Mouse wheel = zoom. Arrows = pan (10%) / navigate files. ESC = reset zoom. Ctrl+Y = auto-fit Y, Ctrl+A = max-at-zero, Ctrl+D = downsample (Interferogram View only). In the Interferogram View, >50k points: auto-downsample, no AA, `NoInputs`, "LARGE DATA" indicator. All other plot panels (Spectrum/Average/SNR/Allan/100% T) plot full-resolution curves and stay interactive at any data size — the 100% T display caches are never decimated.
 
 **Modal styling** (`core/popup_utils.h`): all dialogs use the "Saved"-toast look — rounded-8 corners, 2px accent border, dark fill, no title bar (`NoTitleBar`), plus the 3px accent ring via `drawModalAccentFrame`. Frame every modal with the `beginModal(width, accent, pinWidth)` / `endModal()` pair (`endModal()` unconditionally after the `BeginPopupModal` if-block so styles always pop; `pinWidth=false` for resizable dialogs like Convert). Titles move into a body label when the header is removed — never drop the title text. The Welcome screen, native FileBrowser dialogs, and the FPS HUD are exempt.
 
