@@ -432,39 +432,6 @@ void renderFilesPanel() {
         }
         ImGui::EndChild();
 
-        // Derived products section (workspace mode only): derivative members,
-        // each deletable immediately (no confirm — recomputable, spec rule 7).
-        if (appState.hasWorkspace()) {
-            ImGui::Separator();
-            if (ImGui::CollapsingHeader("Derived products")) {
-                bool any = false;
-                auto listGroup = [&](const char* groupName, const auto& members) {
-                    for (const auto& m : members) {
-                        if (m.kind != MemberKind::Derivative) continue;
-                        any = true;
-                        std::string path = std::string("/") + groupName + "/" + m.id;
-                        if (ImGui::Button(("×##delderv" + path).c_str(),
-                                          ImVec2(ImGui::GetFrameHeight(), ImGui::GetFrameHeight()))) {
-                            performWorkspaceMemberDeletion(appState, path);
-                            appState.needsRedraw = true;
-                        }
-                        ImGui::SameLine();
-                        ImGui::Text("%s/%s", groupName, m.id.c_str());
-                        if (m.stale) {
-                            ImGui::SameLine();
-                            ImGui::TextDisabled("(stale)");
-                        }
-                    }
-                };
-                listGroup("spectra", appState.active->workspace.spectra.members);
-                listGroup("average_spectra", appState.active->workspace.averageSpectra.members);
-                listGroup("snr_spectra", appState.active->workspace.snrSpectra.members);
-                listGroup("allan_werle", appState.active->workspace.allanWerle.members);
-                listGroup("t100", appState.active->workspace.t100.members);
-                if (!any) ImGui::TextDisabled("(none)");
-            }
-        }
-
         // Workspace member delete confirmation (decision 1: always confirm).
         {
             static int delFocus = 0;
