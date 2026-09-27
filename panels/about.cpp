@@ -18,6 +18,11 @@ void openAboutPopup() {
 // Layout assumes the default embedded font (ProggyClean: monospace, ASCII
 // glyph range 0x20-0xFF) — the aligned label columns and library table rely
 // on it; in a proportional font they degrade to slightly ragged left edges.
+//
+// NOTE: the literature list, third-party library table and funding
+// acknowledgement in getAboutText() are mirrored in the user manual
+// (docs/user_manual.html, "31. Literature and acknowledgments").
+// Update the manual whenever this text changes.
 static char aboutBuf[4096];
 static char* getAboutText() {
     static bool initialized = false;

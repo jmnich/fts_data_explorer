@@ -240,7 +240,7 @@ spectra/&lt;id&gt;/                                <span class="c">(member group
 snr_spectra/&lt;id&gt;/                           <span class="c">(member group)</span>
     <span class="a">attrs:</span> kind, origin, config
     data                                     <span class="c">(fp64 [M,2])</span>
-        <span class="a">attrs["columns"]</span> = ["x", "SNR"]
+        <span class="a">attrs["columns"]</span> = ["x", "y"]
         <span class="a">attrs["units"]</span>   = ["cm-1", ""]
 </div>
 
@@ -250,13 +250,13 @@ snr_spectra/&lt;id&gt;/                           <span class="c">(member group)
 allan_werle/&lt;id&gt;/                           <span class="c">(member group)</span>
     <span class="a">attrs:</span> kind, origin, config
     surface_data                             <span class="c">(fp64 [T,W])</span>
-        <span class="a">attrs["columns"]</span> = ["1560", "1562", …]  <span class="c">— wavelength labels [nm]</span>
+        <span class="a">attrs["columns"]</span> = ["taus", "wavelengths", "allan_var"]  <span class="c">— wavelength labels [nm]</span>
     wavelengths                              <span class="c">(fp64 [W])</span>
         <span class="a">attrs["units"]</span>     = "um"
     taus                                     <span class="c">(fp64 [T])</span>
-        <span class="a">attrs["units"]</span>     = "s"
+        <span class="a">attrs["units"]</span> = "measurements"
 </div>
-<p><code>surface_data</code> is T integration times × W wavelength bins. Each column labels one wavelength bin. <code>wavelengths</code> holds the numeric wavelength axis; <code>taus</code> holds the integration time axis.</p>
+<p><code>surface_data</code> is a T × W array (cluster sizes × wavelength bins). The <code>columns</code> attribute labels its three axes as <code>["taus", "wavelengths", "allan_var"]</code>; <code>wavelengths</code> holds the wavelength axis in µm and <code>taus</code> holds the cluster sizes in measurements.</p>
 
 <h4 id="t100">2.5.4 100% T curves (<code>t100/</code>)</h4>
 <p>Transmittance analysis: T% = (sample spectrum / reference spectrum) × 100 for each input file.</p>
@@ -267,7 +267,7 @@ t100/&lt;id&gt;/                                   <span class="c">(member group
         <span class="a">attrs["columns"]</span> = ["x", "y"]
         <span class="a">attrs["units"]</span>   = ["cm-1", "a.u."]
     stddev                                   <span class="c">(fp64 [M,2])</span>
-        <span class="a">attrs["columns"]</span> = ["x", "stddev"]
+        <span class="a">attrs["columns"]</span> = ["x", "y"]
         <span class="a">attrs["units"]</span>   = ["cm-1", "%"]
     transmittance/&lt;file_id&gt;/
         data                                 <span class="c">(fp64 [M,2])</span>
@@ -282,7 +282,7 @@ t100/&lt;id&gt;/                                   <span class="c">(member group
 <ul>
   <li><code>&lt;id&gt;</code> is a human-readable slug (sanitized source basename, e.g. <code>sample_0001</code>), unique within its type group, stable across saves.</li>
   <li>On collision, append a numeric suffix (<code>sample_0001_2</code>).</li>
-  <li>Derivative IDs: <code>avg_of_3</code>, <code>snr_of_5</code>, <code>allan_wl5_tau30</code>.</li>
+  <li>Derivative IDs are fixed per artifact type: <code>spec_&lt;ifgId&gt;</code> for computed spectra, <code>average</code>, <code>snr</code>, <code>allan</code>, and <code>t100</code>.</li>
   <li><code>inputs</code> in <code>@config</code> reference members by absolute HDF5 path: <code>["/igm_uncorrected_x/record_0"]</code>.</li>
 </ul>
 
@@ -428,11 +428,11 @@ t100/&lt;id&gt;/                                   <span class="c">(member group
 <tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
 <tr><td><code>inputs</code></td><td>string[]</td><td>—</td><td></td></tr>
 <tr><td><code>xUnit</code></td><td>string</td><td><code>"cm-1"</code></td><td></td></tr>
-<tr><td><code>reference.source</code></td><td>string</td><td>—</td><td><code>file</code> | <code>average</code></td></tr>
+<tr><td><code>reference.source</code></td><td>string</td><td>—</td><td><code>file</code> | <code>csv</code> | <code>average</code></td></tr>
 <tr><td><code>reference.path</code></td><td>string</td><td>—</td><td>Absolute HDF5 path</td></tr>
 <tr><td><code>energyRatios</code></td><td>array</td><td><code>[]</code></td><td>Up to 3 <code>{"num":"800","den":"1000"}</code> pairs</td></tr>
 </table>
-<blockquote>Reference must be an HDF5 member. Import external CSV refs into <code>spectra/</code> first.</blockquote>
+<blockquote>A <code>file</code> or <code>average</code> reference points at an HDF5 member. A <code>csv</code> reference stores an empty path — the CSV file is chosen in the 100% T panel and is not archived with the workspace.</blockquote>
 
 <hr>
 
@@ -499,7 +499,7 @@ t100/&lt;id&gt;/                                   <span class="c">(member group
 <tr><td><code>averageView.*</code>, <code>snrView.*</code></td><td>—</td><td>Same xUnit/yScale/yAxisMode/limits keys</td></tr>
 <tr><td><code>allanView.calcBase</code></td><td>i32</td><td>0 = 100% T, 1 = spectrum</td></tr>
 <tr><td><code>allanView.wavelengthDecimation</code>, <code>sliceIndex</code>, <code>xRangeMin</code>, <code>xRangeMax</code></td><td>—</td><td>Allan-Werle controls</td></tr>
-<tr><td><code>t100View.referenceSource</code></td><td>i32</td><td>0 = file, 1 = average</td></tr>
+<tr><td><code>t100View.referenceSource</code></td><td>i32</td><td>0 = file, 1 = CSV, 2 = average</td></tr>
 <tr><td><code>t100View.energyRatios</code></td><td>array</td><td>Up to 3 {num,den} pairs</td></tr>
 </table>
 

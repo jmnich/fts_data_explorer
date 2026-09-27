@@ -169,7 +169,7 @@ hr { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
       "type": "Absorbance", "createdIso": "2026-08-02T09:00:00Z" }
   ],
   "tabOrder": [ "ws:sample_0001", "exp:exp_0001", "ws:sample_0002" ]
-}</pre></code>
+}</code></pre>
 
 <h3>4.2 Key reference</h3>
 <table>
@@ -189,7 +189,7 @@ hr { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
 </table>
 
 <h3>4.3 Legacy tab-order fallbacks</h3>
-<p>Older archives may lack <code>tabOrder</code>. The reader then restores <em>workspace tabs only</em> (experiment tab order is empty, so persisted experiments load but do not auto-open as tabs):</p>
+<p>Older archives may lack <code>tabOrder</code>. The reader then restores the workspace tabs and their order; persisted experiments still appear as tabs, in file order, and only their saved interleaved tab order is lost:</p>
 <ol>
   <li><code>openTabs</code> — array of source ids (legacy). Each id opens as a workspace tab.</li>
   <li>Per-source <code>open</code> boolean — sources with <code>open = true</code> open as workspace tabs, in manifest order.</li>
@@ -221,13 +221,13 @@ sources/&lt;id&gt;/
 </div>
 
 <h3>5.1 <code>@summary</code> attribute</h3>
-<p>JSON string attribute on each source group. Informational mirror of the manifest entry; the manifest is authoritative. Refreshed on save-back and rename.</p>
+<p>JSON string attribute on each source group. Informational mirror of the manifest entry; the manifest is authoritative. Name and member count are refreshed on save-back and rename; <code>createdIso</code> is rewritten with the current time on save-back.</p>
 <table>
 <tr><th>Key</th><th>Type</th><th>Description</th></tr>
 <tr><td><code>id</code></td><td>string</td><td>Source id (matches group name and manifest <code>sources[].id</code>)</td></tr>
 <tr><td><code>name</code></td><td>string</td><td>Display name (mirrors manifest)</td></tr>
 <tr><td><code>memberCount</code></td><td>i32</td><td>Primary member count (mirrors manifest)</td></tr>
-<tr><td><code>createdIso</code></td><td>string</td><td>ISO-8601 UTC timestamp</td></tr>
+<tr><td><code>createdIso</code></td><td>string</td><td>ISO-8601 UTC timestamp of the last save-back (the manifest keeps the first-embed time)</td></tr>
 </table>
 
 <h3>5.2 Inner layout</h3>
@@ -243,7 +243,7 @@ sources/&lt;id&gt;/
 experiments/&lt;id&gt;/
     ├── config.json          <span class="c">(vlen str) — full instance state — §6.1</span>
     ├── fingerprint.json     <span class="c">(vlen str) — per-source compute-time snapshots — §6.2</span>
-    ├── results/             <span class="c">(fp64 datasets, Absorbance only) — §6.3</span>
+    ├── results/             <span class="c">(fp64 datasets) — §6.3</span>
     │   ├── curve_0_x        <span class="c">(fp64 [M])</span>
     │   ├── curve_0_ratio    <span class="c">(fp64 [M])</span>
     │   └── …
@@ -272,6 +272,11 @@ experiments/&lt;id&gt;/
 <tr><td><code>computed</code></td><td>bool</td><td>false</td><td>True once a compute produced a ratio for ≥1 curve</td></tr>
 <tr><td><code>manualXMin</code>, <code>manualXMax</code></td><td>fp64</td><td>0.0, 0.0</td><td>Saved view X range (in the saved <code>xUnit</code>)</td></tr>
 <tr><td><code>tabHidden</code></td><td>bool</td><td>false</td><td>Tab-strip visibility (closed-but-kept experiments)</td></tr>
+<tr><td><code>differenceEnabled</code></td><td>bool</td><td>false</td><td>Difference panel on/off</td></tr>
+<tr><td><code>differenceRefIdx</code></td><td>i32</td><td>0</td><td>Index of the Reference curve in the visible-curve list</td></tr>
+<tr><td><code>differenceSubIdx</code></td><td>i32</td><td>1</td><td>Index of the Subtracted curve in the visible-curve list</td></tr>
+<tr><td><code>differenceMode</code></td><td>i32</td><td>0</td><td>0 = Signed, 1 = Absolute</td></tr>
+<tr><td><code>differenceStatsRegion</code></td><td>i32</td><td>0</td><td>0 = Viewbox, 1 = All</td></tr>
 </table>
 
 <h4>Absorbance-specific keys</h4>
@@ -294,6 +299,7 @@ experiments/&lt;id&gt;/
 <tr><td><code>comparatorKeys</code></td><td>string[]</td><td>Stable keys of included datasets. Empty + <code>comparatorKeysExplicit=false</code> = all open datasets.</td></tr>
 <tr><td><code>comparatorKeysExplicit</code></td><td>bool</td><td>True once the user toggled a checkbox (empty then means "nothing selected")</td></tr>
 <tr><td><code>memberPicks</code></td><td>object</td><td>Map of dataset key → member id (multi-member artifacts)</td></tr>
+<tr><td><code>maxAtZeroIfg</code></td><td>bool</td><td>false</td><td>Align each curve's center burst at x = 0 (Comparator, interferogram artifacts)</td></tr>
 </table>
 
 <h3 id="exp-fingerprint">6.2 <code>fingerprint.json</code></h3>
@@ -310,7 +316,7 @@ experiments/&lt;id&gt;/
 <blockquote>Staleness is data-grounded: a snapshot mismatch means the source's data or effective params changed since compute. The user sees a warning and a Recompute button; results are not auto-discarded.</blockquote>
 
 <h3 id="exp-results">6.3 <code>results/</code></h3>
-<p>Group of fp64 datasets, Absorbance experiments only. One pair per computed curve. Comparator experiments store no results (they re-extract overlay curves live from the sources).</p>
+<p>Group of fp64 datasets. Absorbance experiments store one <code>curve_&lt;k&gt;_x</code>/<code>curve_&lt;k&gt;_ratio</code> pair per computed curve; both experiment types additionally store <code>difference_x</code>/<code>difference_y</code> when the Difference panel is enabled. Comparators otherwise store no results — their overlay curves are re-extracted live from the sources.</p>
 <table>
 <tr><th>Dataset</th><th>Shape</th><th>Description</th></tr>
 <tr><td><code>curve_&lt;k&gt;_x</code></td><td>fp64 [M]</td><td>Common X grid (overlapping region of the curve's ref/sample pair)</td></tr>

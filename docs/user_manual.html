@@ -1,0 +1,2772 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FTS Data Explorer — User Manual</title>
+<style>
+:root {
+  --bg: #fff; --fg: #1a1a1a; --muted: #555; --border: #ddd;
+  --code-bg: #f4f4f4; --tree-fg: #2d2d2d; --tree-bg: #fafafa;
+  --tree-border: #e0e0e0; --th-bg: #f0f0f0;
+  --blockquote-bg: #f9f9f9; --blockquote-border: #999;
+  /* FTS Data Explorer default accent: green (0.20, 0.55, 0.30) */
+  --accent: #338c4d;
+  --accent-strong: #226139;
+  --accent-soft: rgba(51, 140, 77, 0.14);
+  --link: #2a7a43;
+  --mark-cur-bg: #338c4d; --mark-cur-fg: #fff;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1e1e1e; --fg: #ddd; --muted: #999; --border: #444;
+    --code-bg: #2a2a2a; --tree-fg: #ccc; --tree-bg: #252525;
+    --tree-border: #444; --th-bg: #2a2a2a;
+    --blockquote-bg: #252525; --blockquote-border: #666;
+    --accent: #6cc38a;
+    --accent-strong: #94d8ab;
+    --accent-soft: rgba(108, 195, 138, 0.20);
+    --link: #6cc38a;
+    --mark-cur-bg: #94d8ab; --mark-cur-fg: #10291a;
+  }
+}
+[data-theme="light"] { --bg:#fff; --fg:#1a1a1a; --muted:#555; --border:#ddd; --code-bg:#f4f4f4; --tree-fg:#2d2d2d; --tree-bg:#fafafa; --tree-border:#e0e0e0; --th-bg:#f0f0f0; --blockquote-bg:#f9f9f9; --blockquote-border:#999; --accent:#338c4d; --accent-strong:#226139; --accent-soft:rgba(51,140,77,0.14); --link:#2a7a43; --mark-cur-bg:#338c4d; --mark-cur-fg:#fff; }
+[data-theme="dark"]  { --bg:#1e1e1e; --fg:#ddd; --muted:#999; --border:#444; --code-bg:#2a2a2a; --tree-fg:#ccc; --tree-bg:#252525; --tree-border:#444; --th-bg:#2a2a2a; --blockquote-bg:#252525; --blockquote-border:#666; --accent:#6cc38a; --accent-strong:#94d8ab; --accent-soft:rgba(108,195,138,0.20); --link:#6cc38a; --mark-cur-bg:#94d8ab; --mark-cur-fg:#10291a; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--fg); line-height: 1.6; transition: background 0.2s, color 0.2s; }
+
+/* --- layout: contents/search column on the left, content on the right --- */
+.layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 2.5rem; max-width: 1320px; margin: 0 auto; padding: 1.75rem 2rem 3rem; }
+.sidebar { position: sticky; top: 1.75rem; align-self: start; max-height: calc(100vh - 3.5rem); overflow-y: auto; display: flex; flex-direction: column; gap: 0.9rem; }
+.sidebar-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.6rem; }
+.brand { font-size: 1.02rem; font-weight: 650; line-height: 1.25; }
+.brand-sub { display: block; margin-top: 0.15rem; color: var(--muted); font-size: 0.75rem; font-weight: 400; letter-spacing: 0.05em; text-transform: uppercase; }
+.content { min-width: 0; }
+/* --- pagination --- */
+.page { display: none; }
+.page.active { display: block; }
+.page-chapter { margin: 0 0 0.15rem; font-size: 0.72rem; font-weight: 650; letter-spacing: 0.07em; text-transform: uppercase; color: var(--accent); }
+.page > .page-chapter + h2 { margin-top: 0.35rem; }
+.page-nav { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.55rem 0 0.65rem; margin-bottom: 0.5rem; background: var(--bg); border-bottom: 1px solid var(--border); }
+.page-btn { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0.7rem; font: inherit; font-size: 0.82rem; color: var(--fg); background: var(--code-bg); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; }
+.page-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.page-btn:disabled { opacity: 0.4; cursor: default; }
+.page-arrow { color: var(--accent); }
+.page-status { font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
+.nav-toc a.active { background: var(--accent-soft); border-left-color: var(--accent); }
+
+/* --- in-page search --- */
+.search-box { display: flex; flex-direction: column; gap: 0.35rem; }
+#manualSearch { width: 100%; padding: 0.45rem 0.6rem; font: inherit; font-size: 0.88rem; color: var(--fg); background: var(--code-bg); border: 1px solid var(--border); border-radius: 4px; outline: none; }
+#manualSearch::placeholder { color: var(--muted); }
+#manualSearch:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.search-row { display: flex; align-items: center; justify-content: space-between; min-height: 1.55rem; font-size: 0.78rem; color: var(--muted); }
+.search-nav { display: flex; gap: 0.25rem; }
+.search-nav button { width: 1.7rem; height: 1.5rem; line-height: 1; font-size: 0.85rem; color: var(--fg); background: var(--code-bg); border: 1px solid var(--border); border-radius: 3px; cursor: pointer; }
+.search-nav button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.search-nav button:disabled { opacity: 0.4; cursor: default; }
+mark.search-hit { background: var(--accent-soft); color: inherit; border-radius: 2px; padding: 0 1px; }
+mark.search-hit.current { background: var(--mark-cur-bg); color: var(--mark-cur-fg); }
+
+.theme-toggle { background: var(--code-bg); border: 1px solid var(--border); color: var(--fg); padding: 0.3rem 0.6rem; border-radius: 4px; cursor: pointer; font-size: 0.78rem; white-space: nowrap; }
+.theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
+
+h1 { font-size: 1.8rem; border-bottom: 2px solid var(--accent); padding-bottom: 0.5rem; margin-bottom: 0.5rem; }
+h2 { font-size: 1.35rem; margin: 2.2rem 0 0.75rem; border-bottom: 1px solid var(--border); padding-bottom: 0.25rem; }
+h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
+h4 { font-size: 1rem; margin: 1.2rem 0 0.4rem; }
+p { margin: 0.5rem 0; }
+a { color: var(--link); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.meta { color: var(--muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
+code { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 0.9em; background: var(--code-bg); border-radius: 3px; padding: 0.1em 0.3em; }
+pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 4px; padding: 0.75rem 1rem; overflow-x: auto; margin: 0.75rem 0; font-size: 0.85rem; line-height: 1.4; }
+pre code { background: none; padding: 0; }
+table { width: 100%; border-collapse: collapse; margin: 0.75rem 0 1.25rem; font-size: 0.9rem; }
+th, td { text-align: left; padding: 0.4rem 0.6rem; border: 1px solid var(--border); vertical-align: top; }
+th { background: var(--accent-soft); font-weight: 600; }
+td { background: var(--bg); }
+tr:nth-child(even) td { background: var(--tree-bg); }
+blockquote { border-left: 3px solid var(--blockquote-border); background: var(--blockquote-bg); padding: 0.5rem 1rem; margin: 0.75rem 0; font-size: 0.9rem; color: var(--muted); }
+ul, ol { padding-left: 1.5rem; margin: 0.5rem 0; }
+li { margin: 0.2rem 0; }
+.nav-toc { background: var(--tree-bg); border: 1px solid var(--border); border-radius: 4px; padding: 0.9rem 1rem; }
+.nav-toc h3 { margin: 0 0 0.5rem; font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.nav-toc ul { list-style: none; padding-left: 0; margin: 0; }
+.nav-toc li { margin: 0.12rem 0; font-size: 0.88rem; break-inside: avoid; }
+.nav-toc a { display: block; padding: 0.12rem 0.4rem; border-left: 2px solid transparent; border-radius: 3px; color: var(--fg); }
+.nav-toc a:hover { background: var(--accent-soft); border-left-color: var(--accent); text-decoration: none; }
+.toc-chapter { margin: 0.7rem 0 0.2rem; padding-top: 0.6rem; border-top: 1px solid var(--border); font-size: 0.72rem; font-weight: 650; letter-spacing: 0.07em; text-transform: uppercase; color: var(--accent); }
+.toc-chapter:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+.toc li:not(.toc-chapter) a { padding-left: 0.9rem; }
+figure.shot { margin: 1rem 0; }
+figure.shot img { width: 100%; display: block; border: 1px solid var(--border); border-radius: 4px; background: #111; }
+figure.shot figcaption { color: var(--muted); font-size: 0.85rem; margin-top: 0.35rem; }
+figure.shot.half { max-width: 50%; }
+figure.shot a img { transition: border-color 0.15s; }
+figure.shot a:hover img { border-color: var(--accent); }
+.shots { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+.shots.three { grid-template-columns: 1fr 1fr 1fr; }
+.shots figure.shot { margin: 0; }
+.note { border-left: 3px solid var(--accent); background: var(--blockquote-bg); padding: 0.5rem 1rem; margin: 0.75rem 0; font-size: 0.9rem; }
+hr { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
+.footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.8rem; }
+kbd { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 0.85em; background: var(--code-bg); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 3px; padding: 0.05em 0.35em; }
+
+/* --- workflow diagram --- */
+.flow-figure { margin: 1rem 0; }
+.flow { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; gap: 0.6rem 0.55rem; margin: 0.25rem 0; }
+.flow-box { display: flex; align-items: center; justify-content: center; gap: 0.45rem; min-height: 3.3rem; padding: 0.5rem 0.7rem; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 8px; font-size: 0.85rem; line-height: 1.35; text-align: center; }
+.flow-num { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 1.3rem; height: 1.3rem; border-radius: 50%; background: var(--accent); color: var(--mark-cur-fg); font-size: 0.72rem; font-weight: 700; }
+.flow-arrow { display: flex; align-items: center; justify-content: center; color: var(--accent); font-size: 1.2rem; line-height: 1; }
+.flow-down { grid-column: 5; }
+.flow-save { grid-column: 1 / -1; justify-self: center; width: min(100%, 24rem); }
+.flow-figure figcaption { color: var(--muted); font-size: 0.85rem; margin-top: 0.35rem; }
+@media (max-width: 760px) {
+  .flow { grid-template-columns: 1fr; }
+  .flow-arrow:not(.flow-down) { transform: rotate(90deg); }
+  .flow-down { grid-column: auto; }
+  .flow-save { grid-column: auto; width: 100%; }
+}
+
+/* --- spectrum calculation chain --- */
+.chain-figure { margin: 1rem 0; }
+.chain { display: flex; flex-direction: column; align-items: center; margin: 0.25rem 0; }
+.chain-node { width: min(100%, 46rem); display: flex; align-items: flex-start; gap: 0.6rem; padding: 0.55rem 0.75rem; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 8px; }
+.chain-num { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 1.3rem; height: 1.3rem; margin-top: 0.1rem; border-radius: 50%; background: var(--accent); color: var(--mark-cur-fg); font-size: 0.72rem; font-weight: 700; }
+.chain-text { display: flex; flex-direction: column; gap: 0.05rem; }
+.chain-title { font-size: 0.9rem; font-weight: 650; }
+.chain-desc { color: var(--muted); font-size: 0.82rem; line-height: 1.4; }
+.chain-arrow { color: var(--accent); font-size: 1.05rem; line-height: 1; padding: 0.22rem 0; }
+.chain-figure figcaption { color: var(--muted); font-size: 0.85rem; margin-top: 0.35rem; }
+h5 { font-size: 0.95rem; margin: 1rem 0 0.35rem; }
+.tree, .ds { background: var(--tree-bg); border: 1px solid var(--tree-border); border-radius: 4px; padding: 0.75rem 1rem; font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 0.82rem; line-height: 1.45; overflow-x: auto; white-space: pre; color: var(--tree-fg); margin: 0.75rem 0; }
+.tree { padding: 1rem 1.25rem; }
+.tree .c, .ds .c { color: var(--muted); }
+.tree .a, .ds .a { color: #b86e00; }
+.tree .t, .ds .t { color: #085; }
+[data-theme="light"] .tree .a, [data-theme="light"] .ds .a { color: #b86e00; }
+[data-theme="light"] .tree .t, [data-theme="light"] .ds .t { color: #085; }
+[data-theme="dark"] .tree .a, [data-theme="dark"] .ds .a { color: #e0b000; }
+[data-theme="dark"] .tree .t, [data-theme="dark"] .ds .t { color: #5dba7a; }
+@media (prefers-color-scheme: dark) {
+  .tree .a, .ds .a { color: #e0b000; }
+  .tree .t, .ds .t { color: #5dba7a; }
+}
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; gap: 1.25rem; padding: 1.25rem; }
+  .sidebar { position: static; max-height: none; }
+  .nav-toc ul { columns: 2; }
+}
+@media (max-width: 720px) { .shots, .shots.three, figure.shot.half { grid-template-columns: 1fr; max-width: 100%; } }
+</style>
+</head>
+<body>
+<div class="layout">
+<aside class="sidebar">
+  <div class="sidebar-head">
+    <div class="brand">FTS Data Explorer<span class="brand-sub">User manual</span></div>
+    <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme">◐ Theme</button>
+  </div>
+  <div class="search-box">
+    <input id="manualSearch" type="search" placeholder="Search the manual..." aria-label="Search the manual" autocomplete="off" spellcheck="false">
+    <div class="search-row">
+      <span id="searchCount">Type to search</span>
+      <span class="search-nav">
+        <button id="searchPrev" type="button" title="Previous match (Shift+Enter)" disabled>&#8593;</button>
+        <button id="searchNext" type="button" title="Next match (Enter)" disabled>&#8595;</button>
+      </span>
+    </div>
+  </div>
+  <nav class="nav-toc">
+  <h3>Contents</h3>
+  <ul class="toc">
+  <li><a href="#cover">FTS Data Explorer</a></li>
+  <li class="toc-chapter">Introduction</li>
+  <li><a href="#intro">1. Overview</a></li>
+  <li><a href="#workflow">2. Workflow</a></li>
+  <li><a href="#format">3. Workspace files and data storage</a></li>
+  <li><a href="#first-start">4. First start</a></li>
+  <li><a href="#interface">5. The interface</a></li>
+  <li><a href="#data">6. Getting data in</a></li>
+  <li><a href="#saving">7. Saving and closing</a></li>
+  <li class="toc-chapter">Single-dataset processing</li>
+  <li><a href="#spectrum-calc">8. Spectrum calculation</a></li>
+  <li><a href="#files">9. Files panel</a></li>
+  <li><a href="#metadata">10. Metadata panel</a></li>
+  <li><a href="#interferogram">11. Interferogram View</a></li>
+  <li><a href="#spectrum">12. Spectrum panel</a></li>
+  <li><a href="#average">13. Average</a></li>
+  <li><a href="#snr">14. SNR</a></li>
+  <li><a href="#allan">15. Allan variance</a></li>
+  <li><a href="#t100">16. 100&nbsp;% T</a></li>
+  <li><a href="#hitran">17. HITRAN Gas Markers</a></li>
+  <li><a href="#export">18. Export panel</a></li>
+  <li class="toc-chapter">Multi-dataset experiments</li>
+  <li><a href="#multi">19. Multi-workspace sessions</a></li>
+  <li><a href="#batch">20. Batch processing</a></li>
+  <li><a href="#experiments">21. Working with experiments</a></li>
+  <li><a href="#comparator">22. Comparator</a></li>
+  <li><a href="#absorbance">23. Absorbance</a></li>
+  <li><a href="#difference">24. Difference</a></li>
+  <li><a href="#exporting-experiments">25. Exporting experiment data</a></li>
+  <li class="toc-chapter">Input controls</li>
+  <li><a href="#keys">26. Keyboard and mouse reference</a></li>
+  <li class="toc-chapter">Developer guide</li>
+  <li><a href="#hdf-single">27. Single-dataset workspace format</a></li>
+  <li><a href="#hdf-multi">28. Multi-workspace container format</a></li>
+  <li><a href="#converters">29. Writing a data converter</a></li>
+  <li><a href="#headless">30. Headless mode</a></li>
+  <li class="toc-chapter">Appendix</li>
+  <li><a href="#literature">31. Literature and acknowledgments</a></li>
+  </ul>
+  </nav>
+</aside>
+
+<main class="content" id="content">
+<div class="page-nav">
+  <button id="pagePrev" class="page-btn" type="button" title="Previous page"><span class="page-arrow">&#8592;</span> Previous</button>
+  <span id="pageStatus" class="page-status">1 / 32</span>
+  <button id="pageNext" class="page-btn" type="button" title="Next page">Next <span class="page-arrow">&#8594;</span></button>
+</div>
+
+<section class="page active" id="cover">
+<h1>FTS Data Explorer</h1>
+<div class="meta">User manual &nbsp;|&nbsp; Applies to version 26.08 and later &nbsp;|&nbsp; 2026-09-26</div>
+
+<p>
+FTS Data Explorer is a desktop application for inspecting and processing data from
+Fourier-transform spectrometers. It reads <a href="https://support.hdfgroup.org/documentation/hdf5/latest/">HDF5</a> workspace files (<code>.h5</code>), plots
+interferograms and spectra, and provides a set of batch analyses: average spectrum,
+spectral SNR, 100&nbsp;% transmittance, and Allan variance. Plots and calculation results
+can be exported to CSV, and the workspace — files, comments, processing settings, computed
+artifacts, experiments — is saved back into the same <code>.h5</code> file.
+</p>
+</section>
+<section class="page" id="intro" data-chapter="Chapter 1 — Introduction">
+<div class="page-chapter">Chapter 1 — Introduction</div>
+<h2>1. Overview</h2>
+
+<p>
+FTS Data Explorer is a desktop application for the whole analysis path of
+Fourier-transform spectrometer data: it takes raw measurements in, turns them into
+spectra, runs the standard analyses, and keeps the results together in one file. It works
+with files from lab-built and commercial instruments alike, and it is meant for day-to-day
+laboratory work — checking a measurement that looks odd, preparing a series of scans for
+averaging, or investigating how stable an instrument is over time — without writing a new
+script for every question. The application does not acquire data from the instrument;
+measurements arrive as files.
+</p>
+
+<p>
+Everything is organized around one container, the workspace. A workspace is a single
+<a href="https://support.hdfgroup.org/documentation/hdf5/latest/">HDF5</a> (<code>.h5</code>) file that holds the
+measurements, their metadata and comments, the processing settings, the computed results,
+and — for multi-dataset work — experiments and batch recipes. Data produced by other
+software (vendor CSVs, text dumps, exported spectra) enters through the built-in Conversion
+screen, which runs small converter scripts and writes a compliant workspace file
+(Section 6). Because the workspace records the complete state of the work, reopening it
+restores the session exactly as it was left; Section 3 explains what is stored where.
+</p>
+
+<p>What you can do with it:</p>
+<ul>
+  <li><strong>Inspect measurements.</strong> Overlay up to five interferograms or spectra,
+      zoom and pan them, and read exact values with the tracking cursor (Sections 9–11).</li>
+  <li><strong>Compute spectra.</strong> Correct the X axis with the Hilbert transform or
+      peak finding, choose an apodization window and zero-padding, and display the result in
+      cm⁻¹, µm, or THz (Sections 8 and 12).</li>
+  <li><strong>Run the standard analyses.</strong> Average spectrum, spectral SNR,
+      100&nbsp;% transmittance with ASTM E1421 energy ratios, and Allan variance for
+      stability (Sections 13–16).</li>
+  <li><strong>Compare datasets.</strong> Comparator and Absorbance experiments overlay
+      artifacts from several datasets and compute difference curves (Chapter 3).</li>
+  <li><strong>Check spectral features.</strong> Overlay HITRAN band markers for eight common gases on the Spectrum View and Average plots (and in spectral experiment viewers) (Section 17).</li>
+  <li><strong>Export and archive.</strong> Write any computed curve to CSV and save the complete state back into the workspace (Sections 7 and 18).</li>
+</ul>
+
+<p>
+The application runs locally and ships as a single executable for Linux and Windows — no installation step. The Windows build is fully static; the Linux build uses the system OpenGL and X11 libraries. Calculations are multithreaded, and the worker count is configurable in the
+Settings menu.
+</p>
+
+<h3>1.1 How this manual is organized</h3>
+<p>
+The chapters mirror how the application is organized:
+</p>
+<ul>
+  <li><strong>Introduction</strong> (Sections 1–7) — the workflow, workspace files, first
+      start, the interface, and getting data in.</li>
+  <li><strong>Single-dataset processing</strong> (Sections 8–18) — the spectrum calculation
+      chain, the Files panel, and every analysis panel for one dataset.</li>
+  <li><strong>Multi-dataset experiments</strong> (Sections 19–25) — multi-workspace
+      sessions, batch processing, and the Comparator and Absorbance experiments.</li>
+  <li><strong>Input controls</strong> (Section 26) — keyboard and mouse shortcuts.</li>
+  <li><strong>Developer guide</strong> (Sections 27–30) — the HDF5 format specifications, writing data converters, and headless mode.</li>
+  <li><strong>Appendix</strong> (Section 31) — literature, third-party libraries, and funding acknowledgements.</li>
+</ul>
+<p>
+If you are opening the application for the first time, continue with Section 2 (Workflow)
+and Section 4 (First start). If you already have a workspace file, Section 6.2 explains how
+to open it, and Section 9 covers the file list.
+</p>
+</section>
+<section class="page" id="workflow" data-chapter="Chapter 1 — Introduction">
+<div class="page-chapter">Chapter 1 — Introduction</div>
+<h2>2. Workflow</h2>
+
+<p>
+The application is built around a single end-to-end workflow: raw measurements come in,
+processing settings are tuned by hand on one dataset, the same method is applied to the remaining datasets, and everything is exported and archived from the same file.
+</p>
+
+<figure class="flow-figure">
+  <div class="flow" role="img" aria-label="Workflow diagram: convert raw data to HDF5, load the workspace, tune the processing, replicate the method with batch processing, extract information, export results, and save the workspace to a single .h5 file">
+    <div class="flow-box"><span class="flow-num">1</span><span>Convert raw data to HDF5</span></div>
+    <div class="flow-arrow" aria-hidden="true">&#8594;</div>
+    <div class="flow-box"><span class="flow-num">2</span><span>Load the workspace</span></div>
+    <div class="flow-arrow" aria-hidden="true">&#8594;</div>
+    <div class="flow-box"><span class="flow-num">3</span><span>Tune the processing</span></div>
+    <div class="flow-arrow flow-down" aria-hidden="true">&#8595;</div>
+    <div class="flow-box"><span class="flow-num">4</span><span>Replicate the method with batch processing</span></div>
+    <div class="flow-arrow" aria-hidden="true">&#8594;</div>
+    <div class="flow-box"><span class="flow-num">5</span><span>Extract information</span></div>
+    <div class="flow-arrow" aria-hidden="true">&#8594;</div>
+    <div class="flow-box"><span class="flow-num">6</span><span>Export results</span></div>
+    <div class="flow-arrow flow-down" aria-hidden="true">&#8595;</div>
+    <div class="flow-box flow-save"><span class="flow-num">7</span><span>Save the workspace to a single .h5</span></div>
+  </div>
+  <figcaption>The workflow supported by FTS Data Explorer.</figcaption>
+</figure>
+
+<ol>
+  <li><strong>Convert the raw data.</strong> Measurements are read from the application's
+      HDF5 workspace format. Files from other sources are converted by a converter script
+      on the Conversion screen. See Section 6.</li>
+  <li><strong>Load the workspace.</strong> Open the file in a tab; its measurements,
+      metadata, and saved settings are restored with it.</li>
+  <li><strong>Tune the processing.</strong> Work on one dataset manually — X-axis
+      correction, apodization, zero-padding, axis ranges — until the spectra look right.
+      See Sections 8, 11, and 12.</li>
+  <li><strong>Replicate the method.</strong> Capture the settings that worked into a batch
+      recipe and apply it to the other datasets, so that every file is processed the same
+      way. See Section 20.</li>
+  <li><strong>Extract the information.</strong> Use the analysis panels (average spectrum,
+      SNR, 100&nbsp;% transmittance with energy ratios, Allan variance) and the
+      cross-dataset experiments. See Sections 13–16 and 21–25.</li>
+  <li><strong>Export the results.</strong> Write any curve, spectrum, or table to CSV for
+      reports and further analysis. See Section 18.</li>
+  <li><strong>Save the workspace.</strong> The complete state — inputs, settings, comments,
+      results, experiments — is stored back into a single <code>.h5</code> file for later
+      access, archiving, or sharing. See Section 7.</li>
+</ol>
+
+<p>
+Steps 3 to 5 are iterative; settings can be changed and results recomputed at any time.
+Because the workspace file records the whole state of an analysis, it can be reopened
+later, on this or another machine, and continued where it was left.
+</p>
+</section>
+<section class="page" id="format" data-chapter="Chapter 1 — Introduction">
+<div class="page-chapter">Chapter 1 — Introduction</div>
+<h2>3. Workspace files and data storage</h2>
+
+<p>
+Everything the application produces is stored in HDF5 files — a binary, self-describing
+container format widely used in scientific computing. Two kinds of file share the
+<code>.h5</code> extension: a single-dataset workspace and a multi-workspace container
+(Section 19). The application tells the two apart by their content, not by the file name, so both open the same way — from the Welcome screen or <code>File → Open Workspace (.h5)...</code>.
+</p>
+
+<h3>3.1 What a workspace file contains</h3>
+<p>
+A workspace holds more than the measurements. It records the complete state of the work done
+on them, which is why a reopened dataset looks exactly as it was left:
+</p>
+<ul>
+  <li><strong>Measurements</strong> — raw interferograms (reference and primary) or
+      precomputed spectra, and their timestamps.</li>
+  <li><strong>Metadata</strong> — the measurement configuration stored with the data, plus
+      the comment and tags edited in the Metadata panel (Section 10).</li>
+  <li><strong>Processing settings and display state</strong> — X-axis correction, reference
+      laser wavelength, apodization, zero-padding, detector sensitivity, axis units, plot
+      zoom ranges, and the file selection.</li>
+  <li><strong>Computed results</strong> — spectra, average spectrum, SNR, 100&nbsp;% T,
+      Allan variance, and the inputs they were calculated from.</li>
+  <li><strong>Experiments and recipes</strong> — Comparator and Absorbance setups with their
+      saved results, and batch-processing recipes; these live in multi-workspace files
+      (Sections 19–25).</li>
+</ul>
+
+<h3>3.2 Originals and derivatives</h3>
+<p>
+Everything in a workspace falls into one of two kinds. <strong>Originals</strong> are the
+measurements themselves: the interferograms or precomputed spectra brought in by conversion.
+<strong>Derivatives</strong> are everything computed from them — spectra, average spectrum,
+SNR, 100&nbsp;% T, and Allan variance. The two kinds are treated differently:
+</p>
+<ul>
+  <li>Originals are never removed automatically. Deleting one always asks for confirmation,
+      and any result calculated from it is marked stale (Section 9).</li>
+  <li>Derivatives can be removed at any time, because they can always be recomputed.
+      <code>Strip derivatives</code> in the Files panel clears all of them at once
+      (Section 3.3).</li>
+</ul>
+<p>
+When the inputs of a stored result change, the panel that displays it shows a
+<code>Stale data: source changed.</code> overlay with a <code>Recompute</code> button.
+How a save treats a stale result depends on the path:
+</p>
+<ul>
+  <li><code>Save</code> (Ctrl+S) keeps it in the file as it is.</li>
+  <li><code>Save As</code>, and the save when closing a tab, drop stale results after a “Stale Data Will Be Dropped” confirmation.</li>
+  <li>The exit <code>Save All</code> drops them without asking.</li>
+</ul>
+<p>
+Recompute a result if you want to keep it.
+</p>
+
+<h3>3.3 Stripping derivatives</h3>
+<p>
+<code>Strip derivatives</code> at the top of the Files panel removes every computed result
+from the workspace in one action — spectra, average spectrum, SNR, 100&nbsp;% T, and Allan
+variance — leaving only the measurements. There is no confirmation, because nothing
+irrecoverable is lost: processing settings are kept, so every result can be recalculated at
+any time. This is the quickest way to return a workspace to its raw state before a new
+round of processing, or before applying a batch recipe (Section 20), which strips existing results first.
+</p>
+
+<h3>3.4 What is stored elsewhere</h3>
+<p>
+A few settings belong to the installation rather than to a dataset: the window geometry, UI theme and font size, worker-thread count, converter setup, and the list of recent files. These are kept in the user configuration file (<code>~/.fts_data_explorer_config</code>; on Windows the same file under <code>%HOME%</code>, or <code>fts_data_explorer_config.ini</code> in the working directory when <code>HOME</code> is unset), so they carry over from one dataset to the next. The docking layout is stored separately, in the application data folder (<code>imgui.ini</code> and its layout snapshots).
+</p>
+
+<h3>3.5 Archiving and sharing</h3>
+<p>
+Because a workspace is one self-contained file, archiving or sending a dataset is a matter
+of copying that file. The format is open and documented — see the
+<a href="#hdf-single">single-dataset specification</a> and the
+<a href="#hdf-multi">multi-workspace specification</a> — so the
+data remains readable with generic HDF5 tools even where the application is not available.
+Multi-workspace files embed complete copies of their datasets (Section 19), which costs disk
+space but keeps experiments intact when source files are moved, renamed, or deleted.
+</p>
+
+<p>
+Saving writes the file atomically, so an interrupted save leaves the previous version
+intact. Section 7 describes when saves happen and how unsaved changes are flagged.
+</p>
+</section>
+<section class="page" id="first-start" data-chapter="Chapter 1 — Introduction">
+<div class="page-chapter">Chapter 1 — Introduction</div>
+<h2>4. First start</h2>
+
+<p>
+FTS Data Explorer ships as a single executable for Linux and Windows — there is no installation step and nothing to configure before launching. The Windows build is fully static; the Linux build uses the system OpenGL and X11 libraries. On first start the application opens the <strong>Welcome</strong> screen, where you choose a workspace to open or convert (Section 6.1).
+</p>
+
+<figure class="shot">
+  <img src="screenshots/welcome_screen.png" alt="Welcome screen with recent datasets on the left and recent multi-workspaces on the right">
+  <figcaption>The Welcome screen: recent datasets on the left, recent multi-workspaces on the right.</figcaption>
+</figure>
+
+<p>
+Settings that belong to the installation — recent files, window geometry, theme, docking layout, converter setup — are described in Section 3.4; the processing settings of a dataset live in the dataset file itself.
+</p>
+</section>
+<section class="page" id="interface" data-chapter="Chapter 1 — Introduction">
+<div class="page-chapter">Chapter 1 — Introduction</div>
+<h2>5. The interface</h2>
+
+<h3>5.1 Menu bar</h3>
+
+<p>
+The menu bar appears once a workspace or multi-workspace is open. It has three menus.
+</p>
+
+<div class="shots three">
+  <figure class="shot">
+    <img src="screenshots/ribbon%20menu/file.png" alt="File menu">
+    <figcaption>File menu</figcaption>
+  </figure>
+  <figure class="shot">
+    <img src="screenshots/ribbon%20menu/settings.png" alt="Settings menu">
+    <figcaption>Settings menu</figcaption>
+  </figure>
+  <figure class="shot">
+    <img src="screenshots/ribbon%20menu/help.png" alt="Help menu">
+    <figcaption>Help menu</figcaption>
+  </figure>
+</div>
+
+<h4>File</h4>
+<table>
+<tr><th>Item</th><th>What it does</th></tr>
+<tr><td><code>Convert Dataset...</code></td><td>Opens the Conversion screen (Section 6.3).</td></tr>
+<tr><td><code>Open Workspace (.h5)...</code></td><td>Opens an existing workspace in a new tab. Both single-dataset and multi-workspace files can be opened; the application detects which one it is.</td></tr>
+<tr><td><code>Close Workspace</code></td><td>Closes the active workspace tab. Only enabled while a workspace tab is focused.</td></tr>
+<tr><td><code>Save</code> <kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>Saves everything that has unsaved changes: all open workspace tabs and all experiments.</td></tr>
+<tr><td><code>Save As...</code> <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></td><td>Writes the active workspace to a new <code>.h5</code> file.</td></tr>
+<tr><td><code>Recent Datasets</code></td><td>Submenu with the most recently opened datasets. Entries whose file is missing are greyed out.</td></tr>
+</table>
+
+<h4>Settings</h4>
+<table>
+<tr><th>Item</th><th>What it does</th></tr>
+<tr><td><code>Display fps</code></td><td>Shows a small FPS counter in the top-right corner.</td></tr>
+<tr><td><code>Show timestamps</code></td><td>Appends the measurement time (<code>[hh:mm:ss]</code>) to file names in the Files panel, in the interferogram legend, and for precomputed spectra. Display only — timestamps are never written to exported files.</td></tr>
+<tr><td><code>Focus panels on hover</code></td><td>On by default. The docked panel under the mouse receives keyboard input (arrows, ESC, wheel) without a click; hovering changes input focus only and never switches between stacked dock tabs.</td></tr>
+<tr><td><code>Grid opacity</code></td><td>Slider that sets the brightness of plot grid lines, 0–100&nbsp;%. Applies to all plots.</td></tr>
+<tr><td><code>Restore layout</code></td><td>Rebuilds the default panel arrangement for the current tab.</td></tr>
+<tr><td><code>UI Size</code></td><td>Font scale: <code>tiny</code>, <code>small</code>, <code>normal</code>, <code>large</code>, <code>huge</code>.</td></tr>
+<tr><td><code>Accent</code></td><td>Colour of buttons, tabs and highlights: <code>Green</code> (default), <code>Blue</code>, <code>Purple</code>, <code>Red</code>, <code>Brown</code>, <code>Cyan</code>.</td></tr>
+<tr><td><code>Worker Threads</code></td><td>Number of computation threads: <code>AUTO</code> (default), <code>1</code>, <code>2</code>, <code>4</code>, <code>8</code>, <code>16</code>. The pool is reconfigured immediately.</td></tr>
+</table>
+
+<h4>Help</h4>
+<p>
+The Help menu contains the keyboard shortcut list and the <code>About</code> dialog, which
+shows the version, the licence (GNU GPLv3), third-party library credits, the literature the
+calculations are based on, and funding information. The text in the About dialog is
+selectable and can be copied.
+</p>
+
+<h3>5.2 Tabs</h3>
+
+<p>
+The tab strip at the top holds the <strong>Session</strong> tab, one tab per open workspace,
+and one tab per experiment. The Session tab is always first and cannot be closed. The
+<code>»»»</code> button at the end of the strip opens a list of all tabs. A tab whose
+contents have unsaved changes is marked with <code>*</code>. Workspace and experiment tabs can be dragged to reorder them; middle-clicking a tab closes it, and right-clicking opens a menu with Close (experiment tabs are only hidden — see Section 21).
+</p>
+
+<h3>5.3 Panels and layout</h3>
+
+<p>
+Every workspace consists of docked panels: Files, Interferogram View, Interferogram, Spectrum, Spectrum View, Average, Average View, SNR, SNR View, Allan, Allan View, 100% T, 100% T View, Metadata, Export, and HITRAN Gas Markers. Drag a panel by its title bar to move it, or drop it onto another panel to
+create a stacked group. The layout is remembered per tab type and per workspace, so each
+dataset reopens with the arrangement you left it in. If a layout gets into a state you
+don't like, use <code>Settings → Restore layout</code>.
+</p>
+
+<figure class="shot">
+  <img src="screenshots/tab_single_dataset/full_tab.png" alt="An open workspace tab with the default panel layout">
+  <figcaption>A workspace tab with the default layout: files and settings on the left, plots in the centre and on the right.</figcaption>
+</figure>
+</section>
+<section class="page" id="data" data-chapter="Chapter 1 — Introduction">
+<div class="page-chapter">Chapter 1 — Introduction</div>
+<h2>6. Getting data in</h2>
+
+<h3>6.1 The Welcome screen</h3>
+
+<p>
+The Welcome screen has two lists: <strong>Recent Datasets</strong> (single workspaces) and
+<strong>Recent Multi-Workspaces</strong>. Click a row to open it, or press <kbd>↑</kbd> /
+<kbd>↓</kbd> and <kbd>Enter</kbd>; <kbd>←</kbd> and <kbd>→</kbd> switch between the two
+lists. The <code>×</code> button next to a row removes it from the list without touching the
+file. Rows for files that have moved or been deleted are greyed out and marked
+<code>(unreachable)</code>.
+</p>
+
+<p>
+In the lower part of the screen (button strip and bottom bar):
+</p>
+<ul>
+  <li><code>Open .h5</code> — open an existing workspace.</li>
+  <li><code>Convert Dataset</code> — open the Conversion screen.</li>
+  <li><code>New Multi-Workspace...</code> — create an empty multi-workspace container
+      (Section 19).</li>
+  <li><code>UI Size</code> — quick access to the font scale setting.</li>
+</ul>
+
+<h3>6.2 Opening an existing workspace</h3>
+
+<p>
+Use <code>File → Open Workspace (.h5)...</code>, a recent entry, or the <code>Open .h5</code>
+button on the Welcome screen. Files with the <code>.h5</code> extension are opened as
+workspaces; if the file contains a multi-workspace archive, it opens in the Session tab
+instead. Opening a file that is already open just activates its tab.
+</p>
+
+<h3>6.3 Converting foreign data</h3>
+
+<p>
+Data that is not already in the workspace format is converted with a converter script. Open
+the Conversion screen from the Welcome screen (<code>Convert Dataset</code>) or from the
+menu (<code>File → Convert Dataset...</code>).
+</p>
+
+<figure class="shot">
+  <img src="screenshots/dataset_converter.png" alt="Conversion screen with setup, converter list, input format pane, input and output fields">
+  <figcaption>The Conversion screen: setup and the converter list on the left; input/output, actions, log, and format documentation on the right.</figcaption>
+</figure>
+
+<h4>Setup</h4>
+<p>
+The <em>Setup</em> group configures where converters come from and which Python to use:
+</p>
+<ul>
+  <li><code>Converter repo URL</code> — location of the standard converter collection.
+      Defaults to the official GitHub repository.</li>
+  <li><code>Converter repo local destination</code> — where the collection is stored
+      locally. <code>Browse...</code> picks a folder.</li>
+  <li><code>Update converters base</code> — clones the repository the first time, then pulls
+      updates. Needs <code>git</code>; the detected version is shown below the button.</li>
+  <li><code>Python interpreter</code> — interpreter used to run scripts, with a
+      <code>Browse...</code> button and a <code>Test</code> button. The detected Python and h5py versions are shown below the row when the probe succeeds.</li>
+  <li><code>Local dir</code> — a folder of your own scripts. A <code>.py</code> file placed
+      here overrides a converter from the repository with the same id. This is also where
+      you put one-off scripts that are not in the repository.</li>
+</ul>
+
+<p>
+Banners at the top of the window report missing dependencies: without <code>git</code>
+updating is disabled; without Python or the <code>h5py</code>/<code>numpy</code> packages
+conversion is disabled. The <code>Refresh</code> button only rescans installed converters —
+it does not use the network. When a clone already exists, it is updated automatically at startup, without prompting.
+</p>
+
+<h4>Running a conversion</h4>
+<ol>
+  <li>Select a converter from the list. Its description, expected input, and a format
+      documentation pane appear. Entries that fail to parse are listed in red with
+      <code>BROKEN:</code> and cannot be run.</li>
+  <li>Set the <code>Input</code> path. Converters that take a single file open a file
+      dialog; converters that take a directory open a folder dialog.</li>
+  <li>Set the <code>Output directory</code>. The output file name is derived from the input
+      name (<code>&lt;name&gt;.h5</code>); for a directory input it is the directory name.</li>
+  <li>Click <code>Convert</code>, or <code>Convert and open</code> to open the result in a
+      workspace tab as soon as it is written.</li>
+</ol>
+
+<p>
+The <code>Log</code> pane shows the last lines of converter output, and the result is
+validated before it is accepted. If the conversion fails, the reason is shown in the banner area, for example <code>Converter exited with code N</code> or
+<code>Converted file failed validation: ...</code>. The output file cannot overwrite the workspace in the active tab. While a conversion or repository sync runs, the Conversion screen stays open; press <code>Exit</code> when you are done.
+</p>
+</section>
+<section class="page" id="saving" data-chapter="Chapter 1 — Introduction">
+<div class="page-chapter">Chapter 1 — Introduction</div>
+<h2>7. Saving and closing</h2>
+
+<p>
+<code>File → Save</code> (<kbd>Ctrl</kbd>+<kbd>S</kbd>) saves all workspaces and
+experiments that have unsaved changes; a <code>Saving...</code> overlay is followed by a
+<code>Saved</code> notification. <code>Save As...</code>
+(<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>) writes the active workspace to a new file.
+</p>
+
+<p>
+A tab with unsaved changes is marked with <code>*</code>. Closing such a tab opens a dialog with <code>Save</code>, <code>Don't Save</code>, and <code>Cancel</code>. Leaving the application, or pressing <kbd>Ctrl</kbd>+<kbd>H</kbd> to go back to the Welcome screen, opens the same prompt with <code>Save All</code>, <code>Discard All</code>, and <code>Cancel</code>. Nothing is discarded silently — with one exception: the exit Save All drops stale results without asking (Section 3.2).
+</p>
+
+<p>
+<kbd>Ctrl</kbd>+<kbd>H</kbd> closes all tabs and returns to the Welcome screen without
+quitting the application. <code>File → Close Workspace</code> closes only the active
+workspace tab.
+</p>
+</section>
+<section class="page" id="spectrum-calc" data-chapter="Chapter 2 — Single-dataset processing">
+<div class="page-chapter">Chapter 2 — Single-dataset processing</div>
+<h2>8. Spectrum calculation</h2>
+
+<p>
+A spectrum is computed from the primary detector trace in a fixed sequence of stages. The chain below shows the complete data flow; every stage runs in order, and the user-facing stages are configured from the Interferogram and Spectrum panels (Sections 11 and 12). Resampling and mean removal always run with fixed rules.
+</p>
+
+<figure class="chain-figure">
+  <div class="chain" role="img" aria-label="Spectrum calculation chain: raw interferograms, X-axis correction, resampling, mean removal, apodization, zero-padding, FFT, magnitude, unit conversion">
+    <div class="chain-node"><span class="chain-num">1</span><span class="chain-text"><span class="chain-title">Raw interferograms</span><span class="chain-desc">Reference and primary detector traces, indexed by sample number.</span></span></div>
+    <div class="chain-arrow" aria-hidden="true">&#8595;</div>
+    <div class="chain-node"><span class="chain-num">2</span><span class="chain-text"><span class="chain-title">X-axis correction</span><span class="chain-desc">The reference channel turns the sample index into optical path difference — Hilbert transform or peak finding, scaled by the reference laser wavelength.</span></span></div>
+    <div class="chain-arrow" aria-hidden="true">&#8595;</div>
+    <div class="chain-node"><span class="chain-num">3</span><span class="chain-text"><span class="chain-title">Resampling</span><span class="chain-desc">The primary trace is interpolated onto a uniform OPD grid, as the FFT requires.</span></span></div>
+    <div class="chain-arrow" aria-hidden="true">&#8595;</div>
+    <div class="chain-node"><span class="chain-num">4</span><span class="chain-text"><span class="chain-title">Mean removal</span><span class="chain-desc">The average of the trace is subtracted, centring the signal on zero.</span></span></div>
+    <div class="chain-arrow" aria-hidden="true">&#8595;</div>
+    <div class="chain-node"><span class="chain-num">5</span><span class="chain-text"><span class="chain-title">Apodization</span><span class="chain-desc">A window function (Rectangular, Gauss, Norton-Beer, Dolph-Chebyshev, Hamming, ...) tapers the trace and trades main-lobe width against sidelobe level.</span></span></div>
+    <div class="chain-arrow" aria-hidden="true">&#8595;</div>
+    <div class="chain-node"><span class="chain-num">6</span><span class="chain-text"><span class="chain-title">Zero-padding</span><span class="chain-desc">The trace is extended with zeros by the factor K. The transform has N &times; (K + 1) bins; the plotted spectrum keeps the positive-frequency half, N &times; (K + 1) / 2 points.</span></span></div>
+    <div class="chain-arrow" aria-hidden="true">&#8595;</div>
+    <div class="chain-node"><span class="chain-num">7</span><span class="chain-text"><span class="chain-title">FFT</span><span class="chain-desc">The padded trace is transformed into the frequency domain.</span></span></div>
+    <div class="chain-arrow" aria-hidden="true">&#8595;</div>
+    <div class="chain-node"><span class="chain-num">8</span><span class="chain-text"><span class="chain-title">Magnitude</span><span class="chain-desc">The magnitude of each complex result is taken; the phase is discarded.</span></span></div>
+    <div class="chain-arrow" aria-hidden="true">&#8595;</div>
+    <div class="chain-node"><span class="chain-num">9</span><span class="chain-text"><span class="chain-title">Unit conversion</span><span class="chain-desc">The X axis is converted to the selected unit: cm⁻¹, µm, or THz. Detector sensitivity and normalisation are applied when the spectrum is drawn, not to the stored result.</span></span></div>
+  </div>
+  <figcaption>The spectrum calculation chain. X correction, apodization, zero-padding, and the axis units are user-controlled; resampling and mean removal always run with fixed rules.</figcaption>
+</figure>
+
+<p>
+Not every dataset runs the whole chain. A dataset with an already corrected axis skips the
+X-axis correction stage and uses its stored OPD axis; a dataset that contains precomputed
+spectra skips stages 2–8 and uses the stored spectrum directly.
+</p>
+
+<p>
+Spectra are recalculated automatically when a stage's settings change, so the chain can be
+tuned interactively while watching the result (Section 12).
+</p>
+</section>
+<section class="page" id="files" data-chapter="Chapter 2 — Single-dataset processing">
+<div class="page-chapter">Chapter 2 — Single-dataset processing</div>
+<h2>9. Files panel</h2>
+
+<figure class="shot half">
+  <img src="screenshots/tab_single_dataset/files.png" alt="Files panel with file rows, checkboxes and selection buttons">
+  <figcaption>The Files panel. Rows with the coloured background are the files currently plotted.</figcaption>
+</figure>
+
+<p>
+The Files panel lists the measurements in the current dataset. The header shows the dataset
+name, followed by selection helpers:
+</p>
+<ul>
+  <li><code>Select: All | None | 10 | 50%</code> — set the checkbox (batch selection) for
+      all files, none, the first ten, or the first half of the list.</li>
+  <li><code>Strip derivatives</code> — removes every computed result from the workspace
+      (spectra, average, SNR, Allan, 100&nbsp;% T). There is no confirmation; results can be
+      recomputed at any time.</li>
+</ul>
+
+<p>
+Each row contains a delete button (<code>×</code>), the file name, and a checkbox. Row
+backgrounds match the plot colours of the currently displayed files; the colours are
+assigned in the order the files are selected.
+</p>
+
+<h3>9.1 Selecting files</h3>
+<ul>
+  <li><strong>Click</strong> a file to load it on its own, replacing the current selection.</li>
+  <li><strong>Ctrl+click</strong> toggles the file in or out of a multi-file selection
+      (up to 5 files).</li>
+  <li><strong>Shift+click</strong> selects a range of files.</li>
+  <li>Ctrl+clicking a sixth file is refused with a <code>Selection Limit</code> message; a Shift+click range stops at five, and Shift+Arrow drops the oldest selected file to make room.</li>
+</ul>
+
+<p>
+The checkboxes on the right are separate from the highlighted selection. They choose the
+files used by the batch analyses (Average, SNR, Allan, 100&nbsp;% T standard deviation) and
+by the <code>Spectra from selected files</code> export. All files are checked when a workspace is opened for the first time; after that the saved checkbox states are restored.
+</p>
+
+<h3>9.2 Deleting files and results</h3>
+<p>
+Clicking <code>×</code> (or pressing <kbd>Delete</kbd>) asks for confirmation in a <code>Delete member?</code> dialog that shows the workspace path of the entry (for example <code>/igm_uncorrected_x/record_0</code>). If other results
+depend on the file, the dialog notes that they may become stale. Deletion is written to the
+file only when you save.
+</p>
+
+<p>
+Computed results are not listed as separate rows in the Files panel. They are cleared with
+<code>Strip derivatives</code> (Section 3.3), and the panel that displays a result shows
+whether it is still current: when its inputs change, that panel shows the
+<code>Stale data: source changed.</code> overlay, where the result can be recomputed.
+</p>
+</section>
+<section class="page" id="metadata" data-chapter="Chapter 2 — Single-dataset processing">
+<div class="page-chapter">Chapter 2 — Single-dataset processing</div>
+<h2>10. Metadata panel</h2>
+
+<figure class="shot half">
+  <img src="screenshots/tab_single_dataset/metadata.png" alt="Metadata panel showing file information, comment editor, tags and measurement configuration tree">
+  <figcaption>The Metadata panel: file summary, editable comment and tags, and the measurement configuration tree.</figcaption>
+</figure>
+
+<p>
+The Metadata panel shows the first member id of the active file group in lexicographic order (not necessarily the highlighted file, and not necessarily the first row shown in the Files panel), the number of samples in the loaded data (the downsampled count when downsampling is on), and the data type of the current dataset — <code>Precomputed spectra</code>, <code>Corrected single IFG</code>, or
+<code>Uncorrected dual IFG</code>. Which type a dataset has determines which processing steps are available (see Sections 11 and 12).
+</p>
+
+<ul>
+  <li><code>Comment:</code> — a free-text note stored in the workspace. Comments are
+      included in the archive and travel with the file.</li>
+  <li><code>Tags:</code> — a short single-line label field.</li>
+  <li><code>@created</code> and <code>@format</code> — read-only attributes of the
+      workspace.</li>
+  <li><code>Measurement Config</code> — a collapsible tree with the instrument and
+      acquisition metadata (instrument, detector, acquisition card, laser, environment).
+      Values are grouped by section.</li>
+</ul>
+
+<p>
+Comment and tag edits are saved together with the workspace; there is no separate apply
+button. To keep a note after editing, use <code>File → Save</code>.
+</p>
+</section>
+<section class="page" id="interferogram" data-chapter="Chapter 2 — Single-dataset processing">
+<div class="page-chapter">Chapter 2 — Single-dataset processing</div>
+<h2>11. Interferogram View</h2>
+
+<div class="shots">
+  <figure class="shot">
+    <img src="screenshots/tab_single_dataset/interferogram/view.png" alt="Interferogram View with reference detector and primary detector plots">
+    <figcaption>Interferogram View: reference detector on top, primary detector below.</figcaption>
+  </figure>
+  <figure class="shot">
+    <img src="screenshots/tab_single_dataset/interferogram/settings.png" alt="Interferogram control panel">
+    <figcaption>The Interferogram controls.</figcaption>
+  </figure>
+</div>
+
+<p>
+The view stacks two plots with a shared X axis: the reference detector on top (when the
+dataset has one) and the primary detector below. The X axis shows the sample number or the
+optical path difference (<code>OPD [µm]</code>), and Y shows detector voltage. All selected files are overlaid; when more than one file is loaded, a legend row above the plots shows each file with its plot colour and its timestamp if <code>Show timestamps</code> is enabled. The apodization window selected in the Spectrum panel is drawn as a cyan overlay on the primary plot, for the first selected file.
+</p>
+
+<h3>11.1 Interacting with the plots</h3>
+<ul>
+  <li><strong>Mouse wheel</strong> — zoom; in the interferogram and spectral plots only X is affected (Y is auto-fitted), while the Allan 2D slice zooms both axes.</li>
+  <li><strong>Shift+drag</strong> — hold Shift and drag to mark an X range; when you release Shift, both plots zoom to it.</li>
+  <li><kbd>ESC</kbd> — reset the zoom.</li>
+  <li><kbd>←</kbd> / <kbd>→</kbd> — pan by 10&nbsp;% of the visible range.</li>
+</ul>
+<p>
+The same controls work in every plot panel (Spectrum, Average, SNR, Allan slice, 100&nbsp;% T, experiment viewers), except that the wheel zoom in the Allan 2D slice affects both axes. The Y axis of the interferogram is always fitted to the
+data; the <code>Auto-fit Y</code> control chooses between fitting to the full data
+(<code>off</code>) and fitting to the visible X range (<code>on</code>).
+</p>
+
+<h3>11.2 Large datasets</h3>
+<p>
+When the first loaded file has more than 50&nbsp;000 samples in a detector, the corresponding interferogram plot switches to large-data mode: the primary plot is annotated <code>LARGE DATA</code>, ImPlot's built-in mouse interactions (wheel, pan, box-select) are disabled — the tracking cursor and Shift+drag range selection still respond, and keyboard panning and <kbd>ESC</kbd> still work — and anti-aliasing is switched off. With downsampling enabled (the default), long reference-detector records are decimated for display and stay fully interactive; datasets without a reference channel (corrected-axis data) are not decimated. Spectra and OPD calculations always use the full-resolution data.
+</p>
+
+<h3>11.3 Controls</h3>
+<table>
+<tr><th>Control</th><th>Values</th><th>Meaning</th></tr>
+<tr><td><code>X axis base</code></td><td><code>sample</code> / <code>OPD</code></td><td>Display the X axis as sample index or optical path difference. For datasets with a corrected axis, <code>sample</code> is disabled.</td></tr>
+<tr><td><code>Max at zero</code></td><td><code>off</code> / <code>on</code></td><td>Shift X so that the centre burst lies at zero. Useful when comparing measurements with different burst positions.</td></tr>
+<tr><td><code>Auto-fit Y</code></td><td><code>off</code> / <code>on</code></td><td><code>off</code> fits Y to all data, <code>on</code> fits Y to the visible X range. Default: on.</td></tr>
+<tr><td><code>Cursor</code></td><td><code>on</code> / <code>off</code></td><td>Tracking cursor: a vertical line with a readout box while the mouse hovers the plot.</td></tr>
+<tr><td><code>Downsample</code></td><td><code>off</code> / <code>on</code></td><td>Decimate long interferograms for display. Default: on. Turning it on or off reloads the selected files.</td></tr>
+<tr><td><code>X correction</code></td><td><code>Hilbert</code> / <code>Peaks</code></td><td>How the OPD axis is computed from the reference detector. Shown only for uncorrected datasets that have a reference channel.</td></tr>
+<tr><td><code>Peak promin.</code></td><td>0.0–0.5, default 0.02</td><td>Peak-finding threshold. Shown when <code>X correction = Peaks</code>.</td></tr>
+<tr><td><code>Peak markers</code></td><td><code>off</code> / <code>on</code></td><td>Marks detected reference peaks in the plot. Shown when <code>X correction = Peaks</code>; the control is only active when the X axis is in sample mode.</td></tr>
+</table>
+
+<p>
+The corresponding keys are <kbd>Ctrl</kbd>+<kbd>Y</kbd> (auto-fit Y),
+<kbd>Ctrl</kbd>+<kbd>A</kbd> (max at zero), and <kbd>Ctrl</kbd>+<kbd>D</kbd>
+(downsample).
+</p>
+</section>
+<section class="page" id="spectrum" data-chapter="Chapter 2 — Single-dataset processing">
+<div class="page-chapter">Chapter 2 — Single-dataset processing</div>
+<h2>12. Spectrum panel</h2>
+
+<div class="shots">
+  <figure class="shot">
+    <img src="screenshots/tab_single_dataset/spectrum/view.png" alt="Spectrum View with a computed magnitude spectrum">
+    <figcaption>Spectrum View: one curve per selected file.</figcaption>
+  </figure>
+  <figure class="shot">
+    <img src="screenshots/tab_single_dataset/spectrum/settings.png" alt="Spectrum settings with sensitivity, laser wavelength, zero-padding and apodization controls">
+    <figcaption>Spectrum settings.</figcaption>
+  </figure>
+</div>
+
+<p>
+The Spectrum panel computes a magnitude spectrum from the primary interferogram: the X axis
+is corrected (Hilbert transform or peak finding, depending on the Interferogram settings),
+the signal is resampled onto a uniform OPD grid, the mean is removed, the apodization window
+is applied, the data is zero-padded, the FFT is taken, and the result is converted to the
+chosen units. The Spectrum View shows one curve per selected file.
+</p>
+
+<h3>12.1 Settings</h3>
+<table>
+<tr><th>Control</th><th>Meaning</th></tr>
+<tr><td><code>Detector sensitivity [kV/W]</code></td><td>Converts the spectrum from volts to power units. Enter <code>NA</code> (or 0) to keep the spectrum normalised so that its maximum is 1 (0&nbsp;dB).</td></tr>
+<tr><td><code>Ref laser [µm]</code></td><td>Wavelength of the reference laser used for the OPD axis. Default 1.550&nbsp;µm. Disabled for datasets that already have a corrected axis.</td></tr>
+<tr><td><code>Zero-pad K</code></td><td>Zero-padding factor; the transform has N×(K+1) bins and the plotted spectrum keeps the positive-frequency half, N×(K+1)/2 points. <code>0</code> disables padding. Default: 2. Disabled for precomputed spectra.</td></tr>
+<tr><td><code>Apodization</code></td><td>Window applied before the FFT. Ten windows are available; the window-specific parameter appears below the selector.</td></tr>
+<tr><td><code>Cursor</code></td><td>Tracking cursor with a combined cm⁻¹ / µm / THz readout.</td></tr>
+<tr><td><code>Y scale</code></td><td><code>lin</code>, <code>log</code>, or <code>dB</code>.</td></tr>
+<tr><td><code>X unit</code></td><td><code>cm-1</code>, <code>µm</code>, or <code>THz</code>. Changing the unit does not recompute the spectrum.</td></tr>
+<tr><td><code>Y Axis</code></td><td><code>all</code> fits Y to all data, <code>tight</code> to the visible range, <code>force</code> locks Y to the min/max fields. A red <code>(min&lt;max!)</code> note appears beside the fields when min ≥ max.</td></tr>
+</table>
+
+<p>
+Apodization windows and their parameters:
+</p>
+<table>
+<tr><th>Window</th><th>Parameter</th></tr>
+<tr><td><code>Rectangular</code></td><td>Mode <code>Sym</code> / <code>Asym</code>, width 0.05–1.0</td></tr>
+<tr><td><code>Gauss</code></td><td>Sigma 1.0–3.0</td></tr>
+<tr><td><code>Triangular</code></td><td>—</td></tr>
+<tr><td><code>Norton-Beer</code></td><td>FWHM 1.0–2.0</td></tr>
+<tr><td><code>Dolph-Chebyshev</code></td><td>Attenuation 50–160&nbsp;dB</td></tr>
+<tr><td><code>Hamming</code></td><td>Alpha 0.36–1.0</td></tr>
+<tr><td><code>Blackman-Harris</code></td><td>—</td></tr>
+<tr><td><code>Hann</code></td><td>—</td></tr>
+<tr><td><code>Happ-Genzel</code></td><td>—</td></tr>
+<tr><td><code>Kaiser</code></td><td>Beta 0.5–12.0</td></tr>
+</table>
+
+<h3>12.2 Recomputation</h3>
+<p>
+Spectra are recomputed automatically when a relevant setting changes (reference laser,
+zero-padding, apodization, X-correction method, or the data itself). The first computation
+for a file waits for the result; later ones run in the background while the previous curve
+stays visible. Changing the X unit or the Y scale only redraws the existing curve.
+</p>
+
+<p>
+For datasets that already contain precomputed spectra, the panel shows those spectra
+directly: zero-padding and apodization are disabled, and the reference laser value is
+ignored.
+</p>
+</section>
+<section class="page" id="average" data-chapter="Chapter 2 — Single-dataset processing">
+<div class="page-chapter">Chapter 2 — Single-dataset processing</div>
+<h2>13. Average</h2>
+
+<div class="shots">
+  <figure class="shot">
+    <img src="screenshots/tab_single_dataset/average%20spectrum/view.png" alt="Average View showing a mean spectrum">
+    <figcaption>The average spectrum of all checked files.</figcaption>
+  </figure>
+  <figure class="shot">
+    <img src="screenshots/tab_single_dataset/average%20spectrum/settings.png" alt="Average panel controls">
+    <figcaption>Average panel controls.</figcaption>
+  </figure>
+</div>
+
+<p>
+The Average panel computes the mean spectrum of all files ticked in the Files panel
+(at least one). Press <code>Calculate average</code>; a progress bar shows the state, and
+the plot is labelled <code>Average of N</code>. The plot controls are
+<code>Cursor</code>, <code>Y scale</code> (lin/log/dB), <code>X unit</code>,
+<code>Match X to Spectrum View</code> (copies the Spectrum panel's unit and zoom range),
+and <code>Y Axis</code> with the usual all/tight/force modes. The result is stored in the
+workspace and used as a reference option by the 100&nbsp;% T and Absorbance panels.
+</p>
+
+<p>
+If the checked files or the processing settings change after a calculation, the plot shows
+a <code>Stale data: source changed.</code> overlay with a <code>Recompute</code> button; hovering it lists what changed (up to four sources).
+</p>
+</section>
+<section class="page" id="snr" data-chapter="Chapter 2 — Single-dataset processing">
+<div class="page-chapter">Chapter 2 — Single-dataset processing</div>
+<h2>14. SNR</h2>
+
+<div class="shots">
+  <figure class="shot">
+    <img src="screenshots/tab_single_dataset/snr/view.png" alt="SNR View showing signal-to-noise ratio per wavenumber">
+    <figcaption>Signal-to-noise ratio per wavenumber.</figcaption>
+  </figure>
+  <figure class="shot">
+    <img src="screenshots/tab_single_dataset/snr/settings.png" alt="SNR panel controls">
+    <figcaption>SNR panel controls.</figcaption>
+  </figure>
+</div>
+
+<p>
+The SNR panel combines repeat measurements into a per-wavelength signal-to-noise ratio:
+the mean spectrum divided by the sample standard deviation across files. At least two
+files must be ticked in the Files panel; the header shows how many are selected. Press
+<code>Calculate SNR</code> to compute. The Y scale offers <code>lin</code> and
+<code>log</code> (no dB); the remaining controls match the Average panel. The result is
+labelled <code>SNR of N</code>.
+</p>
+</section>
+<section class="page" id="allan" data-chapter="Chapter 2 — Single-dataset processing">
+<div class="page-chapter">Chapter 2 — Single-dataset processing</div>
+<h2>15. Allan variance</h2>
+
+<div class="shots">
+  <figure class="shot">
+    <img src="screenshots/tab_single_dataset/allan/view.png" alt="Allan View with a 3D Allan-Werle surface and a 2D slice">
+    <figcaption>Allan–Werle surface and a 2D slice through it.</figcaption>
+  </figure>
+  <figure class="shot">
+    <img src="screenshots/tab_single_dataset/allan/settings.png" alt="Allan panel controls">
+    <figcaption>Allan panel controls.</figcaption>
+  </figure>
+</div>
+
+<p>
+The Allan panel estimates the Allan–Werle variance as a function of integration time
+(τ), either from each file's transmittance against the mean of the selected spectra (<code>Calc base = 100% T</code>) or from the raw spectra
+(<code>Calc base = Spectrum</code>). It needs at least two ticked files. The result is a
+3D surface plus a 2D slice; rotate, zoom and pan the surface with the mouse. The slice is
+drawn as a white curve on the surface and as a separate log–log plot below it.
+</p>
+
+<table>
+<tr><th>Control</th><th>Meaning</th></tr>
+<tr><td><code>Decimation</code></td><td>Spacing between the wavelengths used for the surface. Default 5; set to 1 for full resolution.</td></tr>
+<tr><td><code>Calc base</code></td><td><code>100% T</code> (default) or <code>Spectrum</code>.</td></tr>
+<tr><td><code>Calculate Allan</code></td><td>Starts the three-phase computation (average spectrum, transmittance, per-wavelength variance).</td></tr>
+<tr><td><code>X unit</code></td><td>Unit used for the wavelength axis and the slice display.</td></tr>
+<tr><td><code>X range</code></td><td>Wavelength range included in the calculation; the label follows the selected X unit and the limits are stored in µm. Default 1–30&nbsp;µm.</td></tr>
+<tr><td>Slice slider</td><td>Below the plots; selects the wavelength shown in the 2D slice. The header reports the current value, for example <code>Slice: 19.335 µm | Allan, 100 files</code>.</td></tr>
+</table>
+
+<p>
+The progress bar covers one phase at a time, so its percentage can restart during a run.
+Results are stored in the workspace; <code>Allan-Werle 3D</code> and
+<code>Allan-Werle slice</code> can be exported from the Export panel.
+</p>
+</section>
+<section class="page" id="t100" data-chapter="Chapter 2 — Single-dataset processing">
+<div class="page-chapter">Chapter 2 — Single-dataset processing</div>
+<h2>16. 100&nbsp;% T</h2>
+
+<div class="shots">
+  <figure class="shot">
+    <img src="screenshots/tab_single_dataset/100T/view.png" alt="100% T View with transmittance curves, standard deviation plot and energy ratio table">
+    <figcaption>Transmittance curves, standard deviation, and energy ratios.</figcaption>
+  </figure>
+  <figure class="shot">
+    <img src="screenshots/tab_single_dataset/100T/settings.png" alt="100% T panel controls">
+    <figcaption>100&nbsp;% T panel controls.</figcaption>
+  </figure>
+</div>
+
+<p>
+The 100&nbsp;% T panel divides each sample spectrum by a reference spectrum and plots the
+result as transmittance in percent, together with an optional standard-deviation curve and
+ASTM-style energy ratios. The transmittance curves are drawn for the files
+<em>highlighted</em> in the Files panel (up to five); the standard deviation is computed
+over the files <em>ticked</em> with checkboxes (at least two).
+</p>
+
+<h3>16.1 Reference spectrum</h3>
+<p>
+Choose the reference source with <code>File</code>, <code>CSV</code>, or <code>Avg</code>:
+</p>
+<ul>
+  <li><code>File</code> — press <code>Set as reference</code> to use the spectrum of the
+      first highlighted file.</li>
+  <li><code>CSV</code> — type or browse to a two-column CSV file and press
+      <code>Load</code>. The unit is taken from the file header when recognisable.</li>
+  <li><code>Avg</code> — press <code>Use average</code> to use the computed average
+      spectrum. Disabled until an average exists.</li>
+</ul>
+<p>
+A green <code>Reference loaded</code> line reports the source, the number of points, and the
+unit; otherwise the line reads <code>No reference</code>.
+</p>
+
+<h3>16.2 Energy ratios</h3>
+<p>
+Three ratio rows <code>A</code>, <code>B</code>, <code>C</code> each take a numerator and a
+denominator band in cm⁻¹. <code>ASTM E1421</code> fills the standard bands
+(4000/2000, 2000/1000, 150/max). The results table below the plots lists every highlighted
+file and, once a standard deviation has been computed, adds <code>Average</code>,
+<code>Spread</code> (max − min), and <code>Std Dev</code> rows. Invalid bands are shown as
+<code>--</code>.
+</p>
+
+<h3>16.3 Standard deviation</h3>
+<p>
+<code>Calculate std</code> computes the sample standard deviation across all ticked files
+(at least two) and adds a second, X-linked plot with the <code>Std Dev T(%)</code> curve.
+While it runs, the panel shows <code>Processing i/n</code>. If no standard deviation has
+been computed yet, the plot area reports <code>Std dev not calculated</code>.
+</p>
+
+<div class="note">
+Bins where the reference spectrum is close to zero relative to its peak are masked, so the
+transmittance is not divided by numerical noise.
+</div>
+</section>
+<section class="page" id="hitran" data-chapter="Chapter 2 — Single-dataset processing">
+<div class="page-chapter">Chapter 2 — Single-dataset processing</div>
+<h2>17. HITRAN Gas Markers</h2>
+
+<figure class="shot half">
+  <img src="screenshots/tab_single_dataset/hitran.png" alt="HITRAN Gas Markers panel with eight gas checkboxes, threshold and smoothing controls">
+  <figcaption>HITRAN Gas Markers: enable gases and pick a strength threshold and smoothing.</figcaption>
+</figure>
+
+<p>
+The HITRAN panel overlays known absorption bands of eight gases — H<sub>2</sub>O,
+CO<sub>2</sub>, CH<sub>4</sub>, O<sub>3</sub>, N<sub>2</sub>O, CO, NO, NO<sub>2</sub> — on
+spectral plots, to help tell real absorption features from artefacts. Each gas has a colour
+swatch and a checkbox; hovering a checkbox reports how many bands and peaks are drawn at
+the current settings. The markers appear on the Spectrum View and Average plots (and in
+spectral experiment viewers); they are display-only and never appear in exports.
+</p>
+
+<table>
+<tr><th>Control</th><th>Values</th></tr>
+<tr><td>Gas checkboxes</td><td>One per gas; any combination.</td></tr>
+<tr><td><code>Strength threshold</code></td><td><code>0.1%</code>, <code>1%</code>, <code>2%</code> (default), <code>10%</code> relative to the gas's smoothed peak envelope; the drawn peak ticks mark lines that are strong relative to the strongest transition.</td></tr>
+<tr><td><code>Smoothing range</code></td><td><code>1</code>, <code>2</code>, <code>5</code>, <code>10</code> cm⁻¹ (default 10; <code>1</code> disables smoothing).</td></tr>
+<tr><td><code>HITRAN Off</code></td><td>Unchecks all gases.</td></tr>
+</table>
+</section>
+<section class="page" id="export" data-chapter="Chapter 2 — Single-dataset processing">
+<div class="page-chapter">Chapter 2 — Single-dataset processing</div>
+<h2>18. Export panel</h2>
+
+<figure class="shot half">
+  <img src="screenshots/tab_single_dataset/export.png" alt="Export panel with a list of artifact checkboxes and an Export button">
+  <figcaption>The Export panel lists all artifacts; the ones that cannot be produced are greyed out.</figcaption>
+</figure>
+
+<p>
+CSV export for a single workspace happens in the Export panel; experiment tabs have their own Export panel (Section 25). Tick the artifacts you want and press
+<code>Export</code>; pick a folder in the <code>Select Export Directory</code> dialog, and
+the files are written with 15 significant digits. Artifacts that cannot be produced are
+greyed out. Files are named after the dataset and the artifact, for example <code>mydataset_average_spectrum.csv</code>.
+</p>
+
+<table>
+<tr><th>Artifact</th><th>Output file</th><th>Columns</th></tr>
+<tr><td>Corrected interferograms from selected files</td><td><code>&lt;ds&gt;_corrected_ifg_&lt;file&gt;.csv</code></td><td>OPD [µm], Primary Detector [V]</td></tr>
+<tr><td>Uncorrected interferograms from selected files</td><td><code>&lt;ds&gt;_uncorrected_ifgs.csv</code></td><td>Index, Reference/Primary pairs for each file</td></tr>
+<tr><td>Average spectrum</td><td><code>&lt;ds&gt;_average_spectrum.csv</code></td><td>X unit, Magnitude [V]</td></tr>
+<tr><td>SNR spectrum</td><td><code>&lt;ds&gt;_snr_spectrum.csv</code></td><td>X unit, SNR</td></tr>
+<tr><td>Spectra from selected files</td><td><code>&lt;ds&gt;_spectra.csv</code></td><td>X unit, one Magnitude column per file</td></tr>
+<tr><td>Allan-Werle 3D</td><td><code>&lt;ds&gt;_allan_3d.csv</code></td><td>X unit, Tau [measurements], Allan Variance</td></tr>
+<tr><td>Allan-Werle slice</td><td><code>&lt;ds&gt;_allan_slice_&lt;wl&gt;_&lt;unit&gt;.csv</code></td><td>Tau [measurements], Allan Variance</td></tr>
+<tr><td>100&nbsp;% T transmission line</td><td><code>&lt;ds&gt;_t100_transmission_&lt;file&gt;.csv</code></td><td>X unit, T(%)</td></tr>
+<tr><td>100&nbsp;% T lines for all files</td><td><code>&lt;ds&gt;_t100_all_transmissions.csv</code></td><td>X unit, one T% column per ticked file</td></tr>
+<tr><td>100&nbsp;% T standard deviation</td><td><code>&lt;ds&gt;_t100_stddev.csv</code></td><td>X unit, Standard Deviation T(%)</td></tr>
+<tr><td>Absorbance from selected files</td><td><code>&lt;ds&gt;_absorbance_&lt;file&gt;.csv</code></td><td>X unit, Absorbance</td></tr>
+<tr><td>Transmittance from selected files</td><td><code>&lt;ds&gt;_transmittance_&lt;file&gt;.csv</code></td><td>X unit, Transmittance</td></tr>
+</table>
+
+<p>
+The two 100&nbsp;% T curve exports differ: <code>100% T transmission line</code> writes
+the first highlighted file, while <code>100% T lines for all files</code> writes one column
+per ticked file. Absorbance and Transmittance CSV files are produced by the command-line export path (Section 30); the Export button writes only the ten artifacts above, even when one of those two checkboxes is ticked.
+</p>
+</section>
+<section class="page" id="multi" data-chapter="Chapter 3 — Multi-dataset experiments">
+<div class="page-chapter">Chapter 3 — Multi-dataset experiments</div>
+<h2>19. Multi-workspace sessions</h2>
+
+<figure class="shot">
+  <a href="screenshots/session_tab_single_dataset.png" title="Open the full-resolution screenshot">
+    <img src="screenshots/session_tab_single_dataset.png" alt="Session tab in single-dataset mode">
+  </a>
+  <figcaption>Single-dataset session: the Session tab offers to create a multi-workspace. Click the image for the full-resolution version.</figcaption>
+</figure>
+
+<figure class="shot">
+  <a href="screenshots/session_tab_multi_dataset.png" title="Open the full-resolution screenshot">
+    <img src="screenshots/session_tab_multi_dataset.png" alt="Session tab in multi-workspace mode with datasets, active experiments, available experiments and batch processing">
+  </a>
+  <figcaption>Multi-workspace session: Datasets, experiments, and batch processing. Click the image for the full-resolution version.</figcaption>
+</figure>
+
+<p>
+A multi-workspace is a single <code>.h5</code> file that contains several complete datasets
+plus any experiments and batch recipes built from them. Because every dataset is stored in full, the archive carries all measurement data with it: the original measurement files can be gone and the embedded datasets still open. One caveat: a persisted experiment records its dataset references together with the archive's absolute path, so after the file is copied to a different location those references have to be picked again. An experiment can also point at a standalone workspace file that is open in a tab — such an experiment depends on that file and does not travel with the container. The archive
+layout is documented in the
+<a href="#hdf-multi">multi-workspace format specification</a>.
+</p>
+
+<h3>19.1 Creating and adding datasets</h3>
+<ul>
+  <li><strong>New empty multi-workspace</strong> — <code>New Multi-Workspace...</code> on
+      the Welcome screen, or <code>Create Multi-Workspace...</code> in the Session tab when
+      a single dataset is open. The second option embeds the open dataset straight away.</li>
+  <li><strong>Add datasets</strong> — in the Datasets panel, press <code>+ Add Dataset</code>
+      and pick an <code>.h5</code> file. A full copy is embedded; the original file is not
+      linked and is never modified.</li>
+</ul>
+
+<h3>19.2 Working with the Datasets panel</h3>
+<p>
+The header shows the file name, its path, and the number of datasets with the total size.
+Each dataset row reports the number of measurements, the creation date, and its size.
+</p>
+<ul>
+  <li><strong>Click a row</strong> to open the dataset in its own workspace tab.</li>
+  <li><strong>Right-click a row</strong> for <code>Rename</code>, <code>Export</code>, and
+      <code>Delete</code>. <code>Export</code> writes the dataset back out as a standalone
+      <code>.h5</code> file.</li>
+  <li><strong>Delete</strong> removes the dataset from the container and closes its tab. A
+      confirmation dialog reminds you that the source file on disk is not affected.</li>
+</ul>
+
+<p>
+Closing a dataset's workspace tab does not remove it from the container — it stays in the
+Datasets list and can be reopened with one click. Use <code>File → Save</code> to write
+changes back into the multi-workspace file.
+</p>
+</section>
+<section class="page" id="batch" data-chapter="Chapter 3 — Multi-dataset experiments">
+<div class="page-chapter">Chapter 3 — Multi-dataset experiments</div>
+<h2>20. Batch processing</h2>
+
+<p>
+Batch processing is available in multi-workspace sessions, in the
+<code>Batch Processing</code> panel of the Session tab. It applies one processing recipe to
+any number of embedded datasets: spectra are recomputed with the recipe's settings, the
+requested results are calculated, and existing derived results are replaced.
+</p>
+
+<h3>20.1 Recipes</h3>
+<p>
+A recipe holds the spectrum processing settings (zero-padding, apodization window and its
+parameter, X-correction method and peak prominence), optional overrides for the reference
+laser wavelength and detector sensitivity, the list of artifacts to produce
+(spectra, average, SNR, 100&nbsp;% T, Allan), the 100&nbsp;% T energy bands, and the Allan
+decimation and wavelength range. Six standard recipes are built in:
+</p>
+<table>
+<tr><th>Recipe</th><th>Produces</th></tr>
+<tr><td><code>Average spectrum - NB weak / medium / strong</code></td><td>Spectra and average spectrum; Norton-Beer FWHM 1.2 / 1.4 / 1.6, K = 2, Hilbert correction.</td></tr>
+<tr><td><code>All - NB weak / medium / strong</code></td><td>Spectra, average, SNR, and 100&nbsp;% T with the same window settings.</td></tr>
+</table>
+
+<p>
+The buttons below the recipe list:
+</p>
+<ul>
+  <li><code>New from dataset</code> — captures the settings and artifacts of an existing
+      dataset into a new recipe. You can give it a name and comment, and choose whether to
+      pin the dataset's reference laser wavelength and detector sensitivity.</li>
+  <li><code>Import</code> / <code>Export</code> — read and write recipes as human-readable
+      JSON files, for sharing or editing outside the application.</li>
+  <li><code>Delete</code> — removes a workspace recipe. Built-in recipes cannot be deleted.</li>
+</ul>
+
+<h3>20.2 Applying a recipe</h3>
+<ol>
+  <li>Select a recipe and tick the datasets to process (<code>All</code> /
+      <code>None</code> buttons, or click the checkboxes; <kbd>Space</kbd> toggles the
+      focused row).</li>
+  <li>Press <code>Batch process</code> and confirm with <code>Run</code>. The confirmation
+      notes that all existing derived results will be stripped before calculation.</li>
+  <li>A progress dialog reports the current dataset and file. The last few lines of errors and warnings, if any, are listed at the end of the run.</li>
+</ol>
+
+<p>
+Datasets that are open in tabs are updated in place as soon as their turn finishes; their
+results and panel settings match the recipe afterwards. Each processed dataset is written back into the multi-workspace file as its turn finishes, so no separate save is needed for the batch results.
+</p>
+</section>
+<section class="page" id="experiments" data-chapter="Chapter 3 — Multi-dataset experiments">
+<div class="page-chapter">Chapter 3 — Multi-dataset experiments</div>
+<h2>21. Working with experiments</h2>
+
+<p>
+Experiments compare data across datasets and are stored inside a multi-workspace archive.
+There are two types, created from the <code>Available Experiments</code> panel in the
+Session tab by clicking the <code>+ New</code> card:
+</p>
+<ul>
+  <li><strong>Comparator</strong> — overlays one artifact type from several datasets.</li>
+  <li><strong>Absorbance</strong> — computes absorbance or transmittance of one or more
+      samples against references.</li>
+</ul>
+
+<p>
+New experiments are named automatically (<code>Absorbance 1</code>, <code>Absorbance 2</code>, <code>Comparator 1</code>, ...) and can be renamed either in the <code>Name</code> field of
+their Settings panel or by right-clicking the row in <code>Active Experiments</code>.
+Deleting an experiment (right-click or the row's <code>Delete</code> button) removes it
+from the archive after confirmation. Closing an experiment tab only hides it; the
+experiment stays in the Active Experiments list and can be reopened with a click.
+</p>
+
+<p>
+Each experiment has its own docked panels: <code>Settings</code>,
+<code>Viewer</code>, <code>Plot Ranging</code>, <code>Difference</code>,
+<code>Export</code>, and <code>HITRAN Gas Markers</code>. Plot interaction is the same as
+in workspace panels: wheel zoom, Shift+drag range selection, arrow-key panning,
+<kbd>ESC</kbd> to reset, and <kbd>Ctrl</kbd>+<kbd>Q</kbd> for the tracking cursor. The
+shared panels are described in Sections 24 and 25.
+</p>
+</section>
+<section class="page" id="comparator" data-chapter="Chapter 3 — Multi-dataset experiments">
+<div class="page-chapter">Chapter 3 — Multi-dataset experiments</div>
+<h2>22. Comparator</h2>
+
+<div class="shots">
+  <figure class="shot">
+    <img src="screenshots/tab_compartor/full_tab.png" alt="Comparator experiment tab with settings, viewer, difference, and export panels">
+    <figcaption>A Comparator comparing SNR curves of two datasets.</figcaption>
+  </figure>
+  <figure class="shot">
+    <img src="screenshots/tab_compartor/settings.png" alt="Comparator settings with artifact selector and dataset list">
+    <figcaption>Comparator settings: artifact type and included datasets.</figcaption>
+  </figure>
+</div>
+
+<p>
+In <code>Settings</code>, choose the artifact to compare:
+</p>
+<ul>
+  <li><code>Average spectrum</code>, <code>Raw spectrum</code></li>
+  <li><code>SNR</code></li>
+  <li><code>100% T</code></li>
+  <li><code>Corrected interferogram</code>, <code>Raw interferogram</code></li>
+</ul>
+
+<p>
+Then tick the datasets to include in <code>Included datasets</code>. Until you change a checkbox, all open datasets are included; after the first change, the checkboxes define the selection. Rows are
+greyed out when the artifact does not exist for that dataset and yellow when it is stale —
+hovering a yellow row explains that the artifact should be recomputed in its workspace tab.
+For artifacts that have several members (raw spectra, 100&nbsp;% T, interferograms), a
+dropdown on each row picks which member to use. Datasets embedded in the archive do not
+have to be open in a tab to appear here.
+</p>
+
+<p>
+The overlay is rebuilt automatically when source data or selection changes. Curve colours
+are assigned automatically, and the legend above the plot lists each curve with its
+dataset and member name.
+</p>
+</section>
+<section class="page" id="absorbance" data-chapter="Chapter 3 — Multi-dataset experiments">
+<div class="page-chapter">Chapter 3 — Multi-dataset experiments</div>
+<h2>23. Absorbance</h2>
+
+<div class="shots">
+  <figure class="shot">
+    <img src="screenshots/tab_absorbance/full_tab.png" alt="Absorbance experiment tab with curve settings, viewer, plot ranging and export panels">
+    <figcaption>An Absorbance experiment with three sample/reference curves.</figcaption>
+  </figure>
+  <figure class="shot">
+    <img src="screenshots/tab_absorbance/settings.png" alt="Absorbance settings with reference and sample selectors for each curve">
+    <figcaption>Each curve pairs one reference spectrum with one sample spectrum.</figcaption>
+  </figure>
+</div>
+
+<p>
+An Absorbance experiment holds a list of curves. Each curve has a name and a
+<code>Reference</code> and <code>Sample</code> block, each with:
+</p>
+<ul>
+  <li><code>Dataset</code> — which dataset to take the spectrum from.</li>
+  <li><code>Artifact</code> — <code>Average spectrum</code> or <code>Raw spectrum</code>.</li>
+  <li><code>Member</code> — which raw measurement (only for raw spectra).</li>
+</ul>
+
+<p>
+Use <code>+ Add absorbance curve</code> to add more pairs; <code>Delete</code> removes a
+curve. The comment box at the bottom is stored with the experiment. Curves are computed
+automatically whenever a selection changes. If a curve cannot be computed, its yellow
+status text reports the reason (for example <code>No overlapping X region</code> or
+<code>Reference empty</code>).
+</p>
+
+<p>
+The <code>Plot Ranging</code> panel chooses <code>Y mode</code> —
+<code>Transmittance [%]</code> or <code>Absorbance</code> — plus the X unit, Y axis mode,
+cursor, and display downsampling. Absorbance is calculated as −log<sub>10</sub>(T), so a
+flat 100&nbsp;% transmittance line corresponds to zero absorbance.
+</p>
+</section>
+<section class="page" id="difference" data-chapter="Chapter 3 — Multi-dataset experiments">
+<div class="page-chapter">Chapter 3 — Multi-dataset experiments</div>
+<h2>24. Difference</h2>
+
+<p>
+The <code>Difference</code> panel subtracts one displayed curve from another. Turn it
+<code>On</code>, pick the <code>Reference</code> and <code>Subtracted</code> curves, and
+choose <code>Signed</code> or <code>Absolute</code> mode. The statistics row reports
+<code>Min</code>, <code>Max</code>, <code>Peak-peak</code>, and <code>Stddev</code>, either
+over the visible X range (<code>Stats from: Viewbox</code>) or the full curves
+(<code>All</code>). The difference is drawn as a linked subplot below the main plot; both
+plots share the X axis and zoom together. For Absorbance experiments this acts as a
+residual/error curve between two transmittance or absorbance curves.
+</p>
+</section>
+<section class="page" id="exporting-experiments" data-chapter="Chapter 3 — Multi-dataset experiments">
+<div class="page-chapter">Chapter 3 — Multi-dataset experiments</div>
+<h2>25. Exporting experiment data</h2>
+
+<p>
+The experiment <code>Export</code> panel writes all displayed curves to one wide CSV file.
+Choose the X range — <code>all</code>, <code>current plot area</code>, or
+<code>manual</code> with min/max fields — then press <code>Export CSV...</code> and choose
+a destination. The file contains one x/y column pair per curve, using the current unit (and, for Absorbance, the selected Y mode); when the difference curve is enabled it is appended as an extra column pair. The
+tracking cursor and display downsampling never affect exported data — exports always use
+full resolution.
+</p>
+</section>
+<section class="page" id="keys" data-chapter="Input controls">
+<div class="page-chapter">Input controls</div>
+<h2>26. Keyboard and mouse reference</h2>
+
+<table>
+<tr><th>Input</th><th>Action</th></tr>
+<tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>Move through the file list and load the highlighted file.</td></tr>
+<tr><td><kbd>Shift</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd></td><td>Add the highlighted file to the multi-file selection. With five files selected, the oldest one is dropped.</td></tr>
+<tr><td><kbd>Space</kbd></td><td>Toggle the batch-selection checkbox for every highlighted file.</td></tr>
+<tr><td><kbd>Delete</kbd></td><td>Delete the highlighted file from the workspace (with confirmation).</td></tr>
+<tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>Pan the focused plot's X axis by 10&nbsp;% of the visible range.</td></tr>
+<tr><td><kbd>ESC</kbd></td><td>Reset the zoom / autoscale the focused plot.</td></tr>
+<tr><td>Mouse wheel</td><td>Zoom; in most plots only X is affected (Y is auto-fitted), while the Allan 2D slice zooms both axes.</td></tr>
+<tr><td>Shift+drag</td><td>Select an X range to zoom to.</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>Q</kbd></td><td>Toggle the tracking cursor.</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>Y</kbd></td><td>Toggle <code>Auto-fit Y</code> in the Interferogram View.</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>A</kbd></td><td>Toggle <code>Max at zero</code> in the Interferogram View.</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>D</kbd></td><td>Toggle <code>Downsample</code> in the Interferogram View.</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>Save all changes.</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></td><td>Save As for the active workspace.</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>H</kbd></td><td>Return to the Welcome screen (closes tabs; prompts to save).</td></tr>
+</table>
+
+<p>
+The <kbd>Ctrl</kbd>+<kbd>Y</kbd>, <kbd>Ctrl</kbd>+<kbd>A</kbd>, and
+<kbd>Ctrl</kbd>+<kbd>D</kbd> shortcuts act on the Interferogram View only. Keyboard
+shortcuts apply to the focused panel; with <code>Focus panels on hover</code> enabled
+(default), moving the mouse over a panel is enough to focus it.
+</p>
+</section>
+<section class="page" id="hdf-single" data-chapter="Developer guide">
+<div class="page-chapter">Developer guide</div>
+<h2>27. Single-dataset workspace format</h2>
+
+<p>
+This page is the reference specification for the single-dataset workspace format. Read
+it if you plan to write a converter (Section 29) or to read workspace files with your
+own tools.
+</p>
+<div class="meta">HDF5 unified spectral data container &nbsp;|&nbsp; Specification v.1 &nbsp;|&nbsp; 2026-08-02</div>
+
+
+<h3 id="sd-overview">27.1 Overview</h3>
+<p>One HDF5 file holds the <strong>entire workspace</strong>: raw measurements, computed artifacts, and per-panel data-view settings.</p>
+
+
+
+<h4 id="sd-rules">27.1.1 Format rules</h4>
+<table>
+<tr><th style="width:2rem">#</th><th>Rule</th></tr>
+<tr><td>1</td><td>Every dataset carries a <code>kind</code> attribute: <code>"original"</code> (as loaded) or <code>"derivative"</code> (computed). <code>kind = "original"</code> is written once, never overwritten.</td></tr>
+<tr><td>2</td><td>Every group carries <code>@origin</code> and <code>@config</code> attributes (JSON strings). Groups contain only datasets.</td></tr>
+<tr><td>3</td><td>No file versioning. A static root <code>@format</code> attribute identifies the layout.</td></tr>
+<tr><td>4</td><td>No host info: no hostnames, usernames, paths, or OS fingerprints. <code>@origin</code> records only application identity and timestamp.</td></tr>
+<tr><td>5</td><td>No images, opaque blobs, base64, executables, or scripts. The container stores only datasets, groups, and string metadata attributes.</td></tr>
+<tr><td>6</td><td>All numeric data is native HDF5 typed datasets (IEEE fp32/fp64, i32). Datatype <em>is</em> the format specifier; <code>@config</code> records units. Strings: VLEN UTF-8 (<code>H5T_C_S1 + H5T_VARIABLE</code>), shape <code>(1,)</code>. Shapes: C order, row-major. All 2-column datasets carry <code>columns</code> and <code>units</code> string attributes.</td></tr>
+<tr><td>7</td><td>Derivative datasets can be safely stripped: delete any group or dataset with <code>kind = "derivative"</code>. <code>igm_uncorrected_x/</code>, <code>igm_corrected_x/</code>, and original spectra are untouched. Apps must tolerate stripped files and recompute on demand.</td></tr>
+<tr><td>8</td><td>Root datasets: <code>workspace.json</code> (<a href="#sd-workspace">§27.8</a>), <code>measurement_config.json</code> (<a href="#sd-measurement-config">§27.6.1</a>), <code>measurement_comment.txt</code> (<a href="#sd-comment">§27.6.2</a>), <code>tags</code> (<a href="#sd-tags">§27.6.3</a>). All may be empty.</td></tr>
+<tr><td>9</td><td>Configuration is <strong>extensible</strong>: unknown keys are preserved verbatim on save.</td></tr>
+<tr><td>10</td><td>Derivative datasets reference their source data via <code>inputs</code> (absolute HDF5 paths in <code>@config</code>). Every referenced path must exist in the file — a saved file must never contain an <code>inputs</code> entry pointing to a deleted member.</td></tr>
+</table>
+
+<hr>
+
+<h3 id="sd-layout">27.2 Container layout</h3>
+<p>Groups are organized <strong>by data type</strong>. All x/y-style data is stored as 2-column datasets with <code>columns</code> and <code>units</code> attributes. Original measurements may carry a <code>timestamp</code> attribute.</p>
+
+<div class="tree">
+<a href="#sd-root">unified_spectral_data_container.h5</a>
+├── <span class="a">@format</span> = <span class="t">"unified-spectral-data-container"</span>
+├── <span class="a">@created</span> = <span class="t">"2026-08-01T12:34:56Z"</span>       <span class="c">(ISO-8601 UTC)</span>
+├── <a href="#sd-workspace">workspace.json</a>                          <span class="c">(vlen str) — §27.8</span>
+├── <a href="#sd-measurement-config">measurement_config.json</a>                 <span class="c">(vlen str) — §27.6.1</span>
+├── <a href="#sd-comment">measurement_comment.txt</a>                 <span class="c">(vlen str) — §27.6.2</span>
+├── <a href="#sd-tags">tags</a>                                    <span class="c">(vlen str) — §27.6.3</span>
+├── <a href="#sd-igm-uncorrected">igm_uncorrected_x/</a>           <span class="a">@schema</span>=<span class="t">"interferogram"</span>
+│   │   <span class="a">attrs:</span> origin, config
+│   ├── record_0                   <span class="c">(fp32/fp64 [N,2])</span>
+│   │       <span class="a">attrs:</span> kind, columns, units, timestamp
+│   ├── record_1                   <span class="c">...</span>
+│   └── …
+├── <a href="#sd-igm-corrected">igm_corrected_x/</a>              <span class="a">@schema</span>=<span class="t">"interferogram"</span>
+│   │   <span class="a">attrs:</span> origin, config
+│   ├── record_0                  <span class="c">(fp64 [N,2])</span>
+│   │       <span class="a">attrs:</span> kind, columns, units, timestamp
+│   ├── record_1                  <span class="c">...</span>
+│   └── …
+├── <a href="#sd-spectra-layout">spectra/</a>                    <span class="a">@schema</span>=<span class="t">"spectrum/v1"</span>
+│   ├── &lt;id&gt;/                   <span class="c">(member group)</span>
+│   │   │   <span class="a">attrs:</span> kind, origin, config, timestamp
+│   │   └── data                <span class="c">(fp64 [M,2])</span>
+│   │           <span class="a">attrs:</span> columns, units
+│   └── …
+├── <a href="#sd-average">average_spectra/</a>            <span class="a">@schema</span>=<span class="t">"average_spectrum/v1"</span>
+│   ├── &lt;id&gt;/                   <span class="c">(member group)</span>
+│   │   │   <span class="a">attrs:</span> kind, origin, config
+│   │   └── data                <span class="c">(fp64 [M,2])</span>
+│   │           <span class="a">attrs:</span> columns, units
+│   └── …
+├── <a href="#sd-snr">snr_spectra/</a>                <span class="a">@schema</span>=<span class="t">"snr_spectrum/v1"</span>
+│   ├── &lt;id&gt;/                   <span class="c">(member group)</span>
+│   │   │   <span class="a">attrs:</span> kind, origin, config
+│   │   └── data                <span class="c">(fp64 [M,2])</span>
+│   │           <span class="a">attrs:</span> columns, units
+│   └── …
+├── <a href="#sd-allan">allan_werle/</a>                <span class="a">@schema</span>=<span class="t">"allan_werle/v1"</span>
+│   ├── &lt;id&gt;/                   <span class="c">(member group)</span>
+│   │   │   <span class="a">attrs:</span> kind, origin, config
+│   │   ├── surface_data        <span class="c">(fp64 [T,W])</span>
+│   │   │       <span class="a">attrs:</span> columns
+│   │   ├── wavelengths         <span class="c">(fp64 [W])</span>
+│   │   │       <span class="a">attrs:</span> units
+│   │   └── taus               <span class="c">(fp64 [T])</span>
+│   │           <span class="a">attrs:</span> units
+│   └── …
+└── <a href="#sd-t100">t100/</a>                       <span class="a">@schema</span>=<span class="t">"t100/v1"</span>
+    ├── &lt;id&gt;/                   <span class="c">(member group)</span>
+    │   │   <span class="a">attrs:</span> kind, origin, config
+    │   ├── reference            <span class="c">(fp64 [M,2])</span>
+    │   │       <span class="a">attrs:</span> columns, units
+    │   ├── stddev               <span class="c">(fp64 [M,2])</span>
+    │   │       <span class="a">attrs:</span> columns, units
+    │   └── transmittance/&lt;file_id&gt;/
+    │       └── data             <span class="c">(fp64 [M,2])</span>
+    │               <span class="a">attrs:</span> columns, units
+    └── …
+</div>
+
+<h4 id="sd-notation">27.2.1 Notation</h4>
+<table>
+<tr><th>Symbol</th><th>Meaning</th></tr>
+<tr><td><code>name/</code></td><td>HDF5 group</td></tr>
+<tr><td><code>name</code></td><td>HDF5 dataset</td></tr>
+<tr><td><code>@name = value</code></td><td>HDF5 attribute</td></tr>
+<tr><td><code>(fp64 [N])</code></td><td>Dataset shape: <code>fp64</code> = IEEE double, <code>fp32</code> = float, <code>i32</code> = int32</td></tr>
+<tr><td><code>&lt;id&gt;</code></td><td>Member identifier (<a href="#sd-member-ids">§27.3</a>)</td></tr>
+</table>
+<p>Shapes are C order, row-major. Scalars: shape <code>[1]</code>. VLEN strings: datasets of shape <code>(1,)</code> with <code>H5T_C_S1 + H5T_VARIABLE</code>.</p>
+
+<h4 id="sd-root">27.2.2 Root attributes &amp; datasets</h4>
+<ul>
+  <li><strong><code>@format</code></strong> — static <code>"unified-spectral-data-container"</code>. Never changes.</li>
+  <li><strong><code>@created</code></strong> — ISO-8601 UTC timestamp, written at creation. Only reset on "Save As".</li>
+  <li>Root datasets are described in <a href="#sd-workspace">§27.8</a> and <a href="#sd-measurement">§27.6</a>.</li>
+</ul>
+
+<h4 id="sd-interferograms">27.2.3 Interferograms</h4>
+<p>All interferograms are flat 2D datasets directly inside the type group. No per-scan sub-groups; <code>@origin</code>/<code>@config</code> are pool-level attributes on the group. Each original dataset may carry a <code>timestamp</code> attribute (ISO-8601 UTC).</p>
+
+<h5 id="sd-igm-uncorrected">27.2.3.1 Uncorrected IFG — <code>igm_uncorrected_x/</code></h5>
+<div class="ds">
+igm_uncorrected_x/
+    <span class="a">attrs:</span> origin, config
+    record_0          <span class="c">(fp32/fp64 [N,2])</span>
+        <span class="a">attrs["kind"]</span>    = "original"
+        <span class="a">attrs["columns"]</span> = ["Reference detector", "Primary detector"]
+        <span class="a">attrs["units"]</span>   = ["V", "V"]
+</div>
+<p>No OPD axis — x-axis is sample indices. <code>axisCorrected</code> is <code>false</code>. Imported from WUST Mini FTS CSV raw measurements.</p>
+
+<h5 id="sd-igm-corrected">27.2.3.2 Corrected IFG — <code>igm_corrected_x/</code></h5>
+<div class="ds">
+igm_corrected_x/
+    <span class="a">attrs:</span> origin, config
+    record_0         <span class="c">(fp64 [N,2])</span>
+        <span class="a">attrs["kind"]</span>    = "original" | "derivative"
+        <span class="a">attrs["columns"]</span> = ["Primary detector", "OPD axis"]
+        <span class="a">attrs["units"]</span>   = ["V", "um"]
+</div>
+<p>One channel per column. <code>axisCorrected</code> is <code>true</code>. Corrected single IFGs are imported from ArcOptix IGMs TXT measurements (<code>kind = "original"</code>). Derivative corrected IFGs may be produced by computation pipelines (e.g. phase correction).</p>
+
+<h4 id="sd-spectra-layout">27.2.4 Spectrum member groups</h4>
+<p>Precomputed spectra (<code>kind = "original"</code>) come from measurement sources. FFT-computed spectra (<code>kind = "derivative"</code>) come from the app pipeline (<a href="#sd-config-spectrum">§27.7.3</a>). Both use the same layout:</p>
+<div class="ds">
+spectra/&lt;id&gt;/                                <span class="c">(member group)</span>
+    <span class="a">attrs:</span> kind, origin, config
+    data                                     <span class="c">(fp64 [M,2])</span>
+        <span class="a">attrs["columns"]</span> = ["x", "y"]
+        <span class="a">attrs["units"]</span>   = ["cm-1", "V"]
+</div>
+<p>Column 0: x-axis (wavenumber, wavelength, or THz per <code>@config</code> <code>xUnit</code>). Column 1: spectrum magnitude. Units from <code>@config</code> <code>xUnit</code> and <code>yUnits</code>.</p>
+
+<h4 id="sd-derivatives">27.2.5 Derivative member groups</h4>
+
+<h5 id="sd-average">27.2.5.1 Average spectrum (<code>average_spectra/</code>)</h5>
+<p>Mean spectrum computed from N input interferograms. Same layout as <a href="#sd-spectra-layout">§27.2.4</a>: <code>data</code> (fp64 [M,2]) with columns <code>["x", "y"]</code>.</p>
+
+<h5 id="sd-snr">27.2.5.2 SNR spectrum (<code>snr_spectra/</code>)</h5>
+<p>Signal-to-noise ratio per wavelength bin, computed from ≥ 2 input interferograms. SNR = mean / standard deviation, calculated online across input files.</p>
+<div class="ds">
+snr_spectra/&lt;id&gt;/                           <span class="c">(member group)</span>
+    <span class="a">attrs:</span> kind, origin, config
+    data                                     <span class="c">(fp64 [M,2])</span>
+        <span class="a">attrs["columns"]</span> = ["x", "y"]
+        <span class="a">attrs["units"]</span>   = ["cm-1", ""]
+</div>
+
+<h5 id="sd-allan">27.2.5.3 Allan-Werle plot (<code>allan_werle/</code>)</h5>
+<p>Allan-Werle variance: integration time vs. wavelength. Captures instrument stability characteristics.</p>
+<div class="ds">
+allan_werle/&lt;id&gt;/                           <span class="c">(member group)</span>
+    <span class="a">attrs:</span> kind, origin, config
+    surface_data                             <span class="c">(fp64 [T,W])</span>
+        <span class="a">attrs["columns"]</span> = ["taus", "wavelengths", "allan_var"]  <span class="c">— wavelength labels [nm]</span>
+    wavelengths                              <span class="c">(fp64 [W])</span>
+        <span class="a">attrs["units"]</span>     = "um"
+    taus                                     <span class="c">(fp64 [T])</span>
+        <span class="a">attrs["units"]</span> = "measurements"
+</div>
+<p><code>surface_data</code> is a T × W array (cluster sizes × wavelength bins). The <code>columns</code> attribute labels its three axes as <code>["taus", "wavelengths", "allan_var"]</code>; <code>wavelengths</code> holds the wavelength axis in µm and <code>taus</code> holds the cluster sizes in measurements.</p>
+
+<h5 id="sd-t100">27.2.5.4 100% T curves (<code>t100/</code>)</h5>
+<p>Transmittance analysis: T% = (sample spectrum / reference spectrum) × 100 for each input file.</p>
+<div class="ds">
+t100/&lt;id&gt;/                                   <span class="c">(member group)</span>
+    <span class="a">attrs:</span> kind, origin, config
+    reference                                <span class="c">(fp64 [M,2])</span>
+        <span class="a">attrs["columns"]</span> = ["x", "y"]
+        <span class="a">attrs["units"]</span>   = ["cm-1", "a.u."]
+    stddev                                   <span class="c">(fp64 [M,2])</span>
+        <span class="a">attrs["columns"]</span> = ["x", "y"]
+        <span class="a">attrs["units"]</span>   = ["cm-1", "%"]
+    transmittance/&lt;file_id&gt;/
+        data                                 <span class="c">(fp64 [M,2])</span>
+            <span class="a">attrs["columns"]</span> = ["x", "T%"]
+            <span class="a">attrs["units"]</span>   = ["cm-1", "%"]
+</div>
+<p><code>reference</code>: reference spectrum (file or average). <code>stddev</code>: standard deviation of T% across all checked files at each x. <code>transmittance/&lt;file_id&gt;/</code>: one subgroup per input file.</p>
+
+<hr>
+
+<h3 id="sd-member-ids">27.3 Member IDs &amp; references</h3>
+<ul>
+  <li><code>&lt;id&gt;</code> is a human-readable slug (sanitized source basename, e.g. <code>sample_0001</code>), unique within its type group, stable across saves.</li>
+  <li>On collision, append a numeric suffix (<code>sample_0001_2</code>).</li>
+  <li>Derivative IDs are fixed per artifact type: <code>spec_&lt;ifgId&gt;</code> for computed spectra, <code>average</code>, <code>snr</code>, <code>allan</code>, and <code>t100</code>.</li>
+  <li><code>inputs</code> in <code>@config</code> reference members by absolute HDF5 path: <code>["/igm_uncorrected_x/record_0"]</code>.</li>
+</ul>
+
+<h3 id="sd-kind">27.4 The <code>kind</code> attribute</h3>
+<p>String attribute on each dataset. Type groups carry <code>@schema</code> describing member layout.</p>
+<table>
+<tr><th><code>kind</code></th><th>Meaning</th></tr>
+<tr><td><code>"original"</code></td><td>Data as loaded from a measurement source</td></tr>
+<tr><td><code>"derivative"</code></td><td>Produced by a computation pipeline</td></tr>
+</table>
+<table>
+<tr><th>Type group</th><th><code>@schema</code></th></tr>
+<tr><td><code>igm_uncorrected_x/</code>, <code>igm_corrected_x/</code></td><td><code>"interferogram"</code></td></tr>
+<tr><td><code>spectra/</code></td><td><code>"spectrum/v1"</code></td></tr>
+<tr><td><code>average_spectra/</code></td><td><code>"average_spectrum/v1"</code></td></tr>
+<tr><td><code>snr_spectra/</code></td><td><code>"snr_spectrum/v1"</code></td></tr>
+<tr><td><code>allan_werle/</code></td><td><code>"allan_werle/v1"</code></td></tr>
+<tr><td><code>t100/</code></td><td><code>"t100/v1"</code></td></tr>
+</table>
+
+<h3 id="sd-origin">27.5 <code>@origin</code> attribute</h3>
+<p>JSON string attribute on every group. Written at creation, never silently rewritten. Application identity only — no host info.</p>
+<div class="ds">{"timestamp": "2026-08-01T12:34:56Z", "application": "FTS Data Explorer", "version": "26.08.3"}</div>
+<table>
+<tr><th>Key</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>timestamp</code></td><td>string</td><td>ISO-8601 UTC, second precision</td></tr>
+<tr><td><code>application</code></td><td>string</td><td>Producing application name</td></tr>
+<tr><td><code>version</code></td><td>string</td><td>Application version</td></tr>
+</table>
+<p>Additional keys permitted (e.g. <code>instrument</code>, <code>notes</code>) but no host-identifying info. For interferogram groups, one <code>@origin</code> serves all datasets in the group.</p>
+<p>Individual original datasets may carry a <code>timestamp</code> attribute (ISO-8601 UTC) recording the acquisition time of that measurement.</p>
+
+<hr>
+
+<h3 id="sd-measurement">27.6 Measurement setup metadata (root)</h3>
+
+<h4 id="sd-measurement-config">27.6.1 <code>measurement_config.json</code></h4>
+<p>JSON dataset for measurement setup settings. Extensible (unknown keys preserved).</p>
+<table>
+<tr><th>Key</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>instrument.model</code></td><td>string</td><td>e.g. <code>"ArcOptix FT"</code></td></tr>
+<tr><td><code>instrument.serial</code></td><td>string</td><td></td></tr>
+<tr><td><code>detector.type</code></td><td>string</td><td>e.g. <code>"InGaAs"</code>, <code>"MCT"</code></td></tr>
+<tr><td><code>detector.model</code></td><td>string</td><td>Detector model</td></tr>
+<tr><td><code>detector.responsivity</code></td><td>fp64</td><td>Detector responsivity</td></tr>
+<tr><td><code>detector.internalGain</code></td><td>fp64</td><td>Internal gain setting</td></tr>
+<tr><td><code>detector.externalGain</code></td><td>fp64</td><td>External amplifier gain</td></tr>
+<tr><td><code>detector.misc</code></td><td>string</td><td>Free-form additional detector info</td></tr>
+<tr><td><code>acquisitionCard.model</code></td><td>string</td><td>DAQ card model</td></tr>
+<tr><td><code>acquisitionCard.resolution</code></td><td>i32</td><td>ADC resolution [bits]</td></tr>
+<tr><td><code>acquisitionCard.gain</code></td><td>fp64</td><td>DAQ card gain</td></tr>
+<tr><td><code>acquisitionCard.misc</code></td><td>string</td><td>Free-form additional DAQ info</td></tr>
+<tr><td><code>laser.wavelengthUm</code></td><td>fp64</td><td>Reference laser wavelength [um]</td></tr>
+<tr><td><code>acquisition.integrationTimeS</code></td><td>fp64</td><td>Integration time per scan [s]</td></tr>
+<tr><td><code>acquisition.scans</code></td><td>i32</td><td>Co-added scans</td></tr>
+<tr><td><code>acquisition.resolutionCmInv</code></td><td>fp64</td><td>Target resolution [cm⁻¹]</td></tr>
+<tr><td><code>acquisition.delayLine</code></td><td>object</td><td>Delay-line scan params</td></tr>
+<tr><td><code>environment.ambient.temperatureC</code></td><td>fp64</td><td>Ambient temperature [°C]</td></tr>
+<tr><td><code>environment.ambient.humidityPct</code></td><td>fp64</td><td>Ambient relative humidity [%]</td></tr>
+<tr><td><code>environment.instrument.temperatureC</code></td><td>fp64</td><td>Instrument temperature [°C]</td></tr>
+<tr><td><code>environment.instrument.humidityPct</code></td><td>fp64</td><td>Instrument relative humidity [%]</td></tr>
+<tr><td><code>environment.instrument.purgingGas</code></td><td>string</td><td>e.g. <code>"N2"</code>, <code>"dry air"</code>, <code>""</code> for none</td></tr>
+</table>
+<p><code>acquisition.delayLine</code>: <code>minimumSpeed</code>, <code>maximumSpeed</code>, <code>configuredScanSpeed</code> (fp64, mm/s); <code>configuredScanStart</code>, <code>configuredScanLength</code>, <code>minimalScanLength</code> (i32, ticks); <code>comPort</code> (string); <code>speedSliderTicks</code> (i32).</p>
+<p>Non-standard keys → <code>measurement_config.json["legacy"]</code> as flat <code>{key: value}</code>. Preserved on save.</p>
+
+<h4 id="sd-comment">27.6.2 <code>measurement_comment.txt</code></h4>
+<p>Free-form UTF-8 comment (vlen str). May be empty. Round-tripped verbatim.</p>
+
+<h4 id="sd-tags">27.6.3 <code>tags</code></h4>
+<p>Comma-separated tags (vlen str), e.g. <code>"FTIR, sample-x"</code>. May be empty. Split on <code>,</code> and trim.</p>
+
+<hr>
+
+<h3 id="sd-config">27.7 <code>@config</code> attribute</h3>
+<p>JSON string attribute on every group. Holds everything needed to reproduce the member from its inputs. Extensible. Display/view state belongs in <a href="#sd-workspace"><code>workspace.json</code></a>.</p>
+
+<h4>27.7.1 Shared primitives</h4>
+<p><strong><code>xUnit</code></strong>: <code>"cm-1"</code> | <code>"um"</code> | <code>"thz"</code>.</p>
+<p><strong><code>apodization</code> object:</strong></p>
+<table>
+<tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>window</code></td><td>string</td><td><code>"rectangular"</code></td><td><code>rectangular</code>, <code>gauss</code>, <code>triangular</code>, <code>norton_beer</code>, <code>dolph_chebyshev</code>, <code>hamming</code>, <code>blackman_harris</code>, <code>hann</code>, <code>happ_genzel</code>, <code>kaiser</code></td></tr>
+<tr><td><code>gaussSigma</code></td><td>fp64</td><td>1.0</td><td>Gaussian sigma</td></tr>
+<tr><td><code>rectWidth</code></td><td>fp64</td><td>1.0</td><td></td></tr>
+<tr><td><code>rectAsymMode</code></td><td>bool</td><td>true</td><td><code>true</code> = asymmetric</td></tr>
+<tr><td><code>nortonBeerFwhm</code></td><td>fp64</td><td>1.5</td><td>1.0–2.0</td></tr>
+<tr><td><code>dolphChebyshevAtDb</code></td><td>fp64</td><td>60.0</td><td>Attenuation [dB] (50–160)</td></tr>
+<tr><td><code>hammingAlpha</code></td><td>fp64</td><td>0.54</td><td>0.36–1.0</td></tr>
+<tr><td><code>kaiserBeta</code></td><td>fp64</td><td>6.0</td><td>0.5–12.0</td></tr>
+</table>
+
+<h4 id="sd-config-ifg">27.7.2 Interferogram config</h4>
+<table>
+<tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>sourceFormat</code></td><td>string</td><td>—</td><td><code>csv</code>, <code>txt</code></td></tr>
+<tr><td><code>dataType</code></td><td>string</td><td>—</td><td><code>igm_uncorrected_x</code> | <code>igm_corrected_x</code></td></tr>
+<tr><td><code>axisCorrected</code></td><td>bool</td><td>false</td><td>OPD column present</td></tr>
+<tr><td><code>detectorUnits</code></td><td>string</td><td><code>"V"</code></td><td></td></tr>
+<tr><td><code>opdUnits</code></td><td>string</td><td><code>"um"</code></td><td></td></tr>
+<tr><td><code>channelOrder</code></td><td>string[]</td><td>—</td><td>e.g. <code>["Reference detector", "Primary detector"]</code></td></tr>
+<tr><td><code>fileCount</code></td><td>i32</td><td>—</td><td>Scans in group</td></tr>
+<tr><td><code>pointsPerFile</code></td><td>i32</td><td>—</td><td>Points per scan</td></tr>
+</table>
+
+<h4 id="sd-config-spectrum">27.7.3 Spectrum config</h4>
+<table>
+<tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>inputs</code></td><td>string[]</td><td>—</td><td>IFG paths (<strong>required for <code>derivative</code>, omitted for <code>original</code></strong>)</td></tr>
+<tr><td><code>xUnit</code></td><td>string</td><td><code>"cm-1"</code></td><td></td></tr>
+<tr><td><code>yUnits</code></td><td>string</td><td><code>"V"</code></td><td>Must be linear: <code>a.u.</code>, <code>V</code>, <code>W</code>, etc. No dB.</td></tr>
+<tr><td><code>sourceFormat</code></td><td>string</td><td>—</td><td><code>csv</code>, <code>txt</code></td></tr>
+<tr><td><code>detectorUnits</code></td><td>string</td><td><code>"V"</code></td><td></td></tr>
+<tr><td><code>refLaserUm</code></td><td>fp64</td><td>1.550</td><td>Reference laser [um]</td></tr>
+<tr><td><code>zeroPadK</code></td><td>i32</td><td>0</td><td>N = n·(K+1); 0 = off</td></tr>
+<tr><td><code>xCorrectionMethod</code></td><td>string</td><td><code>"hilbert"</code></td><td><code>hilbert</code> | <code>peaks</code></td></tr>
+<tr><td><code>prominenceThreshold</code></td><td>fp64</td><td>0.02</td><td>Peak-finding fraction (0.0–0.5)</td></tr>
+<tr><td><code>detectorSensitivityKVPerW</code></td><td>fp64</td><td>0.0</td><td>0 = no conversion</td></tr>
+<tr><td><code>apodization</code></td><td>object</td><td>§27.7.1</td><td></td></tr>
+</table>
+
+<h4 id="sd-config-average">27.7.4 Average spectrum</h4>
+<p>Same as <a href="#sd-config-spectrum">§27.7.3</a>, plus <code>count</code> (i32, number of files averaged).</p>
+
+<h4 id="sd-config-snr">27.7.5 SNR spectrum</h4>
+<p>Same as <a href="#sd-config-average">§27.7.4</a>, plus <code>fileCount</code> (i32, ≥ 2). Data stores SNR per bin (mean/stddev online). Column 0: x-axis; column 1: SNR (dimensionless).</p>
+
+<h4 id="sd-config-allan">27.7.6 Allan-Werle plot</h4>
+<table>
+<tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>inputs</code></td><td>string[]</td><td>—</td><td></td></tr>
+<tr><td><code>xUnit</code></td><td>string</td><td><code>"um"</code></td><td></td></tr>
+<tr><td><code>calcBase</code></td><td>string</td><td><code>"t100"</code></td><td><code>t100</code> | <code>spectrum</code></td></tr>
+<tr><td><code>xRangeMin</code>, <code>xRangeMax</code></td><td>fp64</td><td>1.0, 30.0</td><td>Wavelength slice range</td></tr>
+<tr><td><code>wavelengthDecimation</code></td><td>i32</td><td>5</td><td></td></tr>
+<tr><td><code>sliceIndex</code></td><td>i32</td><td>0</td><td></td></tr>
+<tr><td><code>refLaserUm</code></td><td>fp64</td><td>1.550</td><td></td></tr>
+<tr><td><code>apodization</code></td><td>object</td><td>§27.7.1</td><td></td></tr>
+</table>
+
+<h4 id="sd-config-t100">27.7.7 100% T</h4>
+<table>
+<tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>inputs</code></td><td>string[]</td><td>—</td><td></td></tr>
+<tr><td><code>xUnit</code></td><td>string</td><td><code>"cm-1"</code></td><td></td></tr>
+<tr><td><code>reference.source</code></td><td>string</td><td>—</td><td><code>file</code> | <code>csv</code> | <code>average</code></td></tr>
+<tr><td><code>reference.path</code></td><td>string</td><td>—</td><td>Absolute HDF5 path</td></tr>
+<tr><td><code>energyRatios</code></td><td>array</td><td><code>[]</code></td><td>Up to 3 <code>{"num":"800","den":"1000"}</code> pairs</td></tr>
+</table>
+<blockquote>A <code>file</code> or <code>average</code> reference points at an HDF5 member. A <code>csv</code> reference stores an empty path — the CSV file is chosen in the 100% T panel and is not archived with the workspace.</blockquote>
+
+<hr>
+
+<h3 id="sd-workspace">27.8 <code>workspace.json</code> — data-view state</h3>
+<p>Root-level JSON dataset. Holds selections, axis ranges, zoom, units, y-scales, and processing parameters. App state is isolated under <code>applications.&lt;app-name&gt;</code>.</p>
+<p>Does <strong>not</strong> store UI chrome: no window geometry, docking layout, theme, fonts, thread pool.</p>
+<blockquote>Apps must tolerate empty <code>workspace.json</code> (<code>{}</code> or empty string).</blockquote>
+
+<h4>27.8.0 Layout</h4>
+<pre><code>{
+  "app": { "name": "FTS Data Explorer", "version": "26.08.3" },
+  "applications": {
+    "FTS Data Explorer": {
+      "plotDefaults": { "maxAtZero": false, "xAxisBase": 0, "xCorrectionMethod": 0, "peakProminence": 0.02 },
+      "selection": {
+        "sortedFiles": ["sample_0001.csv"],
+        "selectedFiles": ["sample_0001.csv"],
+        "filesSelectedForAveraging": [true],
+        "currentSortedFileIndex": 0
+      },
+      "interferogramView": {
+        "zoomRange": { "min": 0, "max": 100 },
+        "refY": { "min": -0.1, "max": 0.2 },
+        "primY": { "min": -0.1, "max": 0.2 }
+      },
+      "spectrumView": {
+        "xUnit": 0, "yScale": 0, "yAxisMode": 0,
+        "detectorSensitivityKVPerW": 0.0, "refLaserUm": 1.550, "zeroPadK": 0,
+        "apodization": { "window": "rectangular", "gaussSigma": 1.0 }
+      },
+      "averageView": { "xUnit": 0, "yScale": 0, "yAxisMode": 0 },
+      "snrView":     { "xUnit": 0, "yScale": 0, "yAxisMode": 0 },
+      "allanView":   { "xUnit": 1, "wavelengthDecimation": 5, "calcBase": 0 },
+      "t100View":    { "xUnit": 0, "yAxisMode": 0, "referenceSource": 0,
+                       "energyRatios": [{"num":"","den":""}] }
+    }
+  }
+}</code></pre>
+<p><code>applications</code> keys match the <code>app.name</code> string from <code>@origin</code>.</p>
+
+<h4>27.8.1 Key reference</h4>
+<table>
+<tr><th>Key</th><th>Type</th><th>Values</th></tr>
+<tr><td><code>app.name</code></td><td>string</td><td>Application name</td></tr>
+<tr><td><code>app.version</code></td><td>string</td><td>Application version</td></tr>
+<tr><td><code>applications</code></td><td>object</td><td>Map of app-name → state</td></tr>
+<tr><td><code>plotDefaults.maxAtZero</code></td><td>bool</td><td></td></tr>
+<tr><td><code>plotDefaults.xAxisBase</code></td><td>i32</td><td>0 = index, 1 = OPD</td></tr>
+<tr><td><code>plotDefaults.xCorrectionMethod</code></td><td>i32</td><td>0 = Hilbert, 1 = Peaks</td></tr>
+<tr><td><code>selection.sortedFiles</code></td><td>string[]</td><td>Display order</td></tr>
+<tr><td><code>selection.selectedFiles</code></td><td>string[]</td><td></td></tr>
+<tr><td><code>selection.filesSelectedForAveraging</code></td><td>bool[]</td><td>Checkbox state</td></tr>
+<tr><td><code>selection.currentSortedFileIndex</code></td><td>i32</td><td></td></tr>
+<tr><td><code>interferogramView.zoomRange</code></td><td>{min,max}</td><td></td></tr>
+<tr><td><code>interferogramView.refY</code>, <code>primY</code></td><td>{min,max}</td><td>Per-channel Y limits</td></tr>
+<tr><td><code>spectrumView.xUnit</code></td><td>i32</td><td>0 = cm⁻¹, 1 = um, 2 = THz</td></tr>
+<tr><td><code>spectrumView.yScale</code></td><td>i32</td><td>0 = linear, 1 = log10, 2 = dB</td></tr>
+<tr><td><code>spectrumView.yAxisMode</code></td><td>i32</td><td>0 = all, 1 = tight, 2 = force</td></tr>
+<tr><td><code>spectrumView.forcedYMin</code>, <code>forcedYMax</code></td><td>fp64</td><td></td></tr>
+<tr><td><code>spectrumView.detectorSensitivityKVPerW</code></td><td>fp64</td><td>0 = off</td></tr>
+<tr><td><code>spectrumView.refLaserUm</code></td><td>fp64</td><td></td></tr>
+<tr><td><code>spectrumView.zeroPadK</code></td><td>i32</td><td></td></tr>
+<tr><td><code>spectrumView.apodization</code></td><td>object</td><td>§27.7.1</td></tr>
+<tr><td><code>averageView.*</code>, <code>snrView.*</code></td><td>—</td><td>Same xUnit/yScale/yAxisMode/limits keys</td></tr>
+<tr><td><code>allanView.calcBase</code></td><td>i32</td><td>0 = 100% T, 1 = spectrum</td></tr>
+<tr><td><code>allanView.wavelengthDecimation</code>, <code>sliceIndex</code>, <code>xRangeMin</code>, <code>xRangeMax</code></td><td>—</td><td>Allan-Werle controls</td></tr>
+<tr><td><code>t100View.referenceSource</code></td><td>i32</td><td>0 = file, 1 = CSV, 2 = average</td></tr>
+<tr><td><code>t100View.energyRatios</code></td><td>array</td><td>Up to 3 {num,den} pairs</td></tr>
+</table>
+
+<h4>27.8.2 Not persisted</h4>
+<p>Window geometry, UI theme, docking layout, thread config, filesystem paths, host identity, transient state, derivable booleans — live in <code>~/.fts_data_explorer_config</code>.</p>
+
+<h3 id="sd-h5py">27.9 Reading a workspace with h5py</h3>
+<p>
+The container is plain HDF5, so any HDF5 tool can read it. This snippet lists the groups
+and reads one interferogram together with the attributes that describe it:
+</p>
+<pre><code>import h5py
+
+with h5py.File("sample.h5", "r") as f:
+    print(dict(f.attrs))                 # @format, @created
+    print(list(f.keys()))                # root datasets and data groups
+
+    group = f["igm_uncorrected_x"]
+    print(group.attrs["config"])         # JSON: how the data was acquired
+
+    ds = group["record_0"]
+    print(ds.shape, ds.dtype)            # (N, 2), float32
+    print(ds.attrs["columns"], ds.attrs["units"])
+
+    data = ds[...]                       # N x 2 numpy array
+    reference, primary = data[:, 0], data[:, 1]
+</code></pre>
+</section>
+
+<section class="page" id="hdf-multi" data-chapter="Developer guide">
+<div class="page-chapter">Developer guide</div>
+<h2>28. Multi-workspace container format</h2>
+
+<p>
+A multi-workspace container holds many single-dataset workspaces plus the experiments
+and batch recipes built on top of them. It extends the format described in Section 27;
+this page specifies what the container adds.
+</p>
+<div class="meta">HDF5 multi-workspace container &nbsp;|&nbsp; Specification v.2 &nbsp;|&nbsp; 2026-09-13</div>
+
+
+<h3 id="mw-overview">28.1 Overview</h3>
+<p>A <strong>multi-workspace container</strong> (a <code>.h5</code> file, distinguished from a single-dataset <code>.h5</code> by its root <code>archive.json</code> — see <a href="#mw-discrim">§28.9</a>) holds many single-dataset workspaces plus the cross-workspace artifacts built on top of them. It is the project file the application opens when a user works with several datasets at once.</p>
+<p>Each embedded workspace is a complete <a href="#hdf-single">unified-spectral-data-container</a> — raw measurements, computed spectra, and per-panel view state — stored byte-identically under a <code>sources/&lt;id&gt;/</code> group. The container adds three things the single-dataset format does not have:</p>
+<ul>
+  <li>An <strong>archive manifest</strong> (<code>archive.json</code>) that is the single source of truth for what the archive contains.</li>
+  <li><strong>Cross-workspace experiments</strong> (<code>experiments/&lt;id&gt;/</code>) — Absorbance and Comparator analyses that overlay artifacts from one or more embedded datasets.</li>
+  <li><strong>Batch-processing recipes</strong> (<code>recipes/</code>) — reusable processing parameter sets that can be applied across datasets.</li>
+</ul>
+<p>The inner layout of each embedded workspace is specified by the <a href="#hdf-single">Single-Dataset Specification</a>; this document does not repeat it.</p>
+
+<h3 id="mw-rules">28.2 Format rules</h3>
+<table>
+<tr><th style="width:2rem">#</th><th>Rule</th></tr>
+<tr><td>1</td><td>The container has <strong>no root <code>@format</code> attribute</strong>. This distinguishes it from a single-dataset <code>.h5</code>, which always carries <code>@format = "unified-spectral-data-container"</code>. The <code>archive.json</code> dataset at the root is the discriminator (see <a href="#mw-discrim">§28.9</a>).</td></tr>
+<tr><td>2</td><td><code>archive.json</code> is the <strong>source of truth</strong>. The list of sources, experiments, and the tab-strip order live in the manifest. Group existence on disk is secondary; the manifest is what the application reads first.</td></tr>
+<tr><td>3</td><td>All mutations are <strong>atomic</strong>: copy the file to a temp sibling, mutate the temp, reopen it once (HDF5 1.14.3 metadata-cache quirk), then rename over the original. A crash never leaves a half-written archive — at most a stale <code>.tmp</code> file beside it (see <a href="#mw-atomicity">§28.8</a>).</td></tr>
+<tr><td>4</td><td>Manifest version is gated. An unknown <code>version</code> in <code>archive.json</code> produces an explicit error; the application never guesses the layout.</td></tr>
+<tr><td>5</td><td>No host info: no hostnames, usernames, paths, or OS fingerprints. The archive records only application identity and timestamps.</td></tr>
+<tr><td>6</td><td>The pre-embedding file path of a source is <strong>never</strong> stored. Once a dataset is embedded, it has no link back to where it came from.</td></tr>
+<tr><td>7</td><td>Embedded workspace content is <strong>byte-identical</strong> to a standalone <code>.h5</code> file. The same read/write helpers operate on the group handle as on a file root, so embedded sources behave exactly like standalone files.</td></tr>
+<tr><td>8</td><td>No images, opaque blobs, base64, executables, or scripts. The container stores only datasets, groups, and string metadata attributes — the same restriction as the single-dataset format.</td></tr>
+<tr><td>9</td><td>All numeric data is native HDF5 typed datasets (IEEE fp32/fp64, i32). Strings are VLEN UTF-8 (<code>H5T_C_S1 + H5T_VARIABLE</code>), shape <code>(1,)</code>. Shapes are C order, row-major. The fp32/fp64 mix is inherited from the single-dataset format (uncorrected interferograms are fp32 on disk); multi-workspace-specific datasets (experiment <code>results/</code>) are fp64.</td></tr>
+<tr><td>10</td><td>Every mutation self-compacts the file. Because HDF5 does not reclaim bytes freed by <code>H5Ldelete</code> by default, the atomic copy step drops dead space and the archive stays near its live size instead of growing monotonically.</td></tr>
+</table>
+
+<hr>
+
+<h3 id="mw-layout">28.3 Container layout</h3>
+<p>The root holds one dataset (the manifest) and three optional group families. Groups are organized <strong>by function</strong>: embedded datasets, cross-workspace experiments, and batch recipes.</p>
+
+<div class="tree">
+<a href="#mw-manifest">archive.json</a>                              <span class="c">(vlen str) — §28.4, the manifest</span>
+├── <a href="#mw-sources">sources/</a>                                <span class="c">embedded single-dataset workspaces</span>
+│   ├── &lt;id&gt;/                                <span class="c">(one per embedded dataset)</span>
+│   │   │   <span class="a">@summary</span> = <span class="t">"{id,name,memberCount,createdIso}"</span>   <span class="c">(JSON string)</span>
+│   │   └── <span class="c">&lt;workspace content — see Single-Dataset Spec&gt;</span>
+│   └── …
+├── <a href="#mw-experiments">experiments/</a>                          <span class="c">cross-workspace analyses (optional)</span>
+│   ├── &lt;id&gt;/
+│   │   ├── config.json                     <span class="c">(vlen str) — §28.6.1</span>
+│   │   ├── fingerprint.json                 <span class="c">(vlen str) — §28.6.2</span>
+│   │   ├── results/                        <span class="c">(fp64 datasets) — §28.6.3</span>
+│   │   │   ├── curve_0_x                   <span class="c">(fp64 [M])</span>
+│   │   │   ├── curve_0_ratio                <span class="c">(fp64 [M])</span>
+│   │   │   └── …
+│   │   └── stats.json                      <span class="c">(vlen str) — §28.6.4</span>
+│   └── …
+└── <a href="#mw-recipes">recipes/</a>                               <span class="c">batch-processing recipes (optional)</span>
+    ├── &lt;recipe-name&gt;                      <span class="c">(vlen str, content = recipe JSON) — §28.7</span>
+    └── …
+</div>
+
+<h4 id="mw-notation">28.3.1 Notation</h4>
+<table>
+<tr><th>Symbol</th><th>Meaning</th></tr>
+<tr><td><code>name/</code></td><td>HDF5 group</td></tr>
+<tr><td><code>name</code></td><td>HDF5 dataset</td></tr>
+<tr><td><code>@name = value</code></td><td>HDF5 attribute</td></tr>
+<tr><td><code>(fp64 [N])</code></td><td>Dataset shape: <code>fp64</code> = IEEE double, <code>i32</code> = int32</td></tr>
+<tr><td><code>&lt;id&gt;</code></td><td>Source or experiment identifier (<a href="#mw-manifest">§28.4</a>)</td></tr>
+</table>
+<p>Shapes are C order, row-major. VLEN strings are datasets of shape <code>(1,)</code> with <code>H5T_C_S1 + H5T_VARIABLE</code>.</p>
+
+<hr>
+
+<h3 id="mw-manifest">28.4 <code>archive.json</code> manifest</h3>
+<p>Root-level VLEN-string dataset. JSON object. The single source of truth for the archive's contents. Written at creation, rewritten on every mutation that changes membership.</p>
+
+<h4>28.4.1 Schema</h4>
+<pre><code>{
+  "version": 2,
+  "sources": [
+    { "id": "sample_0001", "name": "sample_0001",
+      "memberCount": 12, "createdIso": "2026-08-01T12:34:56Z" }
+  ],
+  "experiments": [
+    { "id": "exp_0001", "name": "Absorbance 1",
+      "type": "Absorbance", "createdIso": "2026-08-02T09:00:00Z" }
+  ],
+  "tabOrder": [ "ws:sample_0001", "exp:exp_0001", "ws:sample_0002" ]
+}</code></pre>
+
+<h4>28.4.2 Key reference</h4>
+<table>
+<tr><th>Key</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>version</code></td><td>i32</td><td>Manifest schema version. Current: <code>2</code>. Unknown → explicit error.</td></tr>
+<tr><td><code>sources</code></td><td>array</td><td>One entry per embedded workspace. Order is preserved as written (append on embed, erase on remove).</td></tr>
+<tr><td><code>sources[].id</code></td><td>string</td><td>Stable source identifier (slug). Unique within the archive. Used as the <code>sources/&lt;id&gt;/</code> group name.</td></tr>
+<tr><td><code>sources[].name</code></td><td>string</td><td>Display name. May differ from <code>id</code> after a rename. The manifest name is authoritative; <code>@summary</code> mirrors it best-effort.</td></tr>
+<tr><td><code>sources[].memberCount</code></td><td>i32</td><td>Number of primary members (corrected IFG &gt; uncorrected IFG &gt; original spectra). Refreshed on save-back.</td></tr>
+<tr><td><code>sources[].createdIso</code></td><td>string</td><td>ISO-8601 UTC timestamp of first embed.</td></tr>
+<tr><td><code>experiments</code></td><td>array</td><td>Optional. One entry per persisted cross-workspace experiment.</td></tr>
+<tr><td><code>experiments[].id</code></td><td>string</td><td>Stable experiment identifier. Used as the <code>experiments/&lt;id&gt;/</code> group name.</td></tr>
+<tr><td><code>experiments[].name</code></td><td>string</td><td>Display name (instance name, e.g. <code>"Absorbance 1"</code>).</td></tr>
+<tr><td><code>experiments[].type</code></td><td>string</td><td><code>"Absorbance"</code> or <code>"Comparator"</code>.</td></tr>
+<tr><td><code>experiments[].createdIso</code></td><td>string</td><td>ISO-8601 UTC timestamp.</td></tr>
+<tr><td><code>tabOrder</code></td><td>string[]</td><td>Optional. Exact visual tab-strip order, interleaved: <code>"ws:&lt;sourceId&gt;"</code> for workspace tabs, <code>"exp:&lt;experimentId&gt;"</code> for experiment tabs.</td></tr>
+</table>
+
+<h4>28.4.3 Legacy tab-order fallbacks</h4>
+<p>Older archives may lack <code>tabOrder</code>. The reader then restores the workspace tabs and their order; persisted experiments still appear as tabs, in file order, and only their saved interleaved tab order is lost:</p>
+<ol>
+  <li><code>openTabs</code> — array of source ids (legacy). Each id opens as a workspace tab.</li>
+  <li>Per-source <code>open</code> boolean — sources with <code>open = true</code> open as workspace tabs, in manifest order.</li>
+</ol>
+<p>If neither <code>tabOrder</code> nor <code>openTabs</code> is present and no source has <code>open = true</code>, no workspace tabs auto-open.</p>
+
+<hr>
+
+<h3 id="mw-sources">28.5 <code>sources/&lt;id&gt;/</code> — embedded workspaces</h3>
+<p>One group per embedded dataset. The group name is the source <code>id</code>. The group's content is a complete single-dataset workspace, stored exactly as it would be in a standalone <code>.h5</code> file.</p>
+
+<div class="ds">
+sources/&lt;id&gt;/
+    <span class="a">@summary</span> = <span class="t">"{\"id\":\"...\",\"name\":\"...\",\"memberCount\":N,\"createdIso\":\"...\"}"</span>
+    <span class="c"># --- workspace content (see Single-Dataset Spec) ---</span>
+    <span class="a">@format</span> = <span class="t">"unified-spectral-data-container"</span>
+    <span class="a">@created</span> = <span class="t">"2026-08-01T12:34:56Z"</span>
+    ├── workspace.json
+    ├── measurement_config.json
+    ├── measurement_comment.txt
+    ├── tags
+    ├── igm_uncorrected_x/
+    ├── igm_corrected_x/
+    ├── spectra/
+    ├── average_spectra/
+    ├── snr_spectra/
+    ├── allan_werle/
+    └── t100/
+</div>
+
+<h4>28.5.1 <code>@summary</code> attribute</h4>
+<p>JSON string attribute on each source group. Informational mirror of the manifest entry; the manifest is authoritative. Name and member count are refreshed on save-back and rename; <code>createdIso</code> is rewritten with the current time on save-back.</p>
+<table>
+<tr><th>Key</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>id</code></td><td>string</td><td>Source id (matches group name and manifest <code>sources[].id</code>)</td></tr>
+<tr><td><code>name</code></td><td>string</td><td>Display name (mirrors manifest)</td></tr>
+<tr><td><code>memberCount</code></td><td>i32</td><td>Primary member count (mirrors manifest)</td></tr>
+<tr><td><code>createdIso</code></td><td>string</td><td>ISO-8601 UTC timestamp of the last save-back (the manifest keeps the first-embed time)</td></tr>
+</table>
+
+<h4>28.5.2 Inner layout</h4>
+<p>The group's children — root datasets, type groups, member datasets, and all <code>@format</code>/<code>@created</code>/<code>@origin</code>/<code>@config</code>/<code>@schema</code> attributes — are specified in full by the <a href="#hdf-single">Single-Dataset Specification</a>. An embedded source is read and written with the same helpers as a standalone file; the only difference is that the HDF5 root handle is the <code>sources/&lt;id&gt;</code> group rather than the file root.</p>
+<blockquote>Original-data immutability and <code>inputs</code> integrity (single-dataset rules 7, 10) apply inside each embedded source. Save-back rewrites the whole source group atomically.</blockquote>
+
+<hr>
+
+<h3 id="mw-experiments">28.6 <code>experiments/&lt;id&gt;/</code> — cross-workspace analysis</h3>
+<p>One group per persisted experiment. Experiments overlay artifacts from one or more embedded datasets: <strong>Absorbance</strong> computes reference/sample ratios, <strong>Comparator</strong> overlays selected artifact types across datasets. Transient (unsaved) experiments have no group here; only persisted instances occupy space.</p>
+
+<div class="ds">
+experiments/&lt;id&gt;/
+    ├── config.json          <span class="c">(vlen str) — full instance state — §28.6.1</span>
+    ├── fingerprint.json     <span class="c">(vlen str) — per-source compute-time snapshots — §28.6.2</span>
+    ├── results/             <span class="c">(fp64 datasets) — §28.6.3</span>
+    │   ├── curve_0_x        <span class="c">(fp64 [M])</span>
+    │   ├── curve_0_ratio    <span class="c">(fp64 [M])</span>
+    │   └── …
+    └── stats.json           <span class="c">(vlen str) — per-curve summary stats — §28.6.4</span>
+</div>
+
+<h4 id="mw-exp-config">28.6.1 <code>config.json</code></h4>
+<p>JSON string dataset. Full instance state minus transient plot flags. The <code>type</code> field selects the schema branch: Absorbance stores <code>curves</code>; Comparator stores <code>artifactSelector</code>/<code>comparatorKeys</code>/<code>memberPicks</code>.</p>
+
+<h5>Shared keys (both types)</h5>
+<table>
+<tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>type</code></td><td>string</td><td>—</td><td><code>"Absorbance"</code> or <code>"Comparator"</code></td></tr>
+<tr><td><code>name</code></td><td>string</td><td>—</td><td>Instance display name (e.g. <code>"Absorbance 1"</code>)</td></tr>
+<tr><td><code>comment</code></td><td>string</td><td><code>""</code></td><td>Free-text note</td></tr>
+<tr><td><code>xUnit</code></td><td>i32</td><td>0</td><td>0 = cm⁻¹, 1 = µm, 2 = THz</td></tr>
+<tr><td><code>yMode</code></td><td>i32</td><td>0</td><td>Meaningful only for Absorbance (written for both types): 0 = T%, 1 = A</td></tr>
+<tr><td><code>yAxisMode</code></td><td>i32</td><td>0</td><td>0 = all, 1 = tight, 2 = force</td></tr>
+<tr><td><code>forcedYMin</code>, <code>forcedYMax</code></td><td>fp64</td><td>0.0, 1.0</td><td>Forced Y range (mode 2)</td></tr>
+<tr><td><code>yScale</code></td><td>i32</td><td>0</td><td>0 = linear, 1 = log10, 2 = dB (gated off for T100/IFG)</td></tr>
+<tr><td><code>showCursor</code></td><td>bool</td><td>false</td><td>Tracking cursor</td></tr>
+<tr><td><code>hitranGases</code></td><td>bool[8]</td><td>all false</td><td>HITRAN gas-marker selection (spectral artifacts)</td></tr>
+<tr><td><code>hitranThreshold</code></td><td>i32</td><td>2</td><td>Threshold level index (0–3)</td></tr>
+<tr><td><code>hitranSmooth</code></td><td>i32</td><td>3</td><td>Smoothing level index (0–3)</td></tr>
+<tr><td><code>downsampleDisplay</code></td><td>bool</td><td>false</td><td>Display-only stride downsampling</td></tr>
+<tr><td><code>computed</code></td><td>bool</td><td>false</td><td>True once a compute produced a ratio for ≥1 curve</td></tr>
+<tr><td><code>manualXMin</code>, <code>manualXMax</code></td><td>fp64</td><td>0.0, 0.0</td><td>Saved view X range (in the saved <code>xUnit</code>)</td></tr>
+<tr><td><code>tabHidden</code></td><td>bool</td><td>false</td><td>Tab-strip visibility (closed-but-kept experiments)</td></tr>
+<tr><td><code>differenceEnabled</code></td><td>bool</td><td>false</td><td>Difference panel on/off</td></tr>
+<tr><td><code>differenceRefIdx</code></td><td>i32</td><td>0</td><td>Index of the Reference curve in the visible-curve list</td></tr>
+<tr><td><code>differenceSubIdx</code></td><td>i32</td><td>1</td><td>Index of the Subtracted curve in the visible-curve list</td></tr>
+<tr><td><code>differenceMode</code></td><td>i32</td><td>0</td><td>0 = Signed, 1 = Absolute</td></tr>
+<tr><td><code>differenceStatsRegion</code></td><td>i32</td><td>0</td><td>0 = Viewbox, 1 = All</td></tr>
+</table>
+
+<h5>Absorbance-specific keys</h5>
+<table>
+<tr><th>Key</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>curves</code></td><td>array</td><td>One entry per reference/sample pair</td></tr>
+<tr><td><code>curves[].refKey</code></td><td>string</td><td>Stable key of the reference source</td></tr>
+<tr><td><code>curves[].refArtifact</code></td><td>i32</td><td>0 = Average spectrum, 1 = Raw spectrum</td></tr>
+<tr><td><code>curves[].refMember</code></td><td>string</td><td>Member id ("" = first member)</td></tr>
+<tr><td><code>curves[].sampleKey</code></td><td>string</td><td>Stable key of the sample source</td></tr>
+<tr><td><code>curves[].sampleArtifact</code></td><td>i32</td><td>0 = Average spectrum, 1 = Raw spectrum</td></tr>
+<tr><td><code>curves[].sampleMember</code></td><td>string</td><td>Member id</td></tr>
+<tr><td><code>curves[].name</code></td><td>string</td><td>User-chosen curve name ("" = auto "Curve N")</td></tr>
+</table>
+
+<h5>Comparator-specific keys</h5>
+<table>
+<tr><th>Key</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>artifactSelector</code></td><td>i32</td><td>0 = Average spectrum, 1 = Raw spectrum, 2 = SNR, 3 = T100, 4 = Corrected IFG, 5 = Raw IFG</td></tr>
+<tr><td><code>comparatorKeys</code></td><td>string[]</td><td>Stable keys of included datasets. Empty + <code>comparatorKeysExplicit=false</code> = all open datasets.</td></tr>
+<tr><td><code>comparatorKeysExplicit</code></td><td>bool</td><td>True once the user toggled a checkbox (empty then means "nothing selected")</td></tr>
+<tr><td><code>memberPicks</code></td><td>object</td><td>Map of dataset key → member id (multi-member artifacts)</td></tr>
+<tr><td><code>maxAtZeroIfg</code></td><td>bool</td><td>false</td><td>Align each curve's center burst at x = 0 (Comparator, interferogram artifacts)</td></tr>
+</table>
+
+<h4 id="mw-exp-fingerprint">28.6.2 <code>fingerprint.json</code></h4>
+<p>JSON string dataset. Per-source compute-time snapshots used to detect result staleness. Keyed by a composite string <code>&lt;sourceKey&gt;\x1f&lt;artifact&gt;\x1f&lt;memberId&gt;</code> (two curves may reference the same source with different members). On load, the application compares each snapshot to the source's current member state and raises a staleness flag on mismatch.</p>
+
+<h5>MemberSnapshot schema</h5>
+<table>
+<tr><th>Key</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>memberId</code></td><td>string</td><td>Resolved member id at compute time</td></tr>
+<tr><td><code>dataHash</code></td><td>uint64</td><td>FNV-1a content hash over the member's x/y IEEE-754 bit patterns (stable across app versions)</td></tr>
+<tr><td><code>effectiveParams</code></td><td>object</td><td>Normalized params that determine content: active apodization window's field(s), <code>zeroPadK</code>, <code>refLaserUm</code>, <code>xCorrectionMethod</code>, <code>prominence</code> (peak-finding only). xUnit and sensitivity excluded (display-only).</td></tr>
+<tr><td><code>valid</code></td><td>bool</td><td>False for unresolvable members and legacy entries (dropped silently on load)</td></tr>
+</table>
+<blockquote>Staleness is data-grounded: a snapshot mismatch means the source's data or effective params changed since compute. The user sees a warning and a Recompute button; results are not auto-discarded.</blockquote>
+
+<h4 id="mw-exp-results">28.6.3 <code>results/</code></h4>
+<p>Group of fp64 datasets. Absorbance experiments store one <code>curve_&lt;k&gt;_x</code>/<code>curve_&lt;k&gt;_ratio</code> pair per computed curve; both experiment types additionally store <code>difference_x</code>/<code>difference_y</code> when the Difference panel is enabled. Comparators otherwise store no results — their overlay curves are re-extracted live from the sources.</p>
+<table>
+<tr><th>Dataset</th><th>Shape</th><th>Description</th></tr>
+<tr><td><code>curve_&lt;k&gt;_x</code></td><td>fp64 [M]</td><td>Common X grid (overlapping region of the curve's ref/sample pair)</td></tr>
+<tr><td><code>curve_&lt;k&gt;_ratio</code></td><td>fp64 [M]</td><td>Clamped ratio (sample / reference)</td></tr>
+</table>
+<p><code>k</code> is the curve index (0-based). Only curves with non-empty <code>gridX</code>/<code>ratioY</code> are written. The display curve (T% or absorbance) is derived from the ratio at render time and is not stored separately — <code>yMode</code> in <code>config.json</code> selects the transform.</p>
+
+<h4 id="mw-exp-stats">28.6.4 <code>stats.json</code></h4>
+<p>JSON string dataset. Light per-curve summary statistics over the display curve. Absorbance only; Comparator emits an empty array.</p>
+<pre><code>[
+  { "label": "Curve 1", "min": 0.42, "max": 1.08, "mean": 0.91, "std": 0.03 }
+]</code></pre>
+<table>
+<tr><th>Key</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>label</code></td><td>string</td><td>Curve label (user name or auto "Curve N")</td></tr>
+<tr><td><code>min</code></td><td>fp64</td><td>Minimum of the display curve</td></tr>
+<tr><td><code>max</code></td><td>fp64</td><td>Maximum of the display curve</td></tr>
+<tr><td><code>mean</code></td><td>fp64</td><td>Arithmetic mean</td></tr>
+<tr><td><code>std</code></td><td>fp64</td><td>Population standard deviation (N divisor)</td></tr>
+</table>
+
+<hr>
+
+<h3 id="mw-recipes">28.7 <code>recipes/</code> — batch-processing recipes</h3>
+<p>Optional group. One VLEN-string dataset per recipe, named by the recipe name; the dataset content is the recipe JSON. Additive to the archive: recipe operations never touch <code>archive.json</code>, and the single-dataset validator is never run on multi-workspace files. Recipe names must be non-empty and contain no <code>/</code>.</p>
+
+<h4>28.7.1 Recipe JSON schema</h4>
+<pre><code>{
+  "name": "Average spectrum - NB medium",
+  "comment": "K=2, Norton-Beer FWHM 1.4, Hilbert on dual-IFG data.",
+  "artifacts": ["spectra", "average"],
+  "spectrum": {
+    "zeroPadK": 2,
+    "apodization": { "window": "norton_beer", "nortonBeerFwhm": 1.4 },
+    "xCorrectionMethod": "hilbert",
+    "prominenceThreshold": 0.02
+  },
+  "overrides": { "refLaserUm": null, "detectorSensitivityKVPerW": null },
+  "t100": { "energyRatios": [{"num":"2000","den":"1000"}] },
+  "allan": { "wavelengthDecimation": 5, "xRangeMinUm": 1.0,
+             "xRangeMaxUm": 30.0, "calcBase": "100% T" }
+}</code></pre>
+
+<h4>28.7.2 Key reference</h4>
+<table>
+<tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>name</code></td><td>string</td><td>—</td><td>Required, non-empty, unique among recipes</td></tr>
+<tr><td><code>comment</code></td><td>string</td><td><code>""</code></td><td>Free text</td></tr>
+<tr><td><code>artifacts</code></td><td>string[]</td><td>—</td><td>Non-empty subset of <code>spectra</code>, <code>average</code>, <code>snr</code>, <code>t100</code>, <code>allan</code></td></tr>
+<tr><td><code>spectrum.zeroPadK</code></td><td>i32</td><td>0</td><td>N = n·(K+1); 0 = off</td></tr>
+<tr><td><code>spectrum.apodization</code></td><td>object</td><td>—</td><td>Active window + its parameter(s). See <a href="#hdf-single">single-dataset specification §27.7.1</a> for the full window list.</td></tr>
+<tr><td><code>spectrum.xCorrectionMethod</code></td><td>string</td><td><code>"hilbert"</code></td><td><code>hilbert</code> | <code>peaks</code></td></tr>
+<tr><td><code>spectrum.prominenceThreshold</code></td><td>fp64</td><td>0.02</td><td>Peak-finding fraction (0.0–0.5), used only with <code>peaks</code></td></tr>
+<tr><td><code>overrides.refLaserUm</code></td><td>fp64 | null</td><td>null</td><td>null = each dataset keeps its own value</td></tr>
+<tr><td><code>overrides.detectorSensitivityKVPerW</code></td><td>fp64 | null</td><td>null</td><td>null = each dataset keeps its own value</td></tr>
+</table>
+
+<h5>Conditional sections</h5>
+<p>The <code>t100</code> section is emitted only when <code>"t100"</code> ∈ <code>artifacts</code>; the <code>allan</code> section only when <code>"allan"</code> ∈ <code>artifacts</code>.</p>
+<table>
+<tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>t100.energyRatios</code></td><td>array</td><td>ASTM E1421</td><td>Up to 3 <code>{"num","den"}</code> pairs (string values; <code>"max"</code> allowed for den)</td></tr>
+<tr><td><code>allan.wavelengthDecimation</code></td><td>i32</td><td>5</td><td></td></tr>
+<tr><td><code>allan.xRangeMinUm</code>, <code>xRangeMaxUm</code></td><td>fp64</td><td>1.0, 30.0</td><td>Wavelength slice range</td></tr>
+<tr><td><code>allan.calcBase</code></td><td>string</td><td><code>"100% T"</code></td><td><code>"100% T"</code> | <code>"Spectrum"</code></td></tr>
+</table>
+
+<h4>28.7.3 Built-in recipes</h4>
+<p>Six built-in recipes are compiled into the application (Norton-Beer, K=2, Hilbert, no overrides, no Allan). They are in-memory defaults, <strong>not</strong> stored in the <code>recipes/</code> group — the group holds only user-saved recipes. The UI lists built-ins first, then file-stored recipes appended after:</p>
+<ul>
+  <li><code>Average spectrum - NB weak/medium/strong</code> (FWHM 1.2 / 1.4 / 1.6) — artifacts: <code>spectra</code>, <code>average</code>.</li>
+  <li><code>All - NB weak/medium/strong</code> — adds <code>snr</code> + <code>t100</code> (ASTM E1421 bands).</li>
+</ul>
+
+<hr>
+
+<h3 id="mw-atomicity">28.8 Atomicity &amp; versioning</h3>
+
+<h4>28.8.1 Atomic mutation contract</h4>
+<p>Every write — embed, remove, rename, save-back, experiment write/remove, recipe write/remove, tab-order save — follows the same atomic window:</p>
+<pre><code>1. Copy path → path.tmp          (object-by-object H5Ocopy; drops dead space)
+2. Mutate path.tmp               (the actual write)
+3. Reopen path.tmp RDONLY        (HDF5 1.14.3 metadata-cache finalize quirk)
+4. Rename path.tmp → path        (delete-then-rename fallback on Windows)</code></pre>
+<p>A crash at any step leaves the original intact and at most a stale <code>.tmp</code> beside it. The temp is removed at the start of the next mutation.</p>
+
+<h4>28.8.2 Compaction-on-save</h4>
+<p>HDF5 does not reclaim bytes freed by <code>H5Ldelete</code> by default (its free-space manager does not track that space). The atomic copy step copies only <strong>live</strong> objects, so deleted-and-recreated members do not accumulate dead bytes. The archive self-compacts to near its live size on every mutation instead of growing monotonically.</p>
+
+<h4>28.8.3 Version gate</h4>
+<p>The manifest <code>version</code> field is checked on every open. The current version is <code>2</code>. An unknown version produces an explicit error (<code>"unsupported archive version N (expected 2)"</code>) — the application never guesses the layout of a newer or older archive.</p>
+
+<h4>28.8.4 Save-back semantics</h4>
+<p>Saving an embedded workspace rewrites the whole <code>sources/&lt;id&gt;/</code> group atomically (delete + recreate within the temp copy). Original-data immutability is enforced against the current on-disk group; a fresh embed (missing group) skips the check. The manifest entry's <code>memberCount</code> and <code>name</code> are refreshed in the same save, and <code>@summary</code> is rewritten to match.</p>
+
+<hr>
+
+<h3 id="mw-discrim">28.9 File-type discrimination</h3>
+<p>The application must tell a multi-workspace <code>.h5</code> from a single-dataset <code>.h5</code> before attempting to open it, because the two have different root layouts:</p>
+<table>
+<tr><th>File type</th><th>Extension</th><th>Root discriminator</th><th>Open path</th></tr>
+<tr><td>Single-dataset</td><td><code>.h5</code></td><td>Root <code>@format = "unified-spectral-data-container"</code></td><td><code>H5Store::load</code></td></tr>
+<tr><td>Multi-workspace</td><td><code>.h5</code></td><td>Root dataset <code>archive.json</code> exists; no root <code>@format</code></td><td><code>multiWorkspaceLoad</code></td></tr>
+</table>
+<blockquote>The multi-workspace file deliberately has no root <code>@format</code> attribute. <code>H5Store::load</code> rejects any file missing <code>@format</code>, so the generic open path (<code>openWorkspaceInNewTab</code>) sniffs for <code>archive.json</code> and routes multi-workspace files to <code>multiWorkspaceLoad</code> before that check can fire. Paths that already know a file is a multi-workspace archive (recent multi-workspace list, session tab) call <code>multiWorkspaceOpenProject</code> directly.</blockquote>
+
+<h3 id="mw-h5py">28.10 Reading the manifest with h5py</h3>
+<p>
+The manifest is a variable-length string dataset, so opening a multi-workspace file starts
+by reading and parsing it:
+</p>
+<pre><code>import h5py
+import json
+
+with h5py.File("comparison.h5", "r") as f:
+    if "archive.json" not in f:
+        raise SystemExit("not a multi-workspace container")
+
+    manifest = json.loads(f["archive.json"].asstr()[0])
+    print("version:", manifest["version"])
+    for source in manifest["sources"]:
+        print(source["id"], source["name"], source["memberCount"])
+</code></pre>
+</section>
+
+<section class="page" id="converters" data-chapter="Developer guide">
+<div class="page-chapter">Developer guide</div>
+<h2>29. Writing a data converter</h2>
+
+<p>
+Converters are small stand-alone Python scripts that turn a measurement format into the
+workspace format described in Section 27. They are the only supported way to bring foreign
+data into the application — the application itself does not parse vendor formats. The Conversion
+screen (Section 6.3) runs them, and the headless <code>-c</code> command (Section 30) runs
+the same scripts from a terminal.
+</p>
+
+<h3>29.1 How converters are discovered</h3>
+<p>Installed converters are collected from three places, in this order:</p>
+<ol>
+  <li>The <code>converters</code> directory inside the application data folder — your own
+      scripts. A script here overrides a repository converter with the same <code>id</code>.</li>
+  <li>Extra directories added to the configuration.</li>
+  <li>The cloned converter repository.</li>
+</ol>
+<p>
+Only regular <code>.py</code> files are considered. Each file is identified by the manifest
+at its top; a script whose manifest is missing or unparsable is never executed; it is listed with the parse error. Changes on disk are picked up by pressing <code>Refresh</code> on
+the Conversion screen.
+</p>
+
+<h3>29.2 The converter contract</h3>
+<pre><code>&lt;python&gt; &lt;script&gt; &lt;input&gt; &lt;output.h5&gt; [--param value ...]</code></pre>
+<ul>
+  <li><code>&lt;input&gt;</code> is a file or a directory, as declared in the manifest.</li>
+  <li><code>&lt;output.h5&gt;</code> is the file the script must create: a single-dataset
+      workspace (Section 27) that passes validation.</li>
+  <li>Write atomically — build the file under a temporary name and rename it into place when
+      it is complete. An interrupted conversion must never leave a half-written
+      <code>.h5</code> behind.</li>
+  <li>Exit with status <code>0</code> on success. Any other exit status aborts the
+      conversion; the last lines of the script's output are shown in the Conversion screen's
+      log pane.</li>
+</ul>
+
+<h3>29.3 The manifest</h3>
+<p>
+The first lines of the script describe it to the application. They are plain text, not
+Python, and must start with <code>#</code>:
+</p>
+<pre><code>#!/usr/bin/env python3
+#FTS_CONVERTER {"id":"my_instrument_csv","name":"My Instrument CSV","version":"1.0",
+#  "description":"Import one CSV export per scan",
+#  "input":"directory","extensions":[".csv"]}
+#FTS_FORMAT
+# First line: "Reference [V],Primary [V]".
+# Each following line is one sample pair. One file per scan inside the directory.
+#FTS_FORMAT_END
+#FTS_FORMAT_SAMPLE
+# Reference [V],Primary [V]
+# -0.00123,0.00084
+# 0.00031,-0.00047
+#FTS_FORMAT_SAMPLE_END
+</code></pre>
+<table>
+<tr><th>Field</th><th>Meaning</th></tr>
+<tr><td><code>id</code></td><td>Required. Unique among all converters; also the name used by the headless <code>-c</code> flag.</td></tr>
+<tr><td><code>name</code></td><td>Display name (defaults to the <code>id</code>).</td></tr>
+<tr><td><code>version</code></td><td>Free-form version string.</td></tr>
+<tr><td><code>description</code></td><td>One-line description shown in the converter list.</td></tr>
+<tr><td><code>input</code></td><td><code>"file"</code> (default) or <code>"directory"</code>. Decides whether the Conversion screen opens a file or a folder picker.</td></tr>
+<tr><td><code>extensions</code></td><td>File extensions used to filter the input dialog, e.g. <code>[".csv"]</code>.</td></tr>
+<tr><td><code>params</code></td><td>Reserved for future use; not read by the current interface.</td></tr>
+</table>
+<p>
+The JSON may continue over several lines, each continuation starting with <code>#</code>;
+parsing stops at the next line that is not a <code>#</code> continuation — a blank line, a non-<code>#</code> line, or a <code>#FTS_</code> marker. The <code>#FTS_FORMAT</code> block is the
+prose shown in the <em>Input format</em> pane; <code>#FTS_FORMAT_SAMPLE</code> is a verbatim
+sample with the leading <code># </code> stripped.
+</p>
+
+<h3>29.4 Writing the workspace file</h3>
+<p>
+The smallest useful converter writes the four root datasets, then one interferogram group.
+The skeleton below is adapted from the WUST converter shipped with the standard collection:
+</p>
+<pre><code>import datetime
+import json
+import os
+
+import h5py
+import numpy as np
+
+SPEC_ATTR = "unified-spectral-data-container"
+
+
+def utc_now():
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def write_vlen_str(group, name, text):
+    """Variable-length UTF-8 string dataset (shape (1,))."""
+    dt = h5py.special_dtype(vlen=str)
+    group.create_dataset(name, data=np.array([text], dtype=object), dtype=dt)
+
+
+def write_container(out_path, scans):
+    """scans: [(name, ndarray[N, 2] fp32), ...]"""
+    tmp_path = out_path + ".tmp"
+    with h5py.File(tmp_path, "w") as f:
+        f.attrs["format"] = SPEC_ATTR
+        f.attrs["created"] = utc_now()
+
+        write_vlen_str(f, "workspace.json", "{}")
+        write_vlen_str(f, "measurement_config.json", json.dumps({}))
+        write_vlen_str(f, "measurement_comment.txt", "")
+        write_vlen_str(f, "tags", "")
+
+        group = f.create_group("igm_uncorrected_x")
+        group.attrs["origin"] = json.dumps({
+            "timestamp": utc_now(),
+            "application": "my_instrument_csv",
+            "version": "1.0",
+        })
+        for name, arr in scans:
+            ds = group.create_dataset(name, data=arr.astype(np.float32))
+            ds.attrs["kind"] = "original"
+            ds.attrs["columns"] = ["Reference detector", "Primary detector"]
+            ds.attrs["units"] = ["V", "V"]
+        group.attrs["config"] = json.dumps({
+            "sourceFormat": "csv",
+            "dataType": "igm_uncorrected_x",
+            "axisCorrected": False,
+            "detectorUnits": "V",
+            "opdUnits": "um",
+            "channelOrder": ["Reference detector", "Primary detector"],
+            "fileCount": len(scans),
+            "pointsPerFile": int(scans[0][1].shape[0]) if scans else 0,
+        })
+
+    os.replace(tmp_path, out_path)   # atomic: no half-written file is ever visible
+</code></pre>
+<p>Points to keep in mind when adapting this skeleton:</p>
+<ul>
+  <li>For spectra, x/y datasets are two-column with the x axis in column 0. Interferogram groups are special: uncorrected is [Reference detector, Primary detector], corrected is [Primary detector, OPD axis] (Sections 27.2.3.1 and 27.2.3.2).</li>
+  <li>Every dataset carries <code>kind = "original"</code> plus <code>columns</code> and
+      <code>units</code> string attributes.</li>
+  <li>Every group carries <code>@origin</code> and <code>@config</code> JSON attributes. The application stores them verbatim — dataset type and axis handling come from which group the members live in, not from <code>@config</code> — but keep the keys shown above for external tools and round-tripping.</li>
+  <li>Data with an OPD axis belongs in <code>igm_corrected_x/</code> with
+      <code>axisCorrected: true</code> and columns
+      <code>["Primary detector", "OPD axis"]</code> (Section 27.2.3.2). Converters that
+      deliver spectra directly write original members under <code>spectra/</code>
+      (Section 27.2.4).</li>
+  <li>All strings are variable-length UTF-8 — use the helper shown above rather than fixed
+      width arrays.</li>
+</ul>
+
+<h3>29.5 Testing a converter</h3>
+<ol>
+  <li>Run the script by hand exactly as the application would:
+      <code>python3 my_instrument_csv.py &lt;input&gt; /tmp/out.h5</code>. A non-zero exit status aborts the conversion in the application as well.</li>
+  <li>Run it through the application's own path to check validation and logging:
+      <code>fts_data_explorer -c my_instrument_csv &lt;input&gt; out.h5</code>
+      (Section 30). Use <code>-l converter</code> to see whether the manifest was parsed.</li>
+  <li>Inspect the result with any HDF5 tool, for example:
+      <pre><code>python3 - &lt;&lt;'PY'
+import h5py
+
+with h5py.File("out.h5", "r") as f:
+    print(dict(f.attrs))
+    print(list(f["igm_uncorrected_x"].keys()))
+PY</code></pre></li>
+  <li>Open the file in the application and check the Metadata panel and the Files list. If something is missing, fix the script and convert again. A conversion that exits non-zero leaves any previous output untouched (scripts write atomically); if a script exits 0 but produces an invalid file, the invalid file is left at the output path and the error is reported; fix the script and convert again.</li>
+</ol>
+</section>
+
+<section class="page" id="headless" data-chapter="Developer guide">
+<div class="page-chapter">Developer guide</div>
+<h2>30. Headless mode</h2>
+
+<p>
+The same calculation engine can be run without the graphical interface. Headless mode
+loads workspaces, computes artifacts, applies processing configurations, and writes results
+to CSV — which makes it the entry point for scripted pipelines and automated processing.
+Errors are printed to standard error and the process exits with a non-zero status.
+</p>
+
+<h3>30.1 Commands</h3>
+<table>
+<tr><th>Command</th><th>Purpose</th></tr>
+<tr><td><code>-help</code></td><td>Print usage and exit.</td></tr>
+<tr><td><code>-v</code></td><td>Print the version and exit.</td></tr>
+<tr><td><code>-l [type]</code></td><td>List converters (<code>converter</code>), export artifact types (<code>output</code>), or recent datasets (<code>recent</code>).</td></tr>
+<tr><td><code>-w &lt;workspace.h5&gt; &lt;output type&gt; &lt;output dir&gt; [&lt;config.json&gt;]</code></td><td>Open a workspace, optionally apply a processing configuration, compute the requested artifact, export it as CSV, and save the workspace in place.</td></tr>
+<tr><td><code>-cmp &lt;sample.h5&gt; &lt;reference.h5&gt; Comparator spectra &lt;output dir&gt; [&lt;config.json&gt;]</code></td><td>Compute the average spectrum of both workspaces and export both curves on the shared reference grid.</td></tr>
+<tr><td><code>-c &lt;converter&gt; &lt;input&gt; &lt;output.h5&gt;</code></td><td>Run one converter by id (or give a direct <code>.py</code> path) and validate the result.</td></tr>
+<tr><td><code>-sync-converters</code></td><td>Clone or update the converter repository.</td></tr>
+<tr><td><code>-t</code></td><td>Write a processing configuration template (<code>template.json</code>) to the current directory.</td></tr>
+<tr><td><code>-r</code></td><td>Reset: delete the user configuration file and the saved window layouts.</td></tr>
+</table>
+
+<p>
+For <code>-w</code>, the valid output types are the export artifact names listed in
+Section 18. The directory given to <code>-w</code> or <code>-cmp</code> must already exist.
+</p>
+
+<h3>30.2 Processing configuration</h3>
+<p>
+The optional configuration file controls the calculation. Create a starting point with
+<code>-t</code>, which writes <code>template.json</code> with every key and a short comment:
+</p>
+<pre><code>{
+  "spectrum": {
+    "zeroPadK":          { "_comment": "Zero-padding factor (0-16).", "value": 0 },
+    "apodizationWindow": { "_comment": "Rectangular, Gauss, ..., NortonBeer.", "value": "Rectangular" },
+    "nortonBeerFwhm":    { "_comment": "Norton-Beer FWHM (1.0-2.0).", "value": 1.5 },
+    "xCorrectionMethod": { "_comment": "Hilbert or PeakFinding.", "value": "Hilbert" },
+    "xUnit":             { "_comment": "cm-1, um, THz.", "value": "cm-1" },
+    "yScale":            { "_comment": "lin, log10, dB.", "value": "lin" }
+  },
+  "allan": {
+    "wavelengthDecimation": { "_comment": "1-50; 1 = full resolution.", "value": 5 },
+    "xRangeMinUm":          { "_comment": "Wavelength range [um].", "value": 1.0 },
+    "xRangeMaxUm":          { "_comment": "", "value": 30.0 },
+    "calcBase":             { "_comment": "100% T or Spectrum.", "value": "100% T" }
+  },
+  "processing": {
+    "workerThreads": { "_comment": "-1 = AUTO, otherwise any thread count.", "value": -1 }
+  }
+}</code></pre>
+<p>
+The example above is abridged: <code>-t</code> also writes the <code>average</code>, <code>snr</code>, and <code>t100</code> sections. Every key may also be written as a plain value (<code>"zeroPadK": 2</code>) — the
+<code>{ "_comment", "value" }</code> wrapper is what <code>-t</code> produces and what keeps
+the template self-documenting. The template is grouped by panel:
+</p>
+<table>
+<tr><th>Section</th><th>Key fields</th></tr>
+<tr><td><code>spectrum</code></td><td><code>refLaserWavelengthUm</code>, <code>zeroPadK</code>, <code>apodizationWindow</code>, window parameters, <code>detectorSensitivityKVperW</code>, <code>xCorrectionMethod</code>, <code>peakProminence</code>, <code>xUnit</code>, <code>yScale</code>, <code>yAxisMode</code>, <code>forcedYMin</code>, <code>forcedYMax</code></td></tr>
+<tr><td><code>average</code>, <code>snr</code></td><td><code>xUnit</code>, <code>yScale</code>, <code>yAxisMode</code>, <code>forcedYMin</code>, <code>forcedYMax</code></td></tr>
+<tr><td><code>allan</code></td><td><code>wavelengthDecimation</code>, <code>xRangeMinUm</code>, <code>xRangeMaxUm</code>, <code>calcBase</code>, <code>sliceIndex</code></td></tr>
+<tr><td><code>t100</code></td><td><code>referenceSource</code>, <code>csvReferencePath</code>, the three energy-ratio band pairs</td></tr>
+<tr><td><code>processing</code></td><td><code>workerThreads</code> (<code>-1</code> = AUTO)</td></tr>
+</table>
+<p>
+Values with a documented range are clamped. Unknown enum names warn and fall back to defaults (<code>xCorrectionMethod</code> and <code>referenceSource</code> fall back silently), and a value of the wrong JSON type aborts the run. Applying a configuration that contains a <code>spectrum</code> section also clears the workspace's cached spectra, so the requested artifacts are computed with the configured parameters.
+</p>
+
+<h3>30.3 Running from a script</h3>
+<p>
+Headless mode is designed to be called from other programs. The example below computes an
+average spectrum with fixed processing settings and then reads the exported CSV:
+</p>
+<pre><code>import subprocess
+
+import numpy as np
+
+BIN = "fts_data_explorer"
+
+
+def compute(workspace, output_type, out_dir, config=None):
+    cmd = [BIN, "-w", workspace, output_type, out_dir]
+    if config:
+        cmd.append(config)
+    subprocess.run(cmd, check=True)   # raises on a non-zero exit status
+
+
+# Export the average spectrum using the pinned parameters in processing.json.
+compute("sample.h5", "Average spectrum", "results/", "processing.json")
+
+# Compare two workspaces on the reference grid (Comparator export).
+subprocess.run([BIN, "-cmp", "sample.h5", "reference.h5",
+                "Comparator spectra", "results/"], check=True)
+
+# The exported CSV uses the X unit selected by the configuration.
+table = np.genfromtxt("results/sample_average_spectrum.csv",
+                      delimiter=",", names=True)
+print(table.dtype.names, len(table))
+</code></pre>
+<p>
+Headless mode runs the same code paths as the graphical application, so a scripted run with the same workspace and settings produces the same results as the GUI. One difference: headless mode always processes every measurement in the workspace, while the graphical interface uses the saved selection.
+</p>
+</section>
+
+<section class="page" id="literature" data-chapter="Appendix">
+<div class="page-chapter">Appendix</div>
+<h2>31. Literature and acknowledgments</h2>
+
+<p>
+The methods implemented in the application are based on the publications below. The
+software list and the funding acknowledgement are included.
+</p>
+
+<h3>31.1 Literature</h3>
+<table>
+<tr><th>Topic</th><th>Reference</th></tr>
+<tr><td>Norton-Beer apodization windows</td><td>K. F. F. Ntokas, J. Ungermann, and M. Kaufmann, "Norton-Beer apodization and its Fourier transform," Journal of the Optical Society of America A, vol. 40, p. 2026, Nov. 2023.</td></tr>
+<tr><td>Apodization window formulas</td><td>"SciPy 1.0: Fundamental Algorithms for Scientific Computing in Python," Nature Methods, vol. 17, pp. 261–272, 2020.</td></tr>
+<tr><td>FFTW3 library (spectrum computation)</td><td>M. Frigo and S. G. Johnson, "The design and implementation of FFTW3," Proceedings of the IEEE, vol. 93, no. 2, pp. 216–231, 2005. Special issue on Program Generation, Optimization, and Platform Adaptation.</td></tr>
+<tr><td>Building spectrometers and X-axis correction</td><td>J. Mnich, J. Kunsch, M. Budden, T. Gebert, M. Schossig, J. Sotor, and L. A. Sterczewski, "Ultra-broadband room-temperature Fourier transform spectrometer with watt-level power consumption," Optics Express, vol. 32, p. 45801, Dec. 2024.</td></tr>
+<tr><td>General FTS handbook</td><td>P. R. Griffiths and J. A. De Haseth, <em>Fourier transform infrared spectrometry</em>. No. v. 171 in Chemical analysis, Hoboken, N.J: Wiley-Interscience, 2nd ed., 2007.</td></tr>
+<tr><td>HDF5 data format (workspace storage)</td><td>M. Folk, Q. Koziol, E. Pourmal, J. Johnson, D. Robinson, and H. Tang, "An overview of the HDF5 technology suite and its applications," in Proceedings of the EDBT/ICDT 2011 Workshop on Array Databases, ACM, 2011.</td></tr>
+<tr><td>HITRAN database (gas absorption markers)</td><td>I. E. Gordon, L. S. Rothman, R. J. Hargreaves, F. M. Gomez, T. Bertin, C. Hill, et al., "The HITRAN2024 molecular spectroscopic database," J. Quant. Spectrosc. Radiat. Transfer 353, 109807 (2026). DOI: 10.1016/j.jqsrt.2026.109807</td></tr>
+</table>
+
+<h3>31.2 Third-party libraries</h3>
+<table>
+<tr><th>Library</th><th>License</th><th>Project</th></tr>
+<tr><td>Dear ImGui</td><td>MIT</td><td><a href="https://github.com/ocornut/imgui">github.com/ocornut/imgui</a></td></tr>
+<tr><td>ImPlot</td><td>MIT</td><td><a href="https://github.com/epezent/implot">github.com/epezent/implot</a></td></tr>
+<tr><td>ImPlot3D</td><td>MIT</td><td><a href="https://github.com/brenocq/implot3d">github.com/brenocq/implot3d</a></td></tr>
+<tr><td>GLFW</td><td>zlib/libpng</td><td><a href="https://github.com/glfw/glfw">github.com/glfw/glfw</a></td></tr>
+<tr><td>FFTW3</td><td>GPL</td><td><a href="https://fftw.org">fftw.org</a></td></tr>
+<tr><td>tinyfiledialogs</td><td>zlib/libpng</td><td><a href="https://sourceforge.net/projects/tinyfiledialogs">sourceforge.net/projects/tinyfiledialogs</a></td></tr>
+<tr><td>stb_image</td><td>MIT/public domain</td><td><a href="https://github.com/nothings/stb">github.com/nothings/stb</a></td></tr>
+<tr><td>Nlohmann JSON</td><td>MIT</td><td><a href="https://github.com/nlohmann/json">github.com/nlohmann/json</a></td></tr>
+<tr><td>HDF5</td><td>BSD-3-Clause</td><td><a href="https://github.com/HDFGroup/hdf5">github.com/HDFGroup/hdf5</a></td></tr>
+</table>
+
+<h3>31.3 Funding acknowledgement</h3>
+<p>
+This application is a universal tool developed for the TeraERC project (European Research
+Council grant no. 101117433, ERC Starting Grant). Views and opinions expressed are,
+however, those of the authors only and do not necessarily reflect those of the European
+Union or the European Research Council Executive Agency. Neither the European Union nor
+the granting authority can be held responsible for them.
+</p>
+</section>
+
+<hr>
+<div class="footer">FTS Data Explorer — User manual — 2026-09-26</div>
+</main>
+</div>
+
+<script>
+function toggleTheme() {
+  const c = document.documentElement.getAttribute('data-theme');
+  const n = c === 'dark' ? 'light' : (c === 'light' ? null : 'dark');
+  if (n) document.documentElement.setAttribute('data-theme', n);
+  else document.documentElement.removeAttribute('data-theme');
+}
+
+/* --- page navigation --- */
+(function () {
+  const pages = Array.from(document.querySelectorAll('#content > .page'));
+  const pagePrev = document.getElementById('pagePrev');
+  const pageNext = document.getElementById('pageNext');
+  const pageStatus = document.getElementById('pageStatus');
+  const tocLinks = new Map();
+  document.querySelectorAll('.nav-toc a[href^="#"]').forEach(function (a) {
+    tocLinks.set(a.getAttribute('href').slice(1), a);
+  });
+  let current = -1;
+
+  function pageTitle(page) {
+    const heading = page.querySelector('h2, h1');
+    return heading ? heading.textContent.trim() : 'FTS Data Explorer';
+  }
+
+  function showPage(id, push) {
+    let index = pages.findIndex(function (page) { return page.id === id; });
+    if (index < 0) { index = 0; id = pages[0].id; }
+    pages.forEach(function (page, i) { page.classList.toggle('active', i === index); });
+    current = index;
+    tocLinks.forEach(function (a, key) { a.classList.toggle('active', key === id); });
+    const prev = pages[index - 1];
+    const next = pages[index + 1];
+    pagePrev.disabled = !prev;
+    pageNext.disabled = !next;
+    pagePrev.title = prev ? 'Previous: ' + pageTitle(prev) : 'Previous page';
+    pageNext.title = next ? 'Next: ' + pageTitle(next) : 'Next page';
+    pageStatus.textContent = (index + 1) + ' / ' + pages.length;
+    const pageName = pages[index].id === 'cover' ? 'User Manual' : pageTitle(pages[index]);
+    document.title = pageName + ' \u2014 FTS Data Explorer';
+    if (push) { try { history.pushState(null, '', '#' + id); } catch (err) {} }
+    try { window.scrollTo(0, 0); } catch (err) {}
+  }
+
+  function step(delta) {
+    const index = current + delta;
+    if (pages[index]) showPage(pages[index].id, true);
+  }
+
+  document.addEventListener('click', function (e) {
+    const link = e.target.closest ? e.target.closest('a[href^="#"]') : null;
+    if (!link) return;
+    const id = link.getAttribute('href').slice(1);
+    if (!pages.some(function (page) { return page.id === id; })) return;
+    e.preventDefault();
+    showPage(id, true);
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const target = e.target;
+    if (target && target.closest && target.closest('input, textarea, select')) return;
+    if (e.key === 'ArrowLeft') { e.preventDefault(); step(-1); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); step(1); }
+  });
+
+  pagePrev.addEventListener('click', function () { step(-1); });
+  pageNext.addEventListener('click', function () { step(1); });
+  window.addEventListener('popstate', function () {
+    showPage((location.hash || '').slice(1), false);
+  });
+
+  window.fdeShowPage = showPage;
+  showPage((location.hash || '').slice(1), false);
+})();
+
+/* --- in-page search --- */
+(function () {
+  const input = document.getElementById('manualSearch');
+  const content = document.getElementById('content');
+  const countEl = document.getElementById('searchCount');
+  const prevBtn = document.getElementById('searchPrev');
+  const nextBtn = document.getElementById('searchNext');
+  let marks = [];
+  let current = -1;
+  let applied = '';
+  let timer = null;
+  let navigated = false;
+
+  function setStatus(text) { countEl.textContent = text; }
+
+  function updateButtons() {
+    prevBtn.disabled = marks.length === 0;
+    nextBtn.disabled = marks.length === 0;
+  }
+
+  function clearMarks() {
+    marks.forEach(function (mark) {
+      const parent = mark.parentNode;
+      if (!parent) return;
+      while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
+      parent.removeChild(mark);
+      parent.normalize();
+    });
+    marks = [];
+    current = -1;
+  }
+
+  function showCurrent() {
+    marks.forEach(function (mark) { mark.classList.remove('current'); });
+    if (current < 0 || !marks.length) return;
+    const mark = marks[current];
+    mark.classList.add('current');
+    const page = mark.closest('.page');
+    if (page && !page.classList.contains('active') && window.fdeShowPage) {
+      window.fdeShowPage(page.id, false);
+    }
+    mark.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    setStatus((current + 1) + ' / ' + marks.length);
+  }
+
+  function step(delta) {
+    if (!marks.length) return;
+    current = (current + delta + marks.length) % marks.length;
+    navigated = true;
+    showCurrent();
+  }
+
+  function highlight(query, jump) {
+    clearMarks();
+    applied = query.trim();
+    navigated = false;
+    if (applied.length < 2) {
+      setStatus(applied.length ? 'Type at least 2 characters' : 'Type to search');
+      updateButtons();
+      return;
+    }
+    const pattern = new RegExp(applied.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT, null);
+    const nodes = [];
+    let node;
+    while ((node = walker.nextNode())) {
+      const parent = node.parentElement;
+      if (!parent || !node.nodeValue || !node.nodeValue.trim()) continue;
+      if (parent.closest('.page-nav, .footer, script, style')) continue;
+      nodes.push(node);
+    }
+    nodes.forEach(function (textNode) {
+      const text = textNode.nodeValue;
+      pattern.lastIndex = 0;
+      let match, last = 0;
+      const fragment = document.createDocumentFragment();
+      while ((match = pattern.exec(text)) !== null) {
+        if (match.index > last) fragment.appendChild(document.createTextNode(text.slice(last, match.index)));
+        const mark = document.createElement('mark');
+        mark.className = 'search-hit';
+        mark.textContent = match[0];
+        fragment.appendChild(mark);
+        marks.push(mark);
+        last = match.index + match[0].length;
+        if (match[0].length === 0) pattern.lastIndex += 1;
+      }
+      if (last > 0) {
+        if (last < text.length) fragment.appendChild(document.createTextNode(text.slice(last)));
+        textNode.parentNode.replaceChild(fragment, textNode);
+      }
+    });
+    updateButtons();
+    if (marks.length) {
+      current = 0;
+      if (jump) {
+        showCurrent();
+      } else {
+        marks[0].classList.add('current');
+        setStatus('1 / ' + marks.length);
+      }
+    } else {
+      setStatus('No matches');
+    }
+  }
+
+  input.addEventListener('input', function () {
+    clearTimeout(timer);
+    timer = setTimeout(function () { highlight(input.value, false); }, 160);
+  });
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (input.value.trim() !== applied || !marks.length) {
+        highlight(input.value, true);
+      } else if (!navigated) {
+        navigated = true;
+        showCurrent();
+      } else {
+        step(e.shiftKey ? -1 : 1);
+      }
+    } else if (e.key === 'Escape') {
+      input.value = '';
+      highlight('', false);
+      input.blur();
+    }
+  });
+  prevBtn.addEventListener('click', function () { step(-1); });
+  nextBtn.addEventListener('click', function () { step(1); });
+})();
+</script>
+</body>
+</html>
