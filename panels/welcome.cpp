@@ -6,6 +6,8 @@
 #include "config.h"
 #include "file_browser.h"
 #include "theme.h"
+#include "about.h"
+#include "user_manual.h"
 #include "session/multi_workspace_store.h"
 #include "session/workspace_session.h"
 
@@ -163,6 +165,42 @@ static std::string truncateToWidth(const std::string& text, float maxTextWidth) 
     }
     if (lo == 0) return ellipsis;
     return text.substr(0, lo) + ellipsis + text.substr(text.length() - lo);
+}
+
+void renderWelcomeCornerButtons(AppState& appState) {
+    (void)appState;
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    // Margin scales with the UI size setting (ItemSpacing is style-scaled).
+    const float margin = ImGui::GetStyle().ItemSpacing.x * 2.0f;
+
+    // Pivot (1, 0) pins the window's top-right corner to the viewport corner.
+    ImGui::SetNextWindowPos(
+        ImVec2(vp->Pos.x + vp->Size.x - margin, vp->Pos.y + margin),
+        ImGuiCond_Always, ImVec2(1.0f, 0.0f));
+    ImGui::SetNextWindowBgAlpha(0.6f);
+
+    // NoNavFocus / NoFocusOnAppearing: never steal focus from the welcome
+    // list's Up/Down/Enter keyboard navigation. NoSavedSettings keeps it out
+    // of imgui.ini; NoDocking keeps it out of the dockspace.
+    const ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
+        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking |
+        ImGuiWindowFlags_AlwaysAutoResize |
+        ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNavFocus;
+
+    if (ImGui::Begin("##welcomeCornerButtons", nullptr, flags)) {
+        // Equal-width stack: "User manual" is the longer label.
+        const float btnW = ImGui::CalcTextSize("User manual").x +
+                           ImGui::GetStyle().FramePadding.x * 2.0f;
+        if (ImGui::Button("User manual", ImVec2(btnW, 0))) {
+            openUserManual();
+        }
+        if (ImGui::Button("About", ImVec2(btnW, 0))) {
+            openAboutPopup();
+        }
+    }
+    ImGui::End();
 }
 
 void renderWelcomeScreen(AppState& appState, AppConfig& config,

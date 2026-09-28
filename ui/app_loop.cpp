@@ -2101,6 +2101,11 @@ void AppLoop::renderUI() {
                           && !appState.showUnsavedPrompt
                           && !appState.showStaleDropPrompt;
             renderWelcomeScreen(appState, config_, configFilePath_, showPopup);
+            // The ribbon menu is absent on the welcome screen, so About/User
+            // manual live in a viewport corner overlay. renderAboutPopup must
+            // run in-frame or the corner About button would open nothing.
+            renderWelcomeCornerButtons(appState);
+            renderAboutPopup();
         }
 
         // Phase 5: dataset conversion screen (foreign formats -> .h5)
