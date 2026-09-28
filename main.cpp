@@ -26,6 +26,7 @@
 #include "conversion_screen.h"
 #include "app_dirs.h"
 #include "tinyfiledialogs.h"
+#include "user_manual.h"
 #include "file_browser.h"
 #include "welcome.h"
 #include "about.h"
@@ -627,6 +628,10 @@ int main(int argc, char* argv[]) {
     // the converter-repo clone destination.
     ensureAppDirs();
 
+    // Reclaim user-manual temp dirs left behind by crashed/previous runs (only
+    // those whose owning process is gone, so concurrent instances are safe).
+    pruneStaleUserManualTemp();
+
     // Phase 5: best-effort background pull of the converter repo (never a
     // first clone at boot; silent when git is absent or no clone exists).
     startupConverterRefresh(config);
@@ -688,6 +693,10 @@ int main(int argc, char* argv[]) {
     // Cleanup
     destroyWelcomeBackground();
     cleanupApplication(window);
+
+    // Remove this run's extracted user-manual temp directory (best-effort; a
+    // browser still holding files on Windows is collected next start).
+    cleanupUserManualTemp();
 
     // Save configuration before exiting. View-state (panels, plotDefaults,
     // selection) is persisted in workspace.json (Phase 3), not here. The

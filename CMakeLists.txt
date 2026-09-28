@@ -222,6 +222,44 @@ if(NOT XXD_ERR STREQUAL "")
     message(FATAL_ERROR "Failed to generate asset header: ${XXD_ERR}")
 endif()
 
+# Embed the user manual (docs/user_manual.html + docs/screenshots/**). The
+# generator is dependency-driven, so editing the manual is picked up on the next
+# build with no CMake changes — docs/user_manual.html stays the single source.
+# CONFIGURE_DEPENDS re-runs configure when screenshots are added/removed.
+file(GLOB_RECURSE USER_MANUAL_ASSETS CONFIGURE_DEPENDS LIST_DIRECTORIES false
+     "${CMAKE_SOURCE_DIR}/docs/screenshots/*")
+list(APPEND USER_MANUAL_ASSETS "${CMAKE_SOURCE_DIR}/docs/user_manual.html")
+list(SORT USER_MANUAL_ASSETS)
+set(USER_MANUAL_EMBED_CPP "${ASSET_GENERATED_DIR}/user_manual_embedded.cpp")
+
+# A removed asset shrinks the glob, so the dependency-based rebuild sees nothing
+# to trigger it and keeps the stale file embedded. Detect set changes against a
+# stored hash and drop the output to force regeneration. Edits to existing files
+# are still handled by DEPENDS (no recompile unless content changed).
+string(SHA256 USER_MANUAL_ASSETS_HASH "${USER_MANUAL_ASSETS}")
+set(USER_MANUAL_HASH_FILE "${ASSET_GENERATED_DIR}/user_manual_assets.hash")
+set(USER_MANUAL_PREV_HASH "")
+if(EXISTS "${USER_MANUAL_HASH_FILE}")
+    file(READ "${USER_MANUAL_HASH_FILE}" USER_MANUAL_PREV_HASH)
+    string(STRIP "${USER_MANUAL_PREV_HASH}" USER_MANUAL_PREV_HASH)
+endif()
+if(NOT USER_MANUAL_PREV_HASH STREQUAL USER_MANUAL_ASSETS_HASH)
+    file(REMOVE "${USER_MANUAL_EMBED_CPP}")
+    file(WRITE "${USER_MANUAL_HASH_FILE}" "${USER_MANUAL_ASSETS_HASH}\n")
+endif()
+
+add_custom_command(
+    OUTPUT "${USER_MANUAL_EMBED_CPP}"
+    COMMAND ${CMAKE_COMMAND}
+            -DDOCS_DIR=${CMAKE_SOURCE_DIR}/docs
+            -DOUT_CPP=${USER_MANUAL_EMBED_CPP}
+            -P "${CMAKE_SOURCE_DIR}/cmake/gen_manual_assets.cmake"
+    DEPENDS ${USER_MANUAL_ASSETS}
+            "${CMAKE_SOURCE_DIR}/cmake/gen_manual_assets.cmake"
+    COMMENT "Embedding user manual"
+    VERBATIM
+)
+
 # Find required packages
 find_package(OpenGL REQUIRED)
 if(NOT WIN32)
@@ -282,8 +320,11 @@ add_executable(fts_data_explorer
     panels/export.cpp
     ui/theme.cpp
     io/converter.cpp
-    panels/conversion_screen.cpp
     io/app_dirs.cpp
+    io/user_manual.cpp
+    io/open_default.cpp
+    "${USER_MANUAL_EMBED_CPP}"
+    panels/conversion_screen.cpp
     ui/file_browser.cpp
     panels/welcome.cpp
     panels/about.cpp
@@ -359,6 +400,7 @@ if(NOT WIN32)
 else()
     target_link_libraries(fts_data_explorer
         pthread
+        shell32
     )
 endif()
 

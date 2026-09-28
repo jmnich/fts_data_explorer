@@ -7,6 +7,7 @@
 #include "theme.h"
 #include "file_browser.h"
 #include "app_dirs.h"
+#include "user_manual.h"
 #include <imgui.h>
 #include <GLFW/glfw3.h>
 #include <filesystem>
@@ -209,20 +210,9 @@ void renderMainMenuBar(AppConfig& config, const std::string& configFilePath,
                 // Help menu
                 if (ImGui::BeginMenu("Help"))
                 {
-                    ImGui::Text("Keyboard Shortcuts:");
-                    ImGui::Separator();
-                    ImGui::Text("Up/Down Arrows: Navigate files");
-                    ImGui::Text("Space: Toggle selection checkboxes for highlighted files");
-                    ImGui::Text("Delete: Delete current file");
-                    ImGui::Text("Shift + mouse / Right click: X-axis range selection");
-                    ImGui::Text("ESC: Reset zoom");
-                    ImGui::Text("Mouse Scroll: Zoom in/out");
-                    ImGui::Text("Ctrl+Y: Toggle auto-fit Y-axis");
-                    ImGui::Text("Ctrl+A: Toggle max at zero");
-                    ImGui::Text("Ctrl+D: Toggle downsampling");
-                    ImGui::Text("Ctrl+H: Go back to home");
-                    ImGui::Text("Ctrl+Q: Toggle tracking cursor");
-                    ImGui::Separator();
+                    if (ImGui::MenuItem("User manual")) {
+                        openUserManual();
+                    }
                     if (ImGui::MenuItem("About")) {
                         openAboutPopup();
                     }

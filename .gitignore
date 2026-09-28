@@ -54,6 +54,8 @@ compile_commands.json
 CTestTestfile.cmake
 Makefile
 *.cmake
+# ...but keep hand-written CMake scripts (generators, toolchains) tracked.
+!cmake/*.cmake
 
 # Downloaded/extracted tools (cmake distributions, etc.)
 cmake-*/
