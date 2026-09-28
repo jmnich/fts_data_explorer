@@ -193,12 +193,12 @@ h5 { font-size: 0.95rem; margin: 1rem 0 0.35rem; }
   <li><a href="#spectrum-calc">7. Spectrum calculation</a></li>
   <li><a href="#files">8. Files panel</a></li>
   <li><a href="#metadata">9. Metadata panel</a></li>
-  <li><a href="#interferogram">10. Interferogram View</a></li>
+  <li><a href="#interferogram">10. Interferogram panel</a></li>
   <li><a href="#spectrum">11. Spectrum panel</a></li>
-  <li><a href="#average">12. Average</a></li>
+  <li><a href="#average">12. Average spectrum</a></li>
   <li><a href="#snr">13. SNR</a></li>
   <li><a href="#allan">14. Allan variance</a></li>
-  <li><a href="#t100">15. 100&nbsp;% T</a></li>
+  <li><a href="#t100">15. 100&nbsp;% Transmission line</a></li>
   <li><a href="#hitran">16. HITRAN Gas Markers</a></li>
   <li><a href="#export">17. Export panel</a></li>
   <li class="toc-chapter">Multi-dataset experiments</li>
@@ -347,12 +347,32 @@ Settings can be changed and results recomputed at any time. Because the workspac
 <h2>3. Welcome screen</h2>
 
 <p>
-When the application starts it opens the Welcome screen, where you choose a workspace to open or invoke the dataset conversion window (<a href="#data">Section 6.1</a>). Interface size can be adjusted using the dropbox in the bottom right corner to fit displays with different DPI.
+When the application starts it opens the Welcome screen, where you choose a workspace to open or invoke the dataset conversion window.
 </p>
 
 <p>
-The list of recent workspaces is split into two columns. "Recent Datasets", on the left, contains workspaces holding just a single dataset, i.e. a set of consequtive measurements captured during the same experiment. "Recent Multi-Workspaces", on the right, contains workspaces with multiple datasets and experiments. In general single-dataset files are archived measurements and multi-dataset workspaces are created to facilitate actual experiments like absorbance calculation or comparing different radiation sources.
+The list of recent workspaces is split into two columns. "Recent Datasets", on the left, contains workspaces holding just a single dataset, i.e. a set of consequtive measurements captured during the same experiment. "Recent Multi-Workspaces", on the right, contains workspaces with multiple datasets and experiments. In general single-dataset files are archived measurements and multi-dataset workspaces are created to facilitate actual experiments like absorbance calculation or comparing different radiation sources. 
 </p>
+
+<p>
+Click a row to open it, or press <kbd>↑</kbd> /
+<kbd>↓</kbd> and <kbd>Enter</kbd>; <kbd>←</kbd> and <kbd>→</kbd> switch between the two
+lists. The <code>×</code> button next to a row removes it from the list without touching the
+file. Rows for files that have moved or been deleted are greyed out and marked
+<code>(unreachable)</code>.
+</p>
+
+<p>
+In the lower part of the screen (button strip and bottom bar):
+</p>
+<ul>
+  <li><code>Open .h5</code> — open an existing workspace using the system file picker.</li>
+  <li><code>Convert Dataset</code> — open the dataset Conversion window.</li>
+  <li><code>New Multi-Workspace...</code> — create an empty multi-workspace container
+      (<a href="#multi">Section 18</a>).</li>
+  <li><code>UI Size</code> — quick access to the font scale setting.</li>
+</ul>
+
 
 <figure class="shot">
   <img src="screenshots/welcome_screen.png" alt="Welcome screen with recent datasets on the left and recent multi-workspaces on the right">
@@ -517,29 +537,7 @@ Every workspace consists of docked panels, for example: Interferogram View, Inte
 <div class="page-chapter">Chapter 1 — Introduction</div>
 <h2>6. Getting data in</h2>
 
-<h3>6.1 The Welcome screen</h3>
-
-<p>
-The Welcome screen has two lists: <strong>Recent Datasets</strong> (single workspaces) and
-<strong>Recent Multi-Workspaces</strong>. Click a row to open it, or press <kbd>↑</kbd> /
-<kbd>↓</kbd> and <kbd>Enter</kbd>; <kbd>←</kbd> and <kbd>→</kbd> switch between the two
-lists. The <code>×</code> button next to a row removes it from the list without touching the
-file. Rows for files that have moved or been deleted are greyed out and marked
-<code>(unreachable)</code>.
-</p>
-
-<p>
-In the lower part of the screen (button strip and bottom bar):
-</p>
-<ul>
-  <li><code>Open .h5</code> — open an existing workspace using the system file picker.</li>
-  <li><code>Convert Dataset</code> — open the dataset Conversion window.</li>
-  <li><code>New Multi-Workspace...</code> — create an empty multi-workspace container
-      (<a href="#multi">Section 18</a>).</li>
-  <li><code>UI Size</code> — quick access to the font scale setting.</li>
-</ul>
-
-<h3>6.2 Opening an existing workspace</h3>
+<h3>Opening an existing HDF5 workspace</h3>
 
 <p>
 Use <code>File → Open Workspace (.h5)</code>, a recent entry, or the <code>Open .h5</code>
@@ -548,7 +546,7 @@ workspaces; if the file contains a multi-workspace archive, it opens in the Sess
 instead. Opening a file that is already open just activates its tab.
 </p>
 
-<h3>6.3 Converting non-HDF5 data</h3>
+<h3>Converting non-HDF5 data</h3>
 
 <p>
 Data that is not already in the h5 workspace format is converted with a converter script written in Python. If the converter follows the standard described in <a href="#converters">Section 28</a>, then it can be invoked from this window. The Conversion screen is opened from the Welcome screen (<code>Convert Dataset</code>) or from the menu (<code>File → Convert Dataset...</code>).
@@ -605,43 +603,44 @@ The <code>Log</code> pane shows the last lines of converter output. If the conve
 </section>
 <section class="page" id="spectrum-calc" data-chapter="Chapter 2 — Single-dataset processing">
 <div class="page-chapter">Chapter 2 — Single-dataset processing</div>
+
 <h2>7. Spectrum calculation</h2>
 
 <p>
-A spectrum is computed from the primary detector trace in a fixed sequence of stages. The chain below shows the complete data flow; every stage runs in order, and the user-facing stages are configured from the Interferogram and Spectrum panels (Sections <a href="#interferogram">10</a> and <a href="#spectrum">11</a>). Resampling and mean removal always run with fixed rules.
+A spectrum is computed from the primary detector trace in a fixed sequence of stages. The chain below shows the complete data flow; every stage runs in order, and the user-facing stages are configured from the Interferogram and Spectrum panels (Sections <a href="#interferogram">10</a> and <a href="#spectrum">11</a>).
 </p>
 
 <figure class="chain-figure">
   <div class="chain" role="img" aria-label="Spectrum calculation chain: raw interferograms, X-axis correction, resampling, mean removal, apodization, zero-padding, FFT, magnitude, unit conversion">
     <div class="chain-node"><span class="chain-num">1</span><span class="chain-text"><span class="chain-title">Raw interferograms</span><span class="chain-desc">Reference and primary detector traces, indexed by sample number.</span></span></div>
     <div class="chain-arrow" aria-hidden="true">&#8595;</div>
-    <div class="chain-node"><span class="chain-num">2</span><span class="chain-text"><span class="chain-title">X-axis correction</span><span class="chain-desc">The reference channel turns the sample index into optical path difference — Hilbert transform or peak finding, scaled by the reference laser wavelength.</span></span></div>
+    <div class="chain-node"><span class="chain-num">2</span><span class="chain-text"><span class="chain-title">X-axis correction</span><span class="chain-desc">The reference channel turns the sample index into optical path difference - Hilbert transform or peak finding, scaled by the reference laser wavelength.</span></span></div>
     <div class="chain-arrow" aria-hidden="true">&#8595;</div>
     <div class="chain-node"><span class="chain-num">3</span><span class="chain-text"><span class="chain-title">Resampling</span><span class="chain-desc">The primary trace is interpolated onto a uniform OPD grid, as the FFT requires.</span></span></div>
     <div class="chain-arrow" aria-hidden="true">&#8595;</div>
-    <div class="chain-node"><span class="chain-num">4</span><span class="chain-text"><span class="chain-title">Mean removal</span><span class="chain-desc">The average of the trace is subtracted, centring the signal on zero.</span></span></div>
+    <div class="chain-node"><span class="chain-num">4</span><span class="chain-text"><span class="chain-title">Mean removal</span><span class="chain-desc">The average of the trace is subtracted.</span></span></div>
     <div class="chain-arrow" aria-hidden="true">&#8595;</div>
-    <div class="chain-node"><span class="chain-num">5</span><span class="chain-text"><span class="chain-title">Apodization</span><span class="chain-desc">A window function (Rectangular, Gauss, Norton-Beer, Dolph-Chebyshev, Hamming, ...) tapers the trace and trades main-lobe width against sidelobe level.</span></span></div>
+    <div class="chain-node"><span class="chain-num">5</span><span class="chain-text"><span class="chain-title">Apodization</span><span class="chain-desc">Apply a window function (Rectangular, Gauss, Norton-Beer, Dolph-Chebyshev, Hamming, ...). Generated windows are asymmetric and centered at the ZOPD of an interferogram.</span></span></div>
     <div class="chain-arrow" aria-hidden="true">&#8595;</div>
     <div class="chain-node"><span class="chain-num">6</span><span class="chain-text"><span class="chain-title">Zero-padding</span><span class="chain-desc">The trace is extended with zeros by the factor K. The transform has N &times; (K + 1) bins; the plotted spectrum keeps the positive-frequency half, N &times; (K + 1) / 2 points.</span></span></div>
     <div class="chain-arrow" aria-hidden="true">&#8595;</div>
     <div class="chain-node"><span class="chain-num">7</span><span class="chain-text"><span class="chain-title">FFT</span><span class="chain-desc">The padded trace is transformed into the frequency domain.</span></span></div>
     <div class="chain-arrow" aria-hidden="true">&#8595;</div>
-    <div class="chain-node"><span class="chain-num">8</span><span class="chain-text"><span class="chain-title">Magnitude</span><span class="chain-desc">The magnitude of each complex result is taken; the phase is discarded.</span></span></div>
+    <div class="chain-node"><span class="chain-num">8</span><span class="chain-text"><span class="chain-title">Magnitude</span><span class="chain-desc">Complex magitude is calculated to create a real spectrum.</span></span></div>
     <div class="chain-arrow" aria-hidden="true">&#8595;</div>
     <div class="chain-node"><span class="chain-num">9</span><span class="chain-text"><span class="chain-title">Unit conversion</span><span class="chain-desc">The X axis is converted to the selected unit: cm⁻¹, µm, or THz. Detector sensitivity and normalisation are applied when the spectrum is drawn, not to the stored result.</span></span></div>
   </div>
-  <figcaption>The spectrum calculation chain. X correction, apodization, zero-padding, and the axis units are user-controlled; resampling and mean removal always run with fixed rules.</figcaption>
+  <figcaption>The spectrum calculation chain.</figcaption>
 </figure>
 
 <p>
 Not every dataset runs the whole chain. A dataset with an already corrected axis skips the
-X-axis correction stage and uses its stored OPD axis; a dataset that contains precomputed
-spectra skips stages 2–8 and uses the stored spectrum directly.
+X-axis correction stage and uses its stored OPD axis. A dataset that contains precomputed
+spectra skips the whole process.
 </p>
 
 <p>
-Spectra are recalculated automatically when a stage's settings change, so the chain can be
+Spectra are recalculated in real time as settings change, so the chain can be
 tuned interactively while watching the result (<a href="#spectrum">Section 11</a>).
 </p>
 </section>
@@ -662,44 +661,36 @@ name, followed by selection helpers:
   <li><code>Select: All | None | 10 | 50%</code> — set the checkbox (batch selection) for
       all files, none, the first ten, or the first half of the list.</li>
   <li><code>Strip derivatives</code> — removes every computed result from the workspace
-      (spectra, average, SNR, Allan, 100&nbsp;% T). There is no confirmation; results can be
-      recomputed at any time.</li>
+      (spectra, average, SNR, Allan, 100&nbsp;% T).</li>
 </ul>
 
 <p>
 Each row contains a delete button (<code>×</code>), the file name, and a checkbox. Row
-backgrounds match the plot colours of the currently displayed files; the colours are
+backgrounds match the plot colours of the currently displayed files. The colours are
 assigned in the order the files are selected.
 </p>
 
-<h3>8.1 Selecting files</h3>
+<h3>8.1 Selecting records</h3>
 <ul>
   <li><strong>Click</strong> a file to load it on its own, replacing the current selection.</li>
   <li><strong>Ctrl+click</strong> toggles the file in or out of a multi-file selection
       (up to 5 files).</li>
   <li><strong>Shift+click</strong> selects a range of files.</li>
-  <li>Ctrl+clicking a sixth file is refused with a <code>Selection Limit</code> message; a Shift+click range stops at five, and Shift+Arrow drops the oldest selected file to make room.</li>
 </ul>
 
 <p>
 The checkboxes on the right are separate from the highlighted selection. They choose the
 files used by the batch analyses (Average, SNR, Allan, 100&nbsp;% T standard deviation) and
-by the <code>Spectra from selected files</code> export. All files are checked when a workspace is opened for the first time; after that the saved checkbox states are restored.
+by the <code>Spectra from selected files</code> export. All files are checked when a workspace is opened for the first time.
 </p>
 
-<h3>8.2 Deleting files and results</h3>
+<h3>8.2 Deleting records</h3>
 <p>
 Clicking <code>×</code> (or pressing <kbd>Delete</kbd>) asks for confirmation in a <code>Delete member?</code> dialog that shows the workspace path of the entry (for example <code>/igm_uncorrected_x/record_0</code>). If other results
 depend on the file, the dialog notes that they may become stale. Deletion is written to the
-file only when you save.
+file only when you save the workspace.
 </p>
 
-<p>
-Computed results are not listed as separate rows in the Files panel. They are cleared with
-<code>Strip derivatives</code> (<a href="#format">Section 4.3</a>), and the panel that displays a result shows
-whether it is still current: when its inputs change, that panel shows the
-<code>Stale data: source changed.</code> overlay, where the result can be recomputed.
-</p>
 </section>
 <section class="page" id="metadata" data-chapter="Chapter 2 — Single-dataset processing">
 <div class="page-chapter">Chapter 2 — Single-dataset processing</div>
@@ -711,29 +702,28 @@ whether it is still current: when its inputs change, that panel shows the
 </figure>
 
 <p>
-The Metadata panel shows the first member id of the active file group in lexicographic order (not necessarily the highlighted file, and not necessarily the first row shown in the Files panel), the number of samples in the loaded data (the downsampled count when downsampling is on), and the data type of the current dataset — <code>Precomputed spectra</code>, <code>Corrected single IFG</code>, or
-<code>Uncorrected dual IFG</code>. Which type a dataset has determines which processing steps are available (see Sections <a href="#interferogram">10</a> and <a href="#spectrum">11</a>).
+The Metadata panel shows the name of the first record from the dataset, the number of samples in the loaded data (the downsampled count when downsampling is on), and the data type of the current dataset — <code>Precomputed spectra</code>, <code>Corrected single IFG</code>, or <code>Uncorrected dual IFG</code>.
 </p>
 
 <ul>
-  <li><code>Comment:</code> — a free-text note stored in the workspace. Comments are
+  <li><code>Comment:</code> — a text note stored in the workspace. Comments are
       included in the archive and travel with the file.</li>
   <li><code>Tags:</code> — a short single-line label field.</li>
   <li><code>@created</code> and <code>@format</code> — read-only attributes of the
       workspace.</li>
   <li><code>Measurement Config</code> — a collapsible tree with the instrument and
       acquisition metadata (instrument, detector, acquisition card, laser, environment).
-      Values are grouped by section.</li>
+      Values are grouped by section. Precise content depends on the original dataset creator.</li>
 </ul>
 
 <p>
-Comment and tag edits are saved together with the workspace; there is no separate apply
-button. To keep a note after editing, use <code>File → Save</code>.
+Comment and tag edits are only saved together with the workspace!
 </p>
+
 </section>
 <section class="page" id="interferogram" data-chapter="Chapter 2 — Single-dataset processing">
 <div class="page-chapter">Chapter 2 — Single-dataset processing</div>
-<h2>10. Interferogram View</h2>
+<h2>10. Interferogram panel</h2>
 
 <div class="shots">
   <figure class="shot">
@@ -749,25 +739,23 @@ button. To keep a note after editing, use <code>File → Save</code>.
 <p>
 The view stacks two plots with a shared X axis: the reference detector on top (when the
 dataset has one) and the primary detector below. The X axis shows the sample number or the
-optical path difference (<code>OPD [µm]</code>), and Y shows detector voltage. All selected files are overlaid; when more than one file is loaded, a legend row above the plots shows each file with its plot colour and its timestamp if <code>Show timestamps</code> is enabled. The apodization window selected in the Spectrum panel is drawn as a cyan overlay on the primary plot, for the first selected file.
+optical path difference (<code>OPD [µm]</code>), and Y shows detector voltage. All records selected in the Files panel are overlaid for easy comparison. The apodization window selected in the Spectrum panel is drawn as a cyan overlay on the primary plot.
 </p>
 
 <h3>10.1 Interacting with the plots</h3>
 <ul>
-  <li><strong>Mouse wheel</strong> — zoom; in the interferogram and spectral plots only X is affected (Y is auto-fitted), while the Allan 2D slice zooms both axes.</li>
-  <li><strong>Shift+drag</strong> — hold Shift and drag to mark an X range; when you release Shift, both plots zoom to it.</li>
-  <li><kbd>ESC</kbd> — reset the zoom.</li>
-  <li><kbd>←</kbd> / <kbd>→</kbd> — pan by 10&nbsp;% of the visible range.</li>
+  <li><strong>Mouse wheel</strong> - zoom. In the interferogram and spectral plots only X is affected (Y is auto-fitted).</li>
+  <li><strong>Shift+drag</strong> - hold Shift and drag to mark an X range. When you release Shift, both plots zoom to it.</li>
+  <li><kbd>ESC</kbd> - reset the zoom.</li>
+  <li><kbd>←</kbd> / <kbd>→</kbd> - pan by 10&nbsp;% of the visible range.</li>
 </ul>
 <p>
-The same controls work in every plot panel (Spectrum, Average, SNR, Allan slice, 100&nbsp;% T, experiment viewers), except that the wheel zoom in the Allan 2D slice affects both axes. The Y axis of the interferogram is always fitted to the
-data; the <code>Auto-fit Y</code> control chooses between fitting to the full data
-(<code>off</code>) and fitting to the visible X range (<code>on</code>).
+The same controls work in every plot panel (Spectrum, Average, SNR, Allan slice, 100&nbsp;% T, experiment viewers). 
 </p>
 
 <h3>10.2 Large datasets</h3>
 <p>
-When the first loaded file has more than 50&nbsp;000 samples in a detector, the corresponding interferogram plot switches to large-data mode: the primary plot is annotated <code>LARGE DATA</code>, ImPlot's built-in mouse interactions (wheel, pan, box-select) are disabled — the tracking cursor and Shift+drag range selection still respond, and keyboard panning and <kbd>ESC</kbd> still work — and anti-aliasing is switched off. With downsampling enabled (the default), long reference-detector records are decimated for display and stay fully interactive; datasets without a reference channel (corrected-axis data) are not decimated. Spectra and OPD calculations always use the full-resolution data.
+When the first loaded file has more than 50&nbsp;000 samples in a detector, the corresponding interferogram plot switches to large-data mode: the primary plot is annotated <code>LARGE DATA</code>, ImPlot's built-in mouse interactions (wheel, pan, box-select) are disabled - the tracking cursor and Shift+drag range selection still respond, and keyboard panning and <kbd>ESC</kbd> still work - and anti-aliasing is switched off. With downsampling enabled (the default), long records are decimated for display and stay fully interactive. Spectra and OPD calculations always use the underlying full-resolution data for calculations. Downsampling is display-only.
 </p>
 
 <h3>10.3 Controls</h3>
@@ -780,11 +768,11 @@ When the first loaded file has more than 50&nbsp;000 samples in a detector, the 
 <tr><td><code>Downsample</code></td><td><code>off</code> / <code>on</code></td><td>Decimate long interferograms for display. Default: on. Turning it on or off reloads the selected files.</td></tr>
 <tr><td><code>X correction</code></td><td><code>Hilbert</code> / <code>Peaks</code></td><td>How the OPD axis is computed from the reference detector. Shown only for uncorrected datasets that have a reference channel.</td></tr>
 <tr><td><code>Peak promin.</code></td><td>0.0–0.5, default 0.02</td><td>Peak-finding threshold. Shown when <code>X correction = Peaks</code>.</td></tr>
-<tr><td><code>Peak markers</code></td><td><code>off</code> / <code>on</code></td><td>Marks detected reference peaks in the plot. Shown when <code>X correction = Peaks</code>; the control is only active when the X axis is in sample mode.</td></tr>
+<tr><td><code>Peak markers</code></td><td><code>off</code> / <code>on</code></td><td> Used for tuning the peak prominence setting. Marks detected reference peaks in the plot. Shown when <code>X correction = Peaks</code>; the control is only active when the X axis is in sample mode.</td></tr>
 </table>
 
 <p>
-The corresponding keys are <kbd>Ctrl</kbd>+<kbd>Y</kbd> (auto-fit Y),
+Some of these controls have corresponding keyboard shortcuts: <kbd>Ctrl</kbd>+<kbd>Y</kbd> (auto-fit Y),
 <kbd>Ctrl</kbd>+<kbd>A</kbd> (max at zero), and <kbd>Ctrl</kbd>+<kbd>D</kbd>
 (downsample).
 </p>
@@ -796,7 +784,7 @@ The corresponding keys are <kbd>Ctrl</kbd>+<kbd>Y</kbd> (auto-fit Y),
 <div class="shots">
   <figure class="shot">
     <img src="screenshots/tab_single_dataset/spectrum/view.png" alt="Spectrum View with a computed magnitude spectrum">
-    <figcaption>Spectrum View: one curve per selected file.</figcaption>
+    <figcaption>Spectrum View.</figcaption>
   </figure>
   <figure class="shot">
     <img src="screenshots/tab_single_dataset/spectrum/settings.png" alt="Spectrum settings with sensitivity, laser wavelength, zero-padding and apodization controls">
@@ -805,28 +793,24 @@ The corresponding keys are <kbd>Ctrl</kbd>+<kbd>Y</kbd> (auto-fit Y),
 </div>
 
 <p>
-The Spectrum panel computes a magnitude spectrum from the primary interferogram: the X axis
-is corrected (Hilbert transform or peak finding, depending on the Interferogram settings),
-the signal is resampled onto a uniform OPD grid, the mean is removed, the apodization window
-is applied, the data is zero-padded, the FFT is taken, and the result is converted to the
-chosen units. The Spectrum View shows one curve per selected file.
+The Spectrum panel computes spectra from individual interferograms. The Spectrum View shows one curve per selected file allowing to compare up to 5 at once.
 </p>
 
 <h3>11.1 Settings</h3>
 <table>
 <tr><th>Control</th><th>Meaning</th></tr>
-<tr><td><code>Detector sensitivity [kV/W]</code></td><td>Converts the spectrum from volts to power units. Enter <code>NA</code> (or 0) to keep the spectrum normalised so that its maximum is 1 (0&nbsp;dB).</td></tr>
+<tr><td><code>Detector sensitivity [kV/W]</code></td><td>Converts the spectrum from volts to watts. Enter <code>NA</code> (or 0) to keep the spectrum normalised so that its maximum is 1 (0&nbsp;dB).</td></tr>
 <tr><td><code>Ref laser [µm]</code></td><td>Wavelength of the reference laser used for the OPD axis. Default 1.550&nbsp;µm. Disabled for datasets that already have a corrected axis.</td></tr>
 <tr><td><code>Zero-pad K</code></td><td>Zero-padding factor; the transform has N×(K+1) bins and the plotted spectrum keeps the positive-frequency half, N×(K+1)/2 points. <code>0</code> disables padding. Default: 2. Disabled for precomputed spectra.</td></tr>
 <tr><td><code>Apodization</code></td><td>Window applied before the FFT. Ten windows are available; the window-specific parameter appears below the selector.</td></tr>
 <tr><td><code>Cursor</code></td><td>Tracking cursor with a combined cm⁻¹ / µm / THz readout.</td></tr>
 <tr><td><code>Y scale</code></td><td><code>lin</code>, <code>log</code>, or <code>dB</code>.</td></tr>
 <tr><td><code>X unit</code></td><td><code>cm-1</code>, <code>µm</code>, or <code>THz</code>. Changing the unit does not recompute the spectrum.</td></tr>
-<tr><td><code>Y Axis</code></td><td><code>all</code> fits Y to all data, <code>tight</code> to the visible range, <code>force</code> locks Y to the min/max fields. A red <code>(min&lt;max!)</code> note appears beside the fields when min ≥ max.</td></tr>
+<tr><td><code>Y Axis</code></td><td><code>all</code> fits Y to all data, <code>tight</code> to the visible range, <code>force</code> locks Y to the min/max fields.</td></tr>
 </table>
 
 <p>
-Apodization windows and their parameters:
+Available apodization windows and their parameters:
 </p>
 <table>
 <tr><th>Window</th><th>Parameter</th></tr>
@@ -846,8 +830,9 @@ Apodization windows and their parameters:
 <p>
 Spectra are recomputed automatically when a relevant setting changes (reference laser,
 zero-padding, apodization, X-correction method, or the data itself). The first computation
-for a file waits for the result; later ones run in the background while the previous curve
-stays visible. Changing the X unit or the Y scale only redraws the existing curve.
+for a file waits for the result. Later ones run in the background while the previous curve
+stays visible. Changing the X unit or the Y scale only redraws the existing curve. Recomputation 
+of individual spectra should work in real-time when presented with reasonably-sized datasets.
 </p>
 
 <p>
@@ -858,7 +843,7 @@ ignored.
 </section>
 <section class="page" id="average" data-chapter="Chapter 2 — Single-dataset processing">
 <div class="page-chapter">Chapter 2 — Single-dataset processing</div>
-<h2>12. Average</h2>
+<h2>12. Average spectrum</h2>
 
 <div class="shots">
   <figure class="shot">
@@ -873,7 +858,7 @@ ignored.
 
 <p>
 The Average panel computes the mean spectrum of all files ticked in the Files panel
-(at least one). Press <code>Calculate average</code>; a progress bar shows the state, and
+(at least one). Press <code>Calculate average</code>. A progress bar shows the state, and
 the plot is labelled <code>Average of N</code>. The plot controls are
 <code>Cursor</code>, <code>Y scale</code> (lin/log/dB), <code>X unit</code>,
 <code>Match X to Spectrum View</code> (copies the Spectrum panel's unit and zoom range),
@@ -883,7 +868,7 @@ workspace and used as a reference option by the 100&nbsp;% T and Absorbance pane
 
 <p>
 If the checked files or the processing settings change after a calculation, the plot shows
-a <code>Stale data: source changed.</code> overlay with a <code>Recompute</code> button; hovering it lists what changed (up to four sources).
+a <code>Stale data: source changed.</code> overlay with a <code>Recompute</code> button. Hovering it lists what changed (up to four sources).
 </p>
 </section>
 <section class="page" id="snr" data-chapter="Chapter 2 — Single-dataset processing">
@@ -904,9 +889,9 @@ a <code>Stale data: source changed.</code> overlay with a <code>Recompute</code>
 <p>
 The SNR panel combines repeat measurements into a per-wavelength signal-to-noise ratio:
 the mean spectrum divided by the sample standard deviation across files. At least two
-files must be ticked in the Files panel; the header shows how many are selected. Press
+files must be ticked in the Files panel. The header shows how many are selected. Press
 <code>Calculate SNR</code> to compute. The Y scale offers <code>lin</code> and
-<code>log</code> (no dB); the remaining controls match the Average panel. The result is
+<code>log</code> (no dB). The remaining controls match the Average panel. The result is
 labelled <code>SNR of N</code>.
 </p>
 </section>
@@ -926,32 +911,24 @@ labelled <code>SNR of N</code>.
 </div>
 
 <p>
-The Allan panel estimates the Allan–Werle variance as a function of integration time
-(τ), either from each file's transmittance against the mean of the selected spectra (<code>Calc base = 100% T</code>) or from the raw spectra
-(<code>Calc base = Spectrum</code>). It needs at least two ticked files. The result is a
-3D surface plus a 2D slice; rotate, zoom and pan the surface with the mouse. The slice is
-drawn as a white curve on the surface and as a separate log–log plot below it.
+The Allan panel estimates the Allan-Werle variance as a function of integration time
+(τ), either from each file's transmittance against the mean of the selected spectra (<code>Calc base = 100% T</code>) or from the raw spectra (<code>Calc base = Spectrum</code>). Integration time is replaced with the number of measurements to maximize compatibility of the application across differing timestamp standards (or the lack of timestamps). It is up to the user to export the data and replace X axis with seconds, if required. It needs at least two ticked files. The result is a 3D surface plus a 2D slice. Rotate, zoom and pan the surface with the mouse. The slice for the selected wavelength is drawn as a white curve on the surface and as a separate log-log plot below it.
 </p>
 
 <table>
 <tr><th>Control</th><th>Meaning</th></tr>
-<tr><td><code>Decimation</code></td><td>Spacing between the wavelengths used for the surface. Default 5; set to 1 for full resolution.</td></tr>
-<tr><td><code>Calc base</code></td><td><code>100% T</code> (default) or <code>Spectrum</code>.</td></tr>
+<tr><td><code>Decimation</code></td><td>Spacing between the wavelengths used for the surface. Default 5; set to 1 for full resolution (very slow to render).</td></tr>
+<tr><td><code>Calc base</code></td><td>Select the type of data used to calculate the AV. Either <code>100% T</code> (default) or <code>Spectrum</code>.</td></tr>
 <tr><td><code>Calculate Allan</code></td><td>Starts the three-phase computation (average spectrum, transmittance, per-wavelength variance).</td></tr>
 <tr><td><code>X unit</code></td><td>Unit used for the wavelength axis and the slice display.</td></tr>
 <tr><td><code>X range</code></td><td>Wavelength range included in the calculation; the label follows the selected X unit and the limits are stored in µm. Default 1–30&nbsp;µm.</td></tr>
 <tr><td>Slice slider</td><td>Below the plots; selects the wavelength shown in the 2D slice. The header reports the current value, for example <code>Slice: 19.335 µm | Allan, 100 files</code>.</td></tr>
 </table>
 
-<p>
-The progress bar covers one phase at a time, so its percentage can restart during a run.
-Results are stored in the workspace; <code>Allan-Werle 3D</code> and
-<code>Allan-Werle slice</code> can be exported from the Export panel.
-</p>
 </section>
 <section class="page" id="t100" data-chapter="Chapter 2 — Single-dataset processing">
 <div class="page-chapter">Chapter 2 — Single-dataset processing</div>
-<h2>15. 100&nbsp;% T</h2>
+<h2>15. 100&nbsp;% Transmission line</h2>
 
 <div class="shots">
   <figure class="shot">
@@ -967,44 +944,46 @@ Results are stored in the workspace; <code>Allan-Werle 3D</code> and
 <p>
 The 100&nbsp;% T panel divides each sample spectrum by a reference spectrum and plots the
 result as transmittance in percent, together with an optional standard-deviation curve and
-ASTM-style energy ratios. The transmittance curves are drawn for the files
-<em>highlighted</em> in the Files panel (up to five); the standard deviation is computed
+ASTM E1421-style energy ratios. The transmittance curves are drawn for the files
+highlighted in the Files panel (up to five). The standard deviation is computed
 over the files <em>ticked</em> with checkboxes (at least two).
 </p>
 
 <h3>15.1 Reference spectrum</h3>
 <p>
-Choose the reference source with <code>File</code>, <code>CSV</code>, or <code>Avg</code>:
+Choose the reference spectrum source with <code>File</code>, <code>CSV</code>, or <code>Avg</code>:
 </p>
 <ul>
-  <li><code>File</code> — press <code>Set as reference</code> to use the spectrum of the
+  <li><code>File</code> - press <code>Set as reference</code> to use the spectrum of the
       first highlighted file.</li>
-  <li><code>CSV</code> — type or browse to a two-column CSV file and press
+  <li><code>CSV</code> - type or browse to a two-column CSV file and press
       <code>Load</code>. The unit is taken from the file header when recognisable.</li>
-  <li><code>Avg</code> — press <code>Use average</code> to use the computed average
+  <li><code>Avg</code> - press <code>Use average</code> to use the computed average
       spectrum. Disabled until an average exists.</li>
 </ul>
-<p>
-A green <code>Reference loaded</code> line reports the source, the number of points, and the
-unit; otherwise the line reads <code>No reference</code>.
-</p>
+<div class="note">
+A reference CSV starts with a header line, followed by rows of two comma-separated numeric
+columns: x, then y. The header selects the x unit — it must contain the word
+<code>Wavenumber</code> (cm⁻¹), <code>Wavelength</code> (µm), or <code>Frequency</code>
+(THz); anything else is read as cm⁻¹. The x values are converted to the unit selected in
+the Spectrum panel. Empty and non-numeric rows are skipped.
+</div>
 
 <h3>15.2 Energy ratios</h3>
 <p>
 Three ratio rows <code>A</code>, <code>B</code>, <code>C</code> each take a numerator and a
 denominator band in cm⁻¹. <code>ASTM E1421</code> fills the standard bands
-(4000/2000, 2000/1000, 150/max). The results table below the plots lists every highlighted
+(4000/2000, 2000/1000, 150/max). <code>max</code> is recognized as valid and means the point 
+of the maximum spectral brightness. The table below the plots lists every highlighted
 file and, once a standard deviation has been computed, adds <code>Average</code>,
-<code>Spread</code> (max − min), and <code>Std Dev</code> rows. Invalid bands are shown as
-<code>--</code>.
+<code>Spread</code> (max - min), and <code>Std Dev</code> rows.
 </p>
 
 <h3>15.3 Standard deviation</h3>
 <p>
 <code>Calculate std</code> computes the sample standard deviation across all ticked files
-(at least two) and adds a second, X-linked plot with the <code>Std Dev T(%)</code> curve.
-While it runs, the panel shows <code>Processing i/n</code>. If no standard deviation has
-been computed yet, the plot area reports <code>Std dev not calculated</code>.
+(at least two) and adds a second, X-linked plot with the <code>Std Dev T(%)</code> curve. 
+Energy ratio statistics are available only when <code>Std Dev T(%)</code> is calculated.
 </p>
 
 <div class="note">
@@ -1025,16 +1004,18 @@ transmittance is not divided by numerical noise.
 The HITRAN panel overlays known absorption bands of eight gases — H<sub>2</sub>O,
 CO<sub>2</sub>, CH<sub>4</sub>, O<sub>3</sub>, N<sub>2</sub>O, CO, NO, NO<sub>2</sub> — on
 spectral plots, to help tell real absorption features from artefacts. Each gas has a colour
-swatch and a checkbox; hovering a checkbox reports how many bands and peaks are drawn at
+swatch and a checkbox. Hovering a checkbox reports how many bands and peaks are drawn at
 the current settings. The markers appear on the Spectrum View and Average plots (and in
-spectral experiment viewers); they are display-only and never appear in exports.
+spectral experiment viewers). They are display-only and never appear in exports.
+This is not meant to be a precision feature - it is there to help quickly distinguish noise 
+from popular gas contaminants.
 </p>
 
 <table>
 <tr><th>Control</th><th>Values</th></tr>
-<tr><td>Gas checkboxes</td><td>One per gas; any combination.</td></tr>
-<tr><td><code>Strength threshold</code></td><td><code>0.1%</code>, <code>1%</code>, <code>2%</code> (default), <code>10%</code> relative to the gas's smoothed peak envelope; the drawn peak ticks mark lines that are strong relative to the strongest transition.</td></tr>
-<tr><td><code>Smoothing range</code></td><td><code>1</code>, <code>2</code>, <code>5</code>, <code>10</code> cm⁻¹ (default 10; <code>1</code> disables smoothing).</td></tr>
+<tr><td>Gas checkboxes</td><td>One per gas.</td></tr>
+<tr><td><code>Strength threshold</code></td><td> Allows to selectively mask weaker bands. <code>0.1%</code>, <code>1%</code>, <code>2%</code> (default), <code>10%</code> relative to the gas's smoothed peak envelope. The drawn peak ticks mark lines that are strong relative to the strongest transition.</td></tr>
+<tr><td><code>Smoothing range</code></td><td>Helps to emulate FTIRs of different resolution. <code>1</code>, <code>2</code>, <code>5</code>, <code>10</code> cm⁻¹ (default 10; <code>1</code> disables smoothing).</td></tr>
 <tr><td><code>HITRAN Off</code></td><td>Unchecks all gases.</td></tr>
 </table>
 </section>
@@ -1044,14 +1025,12 @@ spectral experiment viewers); they are display-only and never appear in exports.
 
 <figure class="shot half">
   <img src="screenshots/tab_single_dataset/export.png" alt="Export panel with a list of artifact checkboxes and an Export button">
-  <figcaption>The Export panel lists all artifacts; the ones that cannot be produced are greyed out.</figcaption>
+  <figcaption>The Export panel lists all artifacts. The ones that are not yet calculated are greyed-out.</figcaption>
 </figure>
 
 <p>
-CSV export for a single workspace happens in the Export panel; experiment tabs have their own Export panel (<a href="#exporting-experiments">Section 24</a>). Tick the artifacts you want and press
-<code>Export</code>; pick a folder in the <code>Select Export Directory</code> dialog, and
-the files are written with 15 significant digits. Artifacts that cannot be produced are
-greyed out. Files are named after the dataset and the artifact, for example <code>mydataset_average_spectrum.csv</code>.
+CSV export for a single workspace happens in the Export panel. Experiment tabs have their own Export panel (<a href="#exporting-experiments">Section 24</a>). Tick the artifacts you want and press
+<code>Export</code>. Pick a folder in the <code>Select Export Directory</code> dialog where the exported files will be saced. The files are written with 15 significant digits precision. Files are named after the dataset and the artifact, for example <code>mydataset_average_spectrum.csv</code>.
 </p>
 
 <table>
