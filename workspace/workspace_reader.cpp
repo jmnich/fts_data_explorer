@@ -21,6 +21,29 @@ const InterferogramMember* findInGroup(const std::vector<InterferogramMember>& m
     return nullptr;
 }
 
+// Corrected-IFG OPD axes are expected monotonic ascending. Some instruments
+// store them descending (max -> min), including non-increasing axes with
+// duplicate OPD values and descending axes with a noise blip; reverse both
+// columns when the majority of steps run negative, so the spectrum pipeline's
+// resampling and maxOPD see a canonical ascending axis. A genuinely JUMBLED
+// axis (no dominant direction) is deliberately left alone —
+// processSpectrumFromCorrectedAxis rejects it with a diagnostic, which is
+// safer than silently sorting corrupt/swapped columns into a plausible
+// spectrum.
+void normalizeDescendingOpdAxis(std::vector<double>& opd,
+                                std::vector<double>& primary) {
+    if (opd.size() < 2 || primary.size() != opd.size()) return;
+    std::size_t posCount = 0, negCount = 0;
+    for (std::size_t i = 1; i < opd.size(); ++i) {
+        const double d = opd[i] - opd[i - 1];
+        if (d > 0.0) ++posCount;
+        else if (d < 0.0) ++negCount;
+    }
+    if (negCount <= posCount) return;   // ascending / flat / jumbled: leave
+    std::reverse(opd.begin(), opd.end());
+    std::reverse(primary.begin(), primary.end());
+}
+
 const TwoColumnMember* findInGroup(const std::vector<TwoColumnMember>& members,
                                    const std::string& id, bool originalsOnly) {
     for (const auto& m : members) {
@@ -728,6 +751,7 @@ InterferogramData workspaceRead(const Workspace& ws, const std::string& id) {
         data.opdAxis.resize(m->col1.size());
         for (size_t i = 0; i < m->col1.size(); ++i)
             data.opdAxis[i] = m->col1[i] * 1e-6;
+        normalizeDescendingOpdAxis(data.opdAxis, data.primaryDetector);
         data.metadata = readMetadata(*m, "igm_corrected_x");
         return data;
     }
@@ -1338,24 +1362,22 @@ void tickRecomputeChain(AppState& s) {
                     // Recompute always arrives stale; an upstream Average step
                     // implies t100Outdated via the shared params/inputs.)
                     if (t100Outdated(s)) {
-                        // Abort when the reference cannot be rebuilt or the
-                        // spectra are unreadable: the member stays stale, the
-                        // overlay persists, a later click retries — nothing is
-                        // upserted with half-fresh data.
-                        if ((t100.referenceSource == 2 &&
-                             !s.active->averageSpectrum.averageAvailable) ||
-                            (t100.referenceSource == 0 &&
-                             s.active->selectedFilenames.empty()) ||
-                            !s.active->spectrum.ensureSpectraFresh(
+                        // Refresh any stale spectra first (per-file): a
+                        // rejected file is recorded and skipped, it must not
+                        // block the T100 rebuild for the other files. Abort
+                        // only when NO file is usable, or when the reference
+                        // itself cannot be established — rebuilding
+                        // transmittance against a stale reference would mix
+                        // states. The member then stays stale, the overlay
+                        // persists and a later click retries.
+                        if (!s.active->spectrum.ensureSpectraFresh(
                                 t100.lastKnownSelection))
                             break;
-                        // Fresh spectra first (above): the Spectrum panel's
-                        // async refresh leaves old-params data in the cache,
-                        // so a plain lazy recompute would silently use it.
-                        if (t100.referenceSource == 0)
-                            t100.setReferenceFromCurrentSpectrum();
-                        else if (t100.referenceSource == 2)
-                            t100.setReferenceFromAverage();
+                        if (t100.referenceSource == 0) {
+                            if (!t100.setReferenceFromCurrentSpectrum()) break;
+                        } else if (t100.referenceSource == 2) {
+                            if (!t100.setReferenceFromAverage()) break;
+                        }
                         t100.needsRecompute = true;
                         t100.refreshTransmittanceCache();
                     }

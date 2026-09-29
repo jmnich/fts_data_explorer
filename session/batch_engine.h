@@ -155,6 +155,7 @@ struct BatchJob {
     std::vector<double> allanSurface;  size_t allanNw = 0, allanNtaus = 0;
 
     bool sourceSubmitted = false;        // futures for this dataset enqueued
+    bool assembled = false;              // spectrum phase assembled exactly once
     bool allanSubmitted = false;         // per-bin variance tasks enqueued
 
     std::vector<std::string> errors;     // per-dataset failures (kept for the progress modal)

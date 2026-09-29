@@ -69,6 +69,11 @@ timeout: 1200
 - Golden file: reference_output/wust_mini.golden.h5
 - Produced by: `fts_data_explorer -w reference_output/wust_mini.golden.h5 "Spectra from selected files" <dir> tests/test1_single_spectrum/config.json`
 - Config sha: see config.json (Rectangular, zeroPadK=2, Hilbert, cm-1)
-- Date: 2026-08-23
+- Date: 2026-09-29 (regenerated)
 - Golden member: spectra/spec_raw_0 (first-file spectrum, derivative)
 - Policy (D5): C++-produced golden; Python reference is the independent cross-check
+- Regeneration note: the bin→X factor was corrected to `OPD*(K+1)*n/(n-1)`
+  (the resample grid is `linspace(0, maxOPD, n, endpoint=true)`, spacing
+  `maxOPD/(n-1)`, so the old `OPD*(K+1)/i` biased every X by `n/(n-1)`).
+  The previous 2026-08-23 golden captured the old X values; the embedded
+  input IFG members are unchanged (0.0 max abs diff vs `reference_input/`).

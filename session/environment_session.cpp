@@ -603,6 +603,18 @@ void removeExperiment(AppState& s, int idx) {
     // removal (executePendingSwap would resurrect it as the active env).
     if (s.pendingExperimentIdx > idx) --s.pendingExperimentIdx;
     else if (s.pendingExperimentIdx == idx) s.pendingExperimentIdx = -1;
+    // Exit "Save All" holds experiment indices too (the experiment phase runs
+    // after the workspace saves). Shift them so a removal mid-run cannot save
+    // the wrong experiment or skip one.
+    if (!s.exitDirtyExperiments.empty()) {
+        std::vector<int> remapped;
+        remapped.reserve(s.exitDirtyExperiments.size());
+        for (int e : s.exitDirtyExperiments) {
+            if (e == idx) continue;
+            remapped.push_back(e > idx ? e - 1 : e);
+        }
+        s.exitDirtyExperiments = std::move(remapped);
+    }
     s.needsRedraw = true;
 }
 

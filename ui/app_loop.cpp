@@ -927,7 +927,10 @@ void handleKeyboardNavigation(const std::vector<std::string>& csvFiles,
                              bool enableDownsampling, 
                              size_t maxPointsBeforeDownsampling, 
                              size_t maxSelectableFiles) {
-    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) && !csvFiles.empty()) {
+    // WantCaptureKeyboard: an active text field consumes Up/Down for caret
+    // movement; without this guard the file list would jump on every caret key.
+    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) &&
+        !ImGui::GetIO().WantCaptureKeyboard && !csvFiles.empty()) {
         if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
             // Navigate up in file list (with wrapping)
             if (currentSortedFileIndex > 0) {
@@ -1761,8 +1764,12 @@ void AppLoop::handleInput() {
 
         
         // Handle Delete key to remove currently navigated member
-        // (OpenPopup is deferred to the Files panel, after NewFrame)
+        // (OpenPopup is deferred to the Files panel, after NewFrame).
+        // WantCaptureKeyboard guards every global shortcut: without it an
+        // active InputText's Delete (erase character) would also open the
+        // member-delete confirm.
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) &&
+            !ImGui::GetIO().WantCaptureKeyboard &&
             ImGui::IsKeyPressed(ImGuiKey_Delete) &&
             !appState.active->sortedFiles.empty()) {
             appState.active->pendingWorkspaceDeletionPath =
@@ -1927,7 +1934,9 @@ void AppLoop::handleInput() {
         // Discard All modal first). GLOBAL shortcut: lives OUTSIDE the
         // wsActive gate so it works from the Session tab too (bugfix
         // 2026-08-13).
-        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) && ImGui::IsKeyPressed(ImGuiKey_H) && ImGui::GetIO().KeyCtrl) {
+        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_AnyWindow) &&
+            !ImGui::GetIO().WantCaptureKeyboard &&
+            ImGui::IsKeyPressed(ImGuiKey_H) && ImGui::GetIO().KeyCtrl) {
             requestGoHome(appState);
         }
 

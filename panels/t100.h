@@ -87,9 +87,14 @@ public:
     T100Spectrum();
     void reset();
 
-    void setReferenceFromCurrentSpectrum();
+    // Reference setters. The bool-returning ones report whether the reference
+    // was actually established: the T100 recompute chain aborts on false
+    // (rebuilding transmittance against a stale reference would mix states),
+    // while other callers may ignore it. setReferenceFromCSV keeps void — the
+    // chain never calls it and the headless path checks referenceAvailable.
+    bool setReferenceFromCurrentSpectrum();
     void setReferenceFromCSV(const std::string& path);
-    void setReferenceFromAverage();
+    bool setReferenceFromAverage();
 
     void renderT100Contents(bool showTrackingCursor);
 

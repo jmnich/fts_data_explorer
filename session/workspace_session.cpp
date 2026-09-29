@@ -394,6 +394,30 @@ void removeTab(AppState& s, int idx) {
     else if (s.pendingTabCloseIdx == idx) s.pendingTabCloseIdx = -1;
     if (s.pendingRemoveIdx > idx) s.pendingRemoveIdx--;
     else if (s.pendingRemoveIdx == idx) s.pendingRemoveIdx = -1;
+    // Exit "Save All" may be mid-run (one tab saved per frame) and holds
+    // session indices in exitDirtyTabs. Erase the removed tab, shift the rest
+    // and keep the cursor on the same logical next entry — otherwise the saver
+    // swaps to a stale/out-of-range index forever (it can never match
+    // activeSessionIdx) and the app cannot finish exiting.
+    if (!s.exitDirtyTabs.empty()) {
+        size_t removedBeforeCursor = 0;
+        std::vector<int> remapped;
+        remapped.reserve(s.exitDirtyTabs.size());
+        for (size_t i = 0; i < s.exitDirtyTabs.size(); ++i) {
+            const int e = s.exitDirtyTabs[i];
+            if (e == idx) {
+                if (i < s.exitSaveAllCursor) ++removedBeforeCursor;
+                continue;
+            }
+            remapped.push_back(e > idx ? e - 1 : e);
+        }
+        s.exitDirtyTabs = std::move(remapped);
+        if (removedBeforeCursor > s.exitSaveAllCursor)
+            removedBeforeCursor = s.exitSaveAllCursor;
+        s.exitSaveAllCursor -= removedBeforeCursor;
+        if (s.exitSaveAllCursor > s.exitDirtyTabs.size())
+            s.exitSaveAllCursor = s.exitDirtyTabs.size();
+    }
     s.needsRedraw = true;
 }
 

@@ -50,6 +50,10 @@ public:
     std::map<std::string, std::vector<double>> cachedSpectra;
     std::map<std::string, std::vector<double>> cachedFrequencies;
     std::map<std::string, PrimaryFingerprint> lastPrimaryPrints;
+    // Per-file rejection reason (non-monotonic axis, degenerate input). The
+    // empty caches + stamps are still recorded so the dirty check does not
+    // retry every frame; a params/data change clears the failure naturally.
+    std::map<std::string, std::string> spectrumErrors;
     bool spectrumDirty;
     
     // Unified view/interaction state (zoom window, selectors, unit switch,
@@ -115,6 +119,9 @@ public:
     // recompute chain — the Spectrum panel's async refresh would otherwise
     // leave old-params spectra visible (spectrum.cpp:493-495) and the T100
     // refresh would silently recompute against them. No-op on fresh entries.
+    // Returns true when at least one requested file has a usable (non-empty)
+    // spectrum, or when `fileIds` is empty; a rejected file is recorded in
+    // spectrumErrors and skipped by the per-file transmittance loop.
     bool ensureSpectraFresh(const std::vector<std::string>& fileIds);
 
     // Park/resume mirror support (M2.1): heavy members (caches, futures) are

@@ -61,18 +61,12 @@ double SpectralToolbox::convertXValue(double value, SpectrumXUnit from, Spectrum
 
 double SpectralToolbox::interpPoint(double x, const std::vector<double>& xp, const std::vector<double>& fp) {
     if (xp.empty() || xp.size() != fp.size()) return std::numeric_limits<double>::quiet_NaN();
-
-    if (x <= xp.front()) return fp.front();
-    if (x >= xp.back())  return fp.back();
-
-    auto it = std::lower_bound(xp.begin(), xp.end(), x);
-    if (it == xp.begin()) return fp.front();
-
-    auto right = std::prev(it);
-    double x0 = *right, x1 = *it;
-    double y0 = fp[right - xp.begin()], y1 = fp[it - xp.begin()];
-
-    return y0 + (y1 - y0) * (x - x0) / (x1 - x0);
+    // Delegate to interpVector so the single-point and vector paths share the
+    // same normalization (descending/jumbled sources). A raw lower_bound on an
+    // unsorted range is UB, which the previous implementation hit for jumbled
+    // input.
+    const std::vector<double> r = interpVector(std::vector<double>{x}, xp, fp);
+    return r.empty() ? std::numeric_limits<double>::quiet_NaN() : r[0];
 }
 
 std::vector<double> SpectralToolbox::interpVector(const std::vector<double>& x, const std::vector<double>& xp, const std::vector<double>& fp) {
@@ -81,23 +75,48 @@ std::vector<double> SpectralToolbox::interpVector(const std::vector<double>& x, 
     if (xp.size() == 1) { result.assign(x.size(), fp[0]); return result; }
 
     // two-pointer merge scan O(n+m) instead of per-point lower_bound O(n log m).
-    // Handles ascending and descending srcX, clamping to ends exactly like interpPoint.
-    const bool ascending = xp.front() < xp.back();
+    // The scan advances a single bracket, so it requires an ascending source
+    // and an ascending target. A descending source is reversed (indexing it
+    // from the back would be equivalent but harder to read); a jumbled source
+    // — which a bracket scan cannot represent at all — is stable-sorted by X
+    // once. Both fallbacks are rare: callers normalize/validate axes first.
+    const std::vector<double>* px = &xp;
+    const std::vector<double>* py = &fp;
+    std::vector<double> reversedX, reversedY, sortedX, sortedY;
+    const bool sortedAsc = std::is_sorted(xp.begin(), xp.end());
+    const bool sortedDesc = sortedAsc ? false
+        : std::is_sorted(xp.begin(), xp.end(), std::greater<double>());
+    if (sortedDesc) {
+        reversedX.assign(xp.rbegin(), xp.rend());
+        reversedY.assign(fp.rbegin(), fp.rend());
+        px = &reversedX;
+        py = &reversedY;
+    } else if (!sortedAsc) {
+        std::vector<size_t> order(xp.size());
+        for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+        std::stable_sort(order.begin(), order.end(),
+                         [&](size_t a, size_t b) { return xp[a] < xp[b]; });
+        sortedX.resize(xp.size());
+        sortedY.resize(fp.size());
+        for (size_t i = 0; i < order.size(); ++i) {
+            sortedX[i] = xp[order[i]];
+            sortedY[i] = fp[order[i]];
+        }
+        px = &sortedX;
+        py = &sortedY;
+    }
+    const std::vector<double>& sx = *px;
+    const std::vector<double>& sy = *py;
+
     std::size_t lo = 0;                          // bracket [lo, lo+1]
     for (std::size_t i = 0; i < x.size(); ++i) {
         double tx = x[i];
-        // Advance lo so xp[lo] <= tx < xp[lo+1] (ascending) or xp[lo] >= tx > xp[lo+1] (descending)
-        if (ascending) {
-            while (lo + 2 < xp.size() && xp[lo + 1] < tx) ++lo;
-            if (tx <= xp.front()) { result[i] = fp.front(); continue; }
-            if (tx >= xp.back())  { result[i] = fp.back();  continue; }
-        } else {
-            while (lo + 2 < xp.size() && xp[lo + 1] > tx) ++lo;
-            if (tx >= xp.front()) { result[i] = fp.front(); continue; }
-            if (tx <= xp.back())  { result[i] = fp.back();  continue; }
-        }
-        double x0 = xp[lo], x1 = xp[lo + 1];
-        double y0 = fp[lo], y1 = fp[lo + 1];
+        // Advance lo so sx[lo] <= tx < sx[lo+1] (all sources ascending here).
+        while (lo + 2 < sx.size() && sx[lo + 1] < tx) ++lo;
+        if (tx <= sx.front()) { result[i] = sy.front(); continue; }
+        if (tx >= sx.back())  { result[i] = sy.back();  continue; }
+        double x0 = sx[lo], x1 = sx[lo + 1];
+        double y0 = sy[lo], y1 = sy[lo + 1];
         // Same op order as interpPoint (multiply then divide, no intermediate
         // frac) to preserve last-ULP byte-stability of the spectrum pipeline.
         result[i] = y0 + (y1 - y0) * (tx - x0) / (x1 - x0);
@@ -371,6 +390,20 @@ SpectralToolbox::ProcessedSpectrum SpectralToolbox::processSpectrum(
         xAxisFromHilbert(referenceDetector, refLaserWavelength, correctedX);
     }
     if (correctedX.empty()) return result;
+    // Non-monotonic axis handling: noise-level reversals (real references
+    // contain them) are tolerated — interpVector normalizes the sample order —
+    // but a gross phase-unwrap discontinuity makes every resampled value
+    // wrong, so reject it with a reason instead of computing garbage.
+    if (!std::is_sorted(correctedX.begin(), correctedX.end()) &&
+        axisLooksGrosslyNonMonotonic(correctedX)) {
+        std::size_t reversals = 0;
+        for (std::size_t i = 1; i < correctedX.size(); ++i)
+            if (correctedX[i] < correctedX[i - 1]) ++reversals;
+        result.error = "reference X axis has a gross discontinuity (" +
+            std::to_string(reversals) +
+            " reversal(s)); use peak-finding or check the reference";
+        return result;
+    }
 
     // 2. Robust max OPD (skip index 0 to avoid start-of-cumsum contaminations)
     double maxOPD = 0.0;
@@ -412,7 +445,11 @@ SpectralToolbox::ProcessedSpectrum SpectralToolbox::processSpectrum(
     const std::size_t halfN = N / 2;
     result.spectrumX.reserve(halfN);
     result.spectrumY.reserve(halfN);
-    const double factor = OPD * static_cast<double>(K + 1);
+    // The resample grid is linspace(0, maxOPD, n, endpoint=true): spacing
+    // d = maxOPD/(n-1), so bin i maps to um = OPD*(K+1)*n/((n-1)*i).
+    // OPD*(K+1)/i assumed d = maxOPD/n and biased every X by n/(n-1).
+    const double factor = OPD * static_cast<double>(K + 1)
+                        * static_cast<double>(n) / static_cast<double>(n - 1);
     const double invN   = 1.0 / static_cast<double>(n);
     for (std::size_t i = 1; i <= halfN; ++i) {
         const double um = factor / static_cast<double>(i);
@@ -443,6 +480,16 @@ SpectralToolbox::ProcessedSpectrum SpectralToolbox::processSpectrumFromCorrected
     if (n == 0 || opdAxisUm.size() != n || K < 0) return result;
 
     const std::vector<double>& correctedX = opdAxisUm;
+    // The reader reverses strictly-descending stored axes; noise-level
+    // reversals are tolerated (interpVector normalizes the order), but a
+    // gross discontinuity — a swapped/corrupt column (e.g. a converter
+    // writing [OPD, IGM] under ["Primary detector", "OPD axis"]) or a broken
+    // axis — is rejected rather than resampled.
+    if (!std::is_sorted(correctedX.begin(), correctedX.end()) &&
+        axisLooksGrosslyNonMonotonic(correctedX)) {
+        result.error = "OPD axis has a gross discontinuity (column order?)";
+        return result;
+    }
 
     double maxOPD = 0.0;
     for (std::size_t i = 1; i < correctedX.size(); ++i) {
@@ -474,7 +521,9 @@ SpectralToolbox::ProcessedSpectrum SpectralToolbox::processSpectrumFromCorrected
     const std::size_t halfN = N / 2;
     result.spectrumX.reserve(halfN);
     result.spectrumY.reserve(halfN);
-    const double factor = OPD * static_cast<double>(K + 1);
+    // Same spacing correction as processSpectrum (see the comment there).
+    const double factor = OPD * static_cast<double>(K + 1)
+                        * static_cast<double>(n) / static_cast<double>(n - 1);
     const double invN   = 1.0 / static_cast<double>(n);
     for (std::size_t i = 1; i <= halfN; ++i) {
         const double um = factor / static_cast<double>(i);

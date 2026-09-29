@@ -567,6 +567,28 @@ void H5Store::validate(const std::string& path) {
         if (!H5Lexists(file.id, r, H5P_DEFAULT))
             throw H5Error(std::string("validate: missing root dataset ") + r);
     }
+    // igm_corrected_x members: column 1 is the OPD axis. Descending axes are
+    // supported (workspaceRead reverses them), so the check is DIRECTION-AWARE:
+    // reversals are the steps against the axis's dominant direction. A few
+    // noise-level reversals are tolerated (real reference axes glitch); a
+    // swapped/corrupt column — the raw ArcOptix [OPD, IGM] order written under
+    // ["Primary detector", "OPD axis"] — reverses on ~half the samples and is
+    // rejected here. The spectrum pipeline applies the same direction rule
+    // plus a magnitude guard (SpectralToolbox::axisLooksGrosslyNonMonotonic).
+    for (const auto& m : ws.correctedIfg.members) {
+        const auto& opd = m.col1;
+        if (opd.size() < 3) continue;
+        std::size_t posCount = 0, negCount = 0;
+        for (std::size_t i = 1; i < opd.size(); ++i) {
+            const double d = opd[i] - opd[i - 1];
+            if (d > 0.0) ++posCount;
+            else if (d < 0.0) ++negCount;
+        }
+        const std::size_t reversals = std::min(posCount, negCount);
+        if (reversals > opd.size() / 100)
+            throw H5Error("validate: igm_corrected_x/" + m.id +
+                          " OPD column is grossly non-monotonic (converter column order?)");
+    }
     if (!ws.inputsAreValid())
         throw H5Error("validate: dangling inputs present");
 }

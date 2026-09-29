@@ -448,7 +448,7 @@ void finishDatasetFor(AppState& s, bool ok) {
     j.submitted = j.completed = 0;
     j.allanCompleted = j.allanTotal = 0;
     j.futures.clear(); j.fileResults.clear(); j.allanFutures.clear();
-    j.sourceSubmitted = j.allanSubmitted = false;
+    j.sourceSubmitted = j.assembled = j.allanSubmitted = false;
     if (j.currentIdx >= j.totalDatasets()) {
         s.sessionTab.batch.phase = BatchPhase::Done;   // progress modal flips to OK
         // The batch rewrote every processed source in the archive — refresh
@@ -564,6 +564,9 @@ void batchTick(AppState& s) {
             auto res = fut.get();
             if (!res.ps.spectrumX.empty() && !res.ps.spectrumY.empty())
                 j.fileResults[res.fileId] = std::move(res.ps);
+            else if (!res.ps.error.empty())
+                j.errors.push_back(j.sourceIds[j.currentIdx] + ": " +
+                                   res.fileId + ": " + res.ps.error);
         } catch (const std::exception& e) {
             fprintf(stderr, "WARNING: batch spectrum failed: %s\n", e.what());
         }
@@ -572,7 +575,14 @@ void batchTick(AppState& s) {
     if (j.completed < j.submitted) return;
 
     // ── all file spectra done → assemble on the deterministic grid ─────────
-    assembleDataset(j);
+    // Exactly ONCE per dataset. Consumed futures stay invalid, so
+    // `completed == submitted` holds on every later frame too; an unguarded
+    // second assemble (after submitAllan, when fileResults has been cleared)
+    // would take the "every file failed" branch and wipe the assembled state.
+    if (!j.assembled) {
+        assembleDataset(j);
+        j.assembled = true;
+    }
 
     // ── allan phase (submit once, then poll) ────────────────────────────────
     if (recipeHas(j.recipe, "allan") && !j.allanSubmitted) {

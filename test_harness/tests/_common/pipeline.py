@@ -254,6 +254,35 @@ def process_spectrum(raw_primary: np.ndarray, raw_ref: np.ndarray,
     else:
         corrected_x = hilbert_x_axis(raw_ref, ref_laser)
 
+    # Mirror SpectralToolbox::axisLooksGrosslyNonMonotonic exactly: the
+    # dominant step direction defines "forward" (a descending axis is judged
+    # by its own direction); reversals beyond 1% of the samples, or a backward
+    # step beyond 50x the forward median, reject. The median uses the same
+    # order statistic as the C++ nth_element (index size//2) — NOT
+    # np.median's averaged middle, which differs on even counts.
+    if corrected_x.size > 1:
+        d = np.diff(corrected_x)
+        pos_count = int((d > 0).sum())
+        neg_count = int((d < 0).sum())
+        if pos_count or neg_count:
+            descending = neg_count > pos_count
+            fwd = -d if descending else d
+            back = fwd[fwd < 0]
+            fw = fwd[fwd > 0]
+            gross = False
+            if back.size > 0:
+                if back.size > corrected_x.size // 100 or fw.size < 2:
+                    gross = True
+                else:
+                    fw_med = float(np.sort(fw)[fw.size // 2])
+                    gross = float(-back.min()) > 50.0 * fw_med
+            if gross:
+                raise ValueError("corrected X axis is grossly non-monotonic")
+        if not np.all(d >= 0):
+            order = np.argsort(corrected_x, kind="stable")
+            corrected_x = corrected_x[order]
+            raw_primary = raw_primary[order]
+
     # 2 — max OPD (skip index 0) → round-trip OPD
     max_opd = np.max(corrected_x[1:])
     opd = 2.0 * max_opd
@@ -278,10 +307,12 @@ def process_spectrum(raw_primary: np.ndarray, raw_ref: np.ndarray,
     half_n = N // 2
     inv_n = 1.0 / n
 
-    # 8 — X axis: um = OPD*(K+1)/i, keep [1 … halfN]
+    # 8 — X axis from the ACTUAL grid spacing (linspace endpoint=True gives
+    #     d = max_opd/(n-1)): um = OPD*(K+1)*n/((n-1)*i), keep [1 … halfN].
+    #     The old OPD*(K+1)/i assumed d = max_opd/n and biased X by n/(n-1).
     i_vals = np.arange(1, half_n + 1, dtype=float)
     with np.errstate(divide="ignore"):
-        x_um = opd * (K + 1) / i_vals
+        x_um = opd * (K + 1) * n / ((n - 1) * i_vals)
     y_mag = np.abs(fft_vals[1:half_n + 1]) * inv_n
 
     # 9 — unit conversion

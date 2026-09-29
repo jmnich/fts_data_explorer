@@ -144,16 +144,36 @@ void Spectrum::pollPendingSpectra() {
         if (it->future.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
             try {
                 auto ps = it->future.get();
-                cachedSpectra[it->fileId] = std::move(ps.spectrumY);
-                cachedFrequencies[it->fileId] = std::move(ps.spectrumX);
-                wsMirrorSpectrum(*appState, it->fileId,
-                                 cachedFrequencies[it->fileId], cachedSpectra[it->fileId]);
-
                 // Stamp the fingerprint CAPTURED AT SUBMIT TIME, not the
                 // current selectors — a param change mid-compute must not mark
                 // the stale result as fresh.
-                lastPrimaryPrints[it->fileId] = it->primaryPrint;
-                lastSpectrumParams[it->fileId] = it->params;
+                if (ps.spectrumX.empty() || ps.spectrumY.empty()) {
+                    // Rejected/degenerate result: record the failure as a
+                    // "clean empty" so isSpectrumDirty does not re-submit every
+                    // frame, and surface the reason instead of a silent gap.
+                    const std::string msg = ps.error.empty()
+                        ? std::string("spectrum pipeline produced no data") : ps.error;
+                    spectrumErrors[it->fileId] = msg;
+                    cachedSpectra[it->fileId].clear();
+                    cachedFrequencies[it->fileId].clear();
+                    lastPrimaryPrints[it->fileId] = it->primaryPrint;
+                    lastSpectrumParams[it->fileId] = it->params;
+                    fprintf(stderr, "WARNING: spectrum unavailable for %s: %s\n",
+                            it->fileId.c_str(), msg.c_str());
+                    if (appState) {
+                        appState->errorMsg = "Spectrum unavailable for " +
+                                             it->fileId + ":\n" + msg;
+                        appState->showErrorPopup = true;
+                    }
+                } else {
+                    spectrumErrors.erase(it->fileId);
+                    cachedSpectra[it->fileId] = std::move(ps.spectrumY);
+                    cachedFrequencies[it->fileId] = std::move(ps.spectrumX);
+                    wsMirrorSpectrum(*appState, it->fileId,
+                                     cachedFrequencies[it->fileId], cachedSpectra[it->fileId]);
+                    lastPrimaryPrints[it->fileId] = it->primaryPrint;
+                    lastSpectrumParams[it->fileId] = it->params;
+                }
             } catch (const std::exception& e) {
                 fprintf(stderr, "WARNING: Spectrum computation failed for %s: %s\n",
                         it->fileId.c_str(), e.what());
@@ -169,32 +189,28 @@ bool Spectrum::computeAndCacheSpectrum(const std::string& filePath, const std::s
     if (!appState) return false;
     try {
         auto raw = workspaceRead(appState->active->workspace, filePath);
+        // Fingerprint before any branch moves primaryDetector into the result.
+        const PrimaryFingerprint primaryPrint = fingerprintOf(raw.primaryDetector);
 
         auto targetUnit = static_cast<SpectralToolbox::SpectrumXUnit>(plot.xUnitSelector);
 
+        SpectralToolbox::ProcessedSpectrum ps;
         if (appState->active->datasetInfo.hasPrecomputedSpectra) {
             std::vector<double> freqs = raw.referenceDetector;
             for (double& f : freqs)
                 f = SpectralToolbox::convertXValue(f, SpectralToolbox::SpectrumXUnit::CmInv, targetUnit);
-            cachedFrequencies[fileId] = std::move(freqs);
-            // Stamp BEFORE the move below — the old code stamped from the
-            // moved-from vector (always empty; harmless only because the
-            // precomputed branch short-circuits isSpectrumDirty).
-            lastPrimaryPrints[fileId] = fingerprintOf(raw.primaryDetector);
-            cachedSpectra[fileId] = std::move(raw.primaryDetector);
+            ps.spectrumX = std::move(freqs);
+            ps.spectrumY = std::move(raw.primaryDetector);
         } else if (appState->active->datasetInfo.axisIsCorrected) {
             for (auto& v : raw.opdAxis) v *= 1e6;
-            auto ps = SpectralToolbox::processSpectrumFromCorrectedAxis(
+            ps = SpectralToolbox::processSpectrumFromCorrectedAxis(
                 raw.primaryDetector, raw.opdAxis,
                 Kpadding,
                 static_cast<SpectralToolbox::SpectrumXUnit>(plot.xUnitSelector),
                 static_cast<ApodizationWindow>(apodizationSelector),
                 apodizationParams);
-            cachedFrequencies[fileId] = std::move(ps.spectrumX);
-            cachedSpectra[fileId] = std::move(ps.spectrumY);
-            lastPrimaryPrints[fileId] = fingerprintOf(raw.primaryDetector);
         } else {
-            auto ps = SpectralToolbox::processSpectrum(
+            ps = SpectralToolbox::processSpectrum(
                 raw.primaryDetector, raw.referenceDetector,
                 refLaserTextbox,
                 Kpadding,
@@ -203,15 +219,31 @@ bool Spectrum::computeAndCacheSpectrum(const std::string& filePath, const std::s
                 apodizationParams,
                 static_cast<SpectralToolbox::XCorrectionMethod>(appState->active->xCorrectionMethod),
                 appState->active->peakProminenceThreshold);
-            cachedFrequencies[fileId] = std::move(ps.spectrumX);
-            cachedSpectra[fileId] = std::move(ps.spectrumY);
-            lastPrimaryPrints[fileId] = fingerprintOf(raw.primaryDetector);
         }
 
+        if (ps.spectrumX.empty() || ps.spectrumY.empty()) {
+            // Rejected/degenerate result (e.g. non-monotonic reference axis).
+            // Record empty caches + stamps so isSpectrumDirty does not retry
+            // every frame, and surface the reason instead of a silent gap.
+            const std::string msg = ps.error.empty()
+                ? std::string("spectrum pipeline produced no data") : ps.error;
+            spectrumErrors[fileId] = msg;
+            cachedSpectra[fileId].clear();
+            cachedFrequencies[fileId].clear();
+            lastPrimaryPrints[fileId] = primaryPrint;
+            lastSpectrumParams[fileId] = currentSpectrumParams();
+            std::cerr << "Warning: Spectrum unavailable for " << filePath << ": " << msg << std::endl;
+            appState->errorMsg = "Spectrum unavailable for " + filePath + ":\n" + msg;
+            appState->showErrorPopup = true;
+            return false;
+        }
+
+        spectrumErrors.erase(fileId);
+        cachedFrequencies[fileId] = std::move(ps.spectrumX);
+        cachedSpectra[fileId] = std::move(ps.spectrumY);
+        lastPrimaryPrints[fileId] = primaryPrint;
         wsMirrorSpectrum(*appState, fileId, cachedFrequencies[fileId], cachedSpectra[fileId]);
-
         lastSpectrumParams[fileId] = currentSpectrumParams();
-
         return true;
     } catch (const std::exception& e) {
         std::cerr << "Warning: Failed to compute spectrum for " << filePath << ": " << e.what() << std::endl;
@@ -221,9 +253,16 @@ bool Spectrum::computeAndCacheSpectrum(const std::string& filePath, const std::s
 
 bool Spectrum::ensureSpectraFresh(const std::vector<std::string>& fileIds) {
     if (!appState || !appState->active) return false;
-    bool allOk = true;
+    // Returns true when at least one requested file has a usable (non-empty)
+    // spectrum, or when nothing was requested. A rejected file must not block
+    // the T100 rebuild for the other files — the per-file transmittance loop
+    // skips it. (Callers that need the reference file specifically check the
+    // reference setter's result.)
+    bool requested = false;
+    bool anyUsable = false;
     for (const std::string& fileId : fileIds) {
         if (fileId.empty()) continue;
+        requested = true;
         // fileId may be just a filename; find the full path in sortedFiles.
         std::string fullPath = fileId;
         for (const auto& sp : appState->active->sortedFiles) {
@@ -245,9 +284,14 @@ bool Spectrum::ensureSpectraFresh(const std::vector<std::string>& fileIds) {
         }
         static const std::vector<double> kNoPrimary;   // absent -> empty -> dirty
         if (isSpectrumDirty(fileId, primary ? *primary : kNoPrimary))
-            allOk = computeAndCacheSpectrum(fullPath, fileId) && allOk;
+            computeAndCacheSpectrum(fullPath, fileId);
+        const auto cs = cachedSpectra.find(fileId);
+        const auto cf = cachedFrequencies.find(fileId);
+        if (cs != cachedSpectra.end() && cf != cachedFrequencies.end() &&
+            !cs->second.empty() && !cf->second.empty())
+            anyUsable = true;
     }
-    return allOk;
+    return !requested || anyUsable;
 }
 
 void Spectrum::renderSpectrumContents(const std::vector<std::pair<std::string, std::vector<double>>>& primaryDetectors,

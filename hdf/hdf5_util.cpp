@@ -55,10 +55,32 @@ static bool linkExists(hid_t loc, const char* name) {
     return H5Lexists(loc, name, H5P_DEFAULT) > 0;
 }
 
+// Element count of a dataspace (1 for scalar). Guards the VLEN string readers
+// below: H5S_ALL means "memory space = file space", so reading an N-element
+// space into a single `char*` would write N pointers into one stack slot.
+static hsize_t spaceElementCount(hid_t space, const char* what) {
+    const int rank = H5Sget_simple_extent_ndims(space);
+    if (rank < 0) fail(what);
+    if (rank == 0) return 1;   // scalar
+    hsize_t dims[8] = {};
+    if (rank > 8) fail(what);
+    if (H5Sget_simple_extent_dims(space, dims, nullptr) < 0) fail(what);
+    hsize_t n = 1;
+    for (int i = 0; i < rank; ++i) n *= dims[i];
+    return n;
+}
+
 std::string h5ReadVlenString(hid_t loc, const char* name) {
     if (!linkExists(loc, name)) fail("h5ReadVlenString: missing link");
     H5DatasetGuard ds(H5Dopen2(loc, name, H5P_DEFAULT));
     if (ds.id < 0) fail("h5ReadVlenString: H5Dopen2");
+    H5SpaceGuard space(H5Dget_space(ds.id));
+    if (space.id < 0) fail("h5ReadVlenString: H5Dget_space");
+    // The spec stores these as shape (1,) / scalar; anything larger is not a
+    // string field and must not be read into a single-pointer buffer.
+    if (spaceElementCount(space.id, "h5ReadVlenString: H5Sget_simple_extent") != 1)
+        throw H5Error(std::string("h5ReadVlenString: '") + name +
+                      "' is not a scalar/1-element string dataset");
     char* buf = nullptr;
     H5TypeGuard mem(vlenStrType());
     if (H5Dread(ds.id, mem.id, H5S_ALL, H5S_ALL, H5P_DEFAULT, &buf) < 0)
@@ -87,6 +109,13 @@ bool h5HasAttr(hid_t obj, const char* name) {
 std::string h5ReadAttrString(hid_t obj, const char* name) {
     H5AttrGuard attr(H5Aopen(obj, name, H5P_DEFAULT));
     if (attr.id < 0) fail("h5ReadAttrString: H5Aopen");
+    H5SpaceGuard space(H5Aget_space(attr.id));
+    if (space.id < 0) fail("h5ReadAttrString: H5Aget_space");
+    // H5Aread has no memory-space argument: it always writes the attribute's
+    // full element count. Only scalar/1-element attributes are string fields.
+    if (spaceElementCount(space.id, "h5ReadAttrString: H5Sget_simple_extent") != 1)
+        throw H5Error(std::string("h5ReadAttrString: '") + name +
+                      "' is not a scalar/1-element string attribute");
     char* buf = nullptr;
     H5TypeGuard mem(vlenStrType());
     if (H5Aread(attr.id, mem.id, &buf) < 0) fail("h5ReadAttrString: H5Aread");

@@ -134,6 +134,23 @@ def check_ifg_group(f, gname, errors):
             if item.dtype != "float64":
                 fail(errors, f"'{gname}/{name}' dtype {item.dtype}, "
                              f"expected fp64 (spec 2.3.2)")
+            # Column 1 is the OPD axis: it must be monotonic (either
+            # direction). A converter that writes the raw [OPD, IGM] order
+            # under ["Primary detector", "OPD axis"] verifies structurally but
+            # makes every spectrum garbage.
+            if item.shape[0] > 1:
+                opd = item[:, 1]
+                asc = desc = True
+                prev = opd[0]
+                for v in opd[1:]:
+                    if v < prev:
+                        asc = False
+                    if v > prev:
+                        desc = False
+                    prev = v
+                if not (asc or desc):
+                    fail(errors, f"'{gname}/{name}' OPD column not monotonic "
+                                 f"(column order mismatch?)")
         kind = item.attrs.get("kind")
         if kind not in ("original", "derivative"):
             fail(errors, f"'{gname}/{name}' @kind {kind!r}, expected "

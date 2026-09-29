@@ -56,6 +56,62 @@ int main() {
         assert(near(got[j], interpY));
     }
 
+    // ---- axis guard: SpectralToolbox::axisLooksGrosslyNonMonotonic -------
+    // Build an axis from a step list; the predicate only inspects the steps.
+    auto axisFromSteps = [](const std::vector<double>& steps) {
+        std::vector<double> a;
+        a.reserve(steps.size() + 1);
+        a.push_back(0.0);
+        for (double s : steps) a.push_back(a.back() + s);
+        return a;
+    };
+    using ST = SpectralToolbox;
+
+    // Clean monotonic axes (either direction) and a flat axis are not gross.
+    assert(!ST::axisLooksGrosslyNonMonotonic(axisFromSteps(std::vector<double>(100, 0.5))));
+    assert(!ST::axisLooksGrosslyNonMonotonic(axisFromSteps(std::vector<double>(100, -0.5))));
+    assert(!ST::axisLooksGrosslyNonMonotonic(axisFromSteps(std::vector<double>(100, 0.0))));
+    assert(!ST::axisLooksGrosslyNonMonotonic({}));
+    assert(!ST::axisLooksGrosslyNonMonotonic({1.0, 2.0}));
+
+    // A descending axis with one small POSITIVE glitch: direction-aware, the
+    // single reversal is noise-level -> not gross (this is the case the old
+    // direction-blind check wrongly rejected).
+    {
+        std::vector<double> steps(100, -1.0);
+        steps.push_back(0.05);
+        assert(!ST::axisLooksGrosslyNonMonotonic(axisFromSteps(steps)));
+    }
+    // Ascending axis with one noise-level reversal -> not gross.
+    {
+        std::vector<double> steps(100, 1.0);
+        steps.push_back(-0.2);
+        assert(!ST::axisLooksGrosslyNonMonotonic(axisFromSteps(steps)));
+    }
+    // Ascending axis with a GROSS jump (126x the median forward step) -> gross.
+    {
+        std::vector<double> steps(100, 0.01);
+        steps.push_back(-50.0);
+        assert(ST::axisLooksGrosslyNonMonotonic(axisFromSteps(steps)));
+    }
+    // Alternating (IGM voltages used as an OPD axis) -> gross by count.
+    {
+        std::vector<double> steps;
+        for (int i = 0; i < 50; ++i) { steps.push_back(1.0); steps.push_back(-1.0); }
+        assert(ST::axisLooksGrosslyNonMonotonic(axisFromSteps(steps)));
+    }
+    // Median order statistic: 50x1 + 50x3 forward steps (even count) with one
+    // back step of 120. nth_element index size/2 gives the UPPER median (3.0,
+    // threshold 150 -> not gross); an averaged median (2.0, threshold 100)
+    // would wrongly flag it. Pins the C++/Python agreement.
+    {
+        std::vector<double> steps(50, 1.0);
+        steps.insert(steps.end(), 50, 3.0);
+        steps.push_back(-120.0);
+        assert(!ST::axisLooksGrosslyNonMonotonic(axisFromSteps(steps)));
+    }
+
     std::cout << "resampleToGrid: all checks passed\n";
+    std::cout << "axis guard: all checks passed\n";
     return 0;
 }

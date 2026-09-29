@@ -84,8 +84,8 @@ void T100Spectrum::reset() {
     stdWasAvailable_ = false;
 }
 
-void T100Spectrum::setReferenceFromCurrentSpectrum() {
-    if (!appState || appState->active->selectedFilenames.empty()) return;
+bool T100Spectrum::setReferenceFromCurrentSpectrum() {
+    if (!appState || appState->active->selectedFilenames.empty()) return false;
 
     const std::string& fileId = appState->active->selectedFilenames[0];
     auto freqIt = appState->active->spectrum.cachedFrequencies.find(fileId);
@@ -93,7 +93,7 @@ void T100Spectrum::setReferenceFromCurrentSpectrum() {
     if (freqIt == appState->active->spectrum.cachedFrequencies.end() ||
         specIt == appState->active->spectrum.cachedSpectra.end() ||
         freqIt->second.empty() || specIt->second.empty())
-        return;
+        return false;
 
     refX = freqIt->second;
     refY = specIt->second;
@@ -129,6 +129,7 @@ void T100Spectrum::setReferenceFromCurrentSpectrum() {
         appState->requestViewChangeRedraw();
     }
     wsUpsertT100FromPanel(*appState);
+    return true;
 }
 
 static int detectXUnitFromHeader(const std::string& header) {
@@ -175,6 +176,27 @@ void T100Spectrum::setReferenceFromCSV(const std::string& path) {
             v = SpectralToolbox::convertXValue(v, csvU, specU);
     }
 
+    // A jumbled CSV (spreadsheet sort, concatenated exports) breaks the
+    // monotonic-axis assumptions downstream: the overlap window would collapse
+    // to [min(front,back), max(front,back)] and drop most rows, and the
+    // resampler cannot bracket-scan a non-monotonic axis. Normalize ascending
+    // once, here at ingestion.
+    if (!std::is_sorted(rawX.begin(), rawX.end())) {
+        std::vector<size_t> order(rawX.size());
+        for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+        std::stable_sort(order.begin(), order.end(),
+                         [&](size_t a, size_t b) { return rawX[a] < rawX[b]; });
+        std::vector<double> sx(rawX.size()), sy(rawY.size());
+        for (size_t i = 0; i < order.size(); ++i) {
+            sx[i] = rawX[order[i]];
+            sy[i] = rawY[order[i]];
+        }
+        rawX = std::move(sx);
+        rawY = std::move(sy);
+        fprintf(stderr, "Warning: reference CSV '%s' was not sorted by X — "
+                        "sorted ascending\n", path.c_str());
+    }
+
     refX = std::move(rawX);
     refY = std::move(rawY);
     refXUnit = spectrumUnit;
@@ -201,8 +223,8 @@ void T100Spectrum::setReferenceFromCSV(const std::string& path) {
     wsUpsertT100FromPanel(*appState);
 }
 
-void T100Spectrum::setReferenceFromAverage() {
-    if (!appState || !appState->active->averageSpectrum.averageAvailable) return;
+bool T100Spectrum::setReferenceFromAverage() {
+    if (!appState || !appState->active->averageSpectrum.averageAvailable) return false;
 
     const auto& avg = appState->active->averageSpectrum;
     std::vector<double> x = avg.cachedAverageX;
@@ -244,6 +266,7 @@ void T100Spectrum::setReferenceFromAverage() {
         appState->requestViewChangeRedraw();
     }
     wsUpsertT100FromPanel(*appState);
+    return true;
 }
 
 bool T100Spectrum::acquireSpectrumForT100(const std::string& fileId,
@@ -341,12 +364,12 @@ bool T100Spectrum::computeTransmittanceForFile(const std::string& fileId) {
     for (size_t i = 0; i < curFreq.size(); i++)
         convertedCurFreq[i] = SpectralToolbox::convertXValue(curFreq[i], specU, displayUnit);
 
-    double curXmin = std::min(convertedCurFreq.front(), convertedCurFreq.back());
-    double curXmax = std::max(convertedCurFreq.front(), convertedCurFreq.back());
-    double refXmin = std::min(convertedRefX.front(), convertedRefX.back());
-    double refXmax = std::max(convertedRefX.front(), convertedRefX.back());
-    double overlapMin = std::max(curXmin, refXmin);
-    double overlapMax = std::min(curXmax, refXmax);
+    // True min/max, not front/back: a user CSV can be non-monotonic and
+    // front/back would collapse the overlap window to the ends' span.
+    const auto curMinMax = std::minmax_element(convertedCurFreq.begin(), convertedCurFreq.end());
+    const auto refMinMax = std::minmax_element(convertedRefX.begin(), convertedRefX.end());
+    const double overlapMin = std::max(*curMinMax.first, *refMinMax.first);
+    const double overlapMax = std::min(*curMinMax.second, *refMinMax.second);
 
     // Interpolate the current spectrum onto the reference grid once; the loop
     // below keeps the overlap filter + ratio (resampleToGrid is the single
@@ -444,12 +467,11 @@ bool T100Spectrum::computeTransmittanceFromVectors(
     for (size_t i = 0; i < specX.size(); i++)
         convertedCurFreq[i] = SpectralToolbox::convertXValue(specX[i], specU, displayUnit);
 
-    double curXmin = std::min(convertedCurFreq.front(), convertedCurFreq.back());
-    double curXmax = std::max(convertedCurFreq.front(), convertedCurFreq.back());
-    double refXmin = std::min(convertedRefX.front(), convertedRefX.back());
-    double refXmax = std::max(convertedRefX.front(), convertedRefX.back());
-    double overlapMin = std::max(curXmin, refXmin);
-    double overlapMax = std::min(curXmax, refXmax);
+    // True min/max, not front/back (see computeTransmittanceForFile).
+    const auto curMinMax = std::minmax_element(convertedCurFreq.begin(), convertedCurFreq.end());
+    const auto refMinMax = std::minmax_element(convertedRefX.begin(), convertedRefX.end());
+    const double overlapMin = std::max(*curMinMax.first, *refMinMax.first);
+    const double overlapMax = std::min(*curMinMax.second, *refMinMax.second);
 
     // Interpolate the current spectrum onto the reference grid once; the loop
     // below keeps the overlap filter + ratio (resampleToGrid is the single

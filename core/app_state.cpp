@@ -125,6 +125,7 @@ void clearSessionPanels(WorkspaceSession& s) {
     s.spectrum.cachedFrequencies.clear();
     s.spectrum.lastPrimaryPrints.clear();
     s.spectrum.lastSpectrumParams.clear();
+    s.spectrum.spectrumErrors.clear();
     s.loadedData.clear();
     s.rawDataCache.clear();
     s.hilbertXCache.clear();

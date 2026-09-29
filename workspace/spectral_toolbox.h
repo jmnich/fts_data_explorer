@@ -90,6 +90,9 @@ EnergyRatios computeEnergyRatiosDirect(const char* numA, const char* denA,
 // Interpolate (srcX, srcY) onto targetX. Handles ascending and descending srcX.
 // Linear, endpoint-clamped. Empty input -> empty output; degenerate (size 1)
 // srcX -> srcY copy. The ONLY linear-interp path in the codebase (Phase-1 M1.3).
+// A non-monotonic srcX is normalized once (stable-sorted pairs by X) so a
+// jumbled source cannot silently produce bracket garbage; targetX order is
+// preserved (callers may legitimately pass jumbled targets).
 inline std::vector<double> resampleToGrid(
     const std::vector<double>& srcX,
     const std::vector<double>& srcY,
@@ -99,28 +102,53 @@ inline std::vector<double> resampleToGrid(
     if (srcX.size() == 1) return srcY;
     result.reserve(targetX.size());
 
-    const bool ascending = srcX.front() < srcX.back();
+    // Normalize a jumbled source to ascending (rare; the common paths pass a
+    // monotonic axis). Descending sources are handled by the direction branch.
+    std::vector<double> sortedX, sortedY;
+    const std::vector<double>* px = &srcX;
+    const std::vector<double>* py = &srcY;
+    const bool sortedAsc = std::is_sorted(srcX.begin(), srcX.end());
+    const bool sortedDesc = sortedAsc ? false
+        : std::is_sorted(srcX.begin(), srcX.end(), std::greater<double>());
+    if (!sortedAsc && !sortedDesc) {
+        std::vector<size_t> order(srcX.size());
+        for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+        std::stable_sort(order.begin(), order.end(),
+                         [&](size_t a, size_t b) { return srcX[a] < srcX[b]; });
+        sortedX.resize(srcX.size());
+        sortedY.resize(srcY.size());
+        for (size_t i = 0; i < order.size(); ++i) {
+            sortedX[i] = srcX[order[i]];
+            sortedY[i] = srcY[order[i]];
+        }
+        px = &sortedX;
+        py = &sortedY;
+    }
+    const std::vector<double>& sx = *px;
+    const std::vector<double>& sy = *py;
+
+    const bool ascending = sx.front() < sx.back();
     for (double tx : targetX) {
         double interpY;
         if (ascending) {
-            auto it = std::lower_bound(srcX.begin(), srcX.end(), tx);
-            if (it == srcX.begin()) interpY = srcY[0];
-            else if (it == srcX.end()) interpY = srcY.back();
+            auto it = std::lower_bound(sx.begin(), sx.end(), tx);
+            if (it == sx.begin()) interpY = sy[0];
+            else if (it == sx.end()) interpY = sy.back();
             else {
-                size_t hi = it - srcX.begin();
+                size_t hi = it - sx.begin();
                 size_t lo = hi - 1;
-                double frac = (tx - srcX[lo]) / (srcX[hi] - srcX[lo]);
-                interpY = srcY[lo] * (1.0 - frac) + srcY[hi] * frac;
+                double frac = (tx - sx[lo]) / (sx[hi] - sx[lo]);
+                interpY = sy[lo] * (1.0 - frac) + sy[hi] * frac;
             }
         } else {
-            auto it = std::lower_bound(srcX.begin(), srcX.end(), tx, std::greater<double>());
-            if (it == srcX.begin()) interpY = srcY[0];
-            else if (it == srcX.end()) interpY = srcY.back();
+            auto it = std::lower_bound(sx.begin(), sx.end(), tx, std::greater<double>());
+            if (it == sx.begin()) interpY = sy[0];
+            else if (it == sx.end()) interpY = sy.back();
             else {
-                size_t hi = it - srcX.begin();
+                size_t hi = it - sx.begin();
                 size_t lo = hi - 1;
-                double frac = (tx - srcX[lo]) / (srcX[hi] - srcX[lo]);
-                interpY = srcY[lo] * (1.0 - frac) + srcY[hi] * frac;
+                double frac = (tx - sx[lo]) / (sx[hi] - sx[lo]);
+                interpY = sy[lo] * (1.0 - frac) + sy[hi] * frac;
             }
         }
         result.push_back(interpY);
@@ -150,19 +178,62 @@ public:
     struct ProcessedSpectrum {
         std::vector<double> spectrumX;   ///< length N/2 (positive freqs only, index 0 = Inf dropped)
         std::vector<double> spectrumY;   ///< magnitude, normalized by n (unpadded length)
+        std::string error;               ///< non-empty when the result is rejected (empty spectrum)
     };
 
     // ---- primitives --------------------------------------------------------
 
-    /// Linear interpolation at a single point. Endpoints clamped.
+    /// Linear interpolation at a single point. Endpoints clamped. Delegates to
+    /// interpVector, so descending/jumbled sources are normalized identically.
     static double interpPoint(double x, const std::vector<double>& xp, const std::vector<double>& fp);
 
-    /// Vectorised linear interpolation. @p x must be monotonic in the same
-    /// direction as @p xp (ascending or descending) — the two-pointer merge
-    /// scan advances a single bracket and does not re-search per point.
+    /// Vectorised linear interpolation. @p x must be ascending (the merge
+    /// scan advances a single bracket forward); @p xp may be ascending,
+    /// descending or jumbled — a descending source is reversed and a jumbled
+    /// one is stable-sorted by X before the scan, so the bracket invariant
+    /// holds. All callers pass an ascending target (linspace grids).
     static std::vector<double> interpVector(const std::vector<double>& x,
                                             const std::vector<double>& xp,
                                             const std::vector<double>& fp);
+
+    /// True when a non-monotonic axis is GROSSLY broken rather than carrying
+    /// noise-level reversals. Direction-aware: the dominant step direction
+    /// (ascending or descending) defines "forward", so a descending OPD axis
+    /// is judged by its own direction. Calibration against real reference
+    /// data (WUST, ref1, ceramicLPF): isolated reversals reach ~14x the
+    /// median forward step and still produce good spectra; a swapped column
+    /// (IGM voltages used as an OPD axis) reverses on ~half the samples, and
+    /// a broken phase unwrap jumps far beyond 50x the median (measured 126x
+    /// on a segment-reversal fixture). A monotonic axis returns false.
+    static bool axisLooksGrosslyNonMonotonic(const std::vector<double>& axis) {
+        if (axis.size() < 3) return false;
+        std::size_t posCount = 0, negCount = 0;
+        for (std::size_t i = 1; i < axis.size(); ++i) {
+            const double d = axis[i] - axis[i - 1];
+            if (d > 0.0) ++posCount;
+            else if (d < 0.0) ++negCount;
+        }
+        if (posCount == 0 && negCount == 0) return false;   // flat
+        const bool descending = negCount > posCount;
+        std::size_t reversals = 0;
+        double backMax = 0.0;
+        std::vector<double> forward;
+        forward.reserve(axis.size());
+        for (std::size_t i = 1; i < axis.size(); ++i) {
+            const double d = axis[i] - axis[i - 1];
+            const double fwd = descending ? -d : d;
+            if (fwd < 0.0) { ++reversals; backMax = std::max(backMax, -fwd); }
+            else if (fwd > 0.0) forward.push_back(fwd);
+        }
+        if (backMax == 0.0) return false;
+        if (reversals > axis.size() / 100) return true;   // sustained reversal
+        if (forward.size() < 2) return true;
+        const std::size_t mid = forward.size() / 2;
+        std::nth_element(forward.begin(),
+                         forward.begin() + static_cast<std::ptrdiff_t>(mid),
+                         forward.end());
+        return backMax > 50.0 * forward[mid];
+    }
 
     /// Complex division: result = a / b.
     static void complex_divide(fftw_complex* result, fftw_complex a, fftw_complex b);
@@ -231,8 +302,14 @@ public:
      *   4. Apodization: apply selected window function to resampled signal.
      *   5. Zero pad: N = n*(K+1).
      *   6. FFT and magnitude spectrum.
-     *   7. Build X axis as wavelength um = OPD*(K+1)/i, drop index 0 (Inf).
+     *   7. Build X axis from the ACTUAL grid spacing: the resample grid is
+     *      linspace(0, maxOPD, n, endpoint=true), so bin i maps to wavelength
+     *      um = OPD*(K+1)*n/((n-1)*i); drop index 0 (Inf).
      *   8. Convert to requested unit.
+     *
+     * A grossly non-monotonic reference X axis (broken phase unwrap) is
+     * rejected (empty result + error); noise-level reversals are tolerated
+     * and normalized by interpVector.
      *
      * @param primaryDetector    Measurement interferogram [V].
      * @param referenceDetector  Reference (laser) interferogram [V].
