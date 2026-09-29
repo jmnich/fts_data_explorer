@@ -1343,13 +1343,13 @@ own tools.
 <h4 id="sd-rules">24.1.1 Format rules</h4>
 <table>
 <tr><th style="width:2rem">#</th><th>Rule</th></tr>
-<tr><td>1</td><td>Every dataset carries a <code>kind</code> attribute: <code>"original"</code> (as loaded) or <code>"derivative"</code> (computed). <code>kind = "original"</code> is written once, never overwritten.</td></tr>
-<tr><td>2</td><td>Every group carries <code>@origin</code> and <code>@config</code> attributes (JSON strings). Groups contain only datasets.</td></tr>
+<tr><td>1</td><td>Every member - interferogram dataset or member group - carries a <code>kind</code> attribute: <code>"original"</code> (as loaded) or <code>"derivative"</code> (computed). <code>kind = "original"</code> is written once, never overwritten.</td></tr>
+<tr><td>2</td><td>Every group carries <code>@origin</code> and <code>@config</code> attributes (JSON strings). Numeric data lives in datasets; attributes are metadata only.</td></tr>
 <tr><td>3</td><td>No file versioning. A static root <code>@format</code> attribute identifies the layout.</td></tr>
 <tr><td>4</td><td>No host info: no hostnames, usernames, paths, or OS fingerprints. <code>@origin</code> records only application identity and timestamp.</td></tr>
 <tr><td>5</td><td>No images, opaque blobs, base64, executables, or scripts. The container stores only datasets, groups, and string metadata attributes.</td></tr>
 <tr><td>6</td><td>All numeric data is native HDF5 typed datasets (IEEE fp32/fp64, i32). Datatype <em>is</em> the format specifier; <code>@config</code> records units. Strings: VLEN UTF-8 (<code>H5T_C_S1 + H5T_VARIABLE</code>), shape <code>(1,)</code>. Shapes: C order, row-major. All 2-column datasets carry <code>columns</code> and <code>units</code> string attributes.</td></tr>
-<tr><td>7</td><td>Derivative datasets can be safely stripped: delete any group or dataset with <code>kind = "derivative"</code>. <code>igm_uncorrected_x/</code>, <code>igm_corrected_x/</code>, and original spectra are untouched. Apps must tolerate stripped files and recompute on demand.</td></tr>
+<tr><td>7</td><td>Derivative members can be safely stripped: delete any group or dataset with <code>kind = "derivative"</code>. Original members - interferograms with <code>kind = "original"</code> and original spectra - are untouched. Apps must tolerate stripped files and recompute on demand.</td></tr>
 <tr><td>8</td><td>Root datasets: <code>workspace.json</code> (<a href="#sd-workspace">§24.8</a>), <code>measurement_config.json</code> (<a href="#sd-measurement-config">§24.6.1</a>), <code>measurement_comment.txt</code> (<a href="#sd-comment">§24.6.2</a>), <code>tags</code> (<a href="#sd-tags">§24.6.3</a>). All may be empty.</td></tr>
 <tr><td>9</td><td>Configuration is <strong>extensible</strong>: unknown keys are preserved verbatim on save.</td></tr>
 <tr><td>10</td><td>Derivative datasets reference their source data via <code>inputs</code> (absolute HDF5 paths in <code>@config</code>). Every referenced path must exist in the file - a saved file must never contain an <code>inputs</code> entry pointing to a deleted member.</td></tr>
@@ -1435,8 +1435,8 @@ own tools.
 <h4 id="sd-root">24.2.2 Root attributes &amp; datasets</h4>
 <ul>
   <li><strong><code>@format</code></strong> - static <code>"unified-spectral-data-container"</code>. Never changes.</li>
-  <li><strong><code>@created</code></strong> - ISO-8601 UTC timestamp, written at creation. Only reset on "Save As".</li>
-  <li>Root datasets are described in <a href="#sd-workspace">§24.8</a> and <a href="#sd-measurement">§24.6</a>.</li>
+  <li><strong><code>@created</code></strong> - ISO-8601 UTC timestamp, written at creation. Only reset on <code>Save As</code>.</li>
+  <li>Root datasets are described in <a href="#sd-measurement">§24.6</a> and <a href="#sd-workspace">§24.8</a>.</li>
 </ul>
 
 <h4 id="sd-interferograms">24.2.3 Interferograms</h4>
@@ -1462,7 +1462,7 @@ igm_corrected_x/
         <span class="a">attrs["columns"]</span> = ["Primary detector", "OPD axis"]
         <span class="a">attrs["units"]</span>   = ["V", "um"]
 </div>
-<p>One channel per column. <code>axisCorrected</code> is <code>true</code>. Corrected single IFGs are imported from ArcOptix IGMs TXT measurements (<code>kind = "original"</code>). Derivative corrected IFGs may be produced by computation pipelines (e.g. phase correction).</p>
+<p><code>axisCorrected</code> is <code>true</code>. Corrected single IFGs are imported from ArcOptix IGMs TXT measurements (<code>kind = "original"</code>). Derivative corrected IFGs may be produced by computation pipelines (e.g. phase correction).</p>
 
 <h4 id="sd-spectra-layout">24.2.4 Spectrum member groups</h4>
 <p>Precomputed spectra (<code>kind = "original"</code>) come from measurement sources. FFT-computed spectra (<code>kind = "derivative"</code>) come from the app pipeline (<a href="#sd-config-spectrum">§24.7.3</a>). Both use the same layout:</p>
@@ -1491,12 +1491,12 @@ snr_spectra/&lt;id&gt;/                           <span class="c">(member group)
 </div>
 
 <h5 id="sd-allan">24.2.5.3 Allan-Werle plot (<code>allan_werle/</code>)</h5>
-<p>Allan-Werle variance: integration time vs. wavelength. Captures instrument stability characteristics.</p>
+<p>Allan-Werle variance as a function of averaging window (<code>taus</code>, in measurements) and wavelength - it characterises instrument stability.</p>
 <div class="ds">
 allan_werle/&lt;id&gt;/                           <span class="c">(member group)</span>
     <span class="a">attrs:</span> kind, origin, config
     surface_data                             <span class="c">(fp64 [T,W])</span>
-        <span class="a">attrs["columns"]</span> = ["taus", "wavelengths", "allan_var"]  <span class="c">- wavelength labels [nm]</span>
+        <span class="a">attrs["columns"]</span> = ["taus", "wavelengths", "allan_var"]
     wavelengths                              <span class="c">(fp64 [W])</span>
         <span class="a">attrs["units"]</span>     = "um"
     taus                                     <span class="c">(fp64 [T])</span>
@@ -1533,7 +1533,7 @@ t100/&lt;id&gt;/                                   <span class="c">(member group
 </ul>
 
 <h3 id="sd-kind">24.4 The <code>kind</code> attribute</h3>
-<p>String attribute on each dataset. Type groups carry <code>@schema</code> describing member layout.</p>
+<p>String attribute on each member - interferogram dataset or member group. Type groups carry <code>@schema</code> describing member layout.</p>
 <table>
 <tr><th><code>kind</code></th><th>Meaning</th></tr>
 <tr><td><code>"original"</code></td><td>Data as loaded from a measurement source</td></tr>
@@ -1566,7 +1566,7 @@ t100/&lt;id&gt;/                                   <span class="c">(member group
 <h3 id="sd-measurement">24.6 Measurement setup metadata (root)</h3>
 
 <h4 id="sd-measurement-config">24.6.1 <code>measurement_config.json</code></h4>
-<p>JSON dataset for measurement setup settings. Extensible (unknown keys preserved).</p>
+<p>Root VLEN-string dataset holding a JSON object with the measurement setup. Extensible (unknown keys preserved).</p>
 <table>
 <tr><th>Key</th><th>Type</th><th>Description</th></tr>
 <tr><td><code>instrument.model</code></td><td>string</td><td>e.g. <code>"ArcOptix FT"</code></td></tr>
@@ -1654,7 +1654,7 @@ t100/&lt;id&gt;/                                   <span class="c">(member group
 <p>Same as <a href="#sd-config-spectrum">§24.7.3</a>, plus <code>count</code> (i32, number of files averaged).</p>
 
 <h4 id="sd-config-snr">24.7.5 SNR spectrum</h4>
-<p>Same as <a href="#sd-config-average">§24.7.4</a>, plus <code>fileCount</code> (i32, ≥ 2). Data stores SNR per bin (mean/stddev online). Column 0: x-axis; column 1: SNR (dimensionless).</p>
+<p>Same as <a href="#sd-config-average">§24.7.4</a>, plus <code>fileCount</code> (i32, ≥ 2). The data stores the SNR per bin, computed online as mean/stddev across the input files. Column 0: x-axis; column 1: SNR (dimensionless).</p>
 
 <h4 id="sd-config-allan">24.7.6 Allan-Werle plot</h4>
 <table>
@@ -1687,7 +1687,7 @@ t100/&lt;id&gt;/                                   <span class="c">(member group
 <p>Does <strong>not</strong> store UI chrome: no window geometry, docking layout, theme, fonts, thread pool.</p>
 <blockquote>Apps must tolerate empty <code>workspace.json</code> (<code>{}</code> or empty string).</blockquote>
 
-<h4>24.8.0 Layout</h4>
+<h4>24.8.1 Layout</h4>
 <pre><code>{
   "app": { "name": "FTS Data Explorer", "version": "26.08.3" },
   "applications": {
@@ -1719,7 +1719,7 @@ t100/&lt;id&gt;/                                   <span class="c">(member group
 }</code></pre>
 <p><code>applications</code> keys match the <code>app.name</code> string from <code>@origin</code>.</p>
 
-<h4>24.8.1 Key reference</h4>
+<h4>24.8.2 Key reference</h4>
 <table>
 <tr><th>Key</th><th>Type</th><th>Values</th></tr>
 <tr><td><code>app.name</code></td><td>string</td><td>Application name</td></tr>
@@ -1749,7 +1749,7 @@ t100/&lt;id&gt;/                                   <span class="c">(member group
 <tr><td><code>t100View.energyRatios</code></td><td>array</td><td>Up to 3 {num,den} pairs</td></tr>
 </table>
 
-<h4>24.8.2 Not persisted</h4>
+<h4>24.8.3 Not persisted</h4>
 <p>Window geometry, UI theme, docking layout, thread config, filesystem paths, host identity, transient state, derivable booleans - live in <code>~/.fts_data_explorer_config</code>.</p>
 
 <h3 id="sd-h5py">24.9 Reading a workspace with h5py</h3>
@@ -1876,7 +1876,7 @@ this page specifies what the container adds.
 <tr><td><code>sources</code></td><td>array</td><td>One entry per embedded workspace. Order is preserved as written (append on embed, erase on remove).</td></tr>
 <tr><td><code>sources[].id</code></td><td>string</td><td>Stable source identifier (slug). Unique within the archive. Used as the <code>sources/&lt;id&gt;/</code> group name.</td></tr>
 <tr><td><code>sources[].name</code></td><td>string</td><td>Display name. May differ from <code>id</code> after a rename. The manifest name is authoritative; <code>@summary</code> mirrors it best-effort.</td></tr>
-<tr><td><code>sources[].memberCount</code></td><td>i32</td><td>Number of primary members (corrected IFG &gt; uncorrected IFG &gt; original spectra). Refreshed on save-back.</td></tr>
+<tr><td><code>sources[].memberCount</code></td><td>i32</td><td>Number of primary members, by the read priority corrected IFG &gt; uncorrected IFG &gt; original spectra. Refreshed on save-back.</td></tr>
 <tr><td><code>sources[].createdIso</code></td><td>string</td><td>ISO-8601 UTC timestamp of first embed.</td></tr>
 <tr><td><code>experiments</code></td><td>array</td><td>Optional. One entry per persisted cross-workspace experiment.</td></tr>
 <tr><td><code>experiments[].id</code></td><td>string</td><td>Stable experiment identifier. Used as the <code>experiments/&lt;id&gt;/</code> group name.</td></tr>
@@ -2218,7 +2218,7 @@ sample with the leading <code># </code> stripped.
 <h3>26.4 Writing the workspace file</h3>
 <p>
 The smallest useful converter writes the four root datasets, then one interferogram group.
-The skeleton below is adapted from the WUST converter shipped with the standard collection:
+The application runs every converter as <code>&lt;python&gt; &lt;script&gt; &lt;input&gt; &lt;output.h5&gt;</code>, so the skeleton ends with an entry point - only <code>parse_input</code>, which turns the instrument's files into scan arrays, is left to implement. It is adapted from the WUST converter shipped with the standard collection:
 </p>
 <pre><code>import datetime
 import json
@@ -2275,18 +2275,34 @@ def write_container(out_path, scans):
         })
 
     os.replace(tmp_path, out_path)   # atomic: no half-written file is ever visible
+
+
+def parse_input(input_path):
+    """Parse the instrument's format into [(name, ndarray[N, 2] fp32), ...]."""
+    raise NotImplementedError("replace this with your format's parsing")
+
+
+def main():
+    import sys
+    if len(sys.argv) != 3:
+        raise SystemExit("usage: my_instrument_csv.py &lt;input&gt; &lt;output.h5&gt;")
+    scans = parse_input(sys.argv[1])
+    write_container(sys.argv[2], scans)
+
+
+if __name__ == "__main__":
+    main()
 </code></pre>
 <p>Points to keep in mind when adapting this skeleton:</p>
 <ul>
-  <li>For spectra, x/y datasets are two-column with the x axis in column 0. Interferogram groups are special: uncorrected is [Reference detector, Primary detector], corrected is [Primary detector, OPD axis] (Sections <a href="#sd-igm-uncorrected">24.2.3.1</a> and <a href="#sd-igm-corrected">24.2.3.2</a>).</li>
+  <li>For spectra, x/y datasets are two-column with the x axis in column 0. Interferogram groups are special: uncorrected is [Reference detector, Primary detector], corrected is [Primary detector, OPD axis].</li>
   <li>Every dataset carries <code>kind = "original"</code> plus <code>columns</code> and
       <code>units</code> string attributes.</li>
   <li>Every group carries <code>@origin</code> and <code>@config</code> JSON attributes. The application stores them verbatim - dataset type and axis handling come from which group the members live in, not from <code>@config</code> - but keep the keys shown above for external tools and round-tripping.</li>
   <li>Data with an OPD axis belongs in <code>igm_corrected_x/</code> with
       <code>axisCorrected: true</code> and columns
-      <code>["Primary detector", "OPD axis"]</code> (<a href="#sd-igm-corrected">Section 24.2.3.2</a>). Converters that
-      deliver spectra directly write original members under <code>spectra/</code>
-      (<a href="#sd-spectra-layout">Section 24.2.4</a>).</li>
+      <code>["Primary detector", "OPD axis"]</code>. Converters that
+      deliver spectra directly write original members under <code>spectra/</code>.</li>
   <li>All strings are variable-length UTF-8 - use the helper shown above rather than fixed
       width arrays.</li>
 </ul>
@@ -2348,7 +2364,7 @@ The optional configuration file controls the calculation. Create a starting poin
 <pre><code>{
   "spectrum": {
     "zeroPadK":          { "_comment": "Zero-padding factor (0-16).", "value": 0 },
-    "apodizationWindow": { "_comment": "Rectangular, Gauss, ..., NortonBeer.", "value": "Rectangular" },
+    "apodizationWindow": { "_comment": "Rectangular, Gauss, Triangular, NortonBeer, DolphChebyshev.", "value": "Rectangular" },
     "nortonBeerFwhm":    { "_comment": "Norton-Beer FWHM (1.0-2.0).", "value": 1.5 },
     "xCorrectionMethod": { "_comment": "Hilbert or PeakFinding.", "value": "Hilbert" },
     "xUnit":             { "_comment": "cm-1, um, THz.", "value": "cm-1" },
