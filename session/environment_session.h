@@ -21,9 +21,13 @@ struct InterferogramMember;
 // Phase-3 M3.2 — instantiable cross-workspace analysis tab.
 // LIVE object, never folded: multiple instances of a type coexist, each owns
 // its state + futures; tab switch only changes which instance renders.
-// Picks use STABLE keys (workspace path, or "multi-workspace .h5#sourceId") resolved to
+// Picks use STABLE keys ("multi-workspace .h5#sourceId") resolved to
 // live sessions at each use; a closed referenced session degrades the owning
-// rows (marked unavailable, removable) — never re-pointed.
+// rows (marked unavailable, removable) — never re-pointed. POLICY: the
+// pickers only ever offer sources embedded in the multi-workspace container —
+// a standalone workspace file open in a tab is not selectable. Resolution
+// stays tolerant so legacy persisted references to external files keep
+// loading (degraded); new ones cannot be created from the UI.
 enum class EnvType { Absorbance, Comparator };   // Pca removed (Phase-2 user decision)
 
 // Comparator artifact types: what to overlay across the selected datasets.
@@ -155,9 +159,9 @@ public:
 
     // Comparator selection.
     int artifactSelector = 0;            // ComparatorArtifact index
-    std::vector<std::string> comparatorKeys;   // stable keys; empty = all open datasets
+    std::vector<std::string> comparatorKeys;   // stable keys; empty = all embedded datasets
     // True once the user has toggled a checkbox: an empty comparatorKeys then
-    // means "nothing selected", not "all open datasets".
+    // means "nothing selected", not "all embedded datasets".
     bool comparatorKeysExplicit = false;
     // Per-dataset member pick (multi-member artifacts: raw spectra / T100 / IFG).
     // key = dataset stable key, value = member id ("" / absent = first member).
@@ -291,6 +295,13 @@ public:
     // Extract overlay curves for the selected artifact from the selected
     // datasets (public for the roundtrip test; pure data extraction).
     std::vector<ComparatorCurve> gatherCurves(AppState& s);
+
+    // Comparator dataset-inclusion predicate — the single source of truth
+    // shared by gatherCurves and buildCurveSignature (a drift between the
+    // gather and its cache signature would freeze the plot on stale data).
+    // Explicit keys match verbatim (legacy-tolerant); auto-all = every
+    // source embedded in the container.
+    bool comparatorIncludes(AppState& s, const std::string& key);
 
 private:
     // Cached display curves for the Viewer (and, force-fresh, for exportCsv).

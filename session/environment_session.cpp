@@ -119,6 +119,21 @@ std::vector<ComparatorSource> comparatorSources(AppState& s) {
     return out;
 }
 
+// Policy (embedded-only experiments): the pickers never offer a dataset that
+// lives outside the multi-workspace container. Resolution stays tolerant —
+// comparatorSources() above still resolves open standalone tabs for legacy
+// persisted references — but nothing new can be created against them.
+// True iff `key` is the stable key of a source embedded in the container
+// ("multi-workspace .h5#sourceId" with the id present in sessionTab.sources).
+bool isEmbeddedSourceKey(AppState& s, const std::string& key) {
+    const std::string& cp = s.sessionTab.multiWorkspacePath;
+    if (cp.empty() || key.rfind(cp + "#", 0) != 0) return false;
+    const std::string id = key.substr(cp.size() + 1);
+    for (const auto& src : s.sessionTab.sources)
+        if (src.id == id) return true;
+    return false;
+}
+
 // Stride-downsample a curve pair to <= maxPoints (the app's existing policy).
 void downsampleCurve(const std::vector<double>& x, const std::vector<double>& y,
                      size_t maxPoints, std::vector<double>& outX,
@@ -1062,12 +1077,12 @@ void EnvironmentSession::renderViewWindow() {
 // change). Only the curve list scrolls; the comment stays pinned at the bottom.
 void EnvironmentSession::renderAbsorbanceConfig() {
     std::vector<std::pair<std::string, std::string>> datasets;  // (key, label)
-    for (const auto& sess : appState.sessions)
-        datasets.emplace_back(sess->key, sess->label());
+    // Policy: only sources embedded in the multi-workspace container are
+    // pickable — a standalone workspace file open in its own tab is never
+    // offered. sourceLabel prefers the open-tab label when one exists.
     for (const auto& src : appState.sessionTab.sources) {
         const std::string key = appState.sessionTab.multiWorkspacePath + "#" + src.id;
-        if (sessionOpen(key)) continue;
-        datasets.emplace_back(key, src.name);
+        datasets.emplace_back(key, sourceLabel(key));
     }
 
     static const int kArtifacts[2] = {
@@ -1367,21 +1382,33 @@ void EnvironmentSession::renderComparatorConfig() {
     renderCommentEditor();
 }
 
-// Comparator: checkbox list of available datasets (open tabs ∪ embedded
-// sources). comparatorKeys empty = "all open datasets". Embedded sources need not
-// be open in a tab — gatherCurves reads their artifacts from the archive.
-// Rows are greyed when the selected artifact is unavailable and yellow when it
-// is stale; multi-member artifacts get a per-dataset member dropdown.
+// Comparator: checkbox list of the datasets embedded in the multi-workspace
+// container (open tabs and non-open embedded sources alike — policy: nothing
+// outside the container is pickable). comparatorKeys empty = "all embedded
+// datasets". Embedded sources need not be open in a tab — gatherCurves reads
+// their artifacts from the archive. A legacy explicit key that still resolves
+// outside the container (standalone workspace open in its own tab) keeps a row
+// so it stays visible and removable, but is never offered as a new pick. Rows
+// are greyed when the selected artifact is unavailable and yellow when it is
+// stale; multi-member artifacts get a per-dataset member dropdown.
 void EnvironmentSession::renderDatasetSelector() {
     ImGui::TextUnformatted("Included datasets");
     const auto artifact = static_cast<ComparatorArtifact>(artifactSelector);
-    const auto sources = comparatorSources(appState);
 
     const bool autoAll = comparatorKeys.empty() && !comparatorKeysExplicit;
     const auto hasKey = [&](const std::string& k) {
         return std::find(comparatorKeys.begin(), comparatorKeys.end(), k) !=
                comparatorKeys.end();
     };
+
+    // Rows = every embedded source (open or not) ∪ explicit keys that resolve
+    // outside the container. The latter only exist in legacy persisted
+    // selections; unresolvable keys add no row — they contribute no curve.
+    std::vector<ComparatorSource> sources;
+    for (const auto& src : comparatorSources(appState))
+        if (isEmbeddedSourceKey(appState, src.key) || hasKey(src.key))
+            sources.push_back(src);
+
     const ImVec4 yellow(1.0f, 0.8f, 0.2f, 1.0f);
 
     for (const auto& src : sources) {
@@ -1389,8 +1416,10 @@ void EnvironmentSession::renderDatasetSelector() {
         // embedded twice) — hashing the label alone would collide the
         // checkbox (and nested widgets) IDs. The key is stable and unique.
         ImGui::PushID(src.key.c_str());
-        const bool isOpen = sessionOpen(src.key);
-        bool checked = isOpen ? (autoAll || hasKey(src.key)) : hasKey(src.key);
+        // Auto-all checks every embedded row (legacy external rows exist only
+        // for explicit keys, so autoAll is never true alongside them) —
+        // matches gatherCurves' inclusion predicate.
+        bool checked = autoAll || hasKey(src.key);
         const ArtifactInfo info = artifactInfo(*src.ws, artifact, src.key);
 
         // Row coloring: grey (unavailable) / yellow (stale) / default.
@@ -1399,10 +1428,10 @@ void EnvironmentSession::renderDatasetSelector() {
         else if (info.stale) ImGui::PushStyleColor(ImGuiCol_Text, yellow);
 
         if (ImGui::Checkbox(src.label.c_str(), &checked)) {
-            if (autoAll) {   // materialize the implicit all-open selection
+            if (autoAll) {   // materialize the implicit all-embedded selection
                 comparatorKeys.clear();
                 for (const auto& o : sources)
-                    if (sessionOpen(o.key)) comparatorKeys.push_back(o.key);
+                    comparatorKeys.push_back(o.key);
             }
             comparatorKeysExplicit = true;
             dirty = true;
@@ -1446,7 +1475,7 @@ void EnvironmentSession::renderDatasetSelector() {
         ImGui::PopID();
     }
     if (sources.empty())
-        ImGui::TextDisabled("No datasets available — open a workspace first.");
+        ImGui::TextDisabled("No datasets embedded in the workspace.");
 }
 
 // X-unit toggle (cm-1 / um / THz) shared by both env types. Env OWNS unit
@@ -1835,22 +1864,26 @@ void EnvironmentSession::renderDifferenceWindow() {
 // datasets. All artifact types read the persisted workspace model, so embedded
 // embedded sources work without an open tab. Multi-member artifacts show one
 // curve per dataset (the picked member, default first).
+// Comparator dataset-inclusion predicate (see header). Must match
+// buildCurveSignature's walk — both call THIS function.
+bool EnvironmentSession::comparatorIncludes(AppState& s, const std::string& key) {
+    if (comparatorKeys.empty())
+        return !comparatorKeysExplicit && isEmbeddedSourceKey(s, key);
+    return std::find(comparatorKeys.begin(), comparatorKeys.end(), key) !=
+           comparatorKeys.end();
+}
+
 std::vector<ComparatorCurve> EnvironmentSession::gatherCurves(AppState& s) {
     using ST = SpectralToolbox::SpectrumXUnit;
     const auto artifact = static_cast<ComparatorArtifact>(artifactSelector);
     const auto to = static_cast<ST>(plot.xUnitSelector);
     std::vector<ComparatorCurve> curves;
 
-    const auto isOpenSession = [&](const std::string& key) {
-        for (const auto& sess : s.sessions)
-            if (sess->key == key) return true;
-        return false;
-    };
+    // Policy: auto-all means every dataset embedded in the container (open
+    // or not) — a standalone workspace tab is never auto-included. Explicit
+    // keys stay tolerant so legacy persisted references keep resolving.
     const auto included = [&](const std::string& key) {
-        if (comparatorKeys.empty())
-            return !comparatorKeysExplicit && isOpenSession(key);   // auto-all (open) or nothing
-        return std::find(comparatorKeys.begin(), comparatorKeys.end(), key) !=
-               comparatorKeys.end();
+        return comparatorIncludes(s, key);
     };
 
     for (const auto& src : comparatorSources(s)) {
@@ -1992,10 +2025,7 @@ std::string EnvironmentSession::buildCurveSignature() {
     for (const auto& src : comparatorSources(appState)) {
         sig += src.key; sig += '\x1f';
         sig += src.label; sig += '\x1f';
-        const bool included = comparatorKeys.empty()
-            ? (!comparatorKeysExplicit && sessionOpen(src.key))
-            : std::find(comparatorKeys.begin(), comparatorKeys.end(), src.key) !=
-                  comparatorKeys.end();
+        const bool included = comparatorIncludes(appState, src.key);
         append(static_cast<int>(included));
         append(src.ws->memberRevision());
         if (!included) continue;
@@ -2839,6 +2869,59 @@ static nlohmann::json experimentStatsJson(const EnvironmentSession& env) {
     return stats;
 }
 
+// ── D: persisted-key re-basing (archive relocation) ────────────────────────
+// A persisted embedded-source key carries the archive's save-time absolute
+// path ("<save path>#<sourceId>"). When the file is copied or moved, that
+// path no longer matches the open project's — the reference would degrade
+// and force a re-pick. The source id is stable, so at load every key whose
+// '#'-suffix names a source embedded in THIS container is rewritten onto the
+// path the project was opened from. Keys without a matching embedded id
+// (legacy external standalone references, dangling ids) are left untouched
+// and degrade exactly as before. Idempotent: opening from the same path is
+// a no-op; the re-based keys persist on the next save.
+static std::string rebasedSourceKey(AppState& s, const std::string& key) {
+    const size_t hash = key.rfind('#');
+    if (hash == std::string::npos) return key;
+    const std::string id = key.substr(hash + 1);
+    for (const auto& src : s.sessionTab.sources)
+        if (src.id == id) return s.sessionTab.multiWorkspacePath + "#" + id;
+    return key;
+}
+
+// Re-base every persisted source key of one restored instance: absorbance
+// curve keys, comparator key list, member picks, and the staleness
+// fingerprints (composite "sourceKey \x1f artifact \x1f memberId" — only the
+// first segment carries the path).
+static void rebaseExperimentKeys(AppState& s, EnvironmentSession& env) {
+    // No container prefix to re-base onto (sources only load with a manifest,
+    // but keep the invariant local): re-basing would emit "#<id>".
+    if (s.sessionTab.multiWorkspacePath.empty()) return;
+    for (auto& c : env.curves) {
+        c.refKey = rebasedSourceKey(s, c.refKey);
+        c.sampleKey = rebasedSourceKey(s, c.sampleKey);
+    }
+    for (auto& k : env.comparatorKeys) k = rebasedSourceKey(s, k);
+    if (!env.memberPicks.empty()) {
+        std::map<std::string, std::string> rebased;
+        for (const auto& [k, v] : env.memberPicks)
+            rebased[rebasedSourceKey(s, k)] = v;
+        env.memberPicks = std::move(rebased);
+    }
+    if (!env.storedFingerprints.empty()) {
+        std::map<std::string, MemberSnapshot> rebased;
+        for (const auto& [composite, snap] : env.storedFingerprints) {
+            const size_t sep = composite.find('\x1f');
+            if (sep == std::string::npos) {
+                rebased[composite] = snap;
+                continue;
+            }
+            rebased[rebasedSourceKey(s, composite.substr(0, sep)) +
+                    composite.substr(sep)] = snap;
+        }
+        env.storedFingerprints = std::move(rebased);
+    }
+}
+
 bool multiWorkspaceSaveExperiment(AppState& s, EnvironmentSession& env,
                          const std::string& path, std::string& err) {
     if (env.id.empty()) {
@@ -2910,6 +2993,9 @@ bool multiWorkspaceLoadExperiments(AppState& s, const std::string& path, std::st
             for (auto it = fps.begin(); it != fps.end(); ++it)
                 if (it.value().is_object())
                     env->storedFingerprints[it.key()] = memberSnapshotFromJson(it.value());
+            // D — re-base persisted source keys onto the path this project
+            // was opened from (survives copy/move of the archive).
+            rebaseExperimentKeys(s, *env);
             // Results loaded directly — same code path as computing (curveY
             // derived via applyYMode), so no secondary math exists in the
             // loader: what was plotted is what is stored (bitwise).

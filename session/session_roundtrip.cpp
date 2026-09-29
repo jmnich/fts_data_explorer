@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
 #include <thread>
 #include <string>
 #include <vector>
@@ -1266,7 +1267,13 @@ void test11_comparator() {
     // gatherCurves: average-spectrum artifact, both datasets, cm-1 display.
     EnvironmentSession cmp(EnvType::Comparator, "Comparator curves");
     cmp.plot.xUnitSelector = 0;   // cm-1
+    // Policy (embedded-only experiments): auto-all = datasets embedded in
+    // the container. These sessions carry standalone-style keys, so auto-all
+    // selects nothing; explicit keys stay tolerant (legacy references).
     auto curves = cmp.gatherCurves(s);
+    CHECK(curves.empty());
+    cmp.comparatorKeys = {"/tmp/cmp_a.h5", "/tmp/cmp_b.h5"};
+    curves = cmp.gatherCurves(s);
     CHECK(curves.size() == 2);
     CHECK(curves[0].label == "cmp_a (avg of 2)");
     CHECK(curves[0].x.size() == 3 && curves[0].y.size() == 3);
@@ -1290,8 +1297,9 @@ void test11_comparator() {
     CHECK(cmp.gatherCurves(s).empty());
     cmp.comparatorKeysExplicit = false;
 
-    // SNR artifact: none yet → empty.
+    // SNR artifact: none yet → empty (explicit keys — see policy note above).
     cmp.artifactSelector = static_cast<int>(ComparatorArtifact::Snr);
+    cmp.comparatorKeys = {"/tmp/cmp_a.h5"};
     CHECK(cmp.gatherCurves(s).empty());
 
     // SNR artifact with data.
@@ -1302,8 +1310,7 @@ void test11_comparator() {
     snr.x = {1000.0, 2000.0};
     snr.y = {0.1, 0.2};
     s.sessions[0]->workspace.snrSpectra.members.push_back(snr);
-    cmp.comparatorKeys.clear();
-    curves = cmp.gatherCurves(s);
+    curves = cmp.gatherCurves(s);   // explicit key from above stays set
     CHECK(curves.size() == 1);
     CHECK(curves[0].label == "cmp_a (SNR of 4)");
     CHECK(curves[0].x.size() == 2);
@@ -2528,6 +2535,125 @@ void test19_t100FullResInteractive() {
 
 }  // namespace
 
+// Policy (embedded-only experiments) + D (relocation re-basing): the
+// comparator's auto-all covers only sources embedded in the container (an
+// open standalone workspace tab is never auto-included; a non-open embedded
+// source IS), and persisted experiment keys are re-based onto the path the
+// archive is opened from, so a copied or moved container keeps its
+// experiment references.
+void test20_experimentReferencePolicy() {
+    std::printf("test20: experiment source policy + key re-basing...\n");
+    const std::string srcPath = "/tmp/fts_policy_src.h5";
+    const std::string pathA = "/tmp/fts_policy_a.h5";
+    const std::string pathB = "/tmp/fts_policy_b.h5";
+    std::remove(srcPath.c_str());
+    std::remove(pathA.c_str());
+    std::remove(pathB.c_str());
+    std::string err;
+
+    // Auto-all: an embedded source without an open tab IS included.
+    AppState sp;
+    sp.sessionTab.multiWorkspaceOpen = true;
+    sp.sessionTab.multiWorkspacePath = "/tmp/fts_policy_virtual.h5";
+    SourceSummary emb;
+    emb.id = "src_1";
+    emb.name = "embeddedA";
+    sp.sessionTab.sources.push_back(emb);
+    Workspace wse = makeFixtureWorkspace("embeddedA");
+    TwoColumnMember avgE;
+    avgE.id = "average";
+    avgE.units = {"cm-1", "a.u."};
+    avgE.config = nlohmann::json{{"count", 2}}.dump();
+    avgE.x = {900.0};
+    avgE.y = {0.4};
+    wse.averageSpectra.members.push_back(avgE);
+    sp.sessionTab.sourceCache.emplace("src_1", std::move(wse));
+    // An open standalone workspace tab is NOT auto-included.
+    auto sa = std::make_unique<WorkspaceSession>();
+    sa->key = "/tmp/fts_policy_standalone.h5";
+    sa->path = sa->key;
+    sa->workspace = makeFixtureWorkspace("standalone");
+    TwoColumnMember avgS;
+    avgS.id = "average";
+    avgS.units = {"cm-1", "a.u."};
+    avgS.config = nlohmann::json{{"count", 1}}.dump();
+    avgS.x = {700.0};
+    avgS.y = {0.3};
+    sa->workspace.averageSpectra.members.push_back(avgS);
+    sp.sessions.push_back(std::move(sa));
+
+    EnvironmentSession cmp(EnvType::Comparator, "policy");
+    cmp.plot.xUnitSelector = 0;   // cm-1
+    const auto picked = cmp.gatherCurves(sp);   // auto-all: no explicit keys
+    CHECK(picked.size() == 1);
+    CHECK(picked[0].label.rfind("embeddedA", 0) == 0);
+
+    // D — relocation: save an experiment keyed to the archive's save-time
+    // path, copy the container to a different location, reopen: the
+    // persisted keys (curve keys + staleness fingerprints) re-base.
+    H5Store::save(srcPath, makeFixtureWorkspace("policy"));
+    AppState s;
+    CHECK(multiWorkspaceCreate(pathA, err));
+    std::string idA;
+    CHECK(multiWorkspaceAddSource(pathA, srcPath, idA, err));
+    EnvironmentSession* exp = createExperiment(s, EnvType::Absorbance);
+    s.pendingExperimentIdx = -1;
+    const std::string keyA = pathA + "#" + idA;
+    exp->curves.push_back(AbsorbanceCurve{});
+    exp->curves[0].refKey = keyA;
+    exp->curves[0].refMember = "spec_record_0";
+    exp->curves[0].sampleKey = keyA;
+    exp->curves[0].sampleMember = "spec_record_0";
+    MemberSnapshot snap;   // composite fingerprint key carries the path too
+    snap.memberId = "spec_record_0";
+    snap.valid = true;
+    exp->storedFingerprints[keyA + "\x1f" "1" "\x1f" "spec_record_0"] = snap;
+    CHECK(multiWorkspaceSaveExperiment(s, *exp, pathA, err));
+    const std::string expId = exp->id;
+    CHECK(!expId.empty());
+
+    // Comparator experiment: the explicit key list + member picks carry the
+    // archive path as well — re-based by the same load path.
+    EnvironmentSession* cmpExp = createExperiment(s, EnvType::Comparator);
+    s.pendingExperimentIdx = -1;
+    cmpExp->artifactSelector = static_cast<int>(ComparatorArtifact::RawSpectrum);
+    cmpExp->comparatorKeys = {keyA};
+    cmpExp->comparatorKeysExplicit = true;
+    cmpExp->memberPicks[keyA] = "spec_record_0";
+    CHECK(multiWorkspaceSaveExperiment(s, *cmpExp, pathA, err));
+    const std::string cmpExpId = cmpExp->id;
+    CHECK(!cmpExpId.empty());
+    std::remove(srcPath.c_str());
+
+    CHECK(std::filesystem::copy_file(pathA, pathB));
+
+    AppState s2;
+    CHECK(multiWorkspaceLoad(s2, pathB, err));
+    CHECK(multiWorkspaceLoadExperiments(s2, pathB, err));
+    CHECK(s2.experiments.size() == 2);
+    EnvironmentSession* e2 = nullptr;
+    EnvironmentSession* c2 = nullptr;
+    for (auto& e : s2.experiments) {
+        if (e->id == expId) e2 = e.get();
+        else if (e->id == cmpExpId) c2 = e.get();
+    }
+    CHECK(e2 != nullptr);
+    CHECK(c2 != nullptr);
+    const std::string keyB = pathB + "#" + idA;
+    CHECK(e2->curves.size() == 1);
+    CHECK(e2->curves[0].refKey == keyB);
+    CHECK(e2->curves[0].sampleKey == keyB);
+    CHECK(e2->storedFingerprints.count(keyB + "\x1f" "1" "\x1f" "spec_record_0") == 1);
+    CHECK(e2->storedFingerprints.count(keyA + "\x1f" "1" "\x1f" "spec_record_0") == 0);
+    CHECK(c2->comparatorKeys == std::vector<std::string>({keyB}));
+    CHECK(c2->memberPicks.size() == 1);
+    CHECK(c2->memberPicks.count(keyB) == 1);
+    CHECK(c2->memberPicks.count(keyA) == 0);
+
+    std::remove(pathA.c_str());
+    std::remove(pathB.c_str());
+}
+
 int main() {
     test1_singleRoundtrip();
     test2_twoSessionsABBA();
@@ -2550,6 +2676,7 @@ int main() {
     test17_ifgViewStateRoundTrip();
     test18_noEarlyReturnLeakFromT100();
     test19_t100FullResInteractive();
+    test20_experimentReferencePolicy();
     std::printf("fts_session_roundtrip: all %d checks passed\n", g_checks);
     return 0;
 }
