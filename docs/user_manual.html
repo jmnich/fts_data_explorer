@@ -198,7 +198,7 @@ h5 { font-size: 0.95rem; margin: 1rem 0 0.35rem; }
   <li><a href="#average">12. Average spectrum</a></li>
   <li><a href="#snr">13. SNR</a></li>
   <li><a href="#allan">14. Allan variance</a></li>
-  <li><a href="#t100">15. 100&nbsp;% Transmission line</a></li>
+  <li><a href="#t100">15. 100% Transmission line</a></li>
   <li><a href="#hitran">16. HITRAN Gas Markers</a></li>
   <li><a href="#export">17. Export panel</a></li>
   <li class="toc-chapter">Multi-dataset work</li>
@@ -272,7 +272,7 @@ restores the session exactly as it was left; <a href="#format">Section 4</a> exp
       peak finding, choose an apodization window and zero-padding, and display the result in
       cm⁻¹, µm, or THz (Sections <a href="#spectrum-calc">7</a> and <a href="#spectrum">11</a>).</li>
   <li><strong>Run the standard analyses.</strong> Average spectrum, spectral SNR,
-      100&nbsp;% transmittance with ASTM E1421-compliant or custom energy ratios, and Allan variance for stability assesment (Sections <a href="#average">12</a>–<a href="#t100">15</a>).</li>
+      100% transmittance with ASTM E1421-compliant or custom energy ratios, and Allan variance for stability assesment (Sections <a href="#average">12</a>–<a href="#t100">15</a>).</li>
   <li><strong>Compare datasets.</strong> Comparator experiment can overlay all types of artifacts calculated from several datasets and compute difference curves.</li>
   <li><strong>Calculate absorbance/transmittance spectra of samples.</strong> Absorbance experiment allows to freely select reference and sample spectra from any available dataset and overlay curves from multiple experiments. Residual calculation is supported.</li>
   <li><strong>Check spectral features.</strong> Mark HITRAN band markers for eight common gases on the Spectrum View and Average plots (and in spectral experiment viewers) (<a href="#hitran">Section 16</a>).</li>
@@ -329,7 +329,7 @@ The application is built around a simple workflow: raw measurements come in, pro
       recipe and apply it to the other datasets, so that every file is processed the same
       way. See <a href="#batch">Section 19</a>.</li>
   <li><strong>Extract the information.</strong> Use the analysis panels (average spectrum,
-      SNR, 100&nbsp;% transmittance with energy ratios, Allan variance) and the
+      SNR, 100% transmittance with energy ratios, Allan variance) and the
       cross-dataset experiments. See Sections <a href="#average">12</a>–<a href="#t100">15</a> and <a href="#experiments">20</a>–<a href="#exporting-experiments">24</a>.</li>
   <li><strong>Export the results.</strong> Write any curve, spectrum, or table to CSV for
       reports and further analysis. See <a href="#export">Section 17</a>.</li>
@@ -404,7 +404,7 @@ on them, which is why a reopened dataset looks exactly as it was left:
   <li><strong>Processing settings and display state</strong> — X-axis correction, reference
       laser wavelength, apodization, zero-padding, detector sensitivity, axis units, plot
       zoom ranges, and the file selection.</li>
-  <li><strong>Computed results</strong> — spectra, average spectrum, SNR, 100&nbsp;% T,
+  <li><strong>Computed results</strong> — spectra, average spectrum, SNR, 100% T,
       Allan variance, and the inputs they were calculated from.</li>
   <li><strong>Experiments and recipes</strong> — Comparator and Absorbance setups with their
       saved results, and batch-processing recipes; these live in multi-workspace files.</li>
@@ -415,7 +415,7 @@ on them, which is why a reopened dataset looks exactly as it was left:
 Everything in a workspace falls into one of two kinds. <strong>Originals</strong> are the
 measurements themselves: the interferograms or precomputed spectra created by an instrument.
 <strong>Derivatives</strong> are everything computed from them — spectra, average spectrum,
-SNR, 100&nbsp;% T, and Allan variance. The two kinds are treated differently:
+SNR, 100% T, and Allan variance. The two kinds are treated differently:
 </p>
 <ul>
   <li>Originals are never removed automatically. Deleting one always asks for confirmation,
@@ -438,7 +438,7 @@ How a save treats a stale result depends on the path:
 <h3>4.3 Stripping derivatives</h3>
 <p>
 <code>Strip derivatives</code> at the top of the Files panel removes every computed result
-from the workspace in one action — spectra, average spectrum, SNR, 100&nbsp;% T, and Allan
+from the workspace in one action — spectra, average spectrum, SNR, 100% T, and Allan
 variance — leaving only the measurements. This is the way to return a workspace to its raw state before a new
 round of processing, or before sharing or archiving. Stripped workspaces take less disk space.
 </p>
@@ -501,7 +501,7 @@ The menu bar appears once a workspace or multi-workspace is open. It has three m
 <tr><td><code>Display fps</code></td><td>Shows a small FPS counter in the top-right corner.</td></tr>
 <tr><td><code>Show timestamps</code></td><td>Appends the measurement time (<code>[hh:mm:ss]</code>) to file names in the Files panel, in the interferogram legend, and for precomputed spectra.</td></tr>
 <tr><td><code>Focus panels on hover</code></td><td>On by default. The docked panel under the mouse receives keyboard input (arrows, ESC, wheel) without a click; hovering changes input focus only and never switches between stacked dock tabs.</td></tr>
-<tr><td><code>Grid opacity</code></td><td>Slider that sets the brightness of plot grid lines, 0–100&nbsp;%. Applies to all plots.</td></tr>
+<tr><td><code>Grid opacity</code></td><td>Slider that sets the brightness of plot grid lines, 0–100%. Applies to all plots.</td></tr>
 <tr><td><code>Restore layout</code></td><td>Rebuilds the default panel arrangement for the current tab.</td></tr>
 <tr><td><code>UI Size</code></td><td>Font scale: <code>tiny</code>, <code>small</code>, <code>normal</code>, <code>large</code>, <code>huge</code>.</td></tr>
 <tr><td><code>Accent</code></td><td>Colour of buttons, tabs and highlights: <code>Green</code> (default), <code>Blue</code>, <code>Purple</code>, <code>Red</code>, <code>Brown</code>, <code>Cyan</code>.</td></tr>
@@ -661,7 +661,7 @@ name, followed by selection helpers:
   <li><code>Select: All | None | 10 | 50%</code> — set the checkbox (batch selection) for
       all files, none, the first ten, or the first half of the list.</li>
   <li><code>Strip derivatives</code> — removes every computed result from the workspace
-      (spectra, average, SNR, Allan, 100&nbsp;% T).</li>
+      (spectra, average, SNR, Allan, 100% T).</li>
 </ul>
 
 <p>
@@ -680,7 +680,7 @@ assigned in the order the files are selected.
 
 <p>
 The checkboxes on the right are separate from the highlighted selection. They choose the
-files used by the batch analyses (Average, SNR, Allan, 100&nbsp;% T standard deviation) and
+files used by the batch analyses (Average, SNR, Allan, 100% T standard deviation) and
 by the <code>Spectra from selected files</code> export. All files are checked when a workspace is opened for the first time.
 </p>
 
@@ -747,10 +747,10 @@ optical path difference (<code>OPD [µm]</code>), and Y shows detector voltage. 
   <li><strong>Mouse wheel</strong> - zoom. In the interferogram and spectral plots only X is affected (Y is auto-fitted).</li>
   <li><strong>Shift+drag</strong> - hold Shift and drag to mark an X range. When you release Shift, both plots zoom to it.</li>
   <li><kbd>ESC</kbd> - reset the zoom.</li>
-  <li><kbd>←</kbd> / <kbd>→</kbd> - pan by 10&nbsp;% of the visible range.</li>
+  <li><kbd>←</kbd> / <kbd>→</kbd> - pan by 10% of the visible range.</li>
 </ul>
 <p>
-The same controls work in every plot panel (Spectrum, Average, SNR, Allan slice, 100&nbsp;% T, experiment viewers). 
+The same controls work in every plot panel (Spectrum, Average, SNR, Allan slice, 100% T, experiment viewers). 
 </p>
 
 <h3>10.2 Large datasets</h3>
@@ -863,7 +863,7 @@ the plot is labelled <code>Average of N</code>. The plot controls are
 <code>Cursor</code>, <code>Y scale</code> (lin/log/dB), <code>X unit</code>,
 <code>Match X to Spectrum View</code> (copies the Spectrum panel's unit and zoom range),
 and <code>Y Axis</code> with the usual all/tight/force modes. The result is stored in the
-workspace and used as a reference option by the 100&nbsp;% T and Absorbance panels.
+workspace and used as a reference option by the 100% T and Absorbance panels.
 </p>
 
 <p>
@@ -928,7 +928,7 @@ The Allan panel estimates the Allan-Werle variance as a function of integration 
 </section>
 <section class="page" id="t100" data-chapter="Chapter 2 — Single-dataset processing">
 <div class="page-chapter">Chapter 2 — Single-dataset processing</div>
-<h2>15. 100&nbsp;% Transmission line</h2>
+<h2>15. 100% Transmission line</h2>
 
 <div class="shots">
   <figure class="shot">
@@ -937,12 +937,12 @@ The Allan panel estimates the Allan-Werle variance as a function of integration 
   </figure>
   <figure class="shot">
     <img src="screenshots/tab_single_dataset/100T/settings.png" alt="100% T panel controls">
-    <figcaption>100&nbsp;% T panel controls.</figcaption>
+    <figcaption>100% T panel controls.</figcaption>
   </figure>
 </div>
 
 <p>
-The 100&nbsp;% T panel divides each sample spectrum by a reference spectrum and plots the
+The 100% T panel divides each sample spectrum by a reference spectrum and plots the
 result as transmittance in percent, together with an optional standard-deviation curve and
 ASTM E1421-style energy ratios. The transmittance curves are drawn for the files
 highlighted in the Files panel (up to five). The standard deviation is computed
@@ -1042,15 +1042,15 @@ CSV export for a single workspace happens in the Export panel. Experiment tabs h
 <tr><td>Spectra from selected files</td><td><code>&lt;ds&gt;_spectra.csv</code></td><td>X unit, one Magnitude column per file</td></tr>
 <tr><td>Allan-Werle 3D</td><td><code>&lt;ds&gt;_allan_3d.csv</code></td><td>X unit, Tau [measurements], Allan Variance</td></tr>
 <tr><td>Allan-Werle slice</td><td><code>&lt;ds&gt;_allan_slice_&lt;wl&gt;_&lt;unit&gt;.csv</code></td><td>Tau [measurements], Allan Variance</td></tr>
-<tr><td>100&nbsp;% T transmission line</td><td><code>&lt;ds&gt;_t100_transmission_&lt;file&gt;.csv</code></td><td>X unit, T(%)</td></tr>
-<tr><td>100&nbsp;% T lines for all files</td><td><code>&lt;ds&gt;_t100_all_transmissions.csv</code></td><td>X unit, one T% column per ticked file</td></tr>
-<tr><td>100&nbsp;% T standard deviation</td><td><code>&lt;ds&gt;_t100_stddev.csv</code></td><td>X unit, Standard Deviation T(%)</td></tr>
+<tr><td>100% T transmission line</td><td><code>&lt;ds&gt;_t100_transmission_&lt;file&gt;.csv</code></td><td>X unit, T(%)</td></tr>
+<tr><td>100% T lines for all files</td><td><code>&lt;ds&gt;_t100_all_transmissions.csv</code></td><td>X unit, one T% column per ticked file</td></tr>
+<tr><td>100% T standard deviation</td><td><code>&lt;ds&gt;_t100_stddev.csv</code></td><td>X unit, Standard Deviation T(%)</td></tr>
 <tr><td>Absorbance from selected files</td><td><code>&lt;ds&gt;_absorbance_&lt;file&gt;.csv</code></td><td>X unit, Absorbance</td></tr>
 <tr><td>Transmittance from selected files</td><td><code>&lt;ds&gt;_transmittance_&lt;file&gt;.csv</code></td><td>X unit, Transmittance</td></tr>
 </table>
 
 <p>
-The two 100&nbsp;% T curve exports differ: <code>100% T transmission line</code> writes
+The two 100% T curve exports differ: <code>100% T transmission line</code> writes
 the first highlighted file, while <code>100% T lines for all files</code> writes one column
 per ticked file. Absorbance and Transmittance CSV files are produced by the command-line export path (<a href="#headless">Section 29</a>); the Export button writes only the ten artifacts above, even when one of those two checkboxes is ticked.
 </p>
@@ -1123,13 +1123,13 @@ any number of embedded datasets. Existing derived results are replaced with the 
 A recipe holds the spectrum processing settings (zero-padding, apodization window and its
 parameter, X-correction method and peak prominence), optional overrides for the reference
 laser wavelength and detector sensitivity, the list of artifacts to produce
-(spectra, average, SNR, 100&nbsp;% T, Allan), the 100&nbsp;% T energy bands, and the Allan
+(spectra, average, SNR, 100% T, Allan), energy ratios, and the Allan
 decimation and wavelength range. Six standard recipes are built in:
 </p>
 <table>
 <tr><th>Recipe</th><th>Produces</th></tr>
 <tr><td><code>Average spectrum - NB weak / medium / strong</code></td><td>Spectra and average spectrum; Norton-Beer FWHM 1.2 / 1.4 / 1.6, K = 2, Hilbert correction.</td></tr>
-<tr><td><code>All - NB weak / medium / strong</code></td><td>Produces additional calculation artifacts: SNR, and 100&nbsp;% T, with the same window settings.</td></tr>
+<tr><td><code>All - NB weak / medium / strong</code></td><td>Produces additional calculation artifacts: SNR, and 100% T, with the same window settings.</td></tr>
 </table>
 
 <p>
@@ -1219,7 +1219,7 @@ In <code>Settings</code>, choose the artifact to compare:
 Then tick the datasets to include in <code>Included datasets</code>. Until you change a checkbox, all datasets embedded in the container are included; after the first change, the checkboxes define the selection. Rows are
 greyed out when the artifact does not exist for that dataset and yellow when it is stale —
 hovering a yellow row explains that the artifact should be recomputed in its workspace tab.
-For artifacts that have several members (raw spectra, 100&nbsp;% T, interferograms), a
+For artifacts that have several members (raw spectra, 100% T, interferograms), a
 dropdown on each row picks which member to use. Datasets embedded in the archive do not
 have to be open in a tab to appear here.
 </p>
@@ -1267,7 +1267,7 @@ status text reports the reason (for example <code>No overlapping X region</code>
 The <code>Plot Ranging</code> panel chooses <code>Y mode</code> —
 <code>Transmittance [%]</code> or <code>Absorbance</code> — plus the X unit, Y axis mode,
 cursor, and display downsampling. Absorbance is calculated as −log<sub>10</sub>(T), so a
-flat 100&nbsp;% transmittance line corresponds to zero absorbance.
+flat 100% transmittance line corresponds to zero absorbance.
 </p>
 </section>
 <section class="page" id="difference" data-chapter="Chapter 3 — Multi-dataset work">
@@ -1308,7 +1308,7 @@ full resolution.
 <tr><td><kbd>Shift</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd></td><td>Add the highlighted file to the multi-file selection. With five files selected, the oldest one is dropped.</td></tr>
 <tr><td><kbd>Space</kbd></td><td>Toggle the batch-selection checkbox for every highlighted file.</td></tr>
 <tr><td><kbd>Delete</kbd></td><td>Delete the highlighted file from the workspace (with confirmation).</td></tr>
-<tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>Pan the focused plot's X axis by 10&nbsp;% of the visible range.</td></tr>
+<tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>Pan the focused plot's X axis by 10% of the visible range.</td></tr>
 <tr><td><kbd>ESC</kbd></td><td>Reset the zoom / autoscale the focused plot.</td></tr>
 <tr><td>Mouse wheel</td><td>Zoom; in most plots only X is affected (Y is auto-fitted), while the Allan 2D slice zooms both axes.</td></tr>
 <tr><td>Shift+drag</td><td>Select an X range to zoom to.</td></tr>
