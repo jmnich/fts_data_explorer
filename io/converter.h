@@ -36,7 +36,6 @@ struct ConverterDesc {
     std::string path;              // absolute script path
     std::string formatDescription; // joined '# '-prefixed prose ("" if absent)
     std::string formatSample;      // verbatim sample, comment prefix stripped
-    enum class Source { Repo, Local } source = Source::Local;
     bool broken = false;           // manifest failed to parse
     std::string error;             // parse error detail when broken
 };
@@ -67,20 +66,17 @@ struct ConverterProbe {
 };
 
 // ---------------------------------------------------------------------------
-// Discovery registry. Scan roots in order; local wins on id (first-wins):
-//   1. <appDataDir()>/converters        — user's own scripts (never touched)
-//   2. config.converterPaths entries    — extra user dirs
-//   3. config.converterRepoDir          — the repo clone (git-managed)
+// Discovery registry. Single scan root:
+//   config.converterRepoDir — the converter repository clone (git-managed,
+//   but any directory of converter scripts is accepted)
 // ---------------------------------------------------------------------------
 class ConverterRegistry {
 public:
     static ConverterRegistry& instance();
 
-    // Re-scan the three roots. Broken manifests become broken entries
-    // (never executable; surfaced in the UI).
-    void refresh(const std::string& localDir,
-                 const std::vector<std::string>& extraPaths,
-                 const std::string& repoDir);
+    // Re-scan the repository directory. Broken manifests become broken
+    // entries (never executable; surfaced in the UI).
+    void refresh(const std::string& repoDir);
 
     const std::vector<ConverterDesc>& all() const { return converters_; }
     // Nullptr if unknown or broken.
@@ -94,7 +90,7 @@ private:
 
 // Parse a single script file into a manifest. Never throws; failures land in
 // desc.broken/error.
-ConverterDesc parseConverterFile(const std::string& path, bool fromRepo);
+ConverterDesc parseConverterFile(const std::string& path);
 
 // ---------------------------------------------------------------------------
 // Tool probes + repo sync (§2.5). Probe results cached per session; the

@@ -624,8 +624,7 @@ int main(int argc, char* argv[]) {
     appState.configPtr = &config;
     appState.configFilePath = configFilePath;
 
-    // Pre-create the standard data dirs: the local converters drop-in and
-    // the converter-repo clone destination.
+    // Pre-create the standard data dirs: the converter-repo clone destination.
     ensureAppDirs();
 
     // Reclaim user-manual temp dirs left behind by crashed/previous runs (only

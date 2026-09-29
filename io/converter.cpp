@@ -115,10 +115,9 @@ static PopenResult runPopenCapture(const std::string& cmd) {
 // Manifest parsing (§1)
 // ---------------------------------------------------------------------------
 
-ConverterDesc parseConverterFile(const std::string& path, bool fromRepo) {
+ConverterDesc parseConverterFile(const std::string& path) {
     ConverterDesc desc;
     desc.path = path;
-    desc.source = fromRepo ? ConverterDesc::Source::Repo : ConverterDesc::Source::Local;
 
     std::ifstream f(path);
     if (!f.is_open()) {
@@ -209,34 +208,27 @@ ConverterRegistry& ConverterRegistry::instance() {
     return registry;
 }
 
-void ConverterRegistry::refresh(const std::string& localDir,
-                                const std::vector<std::string>& extraPaths,
-                                const std::string& repoDir) {
+void ConverterRegistry::refresh(const std::string& repoDir) {
     converters_.clear();
-    auto addDir = [&](const std::string& dir, bool fromRepo) {
-        std::error_code ec;
-        if (dir.empty() || !fs::is_directory(dir, ec)) return;
-        std::vector<std::string> scripts;
-        for (const auto& entry : fs::directory_iterator(dir, ec)) {
-            if (entry.is_regular_file(ec) && entry.path().extension() == ".py") {
-                scripts.push_back(entry.path().string());
-            }
+    std::error_code ec;
+    if (repoDir.empty() || !fs::is_directory(repoDir, ec)) return;
+    std::vector<std::string> scripts;
+    for (const auto& entry : fs::directory_iterator(repoDir, ec)) {
+        if (entry.is_regular_file(ec) && entry.path().extension() == ".py") {
+            scripts.push_back(entry.path().string());
         }
-        std::sort(scripts.begin(), scripts.end());
-        for (const auto& p : scripts) {
-            ConverterDesc d = parseConverterFile(p, fromRepo);
-            // First wins on id (local overrides repo); broken entries also
-            // shadow so the user sees their own breakage.
-            bool dup = false;
-            for (const auto& existing : converters_) {
-                if (existing.id == d.id) { dup = true; break; }
-            }
-            if (!dup) converters_.push_back(std::move(d));
+    }
+    std::sort(scripts.begin(), scripts.end());
+    for (const auto& p : scripts) {
+        ConverterDesc d = parseConverterFile(p);
+        // First wins on id (alphabetical). Broken scripts have no id and are
+        // all kept - each is a distinct problem.
+        bool dup = false;
+        for (const auto& existing : converters_) {
+            if (!d.id.empty() && existing.id == d.id) { dup = true; break; }
         }
-    };
-    addDir(localDir, false);
-    for (const auto& p : extraPaths) addDir(p, false);
-    addDir(repoDir, true);
+        if (!dup) converters_.push_back(std::move(d));
+    }
 }
 
 const ConverterDesc* ConverterRegistry::get(const std::string& id) const {

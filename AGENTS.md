@@ -97,7 +97,7 @@ Panel-specific (see source headers for full detail):
 
 Invocation contract: `<interpreter> <script> <input> <output.h5> [--param v]`; the script must write atomically and exit 0 on success. The app validates every converted file with `H5Store::validate` before opening.
 
-**Discovery** (`ConverterRegistry::refresh`): scan `appDataDir()/converters` (user's own scripts), then `config.converterPaths` (extra dirs), then the repo clone — **local wins on id**. Broken manifests are listed with the parse error, never executed.
+**Discovery** (`ConverterRegistry::refresh`): scan only the converter repository directory (`config.converterRepoDir`, default `appDataDir()/converter-repo`); it need not be a git clone. Broken manifests are listed with the parse error, never executed. Duplicate `id`s within the directory: first in alphabetical order wins.
 
 **Repo sync** (`git` shell-out, `clone --depth 1` / `pull --ff-only`): clone dir defaults to `appDataDir()/converter-repo` (Linux `$XDG_DATA_HOME`, Windows `%LOCALAPPDATA%` — `io/app_dirs.{h,cpp}`). First clone is explicit only (button), never automatic; a non-empty non-repo dir is renamed to `.broken-<timestamp>` and re-cloned. Startup refresh pulls an existing clone silently.
 

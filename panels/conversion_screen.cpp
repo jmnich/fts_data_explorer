@@ -100,9 +100,7 @@ static std::string effectiveRepoDir(const AppConfig& config) {
 
 static void refreshRegistry(AppState& s) {
     const AppConfig& config = s.configPtr ? *s.configPtr : AppConfig();
-    ConverterRegistry::instance().refresh(appDataDir() + "/converters",
-                                          config.converterPaths,
-                                          effectiveRepoDir(config));
+    ConverterRegistry::instance().refresh(effectiveRepoDir(config));
 }
 
 // ---------------------------------------------------------------------------
@@ -495,10 +493,6 @@ void renderConversionScreen(AppState& s) {
             }
         }
 
-        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-        ImGui::TextWrapped("Local dir: %s — a .py here overrides the same-id repo converter.",
-                           (appDataDir() + "/converters").c_str());
-        ImGui::PopStyleColor();
         ImGui::Spacing();
 
         // ---- Converter list (bottom block: fills the column to its bottom; the
@@ -506,8 +500,20 @@ void renderConversionScreen(AppState& s) {
         // stay at the same vertical level) --------------------------------------
         float fmtH = 200.0f;
         if (converters.empty()) {
-            ImGui::TextDisabled("No converters found. Clone the standard set above "
-                                "or drop .py files into the local dir.");
+            // Distinguish a misconfigured destination from an empty one: with
+            // a single scan root, "no converters" is usually a path problem.
+            const AppConfig& cfg = s.configPtr ? *s.configPtr : AppConfig();
+            const std::string repoDir = effectiveRepoDir(cfg);
+            std::error_code fsEc;
+            if (std::filesystem::is_directory(repoDir, fsEc)) {
+                ImGui::TextDisabled("No converters found. Clone the standard set above.");
+            } else {
+                ImGui::PushStyleColor(ImGuiCol_Text,
+                                      ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+                ImGui::TextWrapped("No converters found. The configured converter "
+                                   "directory does not exist: %s", repoDir.c_str());
+                ImGui::PopStyleColor();
+            }
         } else {
             ImGui::Text("Converters (%zu)", converters.size());
             // No upper cap: the list fills the column to its bottom, so it is

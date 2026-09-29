@@ -9,8 +9,8 @@
 //   Windows: %LOCALAPPDATA%\fts_data_explorer
 std::string appDataDir();
 
-// Create <appDataDir()>/converters and <appDataDir()>/converter-repo on
-// demand. Idempotent; safe to call every startup.
+// Create <appDataDir()>/converter-repo on demand. Idempotent; safe to call
+// every startup.
 void ensureAppDirs();
 
 // Forward-slash path normalization (git on Windows accepts '/', avoiding

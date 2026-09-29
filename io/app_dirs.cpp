@@ -35,7 +35,6 @@ std::string appDataDir() {
 
 void ensureAppDirs() {
     std::error_code ec;
-    fs::create_directories(appDataDir() + "/converters", ec);
     fs::create_directories(appDataDir() + "/converter-repo", ec);
 }
 

@@ -47,9 +47,10 @@ static int countCheckedFiles() {
     return static_cast<int>(appState.active->selectedFiles.size());
 }
 
-// "Load AppConfig + resolve converterRepoDir" — duplicated 3× in handleList /
+// "Load AppConfig + resolve converterRepoDir" — shared by handleList /
 // handleConvert / handleSyncConverters (F14). The returned config keeps the
-// other persisted fields (converterPaths, recentDatasets, interpreter) alive.
+// other persisted fields (recentDatasets, interpreter) alive; the -l
+// converter call site uses only the resolved repo dir.
 static AppConfig loadAppConfigWithRepoDir(std::string& repoDir) {
     AppConfig config;
     std::string configFilePath = getConfigFilePath();
@@ -120,17 +121,14 @@ static void handleList(const std::string& type) {
 
     if (type == "converter") {
         std::string repoDir;
-        AppConfig config = loadAppConfigWithRepoDir(repoDir);
-        ConverterRegistry::instance().refresh(appDataDir() + "/converters",
-                                              config.converterPaths, repoDir);
+        (void)loadAppConfigWithRepoDir(repoDir);  // resolves the repo dir
+        ConverterRegistry::instance().refresh(repoDir);
         for (const auto& c : ConverterRegistry::instance().all()) {
             std::cout << c.id;
             if (c.broken) {
                 std::cout << " [BROKEN: " << c.error << "]";
             } else {
                 if (!c.name.empty()) std::cout << " — " << c.name;
-                std::cout << " (" << (c.source == ConverterDesc::Source::Repo ? "repo" : "local")
-                          << ")";
             }
             std::cout << std::endl;
         }
@@ -780,13 +778,12 @@ static void handleWorkspace(const HeadlessConfig& cfg) {
 static void handleConvert(const HeadlessConfig& cfg) {
     std::string repoDir;
     AppConfig config = loadAppConfigWithRepoDir(repoDir);
-    ConverterRegistry::instance().refresh(appDataDir() + "/converters",
-                                          config.converterPaths, repoDir);
+    ConverterRegistry::instance().refresh(repoDir);
 
     const ConverterDesc* desc = ConverterRegistry::instance().get(cfg.converter);
     ConverterDesc direct;
     if (!desc && std::filesystem::is_regular_file(cfg.converter)) {
-        direct = parseConverterFile(cfg.converter, false);
+        direct = parseConverterFile(cfg.converter);
         desc = &direct;
     }
     if (!desc) {

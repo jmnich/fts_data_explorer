@@ -47,7 +47,6 @@ struct AppConfig {
     std::string converterRepoUrl = "https://github.com/jmnich/fts_data_explorer_converters";
     std::string converterRepoDir;   // empty = default appDataDir()/converter-repo
     std::string converterInterpreter; // empty = "python3" (posix) / "py" (Win)
-    std::vector<std::string> converterPaths; // extra user converter dirs
     
     // Docking layout: tracks whether the default layout has been applied
     bool defaultLayoutApplied = false;
@@ -186,9 +185,6 @@ struct AppConfig {
                 configFile << "repo_dir=" << converterRepoDir << "\n";
             if (!converterInterpreter.empty())
                 configFile << "interpreter=" << converterInterpreter << "\n";
-            for (const auto& p : converterPaths) {
-                configFile << "path=" << p << "\n";
-            }
             
             // Write window settings
             configFile << "\n[Window]\n";
@@ -322,8 +318,6 @@ struct AppConfig {
                             converterRepoDir = value;
                         } else if (key == "interpreter") {
                             converterInterpreter = value;
-                        } else if (key == "path") {
-                            if (!value.empty()) converterPaths.push_back(value);
                         }
                     }
                 }
