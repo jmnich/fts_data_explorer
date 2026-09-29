@@ -201,7 +201,7 @@ h5 { font-size: 0.95rem; margin: 1rem 0 0.35rem; }
   <li><a href="#t100">15. 100&nbsp;% Transmission line</a></li>
   <li><a href="#hitran">16. HITRAN Gas Markers</a></li>
   <li><a href="#export">17. Export panel</a></li>
-  <li class="toc-chapter">Multi-dataset experiments</li>
+  <li class="toc-chapter">Multi-dataset work</li>
   <li><a href="#multi">18. Multi-workspace sessions</a></li>
   <li><a href="#batch">19. Batch processing</a></li>
   <li><a href="#experiments">20. Working with experiments</a></li>
@@ -1055,38 +1055,39 @@ the first highlighted file, while <code>100% T lines for all files</code> writes
 per ticked file. Absorbance and Transmittance CSV files are produced by the command-line export path (<a href="#headless">Section 29</a>); the Export button writes only the ten artifacts above, even when one of those two checkboxes is ticked.
 </p>
 </section>
-<section class="page" id="multi" data-chapter="Chapter 3 — Multi-dataset experiments">
-<div class="page-chapter">Chapter 3 — Multi-dataset experiments</div>
+<section class="page" id="multi" data-chapter="Chapter 3 — Multi-dataset work">
+<div class="page-chapter">Chapter 3 — Multi-dataset work</div>
 <h2>18. Multi-workspace sessions</h2>
+
+<p>
+A multi-workspace is a single <code>.h5</code> file that contains several complete datasets
+plus any experiments and batch recipes bundled with them. Because every used dataset is copied in full, the archive carries all measurement data with it. The original measurement files can be gone and the embedded datasets will still open. The <code>.h5</code> layout of this multi-workspace archive is documented in the <a href="#hdf-multi">multi-workspace format specification</a>. The user does not need to know whether an <code>.h5</code> file is a single-dataset or a multi-workspace - the application will distinguish them automatically and open correctly.
+</p>
+
+<p>
+Whenever an <code>.h5</code> is opened, the primary interface is presented to the user. Each workspace, for either a dataset or an experiment, opens in its own tab. A <code>Session</code> tab is always open and located on the left side of the tab ribbon. It is used to manage the contents of the archive, add or remove datasets, experiments and to apply batch processing recipes. The <code>Session</code> tab will look differently for a single-dataset archive and for a multi-workspace archive. 
+</p>
 
 <figure class="shot">
   <a href="screenshots/session_tab_single_dataset.png" title="Open the full-resolution screenshot">
     <img src="screenshots/session_tab_single_dataset.png" alt="Session tab in single-dataset mode">
   </a>
-  <figcaption>Single-dataset session: the Session tab offers to create a multi-workspace. Click the image for the full-resolution version.</figcaption>
+  <figcaption>When a single-dataset is open then the Session tab offers to create a multi-workspace. Click the image for the full-resolution version.</figcaption>
 </figure>
 
 <figure class="shot">
   <a href="screenshots/session_tab_multi_dataset.png" title="Open the full-resolution screenshot">
     <img src="screenshots/session_tab_multi_dataset.png" alt="Session tab in multi-workspace mode with datasets, active experiments, available experiments and batch processing">
   </a>
-  <figcaption>Multi-workspace session: Datasets, experiments, and batch processing. Click the image for the full-resolution version.</figcaption>
+  <figcaption>When a Multi-workspace archive is open then the Session tab shows all embedded Datasets, experiments, and batch processing recipes. Click the image for the full-resolution version.</figcaption>
 </figure>
 
-<p>
-A multi-workspace is a single <code>.h5</code> file that contains several complete datasets
-plus any experiments and batch recipes built from them. Because every dataset is stored in full, the archive carries all measurement data with it: the original measurement files can be gone and the embedded datasets still open. One caveat: a persisted experiment records its dataset references together with the archive's absolute path, so after the file is copied to a different location those references have to be picked again. An experiment can also point at a standalone workspace file that is open in a tab — such an experiment depends on that file and does not travel with the container. The archive
-layout is documented in the
-<a href="#hdf-multi">multi-workspace format specification</a>.
-</p>
-
-<h3>18.1 Creating and adding datasets</h3>
+<h3>18.1 Creating the multi-workspace archive and adding datasets</h3>
 <ul>
-  <li><strong>New empty multi-workspace</strong> — <code>New Multi-Workspace...</code> on
-      the Welcome screen, or <code>Create Multi-Workspace...</code> in the Session tab when
-      a single dataset is open. The second option embeds the open dataset straight away.</li>
-  <li><strong>Add datasets</strong> — in the Datasets panel, press <code>+ Add Dataset</code>
-      and pick an <code>.h5</code> file. A full copy is embedded; the original file is not
+  <li><strong>Create New empty multi-workspace</strong> - <code>New Multi-Workspace...</code> button on
+      the Welcome screen, or <code>Create Multi-Workspace...</code> button shown in the Session tab when a single dataset is open. The second option embeds the open dataset in the new archive straight away.</li>
+  <li><strong>Add new datasets</strong> - in the Datasets panel, press <code>+ Add Dataset</code>
+      and pick an <code>.h5</code> file. A full copy is embedded. the original file is not
       linked and is never modified.</li>
 </ul>
 
@@ -1098,27 +1099,23 @@ Each dataset row reports the number of measurements, the creation date, and its 
 <ul>
   <li><strong>Click a row</strong> to open the dataset in its own workspace tab.</li>
   <li><strong>Right-click a row</strong> for <code>Rename</code>, <code>Export</code>, and
-      <code>Delete</code>. <code>Export</code> writes the dataset back out as a standalone
-      <code>.h5</code> file.</li>
-  <li><strong>Delete</strong> removes the dataset from the container and closes its tab. A
-      confirmation dialog reminds you that the source file on disk is not affected.</li>
+      <code>Delete</code> dropdown menu. <code>Export</code> button saves the dataset back out from the archive as a standalone <code>.h5</code> file that can be imported or moved elsewhere.</li>
+  <li><strong>Delete</strong> removes the dataset from the archive and closes its tab.</li>
 </ul>
 
 <p>
-Closing a dataset's workspace tab does not remove it from the container — it stays in the
-Datasets list and can be reopened with one click. Use <code>File → Save</code> to write
-changes back into the multi-workspace file.
+Closing a dataset's workspace tab does not remove it from the archive — it stays in the
+Datasets list and can be reopened with one click.
 </p>
 </section>
-<section class="page" id="batch" data-chapter="Chapter 3 — Multi-dataset experiments">
-<div class="page-chapter">Chapter 3 — Multi-dataset experiments</div>
+<section class="page" id="batch" data-chapter="Chapter 3 — Multi-dataset work">
+<div class="page-chapter">Chapter 3 — Multi-dataset work</div>
 <h2>19. Batch processing</h2>
 
 <p>
 Batch processing is available in multi-workspace sessions, in the
-<code>Batch Processing</code> panel of the Session tab. It applies one processing recipe to
-any number of embedded datasets: spectra are recomputed with the recipe's settings, the
-requested results are calculated, and existing derived results are replaced.
+<code>Batch Processing</code> panel of the Session tab. It applies the same processing recipe to
+any number of embedded datasets. Existing derived results are replaced with the new ones, as specified by the selected recipe.
 </p>
 
 <h3>19.1 Recipes</h3>
@@ -1132,7 +1129,7 @@ decimation and wavelength range. Six standard recipes are built in:
 <table>
 <tr><th>Recipe</th><th>Produces</th></tr>
 <tr><td><code>Average spectrum - NB weak / medium / strong</code></td><td>Spectra and average spectrum; Norton-Beer FWHM 1.2 / 1.4 / 1.6, K = 2, Hilbert correction.</td></tr>
-<tr><td><code>All - NB weak / medium / strong</code></td><td>Spectra, average, SNR, and 100&nbsp;% T with the same window settings.</td></tr>
+<tr><td><code>All - NB weak / medium / strong</code></td><td>Produces additional calculation artifacts: SNR, and 100&nbsp;% T, with the same window settings.</td></tr>
 </table>
 
 <p>
@@ -1154,16 +1151,15 @@ The buttons below the recipe list:
       focused row).</li>
   <li>Press <code>Batch process</code> and confirm with <code>Run</code>. The confirmation
       notes that all existing derived results will be stripped before calculation.</li>
-  <li>A progress dialog reports the current dataset and file. The last few lines of errors and warnings, if any, are listed at the end of the run.</li>
+  <li>A progress dialog reports the current dataset and record undergoing calculation.</li>
 </ol>
 
 <p>
-Datasets that are open in tabs are updated in place as soon as their turn finishes; their
-results and panel settings match the recipe afterwards. Each processed dataset is written back into the multi-workspace file as its turn finishes, so no separate save is needed for the batch results.
+Datasets that are open in tabs are updated in place as soon as the batch processing finishes. 
 </p>
 </section>
-<section class="page" id="experiments" data-chapter="Chapter 3 — Multi-dataset experiments">
-<div class="page-chapter">Chapter 3 — Multi-dataset experiments</div>
+<section class="page" id="experiments" data-chapter="Chapter 3 — Multi-dataset work">
+<div class="page-chapter">Chapter 3 — Multi-dataset work</div>
 <h2>20. Working with experiments</h2>
 
 <p>
@@ -1194,8 +1190,8 @@ in workspace panels: wheel zoom, Shift+drag range selection, arrow-key panning,
 shared panels are described in Sections <a href="#difference">23</a> and <a href="#exporting-experiments">24</a>.
 </p>
 </section>
-<section class="page" id="comparator" data-chapter="Chapter 3 — Multi-dataset experiments">
-<div class="page-chapter">Chapter 3 — Multi-dataset experiments</div>
+<section class="page" id="comparator" data-chapter="Chapter 3 — Multi-dataset work">
+<div class="page-chapter">Chapter 3 — Multi-dataset work</div>
 <h2>21. Comparator</h2>
 
 <div class="shots">
@@ -1220,7 +1216,7 @@ In <code>Settings</code>, choose the artifact to compare:
 </ul>
 
 <p>
-Then tick the datasets to include in <code>Included datasets</code>. Until you change a checkbox, all open datasets are included; after the first change, the checkboxes define the selection. Rows are
+Then tick the datasets to include in <code>Included datasets</code>. Until you change a checkbox, all datasets embedded in the container are included; after the first change, the checkboxes define the selection. Rows are
 greyed out when the artifact does not exist for that dataset and yellow when it is stale —
 hovering a yellow row explains that the artifact should be recomputed in its workspace tab.
 For artifacts that have several members (raw spectra, 100&nbsp;% T, interferograms), a
@@ -1234,8 +1230,8 @@ are assigned automatically, and the legend above the plot lists each curve with 
 dataset and member name.
 </p>
 </section>
-<section class="page" id="absorbance" data-chapter="Chapter 3 — Multi-dataset experiments">
-<div class="page-chapter">Chapter 3 — Multi-dataset experiments</div>
+<section class="page" id="absorbance" data-chapter="Chapter 3 — Multi-dataset work">
+<div class="page-chapter">Chapter 3 — Multi-dataset work</div>
 <h2>22. Absorbance</h2>
 
 <div class="shots">
@@ -1274,8 +1270,8 @@ cursor, and display downsampling. Absorbance is calculated as −log<sub>10</sub
 flat 100&nbsp;% transmittance line corresponds to zero absorbance.
 </p>
 </section>
-<section class="page" id="difference" data-chapter="Chapter 3 — Multi-dataset experiments">
-<div class="page-chapter">Chapter 3 — Multi-dataset experiments</div>
+<section class="page" id="difference" data-chapter="Chapter 3 — Multi-dataset work">
+<div class="page-chapter">Chapter 3 — Multi-dataset work</div>
 <h2>23. Difference</h2>
 
 <p>
@@ -1289,8 +1285,8 @@ plots share the X axis and zoom together. For Absorbance experiments this acts a
 residual/error curve between two transmittance or absorbance curves.
 </p>
 </section>
-<section class="page" id="exporting-experiments" data-chapter="Chapter 3 — Multi-dataset experiments">
-<div class="page-chapter">Chapter 3 — Multi-dataset experiments</div>
+<section class="page" id="exporting-experiments" data-chapter="Chapter 3 — Multi-dataset work">
+<div class="page-chapter">Chapter 3 — Multi-dataset work</div>
 <h2>24. Exporting experiment data</h2>
 
 <p>
@@ -2003,7 +1999,7 @@ experiments/&lt;id&gt;/
 <table>
 <tr><th>Key</th><th>Type</th><th>Description</th></tr>
 <tr><td><code>artifactSelector</code></td><td>i32</td><td>0 = Average spectrum, 1 = Raw spectrum, 2 = SNR, 3 = T100, 4 = Corrected IFG, 5 = Raw IFG</td></tr>
-<tr><td><code>comparatorKeys</code></td><td>string[]</td><td>Stable keys of included datasets. Empty + <code>comparatorKeysExplicit=false</code> = all open datasets.</td></tr>
+<tr><td><code>comparatorKeys</code></td><td>string[]</td><td>Stable keys of included datasets. Empty + <code>comparatorKeysExplicit=false</code> = all embedded datasets.</td></tr>
 <tr><td><code>comparatorKeysExplicit</code></td><td>bool</td><td>True once the user toggled a checkbox (empty then means "nothing selected")</td></tr>
 <tr><td><code>memberPicks</code></td><td>object</td><td>Map of dataset key → member id (multi-member artifacts)</td></tr>
 <tr><td><code>maxAtZeroIfg</code></td><td>bool</td><td>false</td><td>Align each curve's center burst at x = 0 (Comparator, interferogram artifacts)</td></tr>

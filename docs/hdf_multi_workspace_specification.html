@@ -296,7 +296,7 @@ experiments/&lt;id&gt;/
 <table>
 <tr><th>Key</th><th>Type</th><th>Description</th></tr>
 <tr><td><code>artifactSelector</code></td><td>i32</td><td>0 = Average spectrum, 1 = Raw spectrum, 2 = SNR, 3 = T100, 4 = Corrected IFG, 5 = Raw IFG</td></tr>
-<tr><td><code>comparatorKeys</code></td><td>string[]</td><td>Stable keys of included datasets. Empty + <code>comparatorKeysExplicit=false</code> = all open datasets.</td></tr>
+<tr><td><code>comparatorKeys</code></td><td>string[]</td><td>Stable keys of included datasets. Empty + <code>comparatorKeysExplicit=false</code> = all datasets embedded in the container.</td></tr>
 <tr><td><code>comparatorKeysExplicit</code></td><td>bool</td><td>True once the user toggled a checkbox (empty then means "nothing selected")</td></tr>
 <tr><td><code>memberPicks</code></td><td>object</td><td>Map of dataset key → member id (multi-member artifacts)</td></tr>
 <tr><td><code>maxAtZeroIfg</code></td><td>bool</td><td>false</td><td>Align each curve's center burst at x = 0 (Comparator, interferogram artifacts)</td></tr>
