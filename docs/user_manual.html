@@ -1220,7 +1220,12 @@ over the visible X range (<code>Stats from: Viewbox</code>) or the full curves
 plots share the X axis and zoom together.
 </p>
 
-<h3>21.2 Export</h3>
+<h3>21.2 Normalize to 1</h3>
+<p>
+Spectra from different expeirment may come with different absolute Y scales. A normalization feature is available to make it easier to compare them. The <code>Normalize to 1</code> toggle in the <code>Plot Ranging</code> panel divides each curve by its own maximum so every curve peaks at 1.0 and the shapes can be compared directly. It is available for the <code>Average or raw spectrum</code> and <code>SNR</code> artifacts (not <code>100% T</code> or interferograms), applies to the plot, the tracking cursor, the <code>Difference</code> curve, and the CSV export (columns marked <code>[norm.]</code>). 
+</p>
+
+<h3>21.3 Export</h3>
 <p>
 The experiment <code>Export</code> panel writes all displayed curves to a singe multi-column CSV file.
 Choose the X range - <code>all</code>, <code>current plot area</code>, or

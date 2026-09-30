@@ -156,6 +156,15 @@ public:
     // interferogram-view alignment. Applied in gatherCurves (display + CSV
     // export stay WYSIWYG). Meaningless for spectral artifacts (xUnit >= 0).
     bool maxAtZeroIfg = false;
+    // "Normalize to 1" (Comparator, spectral artifacts 0-2 only): divide each
+    // gathered curve's Y by its own maximum so every curve peaks at 1.0 —
+    // overlays of spectra from instruments with arbitrary absolute Y scales.
+    // Applied in gatherCurves: plot, tracking cursor, difference compute and
+    // CSV export all see the normalized values (WYSIWYG, maxAtZeroIfg
+    // contract). Never active for T100 (% has an absolute reference) or
+    // interferograms (bipolar signal) — the toggle is gated off and the flag
+    // force-cleared on artifact switch / config restore.
+    bool normalizeTo1 = false;
 
     // Comparator selection.
     int artifactSelector = 0;            // ComparatorArtifact index

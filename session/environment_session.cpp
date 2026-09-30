@@ -1072,6 +1072,7 @@ void EnvironmentSession::renderViewWindow() {
                               : xUnitLabel(plot.xUnitSelector);
             yLabel = artifactLabel(artifact);
             if (plot.yScaleSelector == 2) yLabel += " (dB)";
+            if (normalizeTo1 && artifactSelector < 3) yLabel += " (normalized)";
         }
         renderPlot(curves, xLabel, yLabel, hasGuideline, guideline, true);
         // Cache the visible curve labels for renderDifferenceWindow (the curve
@@ -1371,6 +1372,9 @@ void EnvironmentSession::renderComparatorConfig() {
                     // T100/IFG have no log/dB scale — drop back to lin.
                     if (plot.yScaleSelector != 0 && a >= 3 /* T100 / IFG */)
                         plot.yScaleSelector = 0;
+                    // ... and no per-curve normalization (T100 keeps its
+                    // absolute % reference, IFG is bipolar).
+                    if (normalizeTo1 && a >= 3) normalizeTo1 = false;
                     dirty = true;
                     appState.needsRedraw = true;
                 }
@@ -1661,6 +1665,43 @@ void EnvironmentSession::renderRangingWindow() {
                                   "(applies to display and CSV export).");
         }
         if (type == EnvType::Comparator) renderYScaleButtons();
+        // "Normalize to 1" (Comparator, spectral artifacts 0-2 only): scale
+        // each curve's own maximum to 1.0 — overlays of spectra from
+        // instruments with arbitrary absolute Y scales. T100 (absolute %
+        // reference) and interferograms (bipolar) stay gated off. Display and
+        // CSV export both use the normalized values (WYSIWYG).
+        if (type == EnvType::Comparator && artifactSelector < 3) {
+            const ImVec4 colActive = ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive);
+            const ImVec4 colInactive(0.22f, 0.22f, 0.22f, 0.7f);
+            ImGui::TextUnformatted("Normalize to 1");
+            ImGui::SameLine();
+            for (int m = 0; m < 2; ++m) {
+                const bool on = (m == 0);
+                const bool sel = (normalizeTo1 == on);
+                ImGui::PushStyleColor(ImGuiCol_Button, sel ? colActive : colInactive);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, sel ? colActive : colInactive);
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, colActive);
+                if (ImGui::Button(on ? "On##EnvNormOn" : "Off##EnvNormOff")) {
+                    if (normalizeTo1 != on) {
+                        normalizeTo1 = on;
+                        dirty = true;
+                        // Y-only transform: do NOT autoscale (shouldAutoscale
+                        // refits X too and permanently destroys the user's
+                        // zoom window — the log/dB buttons' pattern instead).
+                        // The AutoFit Y flags refit Y in all/tight modes next
+                        // frame; Force mode pins Y regardless.
+                        appState.requestViewChangeRedraw();   // Y refit follow-up
+                    }
+                }
+                ImGui::PopStyleColor(3);
+                if (m < 1) ImGui::SameLine();
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Scales each curve's own maximum to 1.0 so\n"
+                                  "different instruments' Y scales overlay.\n"
+                                  "Applies to display and CSV export.\n"
+                                  "Relative intensities are NOT preserved.");
+        }
         renderYAxisControls();
         ImGui::Separator();
         renderCursorToggle();
@@ -1951,6 +1992,19 @@ std::vector<ComparatorCurve> EnvironmentSession::gatherCurves(AppState& s) {
                 for (double& v : c.x) v -= off;
             }
         }
+        // "Normalize to 1" (spectral artifacts 0-2 only — T100 keeps its
+        // absolute % reference, interferograms are bipolar): divide each
+        // curve's Y by its OWN maximum so every curve peaks at 1.0 —
+        // cross-instrument overlays with arbitrary absolute Y scales.
+        // Applied here so the plot, tracking cursor, difference compute and
+        // CSV export all see the normalized values (WYSIWYG, same contract
+        // as maxAtZeroIfg above). All-zero / all-negative curves keep their
+        // raw values — no positive maximum to scale by.
+        if (normalizeTo1 && artifactSelector < 3 && !c.y.empty()) {
+            const double yMax = *std::max_element(c.y.begin(), c.y.end());
+            if (yMax > 0.0)
+                for (double& v : c.y) v /= yMax;
+        }
         curves.push_back(std::move(c));
     }
     // Unique labels: ImPlot item IDs and the Difference-panel pickers key on
@@ -2029,6 +2083,7 @@ std::string EnvironmentSession::buildCurveSignature() {
     append(artifactSelector);
     append(plot.xUnitSelector);
     append(static_cast<int>(maxAtZeroIfg));
+    append(static_cast<int>(normalizeTo1));
     append(static_cast<int>(comparatorKeysExplicit));
     for (const auto& k : comparatorKeys) { sig += k; sig += '\x1f'; }
     for (const auto& [k, m] : memberPicks) { sig += k; sig += '#'; sig += m; sig += '\x1f'; }
@@ -2688,6 +2743,9 @@ void EnvironmentSession::exportCsv() {
     } else if (static_cast<ComparatorArtifact>(artifactSelector) ==
                ComparatorArtifact::T100) {
         yUnit = "%";
+    } else if (type == EnvType::Comparator && normalizeTo1 &&
+               artifactSelector < 3 /* spectral artifacts */) {
+        yUnit = "norm.";   // per-curve max scaled to 1.0 (WYSIWYG with plot)
     }
     if (type == EnvType::Comparator) {
         const auto art = static_cast<ComparatorArtifact>(artifactSelector);
@@ -2777,6 +2835,7 @@ static nlohmann::json experimentConfigJson(const EnvironmentSession& env) {
         j["comparatorKeysExplicit"] = env.comparatorKeysExplicit;
         j["memberPicks"] = env.memberPicks;
         j["maxAtZeroIfg"] = env.maxAtZeroIfg;
+        j["normalizeTo1"] = env.normalizeTo1;
     }
     return j;
 }
@@ -2839,13 +2898,17 @@ static void experimentApplyConfig(EnvironmentSession& env, const nlohmann::json&
         }
     } else {
         env.artifactSelector = j.value("artifactSelector", 0);
-        // log/dB are invalid for T100/IFG — never restore an invalid state
-        // (defensive; the UI already resets on artifact switch).
-        if (env.artifactSelector >= 3)
-            env.plot.yScaleSelector = 0;
         env.comparatorKeys = j.value("comparatorKeys", std::vector<std::string>{});
         env.comparatorKeysExplicit = j.value("comparatorKeysExplicit", false);
         env.maxAtZeroIfg = j.value("maxAtZeroIfg", false);
+        env.normalizeTo1 = j.value("normalizeTo1", false);
+        // log/dB and per-curve normalization are invalid for T100/IFG — never
+        // restore an invalid state (defensive; the UI already resets on
+        // artifact switch).
+        if (env.artifactSelector >= 3) {
+            env.plot.yScaleSelector = 0;
+            env.normalizeTo1 = false;
+        }
         auto mp = j.find("memberPicks");
         if (mp != j.end() && mp->is_object())
             for (auto it = mp->begin(); it != mp->end(); ++it)
