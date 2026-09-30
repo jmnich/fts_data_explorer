@@ -91,4 +91,5 @@ __pycache__/
 # test harness runtime artifacts
 test_harness/output/
 test_harness/temporary/
-test_harness/reference_output/.checksums
+# .checksums is git-tracked on purpose: a golden regeneration must update it in
+# the same commit, so a stale freeze is visible in review instead of a per-machine ERROR
