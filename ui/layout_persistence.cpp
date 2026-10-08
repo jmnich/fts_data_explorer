@@ -121,6 +121,11 @@ void restoreTabLayout(const char* type) {
     restoreLayoutFrom(type);
 }
 
+bool tabLayoutExists(const char* type) {
+    if (!ImGui::GetCurrentContext()) return false;
+    return std::filesystem::exists(layoutFilePath(type));
+}
+
 void saveWorkspaceLayout(const std::string& key) {
     if (!ImGui::GetCurrentContext()) return;
     saveLayoutTo(workspaceLayoutName(key));

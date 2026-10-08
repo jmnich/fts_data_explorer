@@ -1111,6 +1111,70 @@ static void rebuildDefaultLayout(ImGuiID dockspace_id, float topOffset) {
 
     ImGui::DockBuilderFinish(dockspace_id);
 }
+
+// v8 (2026-10-08): experiment-tab default layout — the experiment panels
+// fill the WHOLE dock: Settings column left (Plot Ranging/Difference and
+// Export/HITRAN stacked below it), Viewer right. The shared default
+// (rebuildDefaultLayout) squeezes the experiment panels into the middle
+// ~40% between the workspace-only columns, which render EMPTY while an
+// experiment tab is active — fresh-computer launches showed ~60% of the
+// window as dead black space. Seeded into the "experiment" layout snapshot
+// (v8 bump below); applied via restoreTabLayout when an experiment tab
+// activates. DockBuilderDockWindow pre-seeds the DockIds of the env
+// windows even though they do not exist yet — the first env instance
+// picks them up when it appears.
+static void rebuildDefaultExperimentLayout(ImGuiID dockspace_id, float topOffset) {
+    ImGui::DockBuilderRemoveNode(dockspace_id);
+    ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::DockBuilderSetNodeSize(dockspace_id,
+        ImVec2(vp->Size.x, vp->Size.y - topOffset));
+
+    // [Settings column 40% | Viewer 60%]. The column's upper half is the
+    // Settings panel; the lower half stacks Plot Ranging + Difference above
+    // Export + HITRAN (the v6 stacking scheme).
+    ImGuiID dock_settings_col, dock_viewer;
+    ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Left, 0.40f,
+                                &dock_settings_col, &dock_viewer);
+
+    ImGuiID dock_below, dock_settings;
+    ImGui::DockBuilderSplitNode(dock_settings_col, ImGuiDir_Down, 0.5f,
+                                &dock_below, &dock_settings);
+    ImGuiID dock_range, dock_export;
+    ImGui::DockBuilderSplitNode(dock_below, ImGuiDir_Up, 0.5f,
+                                &dock_range, &dock_export);
+
+    ImGui::DockBuilderDockWindow("Settings##envcfg", dock_settings);
+    // Difference shares the Ranging node as a second tab (Ranging docked
+    // first = the "on top" tab — same as the shared default).
+    ImGui::DockBuilderDockWindow("Plot Ranging##envrange", dock_range);
+    ImGui::DockBuilderDockWindow("Difference##envres", dock_range);
+    // HITRAN stacks with the env's data-export panel (v6 scheme).
+    ImGui::DockBuilderDockWindow("Export##envexp", dock_export);
+    ImGui::DockBuilderDockWindow("HITRAN Gas Markers##envhitran", dock_export);
+    ImGui::DockBuilderDockWindow("Viewer##envview", dock_viewer);
+
+    // Workspace/Session panels share the env nodes (mutually exclusive by
+    // tab kind — the same sharing the shared default uses for its views).
+    // They MUST be seeded: this tree stays live when an experiment tab is
+    // active, and activating a workspace tab on a fresh machine restores a
+    // PER-WORKSPACE snapshot that does not exist yet (no-op) — without a
+    // dock target the workspace panels would float.
+    for (const char* name : {"Files", "Datasets"})
+        ImGui::DockBuilderDockWindow(name, dock_settings);
+    for (const char* name : {"Spectrum", "Interferogram", "Average",
+                             "SNR", "100% T", "Allan"})
+        ImGui::DockBuilderDockWindow(name, dock_range);
+    for (const char* name : {"Metadata", "Export", "HITRAN Gas Markers",
+                             "Active Experiments", "Available Experiments",
+                             "Batch Processing"})
+        ImGui::DockBuilderDockWindow(name, dock_export);
+    for (const char* name : {"Interferogram View", "100% T View", "Allan View",
+                             "SNR View", "Average View", "Spectrum View"})
+        ImGui::DockBuilderDockWindow(name, dock_viewer);
+
+    ImGui::DockBuilderFinish(dockspace_id);
+}
 static void renderSpectrumViewPanel() {
         ImGui::Begin("Spectrum View");
         if (appState.active->dataLoaded && !appState.active->loadedData.empty()) {
@@ -2383,6 +2447,41 @@ void AppLoop::renderUI() {
                     resetTabLayout(tabTypeName(static_cast<int>(ActiveTabKind::Experiment)));
                     rebuildDefaultLayout(dockspace_id, topOffset);
                     saveTabLayout(tabTypeName(static_cast<int>(ActiveTabKind::Experiment)));
+                }
+                // v8 (2026-10-08): experiment tabs got a dedicated full-width
+                // default layout (rebuildDefaultExperimentLayout — Settings
+                // column left, Viewer right). The v6/v7 seeds above captured
+                // the SHARED tree, whose workspace-only flanks render empty
+                // while an experiment tab is active (fresh-computer bug:
+                // ~60% of the window black). The experiment snapshot is
+                // reset + re-seeded from the new default (the v6/v7
+                // convention for a changed default). The session snapshot is
+                // seeded ONLY when absent, BEFORE the env build (from the
+                // current arrangement), so switching to the Session tab
+                // restores that instead of inheriting the experiment tree;
+                // a user-customized snapshot is never overwritten. (The
+                // workspace kind needs no seed: it restores per-workspace
+                // snapshots, and a fresh machine's missing one no-ops into
+                // the env tree, whose nodes host the workspace panels.)
+                if (config_.sessionPanelLayoutVersion < 8) {
+                    config_.sessionPanelLayoutVersion = 8;
+                    config_.saveToFile(configFilePath_);
+                    const char* sesType =
+                        tabTypeName(static_cast<int>(ActiveTabKind::Session));
+                    if (!tabLayoutExists(sesType)) saveTabLayout(sesType);
+                    const char* expType =
+                        tabTypeName(static_cast<int>(ActiveTabKind::Experiment));
+                    resetTabLayout(expType);
+                    rebuildDefaultExperimentLayout(dockspace_id, topOffset);
+                    saveTabLayout(expType);
+                    // The env build replaced the live tree. When the
+                    // restored active tab is an experiment it IS the right
+                    // live layout (the env windows dock into it later this
+                    // frame); otherwise the shared default is (v6/v7
+                    // convention: a version bump rebuilds the live tree
+                    // once).
+                    if (appState.activeTabKind != ActiveTabKind::Experiment)
+                        rebuildDefaultLayout(dockspace_id, topOffset);
                 }
 
 ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);

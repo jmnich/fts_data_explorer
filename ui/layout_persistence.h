@@ -47,6 +47,11 @@ void saveTabLayout(const char* type);
 // dock ids.
 void restoreTabLayout(const char* type);
 
+// True when the type's snapshot file exists (restoreTabLayout has something
+// to load). Used by the default-layout seeding to never overwrite a
+// user-customized snapshot. No-op false without an ImGui context (headless).
+bool tabLayoutExists(const char* type);
+
 // Per-workspace layout snapshots (bugfix 2026-08-15): each dataset keeps its
 // OWN docking arrangement, keyed by the session's stable `key` (workspace
 // path, or "multi-workspace .h5#sourceId"). A shared "workspace" snapshot would make
