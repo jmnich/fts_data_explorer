@@ -4,6 +4,7 @@ A free and open source scientific application for rapid exploration of raw data 
 Almost dependency-free builds are available for Linux and Windows.
 
 [![Release](https://img.shields.io/github/v/release/jmnich/fts_data_explorer)](https://github.com/jmnich/fts_data_explorer/releases/latest)
+[![DOI](https://zenodo.org/badge/1188525435.svg)](https://doi.org/10.5281/zenodo.23249162)
 
 ![Welcome](screenshots/1_welcome_screen.png)
 
