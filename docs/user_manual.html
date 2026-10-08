@@ -2436,6 +2436,17 @@ print(table.dtype.names, len(table))
 <p>
 Headless mode runs the same code paths as the graphical application, so a scripted run with the same workspace and settings produces the same results as the GUI. One difference: headless mode always processes every measurement in the workspace, while the graphical interface uses the saved selection.
 </p>
+<div class="note">
+On Windows the executable is a GUI-subsystem binary, so launching it by
+double-click opens no console window. Headless commands started from a
+terminal attach to that terminal and print there as usual, but
+<code>cmd.exe</code> does not wait for GUI-subprocesses - the prompt returns
+while the job is still running. Use <code>start /wait</code> (cmd), output
+redirection, or a shell that waits for the process (Python's
+<code>subprocess.run</code> as in the example above, PowerShell pipelines)
+to block until completion. Redirected output
+(<code>-l converter &gt; list.txt</code>) works unchanged.
+</div>
 </section>
 
 <section class="page" id="literature" data-chapter="Appendix">

@@ -14,6 +14,18 @@
 #include <thread>
 #include <chrono>
 
+#ifdef _WIN32
+// Console plumbing for the GUI-subsystem exe (-mwindows, see CMakeLists.txt).
+// LEAN_AND_MEAN trims rarely used Win32 headers; NOMINMAX guards the min/max
+// macros that would otherwise break std::min/std::max uses below (MinGW's
+// std headers may already define it).
+#define WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 // Include config header
 #include "config.h"
 #include "app_state.h"
@@ -583,6 +595,30 @@ void dispatchPendingAction(AppState& s) {
 }
 
 int main(int argc, char* argv[]) {
+#ifdef _WIN32
+    // The exe is linked with the WINDOWS subsystem so Explorer launches no
+    // longer spawn an empty terminal window. That leaves CLI invocations
+    // (headless flags, bad arguments) without a console: attach to the
+    // CALLING terminal when one exists (cmd/PowerShell), else allocate one
+    // so usage errors stay visible (e.g. "open with"). Redirected streams
+    // keep their file handles — only the missing ones are rebound to the
+    // console. Explorer double-clicks pass no arguments and never reach
+    // this block.
+    if (argc > 1) {
+        const HANDLE outHandle = GetStdHandle(STD_OUTPUT_HANDLE);
+        const HANDLE errHandle = GetStdHandle(STD_ERROR_HANDLE);
+        const bool outValid =
+            outHandle != NULL && outHandle != INVALID_HANDLE_VALUE;
+        const bool errValid =
+            errHandle != NULL && errHandle != INVALID_HANDLE_VALUE;
+        if (!outValid || !errValid) {
+            if (!AttachConsole(ATTACH_PARENT_PROCESS))
+                AllocConsole();
+            if (!outValid) freopen("CONOUT$", "w", stdout);
+            if (!errValid) freopen("CONOUT$", "w", stderr);
+        }
+    }
+#endif
     // Initialize FFTW threading support before any FFTW plan creation.
     // See the comment above the fftw3.h include for why this is required.
     fftw_init_threads();

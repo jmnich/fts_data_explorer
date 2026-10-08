@@ -376,6 +376,12 @@ if(NOT WIN32)
 else()
     target_link_options(fts_data_explorer PRIVATE
         -static
+        # WINDOWS subsystem: MinGW defaults to CONSOLE, which makes Windows
+        # allocate an empty terminal window for every Explorer launch. CLI
+        # invocations (headless flags) reattach to the calling console in
+        # main() — the plain main() entry keeps working (MinGW-w64 links a
+        # default WinMain stub that calls it).
+        -mwindows
     )
 endif()
 
