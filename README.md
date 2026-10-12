@@ -6,6 +6,8 @@ Almost dependency-free builds are available for Linux and Windows.
 [![Release](https://img.shields.io/github/v/release/jmnich/fts_data_explorer)](https://github.com/jmnich/fts_data_explorer/releases/latest)
 [![DOI](https://zenodo.org/badge/1188525435.svg)](https://doi.org/10.5281/zenodo.23249162)
 
+> Want to give it a try? Download the **[demo HDF5 dataset](https://doi.org/10.18150/OXHFAY)** from our ultra-broadband FTIR.
+
 ![Welcome](screenshots/1_welcome_screen.png)
 
 ## The pitch
