@@ -1993,7 +1993,10 @@ std::vector<ComparatorCurve> EnvironmentSession::gatherCurves(AppState& s) {
         return comparatorIncludes(s, key);
     };
 
+    size_t sourcesWalked = 0;
+
     for (const auto& src : comparatorSources(s)) {
+        const size_t srcPos = sourcesWalked++;   // stable per-dataset color basis
         if (!included(src.key)) continue;
         ArtifactInfo info = artifactInfo(*src.ws, artifact, src.key);
         if (info.members.empty()) continue;
@@ -2059,6 +2062,13 @@ std::vector<ComparatorCurve> EnvironmentSession::gatherCurves(AppState& s) {
             if (yMax > 0.0)
                 for (double& v : c.y) v /= yMax;
         }
+        // Explicit palette color (position in the comparatorSources walk —
+        // stable per dataset as inclusion toggles). The custom legend row,
+        // the plotted line and the tracking cursor all read this one value;
+        // ImPlot's per-item auto-color cache (creation-time ColormapIdx) is
+        // bypassed — that cache drifted from the legend's frame-index
+        // assumption whenever an artifact switch renamed the curve labels.
+        c.color = tab20Color(srcPos);
         curves.push_back(std::move(c));
     }
     // Unique labels: ImPlot item IDs and the Difference-panel pickers key on

@@ -54,7 +54,9 @@ struct ComparatorCurve {
     std::string label;       // full label (legend / CSV headers)
     std::string shortLabel;  // compact label (cursor info box, no dataset name)
     std::vector<double> x, y;
-    ImVec4 color;            // explicit line color; w==0 → use the colormap
+    ImVec4 color;            // explicit line color — the legend row, the plotted
+                             // line and the cursor all read this ONE value;
+                             // w==0 → fall back to ImPlot's colormap
 };
 
 // One selectable member of an artifact type. `xUnit` is the member's STORED
