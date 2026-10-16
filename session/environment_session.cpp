@@ -1409,7 +1409,9 @@ void EnvironmentSession::renderComparatorConfig() {
 // outside the container (standalone workspace open in its own tab) keeps a row
 // so it stays visible and removable, but is never offered as a new pick. Rows
 // are greyed when the selected artifact is unavailable and yellow when it is
-// stale; multi-member artifacts get a per-dataset member dropdown.
+// stale; per-record artifacts (raw spectra / T100 / IFG) get a per-dataset
+// member dropdown and a "computed of total records" counter. Average and SNR
+// are single-instance aggregates — never a member selector.
 void EnvironmentSession::renderDatasetSelector() {
     ImGui::TextUnformatted("Included datasets");
     const auto artifact = static_cast<ComparatorArtifact>(artifactSelector);
@@ -1467,29 +1469,58 @@ void EnvironmentSession::renderDatasetSelector() {
         if (info.stale && ImGui::IsItemHovered())
             ImGui::SetTooltip("Stale — recompute this artifact in its workspace tab.");
 
-        // Per-dataset member dropdown for multi-member artifacts (the pushed
-        // row ID already disambiguates across rows).
-        if (checked && info.members.size() > 1) {
+        // Per-record artifacts only (raw spectra / T100 / IFG): average and
+        // SNR are single-instance aggregates — never a member selector. The
+        // pushed row ID already disambiguates across rows. The dropdown is
+        // ALWAYS rendered for these artifacts — with exactly one member it
+        // names the record being plotted, and with none it names the
+        // situation instead of silently vanishing (the counter below carries
+        // the "0 of N" availability).
+        const bool perRecordArtifact =
+            artifact != ComparatorArtifact::AverageSpectrum &&
+            artifact != ComparatorArtifact::Snr;
+        if (checked && perRecordArtifact) {
+            const int memberCount = static_cast<int>(info.members.size());
+            const int recordCount =
+                static_cast<int>(workspaceFileList(*src.ws).size());
             ImGui::Indent();
-            auto pit = memberPicks.find(src.key);
-            std::string current = (pit != memberPicks.end()) ? pit->second : "";
-            bool found = false;
-            for (const auto& m : info.members)
-                if (m.id == current) { found = true; break; }
-            if (!found) current.clear();
-            if (ImGui::BeginCombo("##cmpMember",
-                                  (current.empty() ? info.members.front().id : current).c_str())) {
-                for (const auto& m : info.members) {
-                    const bool sel = m.id == current;
-                    if (ImGui::Selectable(m.id.c_str(), sel)) {
-                        memberPicks[src.key] = m.id;
-                        dirty = true;
-                        appState.needsRedraw = true;
+            if (memberCount >= 1) {
+                auto pit = memberPicks.find(src.key);
+                std::string current = (pit != memberPicks.end()) ? pit->second : "";
+                bool found = false;
+                for (const auto& m : info.members)
+                    if (m.id == current) { found = true; break; }
+                if (!found) current.clear();
+                if (ImGui::BeginCombo("##cmpMember",
+                                      (current.empty() ? info.members.front().id : current).c_str())) {
+                    for (const auto& m : info.members) {
+                        const bool sel = m.id == current;
+                        if (ImGui::Selectable(m.id.c_str(), sel)) {
+                            memberPicks[src.key] = m.id;
+                            dirty = true;
+                            appState.needsRedraw = true;
+                        }
                     }
+                    ImGui::EndCombo();
                 }
-                ImGui::EndCombo();
+            } else {
+                if (ImGui::BeginCombo("##cmpMember", "none computed")) {
+                    ImGui::Selectable("No records computed", false,
+                                      ImGuiSelectableFlags_Disabled);
+                    ImGui::EndCombo();
+                }
             }
             ImGui::Unindent();
+            // Computed-record counter — always visible for per-record
+            // artifacts (0-member rows included: it explains the greyed
+            // row). All-computed sources show "N of N" — availability is
+            // information, not noise.
+            if (recordCount > 0) {
+                ImGui::Indent();
+                ImGui::TextDisabled("%d of %d records computed",
+                                    memberCount, recordCount);
+                ImGui::Unindent();
+            }
         }
         ImGui::PopID();
     }
