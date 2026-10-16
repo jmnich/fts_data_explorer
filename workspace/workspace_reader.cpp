@@ -128,6 +128,21 @@ int xUnitFromString(const std::string& s) {
     return s == "um" ? 1 : s == "thz" ? 2 : 0;
 }
 
+// The X unit of a T100 member's transmittance curves AND std-dev grid: both
+// live on the T100 panel's compute-time grid, never on the spectrum-unit
+// reference grid. Honest members declare it via the "curveXUnit" config key
+// (makeT100Config / batchArtifactCfg); members written before the key
+// existed fall back to the reference unit ("xUnit") — exact for batch-written
+// and unit-matched members, only a guess for legacy members whose panel unit
+// diverged from the Spectrum panel (t100CurveUnit's explicitOut reports which
+// case it is, so verbatim seeding can keep the legacy behavior).
+std::string curveXUnitString(const nlohmann::json& cfg, bool* explicitOut = nullptr) {
+    auto it = cfg.find("curveXUnit");
+    const bool has = it != cfg.end() && it->is_string();
+    if (explicitOut) *explicitOut = has;
+    return has ? it->get<std::string>() : configXUnit(cfg);
+}
+
 // Compare the staleness-relevant spectrum params (decision 7: xUnit excluded —
 // the x-axis is converted on seed, not a staleness condition).
 bool cfgNumEq(const nlohmann::json& cfg, const char* key, double value) {
@@ -907,12 +922,12 @@ void wsUpsertT100(Workspace& ws, const std::vector<std::string>& inputs,
     if (!inputs.empty()) c["inputs"] = inputs;
     m.config = c.dump();
     m.reference.columns = {"x", "y"};
-    m.reference.units = {configXUnit(cfg), "a.u."};
+    m.reference.units = {configXUnit(cfg), "a.u."};      // reference grid: spectrum unit
     m.reference.x = refX;
     m.reference.y = refY;
     if (!stdX.empty() && !stdY.empty()) {
         m.stddev.columns = {"x", "y"};
-        m.stddev.units = {configXUnit(cfg), "%"};
+        m.stddev.units = {curveXUnitString(cfg), "%"};   // std grid: T100 panel unit
         m.stddev.x = stdX;
         m.stddev.y = stdY;
     }
@@ -962,7 +977,12 @@ nlohmann::json makeAllanConfig(const AppState& s, const std::vector<std::string>
 }
 
 nlohmann::json makeT100Config(const AppState& s, const std::vector<std::string>& inputs) {
-    nlohmann::json cfg = spectrumParamsJson(s);   // refX is stored in spectrum-unit
+    nlohmann::json cfg = spectrumParamsJson(s);   // reference grid: spectrum-unit
+    // The transmittance curves and the std-dev grid are cached in the T100
+    // panel's OWN display unit (independent selector) — declare it so the
+    // cross-readers (t100CurveUnit: comparator/absorbance artifactInfo, panel
+    // seeding) never mistake the reference unit for the curve unit.
+    cfg["curveXUnit"] = xUnitString(s.active->t100.plot.xUnitSelector);
     cfg["inputs"] = inputs;
     std::string src = t100SourceString(s.active->t100.referenceSource);
     std::string path = "";
@@ -973,6 +993,10 @@ nlohmann::json makeT100Config(const AppState& s, const std::vector<std::string>&
     }
     cfg["reference"] = {{"source", src}, {"path", path}};
     return cfg;
+}
+
+int t100CurveUnit(const T100Member& m, bool* explicitOut) {
+    return xUnitFromString(curveXUnitString(parseConfig(m.config), explicitOut));
 }
 
 void wsUpsertT100FromPanel(AppState& s) {
@@ -1208,12 +1232,30 @@ void seedPanelsFromWorkspace(WorkspaceSession& sess) {
         // maps are seeded too — wsUpsertT100FromPanel must find the same
         // curves after a pristine open (no-op guard) and after the stddev
         // completion path, which upserts without recomputing transmittance.
+        // Exception: when the view unit differs from the member's curve unit,
+        // the seeded curves below are converted — the guard then legitimately
+        // rewrites the member (in the view unit) on the next compute.
+        // Curves + std-dev grid live on the T100 panel's compute-time grid
+        // (cfg "curveXUnit"); the restored view unit may differ. Convert to
+        // the view unit — the same contract as the Average/SNR seeds above.
+        // Members without the key (pre-curveXUnit legacy) keep verbatim
+        // seeding: their true curve unit is unrecoverable, and the saved view
+        // unit matched the panel at save time.
+        bool curveUnitExplicit = false;
+        const int curveUnit = t100CurveUnit(m, &curveUnitExplicit);
+        const bool convertCurves =
+            curveUnitExplicit && curveUnit != sess.t100.plot.xUnitSelector;
+        const auto fromU = static_cast<SpectralToolbox::SpectrumXUnit>(curveUnit);
+        const auto toU = static_cast<SpectralToolbox::SpectrumXUnit>(sess.t100.plot.xUnitSelector);
         for (const auto& c : m.curves) {
             if (std::find(sess.csvFiles.begin(), sess.csvFiles.end(), c.fileId) == sess.csvFiles.end())
                 continue;   // deleted/absent member: keep its curve out of caches
-            sess.t100.cachedTransX[c.fileId] = c.x;
+            std::vector<double> x = c.x;
+            if (convertCurves)
+                for (double& v : x) v = SpectralToolbox::convertXValue(v, fromU, toU);
+            sess.t100.cachedTransX[c.fileId] = x;
             sess.t100.cachedTransY[c.fileId] = c.y;
-            sess.t100.fullResCachedTransX[c.fileId] = c.x;
+            sess.t100.fullResCachedTransX[c.fileId] = std::move(x);
             sess.t100.fullResCachedTransY[c.fileId] = c.y;
         }
         sess.t100.transmittanceAvailable = !sess.t100.cachedTransY.empty();
@@ -1243,6 +1285,9 @@ void seedPanelsFromWorkspace(WorkspaceSession& sess) {
         }
         if (!m.stddev.x.empty() && !m.stddev.y.empty()) {
             sess.t100.cachedStdX = m.stddev.x;
+            if (convertCurves)
+                for (double& v : sess.t100.cachedStdX)
+                    v = SpectralToolbox::convertXValue(v, fromU, toU);
             sess.t100.cachedStdY = m.stddev.y;
             sess.t100.stddevAvailable = true;
         }

@@ -71,6 +71,9 @@ nlohmann::json batchArtifactCfg(const Recipe& r, const std::vector<std::string>&
         // The T% reference is ALWAYS the dataset's average spectrum; the
         // "source" key is required by t100MemberFresh (workspace_reader.cpp:229).
         cfg["reference"] = {{"source", "average"}, {"path", "/average_spectra/average"}};
+        // Curves + std-dev grid ride the common cm-1 grid (batchSpectrumCfg
+        // computes in cm-1): declare it for t100CurveUnit consumers.
+        cfg["curveXUnit"] = "cm-1";
         nlohmann::json er = nlohmann::json::array();
         for (const auto& [num, den] : r.energyRatios)
             er.push_back({{"num", num}, {"den", den}});

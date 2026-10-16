@@ -269,7 +269,10 @@ ArtifactInfo EnvironmentSession::artifactInfo(const Workspace& ws,
             for (const auto& c : m.curves) {
                 ArtifactMember am;
                 am.id = c.fileId;
-                am.xUnit = memberXUnit(m.reference);
+                // Curves live on the T100 panel's compute-time grid — NOT the
+                // reference grid. t100CurveUnit resolves the honest
+                // "curveXUnit" config key (legacy fallback: reference unit).
+                am.xUnit = t100CurveUnit(m);
                 am.x = c.x;
                 am.y = c.y;
                 am.config = m.config;
@@ -2129,7 +2132,7 @@ std::string EnvironmentSession::buildCurveSignature() {
                 for (const auto& c : m.curves) {
                     sig += c.fileId; sig += '\x1f';
                     append(static_cast<int>(m.stale));
-                    append(memberXUnit(m.reference));
+                    append(t100CurveUnit(m));
                     append(c.x.size());
                     append(c.y.size());
                 }

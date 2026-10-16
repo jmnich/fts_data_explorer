@@ -77,6 +77,17 @@ nlohmann::json makeSnrConfig(const AppState& s, const std::vector<std::string>& 
 nlohmann::json makeAllanConfig(const AppState& s, const std::vector<std::string>& inputs);
 nlohmann::json makeT100Config(const AppState& s, const std::vector<std::string>& inputs);
 
+// X unit (0/1/2 = cm-1/um/thz) of a T100 member's transmittance curves AND
+// std-dev grid: both live on the T100 panel's compute-time grid, NOT the
+// spectrum-unit reference grid ("xUnit"). Declared by the "curveXUnit" config
+// key (makeT100Config / batchArtifactCfg); members written before the key
+// existed fall back to the reference unit. `explicitOut`, when non-null,
+// reports whether the key was present — absent means legacy: the true curve
+// unit is unrecoverable, so downstream seeding must stay verbatim.
+// Single source of truth: the Comparator/Absorbance artifactInfo conversion
+// and the T100 panel seed both resolve the unit through this function.
+int t100CurveUnit(const T100Member& m, bool* explicitOut = nullptr);
+
 // Set MemberBase::stale where a derivative member's config (params + inputs +
 // t100 reference.path) no longer matches the current UI (decision 7). Pure
 // read of AppState; does not set dirty.
