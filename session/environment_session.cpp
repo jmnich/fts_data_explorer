@@ -1174,17 +1174,27 @@ void EnvironmentSession::renderAbsorbanceConfig() {
         // single "average" member per dataset, so the picker is redundant.
         if (artifact != static_cast<int>(ComparatorArtifact::AverageSpectrum)) {
             std::vector<std::string> ids;
-            bool available = false, st = false;
-            int recordCount = 0;
+            bool available = false, st = false, sourceFound = false;
+            int recordCount = 0, computedCount = 0;
+            std::vector<std::string> recordIds;
             for (const auto& src : comparatorSources(appState)) {
                 if (src.key != key) continue;
+                sourceFound = true;
                 ArtifactInfo info = artifactInfo(*src.ws,
                                                  static_cast<ComparatorArtifact>(artifact),
                                                  src.key);
                 available = info.available;
                 st = info.stale;
                 for (const auto& m : info.members) ids.push_back(m.id);
-                recordCount = static_cast<int>(workspaceFileList(*src.ws).size());
+                recordIds = workspaceFileList(*src.ws);
+                recordCount = static_cast<int>(recordIds.size());
+                // Count only members whose record still exists: a deleted
+                // file's derivative member survives (stale) until the prune
+                // at Save and would read "N+1 of N" in the counter below.
+                for (const auto& m : info.members)
+                    if (std::find(recordIds.begin(), recordIds.end(),
+                                  ifgIdFromSpectrumMember(m.id)) != recordIds.end())
+                        ++computedCount;
                 break;
             }
             std::string memCur = member;
@@ -1192,10 +1202,12 @@ void EnvironmentSession::renderAbsorbanceConfig() {
             // Empty artifact: same contract as the comparator dataset
             // selector — the dropdown stays visible and names the situation
             // ("none computed"). A dataset not chosen yet keeps the neutral
-            // em-dash.
+            // em-dash; a dataset whose source no longer resolves (removed
+            // from the container) is named as missing, not as uncomputed.
             const char* preview = !memCur.empty() ? memCur.c_str()
                                   : ids.empty() ? (key.empty() ? "\xE2\x80\x94"   // "—"
-                                                               : "none computed")
+                                                               : (sourceFound ? "none computed"
+                                                                              : "dataset missing"))
                                                 : ids.front().c_str();
             ImGui::TextUnformatted("Member");
             ImGui::SameLine();
@@ -1206,7 +1218,9 @@ void EnvironmentSession::renderAbsorbanceConfig() {
             if (ImGui::BeginCombo((std::string("##mem") + id).c_str(), preview)) {
                 if (ids.empty()) {
                     if (!key.empty())
-                        ImGui::Selectable("No records computed", false,
+                        ImGui::Selectable(sourceFound ? "No records computed"
+                                                      : "Dataset not found",
+                                          false,
                                           ImGuiSelectableFlags_Disabled);
                 } else {
                     for (const auto& idv : ids) {
@@ -1223,7 +1237,7 @@ void EnvironmentSession::renderAbsorbanceConfig() {
             // offered here (raw spectrum), "N of N" included.
             if (recordCount > 0) {
                 ImGui::TextDisabled("%d of %d records computed",
-                                    static_cast<int>(ids.size()), recordCount);
+                                    computedCount, recordCount);
             }
         }
         return changed;
@@ -1522,8 +1536,16 @@ void EnvironmentSession::renderDatasetSelector() {
             artifact != ComparatorArtifact::T100Stddev;
         if (checked && perRecordArtifact) {
             const int memberCount = static_cast<int>(info.members.size());
-            const int recordCount =
-                static_cast<int>(workspaceFileList(*src.ws).size());
+            const std::vector<std::string> recordIds = workspaceFileList(*src.ws);
+            const int recordCount = static_cast<int>(recordIds.size());
+            // Existing-record members only: a deleted file's derivative
+            // member survives (stale) until the prune at Save and would
+            // read "N+1 of N" in the counter below.
+            int existingCount = 0;
+            for (const auto& m : info.members)
+                if (std::find(recordIds.begin(), recordIds.end(),
+                              ifgIdFromSpectrumMember(m.id)) != recordIds.end())
+                    ++existingCount;
             ImGui::Indent();
             if (memberCount >= 1) {
                 auto pit = memberPicks.find(src.key);
@@ -1555,11 +1577,12 @@ void EnvironmentSession::renderDatasetSelector() {
             // Computed-record counter — always visible for per-record
             // artifacts (0-member rows included: it explains the greyed
             // row). All-computed sources show "N of N" — availability is
-            // information, not noise.
+            // information, not noise. Counts only members whose record
+            // still exists in the source workspace (see existingCount).
             if (recordCount > 0) {
                 ImGui::Indent();
                 ImGui::TextDisabled("%d of %d records computed",
-                                    memberCount, recordCount);
+                                    existingCount, recordCount);
                 ImGui::Unindent();
             }
         }
@@ -2843,6 +2866,9 @@ void EnvironmentSession::exportCsv() {
     } else if (static_cast<ComparatorArtifact>(artifactSelector) ==
                ComparatorArtifact::T100) {
         yUnit = "%";
+    } else if (static_cast<ComparatorArtifact>(artifactSelector) ==
+               ComparatorArtifact::T100Stddev) {
+        yUnit = "%";   // std dev of transmittance — same % convention as T100
     } else if (type == EnvType::Comparator && normalizeTo1 &&
                artifactSelector < 3 /* spectral artifacts */) {
         yUnit = "norm.";   // per-curve max scaled to 1.0 (WYSIWYG with plot)

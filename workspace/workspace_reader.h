@@ -27,6 +27,11 @@ InterferogramData workspaceRead(const Workspace& ws, const std::string& id);
 // Absolute "/group/id" path of `id`, or "" if absent.
 std::string memberPathOf(const Workspace& ws, const std::string& id);
 
+// The input IFG id a spectra/spec_<ifgId> member was computed from (the
+// "spec_" prefix is stripped; any other id passes through unchanged —
+// per-record artifact member ids map to their record id this way).
+std::string ifgIdFromSpectrumMember(const std::string& memberId);
+
 // Absolute paths of the currently-checked files in sortedFiles order
 // (workspace mode; filesSelectedForAveraging). Used for inputs comparisons.
 std::vector<std::string> checkedInputPaths(const AppState& s);

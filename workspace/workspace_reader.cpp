@@ -184,12 +184,6 @@ bool configInputsEqual(const nlohmann::json& cfg, const std::vector<std::string>
     return true;
 }
 
-// The input IFG id a spectra/spec_<ifgId> member was computed from.
-std::string ifgIdFromSpectrumMember(const std::string& memberId) {
-    if (memberId.rfind("spec_", 0) == 0) return memberId.substr(5);
-    return memberId;
-}
-
 const TwoColumnMember* findSpectrumMember(const Workspace& ws, const std::string& ifgId) {
     const std::string want = "spec_" + ifgId;
     for (const auto& m : ws.spectra.members)
@@ -517,6 +511,16 @@ void applyPanelViewState(WorkspaceSession& ws, const nlohmann::json& vs) {
 }
 
 } // namespace
+
+// The input IFG id a spectra/spec_<ifgId> member was computed from. The
+// "spec_" prefix is stripped; any other id passes through unchanged, so it
+// doubles as the per-record-artifact member-id -> record-id mapping (T100
+// curve file ids, IFG member ids). Global scope: cross-TU consumers
+// (environment_session.cpp's record counters) call it via the header.
+std::string ifgIdFromSpectrumMember(const std::string& memberId) {
+    if (memberId.rfind("spec_", 0) == 0) return memberId.substr(5);
+    return memberId;
+}
 
 // Window-aware apodization subset (see header): only the active window's
 // parameter(s) count. Equal window + equal effective params → equal output,
