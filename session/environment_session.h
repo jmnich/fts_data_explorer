@@ -33,6 +33,7 @@ enum class EnvType { Absorbance, Comparator };   // Pca removed (Phase-2 user de
 // Comparator artifact types: what to overlay across the selected datasets.
 // CorrectedInterferogram keeps value 4 so persisted configs from the merged
 // "Interferogram" artifact (which preferred corrected) map faithfully.
+// New members must be APPENDED — artifactSelector persists as a raw index.
 enum class ComparatorArtifact {
     AverageSpectrum,       // session average spectrum (cachedAverageX/Y)
     RawSpectrum,           // individual spectra members (via the spectral pool)
@@ -40,6 +41,7 @@ enum class ComparatorArtifact {
     T100,                  // 100% T transmittance curves (cachedTransX/Y per member)
     CorrectedInterferogram,// corrected interferograms (primary detector vs sample index)
     RawInterferogram,      // uncorrected interferograms (primary detector vs sample index)
+    T100Stddev,            // 100% T std-dev curve (single instance per dataset)
 };
 
 const char* experimentTypeName(EnvType t);              // "Absorbance" / "Comparator"

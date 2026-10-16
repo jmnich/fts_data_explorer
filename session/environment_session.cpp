@@ -281,6 +281,23 @@ ArtifactInfo EnvironmentSession::artifactInfo(const Workspace& ws,
             }
         }
         break;
+    case ComparatorArtifact::T100Stddev:
+        // Single instance per dataset (the t100 group holds one fixed-id
+        // member): no member selector, no counter — the Average/SNR rule.
+        // The std-dev grid shares the T100 panel's compute-time grid, so
+        // its unit is the honest curve unit, NOT the reference unit.
+        for (const auto& m : ws.t100.members) {
+            if (m.stddev.x.empty() || m.stddev.y.empty()) continue;
+            ArtifactMember am;
+            am.id = "stddev";
+            am.xUnit = t100CurveUnit(m);
+            am.x = m.stddev.x;
+            am.y = m.stddev.y;
+            am.config = m.config;
+            am.stale = m.stale;
+            info.members.push_back(std::move(am));
+        }
+        break;
     case ComparatorArtifact::CorrectedInterferogram: {
         // corrected: col0 = primary, col1 = OPD axis (um).
         for (const auto& m : ws.correctedIfg.members) {
@@ -360,6 +377,7 @@ const char* artifactLabel(ComparatorArtifact a) {
         case ComparatorArtifact::T100:                  return "100% T";
         case ComparatorArtifact::CorrectedInterferogram: return "Corrected interferogram";
         case ComparatorArtifact::RawInterferogram:      return "Raw interferogram";
+        case ComparatorArtifact::T100Stddev:            return "100% T std dev";
     }
     return "?";
 }
@@ -1073,7 +1091,9 @@ void EnvironmentSession::renderViewWindow() {
                          : (artifact == ComparatorArtifact::RawInterferogram)
                               ? "Sample index"
                               : xUnitLabel(plot.xUnitSelector);
-            yLabel = artifactLabel(artifact);
+            yLabel = (artifact == ComparatorArtifact::T100Stddev)
+                         ? "Std Dev T (%)"   // T100 panel's std-subplot convention
+                         : artifactLabel(artifact);
             if (plot.yScaleSelector == 2) yLabel += " (dB)";
             if (normalizeTo1 && artifactSelector < 3) yLabel += " (normalized)";
         }
@@ -1380,23 +1400,23 @@ void EnvironmentSession::renderCommentEditor() {
 // comment. Plot ranging (X unit / Y scale / Y axis / cursor) lives in the
 // Plot Ranging panel, CSV export in the Export panel (split out 2026-08-14).
 void EnvironmentSession::renderComparatorConfig() {
-    static const char* names[6] = {"Average spectrum", "Raw spectrum", "SNR",
+    static const char* names[7] = {"Average spectrum", "Raw spectrum", "SNR",
                                    "100% T", "Corrected interferogram",
-                                   "Raw interferogram"};
+                                   "Raw interferogram", "100% T std dev"};
     ImGui::TextUnformatted("Artifact");
     ImGui::SameLine();
     ImGui::SetNextItemWidth(-FLT_MIN);
     if (ImGui::BeginCombo("##artifact", names[artifactSelector])) {
-        for (int a = 0; a < 6; ++a) {
+        for (int a = 0; a < 7; ++a) {
             if (ImGui::Selectable(names[a], a == artifactSelector)) {
                 if (artifactSelector != a) {
                     artifactSelector = a;
                     plot.shouldAutoscale = true;
-                    // T100/IFG have no log/dB scale — drop back to lin.
-                    if (plot.yScaleSelector != 0 && a >= 3 /* T100 / IFG */)
+                    // T100/IFG/stddev have no log/dB scale — drop back to lin.
+                    if (plot.yScaleSelector != 0 && a >= 3 /* T100 / IFG / stddev */)
                         plot.yScaleSelector = 0;
                     // ... and no per-curve normalization (T100 keeps its
-                    // absolute % reference, IFG is bipolar).
+                    // absolute % reference, IFG is bipolar, stddev is absolute).
                     if (normalizeTo1 && a >= 3) normalizeTo1 = false;
                     dirty = true;
                     appState.needsRedraw = true;
@@ -1498,7 +1518,8 @@ void EnvironmentSession::renderDatasetSelector() {
         // the "0 of N" availability).
         const bool perRecordArtifact =
             artifact != ComparatorArtifact::AverageSpectrum &&
-            artifact != ComparatorArtifact::Snr;
+            artifact != ComparatorArtifact::Snr &&
+            artifact != ComparatorArtifact::T100Stddev;
         if (checked && perRecordArtifact) {
             const int memberCount = static_cast<int>(info.members.size());
             const int recordCount =
@@ -2023,6 +2044,9 @@ std::vector<ComparatorCurve> EnvironmentSession::gatherCurves(AppState& s) {
             c.label = n > 0 ? src.label + " (SNR of " + std::to_string(n) + ")"
                             : src.label + " · snr";
             c.shortLabel = n > 0 ? "SNR of " + std::to_string(n) : "snr";
+        } else if (artifact == ComparatorArtifact::T100Stddev) {
+            c.label = src.label + " · std dev";
+            c.shortLabel = "std dev";
         } else {
             c.label = src.label + "/" + pick->id;
             c.shortLabel = pick->id;
@@ -2197,6 +2221,18 @@ std::string EnvironmentSession::buildCurveSignature() {
                     append(c.x.size());
                     append(c.y.size());
                 }
+            }
+            break;
+        case ComparatorArtifact::T100Stddev:
+            // Uniformity with the T100 case (upserts bump memberRevision, so
+            // this is defensive — the member identity + grid must be in the
+            // key like every other artifact).
+            for (const auto& m : ws.t100.members) {
+                sig += m.id; sig += '\x1f';
+                append(static_cast<int>(m.stale));
+                append(t100CurveUnit(m));
+                append(m.stddev.x.size());
+                append(m.stddev.y.size());
             }
             break;
         case ComparatorArtifact::CorrectedInterferogram: {
