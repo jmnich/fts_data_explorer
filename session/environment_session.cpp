@@ -1155,6 +1155,7 @@ void EnvironmentSession::renderAbsorbanceConfig() {
         if (artifact != static_cast<int>(ComparatorArtifact::AverageSpectrum)) {
             std::vector<std::string> ids;
             bool available = false, st = false;
+            int recordCount = 0;
             for (const auto& src : comparatorSources(appState)) {
                 if (src.key != key) continue;
                 ArtifactInfo info = artifactInfo(*src.ws,
@@ -1163,13 +1164,19 @@ void EnvironmentSession::renderAbsorbanceConfig() {
                 available = info.available;
                 st = info.stale;
                 for (const auto& m : info.members) ids.push_back(m.id);
+                recordCount = static_cast<int>(workspaceFileList(*src.ws).size());
                 break;
             }
             std::string memCur = member;
             if (std::find(ids.begin(), ids.end(), member) == ids.end()) memCur.clear();
+            // Empty artifact: same contract as the comparator dataset
+            // selector — the dropdown stays visible and names the situation
+            // ("none computed"). A dataset not chosen yet keeps the neutral
+            // em-dash.
             const char* preview = !memCur.empty() ? memCur.c_str()
-                                  : ids.empty()    ? "\xE2\x80\x94"          // "—"
-                                                   : ids.front().c_str();
+                                  : ids.empty() ? (key.empty() ? "\xE2\x80\x94"   // "—"
+                                                               : "none computed")
+                                                : ids.front().c_str();
             ImGui::TextUnformatted("Member");
             ImGui::SameLine();
             ImGui::SetNextItemWidth(-FLT_MIN);
@@ -1177,14 +1184,27 @@ void EnvironmentSession::renderAbsorbanceConfig() {
                 ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
             else if (st) ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.2f, 1.0f));
             if (ImGui::BeginCombo((std::string("##mem") + id).c_str(), preview)) {
-                for (const auto& idv : ids) {
-                    if (ImGui::Selectable(idv.c_str(), idv == memCur)) {
-                        if (idv != member) { member = idv; changed = true; }
+                if (ids.empty()) {
+                    if (!key.empty())
+                        ImGui::Selectable("No records computed", false,
+                                          ImGuiSelectableFlags_Disabled);
+                } else {
+                    for (const auto& idv : ids) {
+                        if (ImGui::Selectable(idv.c_str(), idv == memCur)) {
+                            if (idv != member) { member = idv; changed = true; }
+                        }
                     }
                 }
                 ImGui::EndCombo();
             }
             if (!available || st) ImGui::PopStyleColor();
+            // Computed-record counter — same contract as the comparator
+            // dataset selector: always visible for the per-record artifact
+            // offered here (raw spectrum), "N of N" included.
+            if (recordCount > 0) {
+                ImGui::TextDisabled("%d of %d records computed",
+                                    static_cast<int>(ids.size()), recordCount);
+            }
         }
         return changed;
     };
