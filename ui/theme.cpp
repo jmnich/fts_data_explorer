@@ -97,7 +97,6 @@ void ApplyTheme(ImGuiStyle& style, ImPlotStyle& plotStyle, AccentColor accent) {
     // Tabs (focused tab bar)
     style.Colors[ImGuiCol_Tab] = accentVeryMuted;
     style.Colors[ImGuiCol_TabHovered] = accentMuted;
-    style.Colors[ImGuiCol_TabActive] = accentBase;
     style.Colors[ImGuiCol_TabSelected] = accentBase;
     style.Colors[ImGuiCol_TabSelectedOverline] = accentBase;
 

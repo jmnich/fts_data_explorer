@@ -63,7 +63,7 @@ include(FetchContent)
 FetchContent_Declare(
     imgui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    GIT_TAG docking
+    GIT_TAG v1.93.0-docking
 )
 FetchContent_MakeAvailable(imgui)
 
@@ -71,7 +71,7 @@ FetchContent_MakeAvailable(imgui)
 FetchContent_Declare(
     implot
     GIT_REPOSITORY https://github.com/epezent/implot.git
-    GIT_TAG master
+    GIT_TAG 851cdbdd60d1dfb64c23e987969694de0f547a6b
 )
 FetchContent_MakeAvailable(implot)
 
@@ -79,7 +79,7 @@ FetchContent_MakeAvailable(implot)
 FetchContent_Declare(
     implot3d
     GIT_REPOSITORY https://github.com/brenocq/implot3d.git
-    GIT_TAG main
+    GIT_TAG 7913cf11684730119bd284fd8e7052d140e72f61
 )
 FetchContent_MakeAvailable(implot3d)
 
