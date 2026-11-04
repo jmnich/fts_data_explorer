@@ -127,8 +127,9 @@ bool startRepoSync(const std::string& url, const std::string& repoDir,
 // ---------------------------------------------------------------------------
 // Invocation (§3): <interpreter> <script> <input> <output.h5> [--param v].
 // ---------------------------------------------------------------------------
-// Spawns in a background thread (popen/_popen), streaming lines into
-// job.log. `desc` must outlive the run (the caller keeps it alive). Returns
+// Spawns in a background thread (runProcessStreaming: popen on POSIX,
+// CreateProcessW on Windows), streaming merged stdout+stderr into job.log.
+// `desc` must outlive the run (the caller keeps it alive). Returns
 // false only when the process could not be started.
 bool startConverter(const ConverterDesc& desc, const std::string& interpreter,
                     const std::string& input, const std::string& output,

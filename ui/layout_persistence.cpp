@@ -141,8 +141,11 @@ void restoreWorkspaceLayout(const std::string& key) {
 
 void resetTabLayout(const char* type) {
     if (!ImGui::GetCurrentContext()) return;
-    std::remove(layoutFilePath(type).c_str());
-    std::remove(selectionFilePath(type).c_str());
+    // std::filesystem (not CRT std::remove): the snapshots live under
+    // appDataDir(), whose path is UTF-8 and may be non-ASCII on Windows.
+    std::error_code ec;
+    std::filesystem::remove(layoutFilePath(type), ec);
+    std::filesystem::remove(selectionFilePath(type), ec);
 }
 
 std::map<ImGuiID, std::string> takeRestoredNodeSelection() {

@@ -1,6 +1,8 @@
 #include "process_runner.h"
 
 #include <cstdio>
+#include <cstring>
+#include <cwchar>
 
 #ifdef _WIN32
 
@@ -72,6 +74,33 @@ std::wstring joinQuoted(const std::vector<std::wstring>& args) {
     return line;
 }
 
+// Environment block for the child: the parent's environment plus
+// PYTHONIOENCODING=utf-8. Python writes to a pipe in the ANSI code page by
+// default, while the conversion-screen log is rendered as UTF-8 — so a
+// traceback mentioning a non-ASCII path would arrive as mojibake. Only the
+// stdio encoding is pinned (not PYTHONUTF8), leaving converter file I/O as-is.
+// Set per child so the GUI process's own environment stays untouched.
+//
+// The block must be a sequence of NUL-terminated "NAME=value" entries followed
+// by one extra NUL. Note: Wine ignores lpEnvironment, so this can only be
+// verified on real Windows (see the review notes).
+std::vector<wchar_t> buildChildEnvironment() {
+    std::vector<wchar_t> block;
+    wchar_t* parentEnv = GetEnvironmentStringsW();
+    if (parentEnv) {
+        for (const wchar_t* p = parentEnv; *p; p += wcslen(p) + 1) {
+            // Drop any inherited override so ours is the single definition.
+            if (_wcsnicmp(p, L"PYTHONIOENCODING=", 17) == 0) continue;
+            block.insert(block.end(), p, p + wcslen(p) + 1);
+        }
+        FreeEnvironmentStringsW(parentEnv);
+    }
+    const wchar_t* extra = L"PYTHONIOENCODING=utf-8";
+    block.insert(block.end(), extra, extra + wcslen(extra) + 1);
+    block.push_back(L'\0'); // double-terminated block
+    return block;
+}
+
 std::wstring buildCommandLine(const std::vector<std::string>& argv) {
     std::vector<std::wstring> args;
     args.reserve(argv.size());
@@ -84,6 +113,57 @@ std::wstring buildCommandLine(const std::vector<std::string>& argv) {
         return L"cmd.exe /d /s /c \"" + joinQuoted(args) + L"\"";
     }
     return joinQuoted(args);
+}
+
+// RAII wrapper so an exception from onChunk cannot leak the Win32 handles.
+class HandleGuard {
+public:
+    HandleGuard() = default;
+    explicit HandleGuard(HANDLE h) : h_(h) {}
+    ~HandleGuard() { reset(); }
+    HandleGuard(const HandleGuard&) = delete;
+    HandleGuard& operator=(const HandleGuard&) = delete;
+    void reset(HANDLE h = nullptr) {
+        if (h_ && h_ != INVALID_HANDLE_VALUE) CloseHandle(h_);
+        h_ = h;
+    }
+    HANDLE get() const { return h_; }
+    explicit operator bool() const { return h_ && h_ != INVALID_HANDLE_VALUE; }
+
+private:
+    HANDLE h_ = nullptr;
+};
+
+// "CreateProcess failed: <system message> (0x<code>)" — the OS reason is the
+// only thing that distinguishes "python not found" from "access denied".
+std::string describeCreateProcessError(DWORD code) {
+    std::string msg = "CreateProcess failed";
+    wchar_t* text = nullptr;
+    const DWORD n = FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER |
+                                       FORMAT_MESSAGE_FROM_SYSTEM |
+                                       FORMAT_MESSAGE_IGNORE_INSERTS,
+                                   nullptr, code,
+                                   MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                                   reinterpret_cast<wchar_t*>(&text), 0, nullptr);
+    if (n > 0 && text) {
+        std::wstring w(text, n);
+        while (!w.empty() && (w.back() == L'\r' || w.back() == L'\n' || w.back() == L' '))
+            w.pop_back();
+        const int len = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, nullptr, 0,
+                                            nullptr, nullptr);
+        if (len > 1) {
+            std::string utf8(static_cast<size_t>(len), '\0');
+            WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, utf8.data(), len, nullptr,
+                                nullptr);
+            utf8.resize(static_cast<size_t>(len - 1));
+            msg += ": " + utf8;
+        }
+    }
+    if (text) LocalFree(text);
+
+    char hex[32];
+    std::snprintf(hex, sizeof hex, " (0x%lX)", static_cast<unsigned long>(code));
+    return msg + hex;
 }
 
 } // namespace
@@ -106,47 +186,56 @@ bool runProcessStreaming(const std::vector<std::string>& argv,
         error = "CreatePipe failed";
         return false;
     }
+    HandleGuard readGuard(readEnd);
+    HandleGuard writeGuard(writeEnd);
     // The parent's read end must not be inherited.
     SetHandleInformation(readEnd, HANDLE_FLAG_INHERIT, 0);
 
     // Never pass an invalid handle with STARTF_USESTDHANDLES: that is exactly
     // the failure mode of _popen in a console-less process.
-    HANDLE nul = CreateFileW(L"NUL", GENERIC_READ,
-                             FILE_SHARE_READ | FILE_SHARE_WRITE, &sa,
-                             OPEN_EXISTING, 0, nullptr);
+    HandleGuard nulGuard(CreateFileW(L"NUL", GENERIC_READ,
+                                     FILE_SHARE_READ | FILE_SHARE_WRITE, &sa,
+                                     OPEN_EXISTING, 0, nullptr));
+    if (!nulGuard) {
+        error = "cannot open NUL for the child's stdin";
+        return false;
+    }
 
     STARTUPINFOW si{};
     si.cb = sizeof(si);
     si.dwFlags = STARTF_USESTDHANDLES;
-    si.hStdInput = nul;
+    si.hStdInput = nulGuard.get();
     si.hStdOutput = writeEnd;
     si.hStdError = writeEnd;
 
     PROCESS_INFORMATION pi{};
     std::wstring cmd = buildCommandLine(argv);
+    std::vector<wchar_t> childEnv = buildChildEnvironment();
     const BOOL ok = CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, TRUE,
-                                   CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
-    CloseHandle(writeEnd);
+                                   CREATE_NO_WINDOW, childEnv.data(), nullptr, &si, &pi);
+    // Capture the OS error before CloseHandle clobbers the thread's last-error.
+    const DWORD spawnError = ok ? 0 : GetLastError();
+    // The child holds the write end now; the parent's copy must go or ReadFile
+    // never sees EOF.
+    writeGuard.reset();
     if (!ok) {
-        if (nul != INVALID_HANDLE_VALUE) CloseHandle(nul);
-        CloseHandle(readEnd);
-        error = "CreateProcess failed";
+        error = describeCreateProcessError(spawnError);
         return false;
     }
+    HandleGuard processGuard(pi.hProcess);
+    HandleGuard threadGuard(pi.hThread);
 
     char buf[4096];
     DWORD n = 0;
     while (ReadFile(readEnd, buf, sizeof buf, &n, nullptr) && n > 0) {
         onChunk(buf, static_cast<size_t>(n));
     }
-    CloseHandle(readEnd);
-    if (nul != INVALID_HANDLE_VALUE) CloseHandle(nul);
+    readGuard.reset();
+    nulGuard.reset();
 
     WaitForSingleObject(pi.hProcess, INFINITE);
     DWORD code = 0;
     if (!GetExitCodeProcess(pi.hProcess, &code)) code = 0xFFFFFFFFu;
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
 
     rc = static_cast<int>(code);
     return true;

@@ -13,6 +13,6 @@ std::string appDataDir();
 // every startup.
 void ensureAppDirs();
 
-// Forward-slash path normalization (git on Windows accepts '/', avoiding
-// backslash quoting in popen command lines).
+// Forward-slash path normalization (git on Windows accepts '/', so paths
+// reaching a spawned command line carry no backslashes to quote).
 std::string forwardSlash(const std::string& path);

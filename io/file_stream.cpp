@@ -65,9 +65,23 @@ const wchar_t* modeString(std::ios::openmode mode, bool writing) {
 std::unique_ptr<std::istream> openInputFile(const std::string& path,
                                             std::ios::openmode mode) {
 #ifdef _WIN32
-    const std::wstring wide = fs::path(path).wstring();
+    // fs::path's narrow->wide conversion throws on invalid UTF-8 (fs_path.h
+    // __throw_conversion_error); callers expect a null result, not an exception.
+    std::wstring wide;
+    try {
+        wide = fs::path(path).wstring();
+    } catch (const std::exception&) {
+        return nullptr;
+    }
     FILE* file = _wfopen(wide.c_str(), modeString(mode, false));
     if (!file) return nullptr;
+    // stdio_filebuf's FILE* constructor ignores ios::ate (only basic_filebuf::
+    // open honours it), so seek to the end here: restoreLayoutFrom() sizes the
+    // snapshot with tellg() and would otherwise see 0 and bail out.
+    if ((mode & std::ios::ate) && std::fseek(file, 0, SEEK_END) != 0) {
+        std::fclose(file);
+        return nullptr;
+    }
     auto* buf = new __gnu_cxx::stdio_filebuf<char>(file, mode | std::ios::in);
     if (!buf->is_open()) {
         delete buf;
@@ -85,7 +99,12 @@ std::unique_ptr<std::istream> openInputFile(const std::string& path,
 std::unique_ptr<std::ostream> openOutputFile(const std::string& path,
                                              std::ios::openmode mode) {
 #ifdef _WIN32
-    const std::wstring wide = fs::path(path).wstring();
+    std::wstring wide;
+    try {
+        wide = fs::path(path).wstring();
+    } catch (const std::exception&) {
+        return nullptr;
+    }
     FILE* file = _wfopen(wide.c_str(), modeString(mode, true));
     if (!file) return nullptr;
     auto* buf = new __gnu_cxx::stdio_filebuf<char>(file, mode | std::ios::out);
