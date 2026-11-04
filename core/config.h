@@ -10,6 +10,9 @@
 #include <cstring>
 #include <utility>
 
+#include "app_dirs.h"
+#include "file_stream.h"
+
 // Configuration structure for app settings (persisted to the config file).
 struct AppConfig {
     struct RecentDatasetEntry {
@@ -129,10 +132,11 @@ struct AppConfig {
     // Save configuration to file
     bool saveToFile(const std::string& filename) {
         try {
-            std::ofstream configFile(filename);
-            if (!configFile.is_open()) {
+            auto file = openOutputFile(filename);
+            if (!file) {
                 return false;
             }
+            std::ostream& configFile = *file;
             
             // Write human-readable config
             configFile << "# FTS Data Explorer Configuration\n";
@@ -195,7 +199,6 @@ struct AppConfig {
             configFile << "maximized=" << (windowMaximized ? "true" : "false") << "\n";
             
             configFile.flush();
-            configFile.close();
             return true;
         } catch (const std::exception& e) {
             std::cerr << "Error saving config: " << e.what() << std::endl;
@@ -206,10 +209,11 @@ struct AppConfig {
     // Load configuration from file
     bool loadFromFile(const std::string& filename) {
         try {
-            std::ifstream configFile(filename);
-            if (!configFile.is_open()) {
+            auto file = openInputFile(filename);
+            if (!file) {
                 return false;
             }
+            std::istream& configFile = *file;
             
             std::string line;
             std::string currentSection;
@@ -323,7 +327,6 @@ struct AppConfig {
                 }
             }
             
-            configFile.close();
             return true;
         } catch (const std::exception& e) {
             std::cerr << "Error loading config: " << e.what() << std::endl;
@@ -334,10 +337,19 @@ struct AppConfig {
 
 // Get default config file path
 inline std::string getConfigFilePath() {
+#ifdef _WIN32
+    // HOME is not set on Windows (Explorer/cmd provide USERPROFILE and
+    // LOCALAPPDATA instead), so resolve the config next to imgui.ini and the
+    // layout snapshots — otherwise the file lands in the current working
+    // directory and settings (converter interpreter, repo URL/dir) never
+    // persist. See io/app_dirs.h.
+    return appDataDir() + "/fts_data_explorer_config";
+#else
     // Use home directory for config file
     const char* homeDir = getenv("HOME");
     if (homeDir) {
         return std::string(homeDir) + "/.fts_data_explorer_config";
     }
     return "fts_data_explorer_config.ini";
+#endif
 }

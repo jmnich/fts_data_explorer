@@ -1,6 +1,7 @@
 #include "user_manual.h"
 #include "open_default.h"
 #include "user_manual_embedded.h"
+#include "file_stream.h"
 
 #include <chrono>
 #include <filesystem>
@@ -79,14 +80,16 @@ bool extractManual(std::string& errorOut) {
             errorOut = "Cannot create directory:\n" + target.parent_path().string() + "\n" + ec.message();
             return false;
         }
-        std::ofstream out(target, std::ios::binary | std::ios::trunc);
-        if (!out) {
+        auto outPtr = openOutputFile(target.string(),
+                                     std::ios::binary | std::ios::trunc);
+        if (!outPtr) {
             errorOut = "Cannot write temporary file:\n" + target.string();
             return false;
         }
+        std::ostream& out = *outPtr;
         out.write(reinterpret_cast<const char*>(file.data),
                   static_cast<std::streamsize>(file.size));
-        out.close();
+        out.flush();
         if (!out) {
             errorOut = "Failed writing temporary file:\n" + target.string();
             return false;

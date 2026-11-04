@@ -12,15 +12,8 @@
 
 #include "nlohmann/json.hpp"
 #include "app_dirs.h"
-
-#ifdef _WIN32
-#define FTS_POPEN _popen
-#define FTS_PCLOSE _pclose
-#else
-#include <sys/wait.h>
-#define FTS_POPEN popen
-#define FTS_PCLOSE pclose
-#endif
+#include "file_stream.h"
+#include "process_runner.h"
 
 namespace fs = std::filesystem;
 
@@ -56,61 +49,6 @@ std::string defaultInterpreter() {
 #endif
 }
 
-// Shell-safe quoting for popen command lines. On posix each argument is
-// single-quoted ('…'); on Windows double-quoted for cmd.exe.
-static std::string shellQuote(const std::string& arg) {
-#ifdef _WIN32
-    std::string out = "\"";
-    out += arg;
-    out += "\"";
-    return out;
-#else
-    std::string out = "'";
-    for (char c : arg) {
-        if (c == '\'') out += "'\\''";
-        else out += c;
-    }
-    out += "'";
-    return out;
-#endif
-}
-
-// Build a shell command from argv; stderr is merged into stdout so capture
-// includes failure reasons.
-static std::string buildCommand(const std::vector<std::string>& argv) {
-    std::string cmd;
-    for (const auto& a : argv) {
-        if (!cmd.empty()) cmd += " ";
-        cmd += shellQuote(a);
-    }
-    return cmd + " 2>&1";
-}
-
-struct PopenResult {
-    bool started = false;
-    int rc = -1;                 // exit code (posix wait status converted)
-    std::string output;
-};
-
-static PopenResult runPopenCapture(const std::string& cmd) {
-    PopenResult res;
-    FILE* pipe = FTS_POPEN(cmd.c_str(), "r");
-    if (!pipe) return res;
-    res.started = true;
-    char buf[4096];
-    size_t n;
-    while ((n = fread(buf, 1, sizeof buf, pipe)) > 0) {
-        res.output.append(buf, n);
-    }
-    int rc = FTS_PCLOSE(pipe);
-#ifndef _WIN32
-    if (WIFEXITED(rc)) rc = WEXITSTATUS(rc);
-    else rc = -1;
-#endif
-    res.rc = rc;
-    return res;
-}
-
 // ---------------------------------------------------------------------------
 // Manifest parsing (§1)
 // ---------------------------------------------------------------------------
@@ -119,12 +57,13 @@ ConverterDesc parseConverterFile(const std::string& path) {
     ConverterDesc desc;
     desc.path = path;
 
-    std::ifstream f(path);
-    if (!f.is_open()) {
+    auto file = openInputFile(path);
+    if (!file) {
         desc.broken = true;
         desc.error = "cannot open file";
         return desc;
     }
+    std::istream& f = *file;
 
     // The manifest lives in the file head; 200 lines is ample for docstrings.
     constexpr size_t kMaxHeadLines = 200;
@@ -259,22 +198,26 @@ const ConverterProbe& probeTools(const std::string& interpreter) {
     cached = ConverterProbe{};
     cached.interpreter = interp;
 
-    PopenResult py = runPopenCapture(buildCommand({interp, "--version"}));
+    ProcessResult py = runProcessCapture({interp, "--version"});
     if (py.started && py.rc == 0) {
         cached.pythonAvailable = true;
         cached.pythonVersion = trim(py.output);
-        PopenResult h = runPopenCapture(
-            buildCommand({interp, "-c", "import h5py, numpy; print(h5py.__version__)"}));
+        ProcessResult h = runProcessCapture(
+            {interp, "-c", "import h5py, numpy; print(h5py.__version__)"});
         if (h.started && h.rc == 0) {
             cached.h5pyAvailable = true;
             cached.h5pyVersion = trim(h.output);
         }
+    } else if (!py.started) {
+        cached.pythonError = trim(py.output);
     }
 
-    PopenResult g = runPopenCapture(buildCommand({"git", "--version"}));
+    ProcessResult g = runProcessCapture({"git", "--version"});
     if (g.started && g.rc == 0) {
         cached.gitAvailable = true;
         cached.gitVersion = trim(g.output);
+    } else if (!g.started) {
+        cached.gitError = trim(g.output);
     }
 
     cachedInterpreter = interp;
@@ -290,7 +233,7 @@ bool isGitRepo(const std::string& repoDir) {
     if (!fs::exists(repoDir, ec)) return false;
     if (fs::exists(repoDir + "/.git", ec)) return true;
     // Worktree or unusual layout: trust git itself.
-    PopenResult r = runPopenCapture(buildCommand({"git", "-C", repoDir, "rev-parse", "--git-dir"}));
+    ProcessResult r = runProcessCapture({"git", "-C", repoDir, "rev-parse", "--git-dir"});
     return r.started && r.rc == 0;
 }
 
@@ -303,7 +246,7 @@ bool cloneConverterRepo(const std::string& url, const std::string& repoDir,
         error = "clone destination '" + repoDir + "' is not empty";
         return false;
     }
-    PopenResult r = runPopenCapture(buildCommand({"git", "clone", "--depth", "1", url, repoDir}));
+    ProcessResult r = runProcessCapture({"git", "clone", "--depth", "1", url, repoDir});
     if (!r.started) {
         error = "failed to start git";
         return false;
@@ -320,8 +263,8 @@ bool updateConverterRepo(const std::string& repoDir, std::string& error) {
         error = "not a git repository (use Clone to re-bootstrap)";
         return false;
     }
-    PopenResult r = runPopenCapture(
-        buildCommand({"git", "-C", repoDir, "pull", "--ff-only"}));
+    ProcessResult r = runProcessCapture(
+        {"git", "-C", repoDir, "pull", "--ff-only"});
     if (!r.started) {
         error = "failed to start git";
         return false;
@@ -435,7 +378,6 @@ bool startConverter(const ConverterDesc& desc, const std::string& interpreter,
         argv.push_back("--" + params[i]);
         argv.push_back(params[i + 1]);
     }
-    std::string cmd = buildCommand(argv);
 
     job.running = true;
     job.exitCode = 0;
@@ -444,29 +386,24 @@ bool startConverter(const ConverterDesc& desc, const std::string& interpreter,
         job.log.clear();
     }
     // `job` must outlive the run (documented contract); `desc` too — the
-    // command is fully built here, so only the job reference is captured.
-    job.thread = std::thread([&job, cmd]() {
-        FILE* pipe = FTS_POPEN(cmd.c_str(), "r");
-        if (!pipe) {
-            {
+    // argument vector is fully built here, so only the job reference is
+    // captured. The helper streams merged stdout+stderr into the log so the
+    // GUI tail stays live.
+    job.thread = std::thread([&job, argv]() {
+        int rc = -1;
+        std::string error;
+        const bool started = runProcessStreaming(
+            argv,
+            [&job](const char* data, size_t n) {
                 std::lock_guard<std::mutex> lk(job.logMutex);
-                job.log += "Error: failed to start process\n";
-            }
-            job.exitCode = -1;
-            job.running = false;
-            return;
-        }
-        char buf[4096];
-        size_t n;
-        while ((n = fread(buf, 1, sizeof buf, pipe)) > 0) {
+                job.log.append(data, n);
+            },
+            rc, error);
+        if (!started) {
             std::lock_guard<std::mutex> lk(job.logMutex);
-            job.log.append(buf, n);
+            job.log += "Error: " + error + "\n";
+            rc = -1;
         }
-        int rc = FTS_PCLOSE(pipe);
-#ifndef _WIN32
-        if (WIFEXITED(rc)) rc = WEXITSTATUS(rc);
-        else rc = -1;
-#endif
         job.exitCode = rc;
         job.running = false;
     });

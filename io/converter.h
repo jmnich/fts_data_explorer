@@ -63,6 +63,11 @@ struct ConverterProbe {
     std::string h5pyVersion;
     bool gitAvailable = false;
     std::string gitVersion;
+    // Set when the process could not be started at all (e.g. no console in a
+    // Windows GUI build, missing executable). Distinguishes "not installed"
+    // from "could not run the probe".
+    std::string pythonError;
+    std::string gitError;
 };
 
 // ---------------------------------------------------------------------------

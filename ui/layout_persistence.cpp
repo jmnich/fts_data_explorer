@@ -14,6 +14,8 @@
 #include <imgui.h>
 #include "imgui_internal.h"   // ImGuiDockContext / ImGuiDockNode
 
+#include "file_stream.h"
+
 namespace {
 
 // Snapshots live next to the app's imgui.ini so they travel with the user's
@@ -57,39 +59,40 @@ std::map<ImGuiID, std::string> g_restoredNodeSelection;
 void saveLayoutTo(const std::string& name) {
     const char* ini = ImGui::SaveIniSettingsToMemory(nullptr);
     if (!ini) return;
-    std::ofstream ofs(layoutFilePath(name),
-                      std::ios::binary | std::ios::trunc);
+    auto ofs = openOutputFile(layoutFilePath(name),
+                              std::ios::binary | std::ios::trunc);
     if (ofs)
-        ofs.write(ini, static_cast<std::streamsize>(std::strlen(ini)));
+        ofs->write(ini, static_cast<std::streamsize>(std::strlen(ini)));
     // Sidecar: per-node selected window. ImGui's ini restore skips nodes that
     // already exist, so the selection must be re-applied app-side — capture
     // it here while the live tree is current.
     ImGuiDockContext* dc = &ImGui::GetCurrentContext()->DockContext;
-    std::ofstream sel(selectionFilePath(name), std::ios::trunc);
+    auto sel = openOutputFile(selectionFilePath(name), std::ios::trunc);
     if (!sel) return;
     for (int n = 0; n < dc->Nodes.Data.Size; ++n) {
         ImGuiDockNode* node = (ImGuiDockNode*)dc->Nodes.Data[n].val_p;
         if (!node || !node->IsLeafNode() || node->Windows.Size < 2) continue;
         if (const char* name = nodeSelectedWindowName(node))
-            sel << std::hex << node->ID << "=" << name << "\n";
+            *sel << std::hex << node->ID << "=" << name << "\n";
     }
 }
 
 void restoreLayoutFrom(const std::string& name) {
     const std::string path = layoutFilePath(name);
-    std::ifstream ifs(path, std::ios::binary | std::ios::ate);
+    auto ifs = openInputFile(path, std::ios::binary | std::ios::ate);
     if (!ifs) return;
-    const std::streamsize n = ifs.tellg();
+    const std::streamsize n = ifs->tellg();
     if (n <= 0) return;
     std::vector<char> data(static_cast<size_t>(n));
-    ifs.seekg(0);
-    if (!ifs.read(data.data(), n)) return;
+    ifs->seekg(0);
+    if (!ifs->read(data.data(), n)) return;
     ImGui::LoadIniSettingsFromMemory(data.data(), static_cast<size_t>(n));
     // Read the sidecar for app-side re-application (see header comment).
     g_restoredNodeSelection.clear();
-    std::ifstream sel(selectionFilePath(name));
+    auto sel = openInputFile(selectionFilePath(name));
+    if (!sel) return;
     std::string line;
-    while (std::getline(sel, line)) {
+    while (std::getline(*sel, line)) {
         const size_t eq = line.find('=');
         if (eq == std::string::npos) continue;
         const std::string name = line.substr(eq + 1);

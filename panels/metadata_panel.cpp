@@ -1,5 +1,6 @@
 // Metadata panel (extracted from main.cpp, Phase-1 M1.2c).
 #include "panels.h"
+#include "file_stream.h"
 #include "app_state.h"
 #include "workspace_reader.h"
 #include <imgui.h>
@@ -136,13 +137,13 @@ void renderMetadataPanel() {
                 }
                 commentsPath += "/comments.txt";
                 
-                std::ifstream commentsFile(commentsPath);
-                if (commentsFile.is_open()) {
+                auto commentsPtr = openInputFile(commentsPath);
+                if (commentsPtr) {
+                    std::istream& commentsFile = *commentsPtr;
                     std::string line;
                     while (std::getline(commentsFile, line)) {
                         ImGui::TextWrapped("%s", line.c_str());
                     }
-                    commentsFile.close();
                 } else {
                     ImGui::Text("<Comments Empty>");
                 }

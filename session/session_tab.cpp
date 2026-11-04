@@ -10,6 +10,7 @@
 
 #include "app_state.h"
 #include "config.h"
+#include "file_stream.h"
 #include "multi_workspace_store.h"
 #include "environment_session.h"
 #include "file_browser.h"
@@ -1452,9 +1453,9 @@ void SessionTab::renderBatchImportExport() {
         std::string path = FileBrowser::showFileOpenDialog(
             "Import Recipe", "JSON files", "*.json", glfwGetCurrentContext());
         if (!path.empty()) {
-            std::ifstream ifs(path);
+            auto ifsPtr = openInputFile(path);
             std::stringstream ss;
-            ss << ifs.rdbuf();
+            if (ifsPtr) ss << ifsPtr->rdbuf();
             nlohmann::json j = nlohmann::json::parse(ss.str(), nullptr, false);
             if (j.is_discarded()) {
                 b.importError = "Not valid JSON: " + path;
@@ -1498,9 +1499,9 @@ void SessionTab::renderBatchImportExport() {
                 "Export Recipe", "JSON files", "*.json", "", "recipe.json",
                 glfwGetCurrentContext());
             if (!path.empty()) {
-                std::ofstream ofs(path);
-                ofs << recipeToJson(r).dump(2);
-                if (!ofs.good()) {
+                auto ofsPtr = openOutputFile(path);
+                if (ofsPtr) *ofsPtr << recipeToJson(r).dump(2);
+                if (!ofsPtr || !ofsPtr->good()) {
                     b.exportError = "Could not write: " + path;
                     b.showExportError = true;
                     appState.needsRedraw = true;

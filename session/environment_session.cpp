@@ -15,6 +15,7 @@
 
 #include "app_state.h"
 #include "config.h"
+#include "file_stream.h"
 #include "multi_workspace_store.h"
 #include "cursor_overlay.h"
 #include "file_browser.h"
@@ -2809,12 +2810,13 @@ void EnvironmentSession::exportCsv() {
         defaultFolder, instanceName + ".csv", glfwGetCurrentContext());
     if (path.empty()) return;
 
-    std::ofstream ofs(path);
-    if (!ofs.is_open()) {
+    auto ofsPtr = openOutputFile(path);
+    if (!ofsPtr) {
         appState.errorMsg = "Export failed: cannot open " + path;
         appState.showErrorPopup = true;
         return;
     }
+    std::ostream& ofs = *ofsPtr;
 
     // Build the display curves to export — FORCE-FRESH ([A1] event-driven,
     // zero display cost): Comparator re-gathers (respects the Included
@@ -2900,7 +2902,7 @@ void EnvironmentSession::exportCsv() {
         }
         ofs << "\n";
     }
-    ofs.close();
+    ofs.flush();
     appState.saveToastUntil = glfwGetTime() + 1.5;
     appState.needsRedraw = true;
 }

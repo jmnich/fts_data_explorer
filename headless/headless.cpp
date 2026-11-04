@@ -11,6 +11,7 @@
 #include <cstring>
 #include "nlohmann/json.hpp"
 #include "config.h"
+#include "file_stream.h"
 #include "app_state.h"
 #include "version.h"
 #include "export.h"
@@ -696,12 +697,12 @@ static void handleWorkspace(const HeadlessConfig& cfg) {
     json j;
     if (!cfg.configPath.empty()) {
         try {
-            std::ifstream ifs(cfg.configPath);
-            if (!ifs.is_open()) {
+            auto ifsPtr = openInputFile(cfg.configPath);
+            if (!ifsPtr) {
                 std::cerr << "Error: Config file '" << cfg.configPath << "' not found" << std::endl;
                 exit(1);
             }
-            ifs >> j;
+            *ifsPtr >> j;
         } catch (const std::exception& e) {
             std::cerr << "Error: Invalid JSON in config file '" << cfg.configPath << "': " << e.what() << std::endl;
             exit(1);
@@ -917,12 +918,12 @@ static void handleCompare(const HeadlessConfig& cfg) {
     json j;
     if (!cfg.configPath.empty()) {
         try {
-            std::ifstream ifs(cfg.configPath);
-            if (!ifs.is_open()) {
+            auto ifsPtr = openInputFile(cfg.configPath);
+            if (!ifsPtr) {
                 std::cerr << "Error: Config file '" << cfg.configPath << "' not found" << std::endl;
                 exit(1);
             }
-            ifs >> j;
+            *ifsPtr >> j;
         } catch (const std::exception& e) {
             std::cerr << "Error: Invalid config: " << e.what() << std::endl;
             exit(1);
@@ -975,13 +976,14 @@ static void handleCompare(const HeadlessConfig& cfg) {
 
     if (ot == "Comparator spectra") {
         std::string path = cfg.outputPath + "/" + slug + "_comparator_spectra.csv";
-        std::ofstream ofs(path);
-        if (!ofs.is_open()) { std::cerr << "Error: cannot write " << path << std::endl; exit(1); }
+        auto ofsPtr = openOutputFile(path);
+        if (!ofsPtr) { std::cerr << "Error: cannot write " << path << std::endl; exit(1); }
+        std::ostream& ofs = *ofsPtr;
         ofs << std::setprecision(15);
         ofs << xLabel << ",Sample average,Reference average\n";
         for (size_t i = 0; i < refX.size(); i++)
             ofs << refX[i] << "," << interpSample[i] << "," << refY[i] << "\n";
-        ofs.close();
+        ofs.flush();
         std::cout << "Exported 'Comparator spectra' to " << cfg.outputPath << std::endl;
     } else {
         std::cerr << "Error: Unknown comparator output type '" << ot << "'. "

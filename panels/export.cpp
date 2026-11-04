@@ -12,6 +12,7 @@
 
 #include "imgui.h"
 #include "file_browser.h"
+#include "file_stream.h"
 #include <GLFW/glfw3.h>
 #include <fstream>
 #include <iomanip>
@@ -292,23 +293,25 @@ void ExportPanel::writeCorrectedIFGCsv(const std::string& dir)
         fname = sanitizeFilename(fname);
 
         std::string path = dir + "/" + dsName + "_corrected_ifg_" + fname + ".csv";
-        std::ofstream ofs(path);
-        if (!ofs.is_open()) continue;
+        auto ofsPtr = openOutputFile(path);
+        if (!ofsPtr) continue;
+        std::ostream& ofs = *ofsPtr;
         ofs << std::setprecision(15);
         ofs << "OPD [um],Primary Detector [V]\n";
         size_t n = std::min(opdX.size(), raw.primaryDetector.size());
         for (size_t j = 0; j < n; j++) {
             ofs << opdX[j] << "," << raw.primaryDetector[j] << "\n";
         }
-    ofs.close();
+    ofs.flush();
     }
 }
 void ExportPanel::writeUncorrectedIFGCsv(const std::string& dir)
 {
     std::string dsName = sanitizeFilename(appState->active->currentDatasetName);
     std::string path = dir + "/" + dsName + "_uncorrected_ifgs.csv";
-    std::ofstream ofs(path);
-    if (!ofs.is_open()) return;
+    auto ofsPtr = openOutputFile(path);
+    if (!ofsPtr) return;
+    std::ostream& ofs = *ofsPtr;
     ofs << std::setprecision(15);
 
     size_t nFiles = std::min(appState->active->selectedFiles.size(), appState->active->rawDataCache.size());
@@ -339,7 +342,7 @@ void ExportPanel::writeUncorrectedIFGCsv(const std::string& dir)
         }
         ofs << "\n";
     }
-    ofs.close();
+    ofs.flush();
 }
 
 void ExportPanel::writeAvgSpectrumCsv(const std::string& dir)
@@ -350,8 +353,9 @@ void ExportPanel::writeAvgSpectrumCsv(const std::string& dir)
 
     std::string dsName = sanitizeFilename(appState->active->currentDatasetName);
     std::string path = dir + "/" + dsName + "_average_spectrum.csv";
-    std::ofstream ofs(path);
-    if (!ofs.is_open()) return;
+    auto ofsPtr = openOutputFile(path);
+    if (!ofsPtr) return;
+    std::ostream& ofs = *ofsPtr;
     ofs << std::setprecision(15);
 
     const char* xLabel = "Wavenumber [cm-1]";
@@ -363,7 +367,7 @@ void ExportPanel::writeAvgSpectrumCsv(const std::string& dir)
     for (size_t j = 0; j < n; j++) {
         ofs << avg.cachedAverageX[j] << "," << avg.cachedAverageY[j] << "\n";
     }
-    ofs.close();
+    ofs.flush();
 }
 
 void ExportPanel::writeSnrSpectrumCsv(const std::string& dir)
@@ -374,8 +378,9 @@ void ExportPanel::writeSnrSpectrumCsv(const std::string& dir)
 
     std::string dsName = sanitizeFilename(appState->active->currentDatasetName);
     std::string path = dir + "/" + dsName + "_snr_spectrum.csv";
-    std::ofstream ofs(path);
-    if (!ofs.is_open()) return;
+    auto ofsPtr = openOutputFile(path);
+    if (!ofsPtr) return;
+    std::ostream& ofs = *ofsPtr;
     ofs << std::setprecision(15);
 
     const char* xLabel = "Wavenumber [cm-1]";
@@ -387,7 +392,7 @@ void ExportPanel::writeSnrSpectrumCsv(const std::string& dir)
     for (size_t j = 0; j < n; j++) {
         ofs << snr.cachedSnrX[j] << "," << snr.cachedSnrY[j] << "\n";
     }
-    ofs.close();
+    ofs.flush();
 }
 
 void ExportPanel::writeSpectraCsv(const std::string& dir)
@@ -432,8 +437,9 @@ void ExportPanel::writeSpectraCsv(const std::string& dir)
 
     std::string dsName = sanitizeFilename(appState->active->currentDatasetName);
     std::string path = dir + "/" + dsName + "_spectra.csv";
-    std::ofstream ofs(path);
-    if (!ofs.is_open()) return;
+    auto ofsPtr = openOutputFile(path);
+    if (!ofsPtr) return;
+    std::ostream& ofs = *ofsPtr;
     ofs << std::setprecision(15);
 
     const char* xLabel = "Wavenumber [cm-1]";
@@ -486,7 +492,7 @@ void ExportPanel::writeSpectraCsv(const std::string& dir)
         }
         ofs << "\n";
     }
-    ofs.close();
+    ofs.flush();
 }
 
 void ExportPanel::writeAllan3DCsv(const std::string& dir)
@@ -498,8 +504,9 @@ void ExportPanel::writeAllan3DCsv(const std::string& dir)
 
     std::string dsName = sanitizeFilename(appState->active->currentDatasetName);
     std::string path = dir + "/" + dsName + "_allan_3d.csv";
-    std::ofstream ofs(path);
-    if (!ofs.is_open()) return;
+    auto ofsPtr = openOutputFile(path);
+    if (!ofsPtr) return;
+    std::ostream& ofs = *ofsPtr;
     ofs << std::setprecision(15);
 
     const char* wlLabel = "Wavenumber [cm-1]";
@@ -524,7 +531,7 @@ void ExportPanel::writeAllan3DCsv(const std::string& dir)
             ofs << wl << "," << al.cachedSurfaceTaus[j] << "," << al.cachedSurfaceAllanVar[i * N + j] << "\n";
         }
     }
-    ofs.close();
+    ofs.flush();
 }
 
 void ExportPanel::writeAllanSliceCsv(const std::string& dir)
@@ -549,8 +556,9 @@ void ExportPanel::writeAllanSliceCsv(const std::string& dir)
 
     std::string dsName = sanitizeFilename(appState->active->currentDatasetName);
     std::string path = dir + "/" + dsName + "_allan_slice_" + wlStr + ".csv";
-    std::ofstream ofs(path);
-    if (!ofs.is_open()) return;
+    auto ofsPtr = openOutputFile(path);
+    if (!ofsPtr) return;
+    std::ostream& ofs = *ofsPtr;
     ofs << std::setprecision(15);
 
     ofs << "Tau [measurements],Allan Variance\n";
@@ -559,7 +567,7 @@ void ExportPanel::writeAllanSliceCsv(const std::string& dir)
     for (int j = 0; j < N; ++j) {
         ofs << al.cachedSurfaceTaus[j] << "," << al.cachedSurfaceAllanVar[idx * N + j] << "\n";
     }
-    ofs.close();
+    ofs.flush();
 }
 
 void ExportPanel::writeT100TransCsv(const std::string& dir)
@@ -579,8 +587,9 @@ void ExportPanel::writeT100TransCsv(const std::string& dir)
 
     std::string dsName = sanitizeFilename(appState->active->currentDatasetName);
     std::string path = dir + "/" + dsName + "_t100_transmission_" + srcName + ".csv";
-    std::ofstream ofs(path);
-    if (!ofs.is_open()) return;
+    auto ofsPtr = openOutputFile(path);
+    if (!ofsPtr) return;
+    std::ostream& ofs = *ofsPtr;
     ofs << std::setprecision(15);
 
     const char* xLabel = "Wavenumber [cm-1]";
@@ -591,7 +600,7 @@ void ExportPanel::writeT100TransCsv(const std::string& dir)
     size_t n = std::min(xv.size(), yv.size());
     for (size_t j = 0; j < n; j++)
         ofs << xv[j] << "," << yv[j] << "\n";
-    ofs.close();
+    ofs.flush();
 }
 
 void ExportPanel::writeT100AllTransCsv(const std::string& dir)
@@ -653,8 +662,9 @@ void ExportPanel::writeT100AllTransCsv(const std::string& dir)
 
     std::string dsName = sanitizeFilename(appState->active->currentDatasetName);
     std::string path = dir + "/" + dsName + "_t100_all_transmissions.csv";
-    std::ofstream ofs(path);
-    if (!ofs.is_open()) return;
+    auto ofsPtr = openOutputFile(path);
+    if (!ofsPtr) return;
+    std::ostream& ofs = *ofsPtr;
     ofs << std::setprecision(15);
 
     const char* xLabel = "Wavenumber [cm-1]";
@@ -674,7 +684,7 @@ void ExportPanel::writeT100AllTransCsv(const std::string& dir)
     for (size_t i = 0; i < allTransX.size(); i++) {
         if (!allTransX[i].empty()) { masterXPtr = &allTransX[i]; break; }
     }
-    if (!masterXPtr) { ofs.close(); return; }
+    if (!masterXPtr) { ofs.flush(); return; }
     const auto& masterX = *masterXPtr;
     size_t nRows = masterX.size();
 
@@ -706,7 +716,7 @@ void ExportPanel::writeT100AllTransCsv(const std::string& dir)
         }
         ofs << "\n";
     }
-    ofs.close();
+    ofs.flush();
 }
 
 void ExportPanel::writeT100StdDevCsv(const std::string& dir)
@@ -717,8 +727,9 @@ void ExportPanel::writeT100StdDevCsv(const std::string& dir)
 
     std::string dsName = sanitizeFilename(appState->active->currentDatasetName);
     std::string path = dir + "/" + dsName + "_t100_stddev.csv";
-    std::ofstream ofs(path);
-    if (!ofs.is_open()) return;
+    auto ofsPtr = openOutputFile(path);
+    if (!ofsPtr) return;
+    std::ostream& ofs = *ofsPtr;
     ofs << std::setprecision(15);
 
     const char* xLabel = "Wavenumber [cm-1]";
@@ -729,7 +740,7 @@ void ExportPanel::writeT100StdDevCsv(const std::string& dir)
     size_t n = std::min(t100.cachedStdX.size(), t100.cachedStdY.size());
     for (size_t j = 0; j < n; j++)
         ofs << t100.cachedStdX[j] << "," << t100.cachedStdY[j] << "\n";
-    ofs.close();
+    ofs.flush();
 }
 
 void ExportPanel::writeAbsorbanceCsv(const std::string& dir)
@@ -750,8 +761,9 @@ void ExportPanel::writeAbsorbanceCsv(const std::string& dir)
         std::string srcName = exportBaseName(fileId);
         srcName = sanitizeFilename(srcName);
         std::string path = dir + "/" + dsName + "_absorbance_" + srcName + ".csv";
-        std::ofstream ofs(path);
-        if (!ofs.is_open()) continue;
+        auto ofsPtr = openOutputFile(path);
+        if (!ofsPtr) continue;
+        std::ostream& ofs = *ofsPtr;
         ofs << std::setprecision(15);
         ofs << xLabel << ",Absorbance\n";
         size_t n = std::min(xv.size(), yv.size());
@@ -760,7 +772,7 @@ void ExportPanel::writeAbsorbanceCsv(const std::string& dir)
             double a = (tFraction > 1e-15) ? -std::log10(tFraction) : 0.0;
             ofs << xv[j] << "," << a << "\n";
         }
-        ofs.close();
+        ofs.flush();
     }
 }
 
@@ -782,14 +794,15 @@ void ExportPanel::writeTransmittanceCsv(const std::string& dir)
         std::string srcName = exportBaseName(fileId);
         srcName = sanitizeFilename(srcName);
         std::string path = dir + "/" + dsName + "_transmittance_" + srcName + ".csv";
-        std::ofstream ofs(path);
-        if (!ofs.is_open()) continue;
+        auto ofsPtr = openOutputFile(path);
+        if (!ofsPtr) continue;
+        std::ostream& ofs = *ofsPtr;
         ofs << std::setprecision(15);
         ofs << xLabel << ",Transmittance\n";
         size_t n = std::min(xv.size(), yv.size());
         for (size_t j = 0; j < n; j++)
             ofs << xv[j] << "," << (yv[j] / 100.0) << "\n";  // T% → fraction
-        ofs.close();
+        ofs.flush();
     }
 }
 void ExportPanel::renderPanel() {

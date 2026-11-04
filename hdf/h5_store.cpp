@@ -1,14 +1,25 @@
 #include "h5_store.h"
 
-#include <sys/stat.h>
-
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <sstream>
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 #include "hdf5_util.h"
+
+namespace fs = std::filesystem;
 
 namespace {
 
@@ -32,8 +43,26 @@ std::string utcNowIso() {
 }
 
 bool fileExists(const std::string& path) {
-    struct stat st{};
-    return stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode);
+    // fs::is_regular_file goes through the UTF-8-aware filesystem layer;
+    // stat() would use the ANSI code page on Windows and miss non-ASCII paths.
+    std::error_code ec;
+    return fs::is_regular_file(fs::path(path), ec);
+}
+
+// Atomically replace `to` with `from`.
+//
+// POSIX rename() replaces an existing destination. The Windows CRT's rename()
+// refuses to (EACCES when the target exists), so MoveFileExW is used there.
+// The Linux path is the plain rename() call, unchanged.
+bool atomicReplace(const std::string& from, const std::string& to) {
+#ifdef _WIN32
+    const std::wstring wfrom = fs::path(from).wstring();
+    const std::wstring wto = fs::path(to).wstring();
+    return MoveFileExW(wfrom.c_str(), wto.c_str(),
+                       MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED) != 0;
+#else
+    return std::rename(from.c_str(), to.c_str()) == 0;
+#endif
 }
 
 // H5Lexists is tri-state: 1 = exists, 0 = missing leaf (silent), -1 = error
@@ -514,11 +543,13 @@ void H5Store::save(const std::string& path, const Workspace& ws) {
         if (file.id < 0) fail("save: H5Fcreate");
         writeAll(file.id, ws);
     } catch (...) {
-        std::remove(tmp.c_str());
+        std::error_code ec;
+        fs::remove(fs::path(tmp), ec);
         throw;
     }
-    if (std::rename(tmp.c_str(), path.c_str()) != 0) {
-        std::remove(tmp.c_str());
+    if (!atomicReplace(tmp, path)) {
+        std::error_code ec;
+        fs::remove(fs::path(tmp), ec);
         throw H5Error("save: rename failed for '" + path + "'");
     }
 }

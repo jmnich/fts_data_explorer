@@ -47,6 +47,8 @@ struct ConversionScreenState {
     std::string pyVersion;
     std::string h5pyVersion;
     std::string gitVersion;
+    std::string pyError;   // probe could not start the process (not "missing")
+    std::string gitError;
     bool gitOk = false;
     bool pyOk = false;
     bool h5pyOk = false;

@@ -83,8 +83,10 @@ static void updateToolStatus(ConversionScreenState& st, const std::string& inter
     const ConverterProbe& probe = probeTools(interp);
     st.gitOk = probe.gitAvailable;
     st.gitVersion = probe.gitVersion;
+    st.gitError = probe.gitError;
     st.pyOk = probe.pythonAvailable;
     st.pyVersion = probe.pythonVersion;
+    st.pyError = probe.pythonError;
     st.h5pyOk = probe.h5pyAvailable;
     st.h5pyVersion = probe.h5pyVersion;
     st.probed = true;
@@ -303,11 +305,17 @@ void renderConversionScreen(AppState& s) {
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
             ImGui::TextWrapped("git not found — install git (apt install git / "
                                "git-scm.com). Clone disabled.");
+            if (!st.gitError.empty())
+                ImGui::TextWrapped("Probe could not start the process: %s",
+                                   st.gitError.c_str());
             ImGui::PopStyleColor();
         }
         if (!st.pyOk) {
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.6f, 0.3f, 1.0f));
             ImGui::TextWrapped("Python interpreter not found. Convert disabled.");
+            if (!st.pyError.empty())
+                ImGui::TextWrapped("Probe could not start the process: %s",
+                                   st.pyError.c_str());
             ImGui::PopStyleColor();
         } else if (!st.h5pyOk) {
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.6f, 0.3f, 1.0f));

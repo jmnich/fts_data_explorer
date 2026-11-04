@@ -320,6 +320,8 @@ add_executable(fts_data_explorer
     panels/export.cpp
     ui/theme.cpp
     io/converter.cpp
+    io/process_runner.cpp
+    io/file_stream.cpp
     io/app_dirs.cpp
     io/user_manual.cpp
     io/open_default.cpp
@@ -438,6 +440,7 @@ install(TARGETS fts_data_explorer DESTINATION bin)
 add_executable(fts_session_roundtrip
     session/session_roundtrip.cpp
     core/app_state.cpp
+    io/file_stream.cpp
     session/workspace_session.cpp
     session/spectral_pool.cpp
     session/environment_session.cpp

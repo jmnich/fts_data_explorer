@@ -1,4 +1,5 @@
 #include "theme.h"
+#include "file_stream.h"
 #include "t100.h"
 #include "spectral_toolbox.h"
 #include "interferogram_data.h"
@@ -140,8 +141,9 @@ static int detectXUnitFromHeader(const std::string& header) {
 }
 
 void T100Spectrum::setReferenceFromCSV(const std::string& path) {
-    std::ifstream ifs(path);
-    if (!ifs.is_open()) return;
+    auto ifsPtr = openInputFile(path);
+    if (!ifsPtr) return;
+    std::istream& ifs = *ifsPtr;
 
     std::string headerLine;
     if (!std::getline(ifs, headerLine)) return;
@@ -164,7 +166,6 @@ void T100Spectrum::setReferenceFromCSV(const std::string& path) {
             rawY.push_back(y);
         }
     }
-    ifs.close();
 
     if (rawX.empty() || rawY.empty()) return;
 
