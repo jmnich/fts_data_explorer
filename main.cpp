@@ -624,6 +624,15 @@ int main(int argc, char* argv[]) {
     fftw_init_threads();
     fftw_plan_with_nthreads(1);
 
+#ifdef _WIN32
+    // Spawned converter processes (GUI and headless -c) inherit this. Python
+    // writes to a pipe in the ANSI code page by default, while the conversion
+    // log is rendered as UTF-8 — without this, a traceback mentioning a
+    // non-ASCII path arrives as mojibake. Only the stdio encoding is pinned
+    // (not PYTHONUTF8), leaving converter file I/O unchanged.
+    _putenv_s("PYTHONIOENCODING", "utf-8");
+#endif
+
     // Parse headless mode flags before any GUI initialization
     HeadlessConfig headlessCfg;
     if (parseHeadlessArgs(argc, argv, headlessCfg)) return 1;

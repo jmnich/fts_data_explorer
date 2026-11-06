@@ -1,8 +1,6 @@
 #include "process_runner.h"
 
 #include <cstdio>
-#include <cstring>
-#include <cwchar>
 
 #ifdef _WIN32
 
@@ -74,33 +72,11 @@ std::wstring joinQuoted(const std::vector<std::wstring>& args) {
     return line;
 }
 
-// Environment block for the child: the parent's environment plus
-// PYTHONIOENCODING=utf-8. Python writes to a pipe in the ANSI code page by
-// default, while the conversion-screen log is rendered as UTF-8 — so a
-// traceback mentioning a non-ASCII path would arrive as mojibake. Only the
-// stdio encoding is pinned (not PYTHONUTF8), leaving converter file I/O as-is.
-// Set per child so the GUI process's own environment stays untouched.
-//
-// The block must be a sequence of NUL-terminated "NAME=value" entries followed
-// by one extra NUL. Note: Wine ignores lpEnvironment, so this can only be
-// verified on real Windows (see the review notes).
-std::vector<wchar_t> buildChildEnvironment() {
-    std::vector<wchar_t> block;
-    wchar_t* parentEnv = GetEnvironmentStringsW();
-    if (parentEnv) {
-        for (const wchar_t* p = parentEnv; *p; p += wcslen(p) + 1) {
-            // Drop any inherited override so ours is the single definition.
-            if (_wcsnicmp(p, L"PYTHONIOENCODING=", 17) == 0) continue;
-            block.insert(block.end(), p, p + wcslen(p) + 1);
-        }
-        FreeEnvironmentStringsW(parentEnv);
-    }
-    const wchar_t* extra = L"PYTHONIOENCODING=utf-8";
-    block.insert(block.end(), extra, extra + wcslen(extra) + 1);
-    block.push_back(L'\0'); // double-terminated block
-    return block;
-}
-
+// Environment: the child inherits the parent's block (lpEnvironment = nullptr).
+// PYTHONIOENCODING=utf-8 is set once in main() instead — building a custom
+// block here is a trap: Windows requires it to be sorted alphabetically and,
+// for a Unicode block, to be paired with CREATE_UNICODE_ENVIRONMENT; getting
+// either wrong makes CreateProcessW fail with ERROR_INVALID_PARAMETER (87).
 std::wstring buildCommandLine(const std::vector<std::string>& argv) {
     std::vector<std::wstring> args;
     args.reserve(argv.size());
@@ -210,9 +186,8 @@ bool runProcessStreaming(const std::vector<std::string>& argv,
 
     PROCESS_INFORMATION pi{};
     std::wstring cmd = buildCommandLine(argv);
-    std::vector<wchar_t> childEnv = buildChildEnvironment();
     const BOOL ok = CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, TRUE,
-                                   CREATE_NO_WINDOW, childEnv.data(), nullptr, &si, &pi);
+                                   CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
     // Capture the OS error before CloseHandle clobbers the thread's last-error.
     const DWORD spawnError = ok ? 0 : GetLastError();
     // The child holds the write end now; the parent's copy must go or ReadFile
