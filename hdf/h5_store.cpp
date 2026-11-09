@@ -512,10 +512,31 @@ static void writeAll(hid_t root, const Workspace& ws) {
     writeT100Sub(root, "t100", "t100/v1", ws.t100);
 }
 
-Workspace H5Store::load(const std::string& path) {
-    H5FileGuard file(H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT));
-    if (file.id < 0) throw H5Error("load: cannot open '" + path + "'");
+// Read-only open + readAll with optional HDF5 file locking. `save`'s
+// existing-file check opens the target lock-free: an external exclusive lock
+// (HDFView, Python/h5py, OneDrive/AV) must not abort the save, and the app's
+// own writes are atomic temp+rename, so the byte-range lock adds no safety.
+// User-facing opens keep the lock.
+static Workspace loadWorkspaceFile(const std::string& path, bool useLock) {
+    hid_t fapl = H5P_DEFAULT;
+    if (!useLock) {
+        const hid_t created = H5Pcreate(H5P_FILE_ACCESS);
+        if (created >= 0) {
+            H5Pset_file_locking(created, /*use_file_locking=*/false,
+                                /*ignore_when_disabled=*/true);
+            fapl = created;
+        }
+    }
+    H5FileGuard file(H5Fopen(path.c_str(), H5F_ACC_RDONLY, fapl));
+    std::string openErr;
+    if (file.id < 0) openErr = h5LastError();   // before H5Pclose clears the stack
+    if (fapl != H5P_DEFAULT) H5Pclose(fapl);
+    if (file.id < 0) throw H5Error("load: cannot open '" + path + "': " + openErr);
     return readAll(file.id);
+}
+
+Workspace H5Store::load(const std::string& path) {
+    return loadWorkspaceFile(path, /*useLock=*/true);
 }
 
 Workspace H5Store::loadGroup(const std::string& path, const std::string& prefix) {
@@ -533,7 +554,7 @@ void H5Store::save(const std::string& path, const Workspace& ws) {
 
     Workspace existing;
     if (fileExists(path)) {
-        existing = load(path);  // also validates @format/@schema
+        existing = loadWorkspaceFile(path, /*useLock=*/false);  // validates @format/@schema
         verifyOriginalsUnchanged(existing, ws);
     }
 
@@ -550,7 +571,11 @@ void H5Store::save(const std::string& path, const Workspace& ws) {
     if (!atomicReplace(tmp, path)) {
         std::error_code ec;
         fs::remove(fs::path(tmp), ec);
-        throw H5Error("save: rename failed for '" + path + "'");
+        std::string msg = "save: rename failed for '" + path + "'";
+#ifdef _WIN32
+        msg += " (the file may be open in another program — close it and retry)";
+#endif
+        throw H5Error(msg);
     }
 }
 

@@ -131,6 +131,27 @@ void writeSourceSummary(hid_t file, const std::string& id, const Workspace& ws,
     h5WriteAttrString(g.id, "summary", summary.dump());
 }
 
+// Read-only open of the archive WITHOUT an HDF5 file lock. The copy below only
+// reads the source (the mutation happens on the private temp), and the app's
+// saves are atomic temp+rename, so the byte-range lock adds no safety. On
+// Windows a shared-lock request fails outright when another process holds the
+// exclusive lock (HDFView, a Python/h5py script, OneDrive/AV), which aborted
+// the save with a generic "copy to temp failed: open".
+hid_t openArchiveReadNoLock(const std::string& path, std::string& openErr) {
+    hid_t fapl = H5P_DEFAULT;
+    const hid_t created = H5Pcreate(H5P_FILE_ACCESS);
+    if (created >= 0) {
+        H5Pset_file_locking(created, /*use_file_locking=*/false,
+                            /*ignore_when_disabled=*/true);
+        fapl = created;
+    }
+    const hid_t id = H5Fopen(path.c_str(), H5F_ACC_RDONLY, fapl);
+    // Capture the stack BEFORE H5Pclose: closing the FAPL clears it.
+    if (id < 0) openErr = h5LastError();
+    if (fapl != H5P_DEFAULT) H5Pclose(fapl);
+    return id;
+}
+
 // Atomic archive mutation: copy `path` to a temp sibling, run `mutate` on the
 // temp, rename over the original (delete-then-rename fallback for Windows,
 // where rename-over-existing fails). A crash leaves the original intact and
@@ -150,14 +171,15 @@ bool atomicMutate(const std::string& path,
     // archive self-compacts to ~its live size on every mutation instead of
     // growing monotonically.
     {
-        H5FileGuard src(H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT));
+        std::string openErr;
+        H5FileGuard src(openArchiveReadNoLock(path, openErr));
         if (src.id < 0) {
-            err = "multi-workspace: copy to temp failed: open '" + path + "'";
+            err = "multi-workspace: copy to temp failed: open '" + path + "': " + openErr;
             return false;
         }
         H5FileGuard dst(H5Fcreate(tmp.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT));
         if (dst.id < 0) {
-            err = "multi-workspace: copy to temp failed: create '" + tmp + "'";
+            err = "multi-workspace: copy to temp failed: create '" + tmp + "': " + h5LastError();
             return false;
         }
         struct Ctx { hid_t dst; herr_t firstErr = 0; };
@@ -170,8 +192,9 @@ bool atomicMutate(const std::string& path,
         };
         if (H5Literate(src.id, H5_INDEX_NAME, H5_ITER_INC, nullptr, visit, &ctx) < 0 ||
             ctx.firstErr < 0) {
-            std::filesystem::remove(tmp);
-            err = "multi-workspace: copy to temp failed: H5Ocopy";
+            std::error_code rmEc;
+            std::filesystem::remove(tmp, rmEc);
+            err = "multi-workspace: copy to temp failed: H5Ocopy: " + h5LastError();
             return false;
         }
     }
@@ -179,7 +202,8 @@ bool atomicMutate(const std::string& path,
     try {
         mutate(tmp);
     } catch (const std::exception& e) {
-        std::filesystem::remove(tmp);
+        std::error_code rmEc;
+        std::filesystem::remove(tmp, rmEc);
         err = e.what();
         return false;
     }
@@ -193,8 +217,9 @@ bool atomicMutate(const std::string& path,
     {
         H5FileGuard heal(H5Fopen(tmp.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT));
         if (heal.id < 0) {
-            std::filesystem::remove(tmp);
-            err = "multi-workspace: post-mutate reopen failed";
+            std::error_code rmEc;
+            std::filesystem::remove(tmp, rmEc);
+            err = "multi-workspace: post-mutate reopen failed: " + h5LastError();
             return false;
         }
     }
@@ -206,8 +231,12 @@ bool atomicMutate(const std::string& path,
         std::filesystem::rename(tmp, path, ec);
     }
     if (ec) {
-        std::filesystem::remove(tmp);
+        std::error_code rmEc;
+        std::filesystem::remove(tmp, rmEc);
         err = "multi-workspace: rename failed: " + ec.message();
+#ifdef _WIN32
+        err += " (the archive may be open in another program — close it and retry)";
+#endif
         return false;
     }
     return true;
@@ -585,9 +614,16 @@ bool multiWorkspaceExperimentWrite(const std::string& path, const std::string& e
         const bool haveParent = H5Lexists(file.id, "experiments", H5P_DEFAULT) > 0;
         if (haveParent && H5Lexists(file.id, prefix.c_str(), H5P_DEFAULT) > 0)
             H5Ldelete(file.id, prefix.c_str(), H5P_DEFAULT);
-        if (!haveParent &&
-            H5Gcreate2(file.id, "experiments", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT) < 0)
-            throw H5Error("multiWorkspaceExperimentWrite: cannot create experiments/");
+        if (!haveParent) {
+            // Guard the created group: a bare H5Gcreate2 return value leaks the
+            // group id, which keeps the file's shared struct alive (nrefs > 1)
+            // and makes a later open with different locking flags fail with
+            // "file locking flag values don't match".
+            H5GroupGuard eg(H5Gcreate2(file.id, "experiments", H5P_DEFAULT,
+                                       H5P_DEFAULT, H5P_DEFAULT));
+            if (eg.id < 0)
+                throw H5Error("multiWorkspaceExperimentWrite: cannot create experiments/");
+        }
         H5GroupGuard g(H5Gcreate2(file.id, prefix.c_str(), H5P_DEFAULT,
                                   H5P_DEFAULT, H5P_DEFAULT));
         if (g.id < 0) throw H5Error("multiWorkspaceExperimentWrite: cannot create group '" + expId + "'");
