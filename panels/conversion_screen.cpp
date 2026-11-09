@@ -2,6 +2,7 @@
 #include "conversion_screen.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -38,30 +39,115 @@ static void loadSetupFields(ConversionScreenState& st, const AppConfig& config) 
              config.converterInterpreter.c_str());
 }
 
-// The .h5 file the converter will produce: <outputDir>/<input stem>.h5
-// (directory inputs use the directory name as the stem — the file inherits
-// the input's name). Empty when either side is unset.
-static std::string derivedOutputH5(const ConversionScreenState& st) {
-    if (st.inputPathBuf[0] == '\0' || st.outputDirBuf[0] == '\0') return "";
-    fs::path in(st.inputPathBuf);
-    std::string stem = fs::is_directory(in) ? in.filename().string()
-                                            : in.stem().string();
-    if (stem.empty()) return "";
-    return (fs::path(st.outputDirBuf) / (stem + ".h5")).string();
-}
-
-static void saveConfigField(AppState& s) {
-    if (s.configPtr) {
-        s.configPtr->saveToFile(s.configFilePath);
-    }
-}
-
 // Leading/trailing whitespace strip for one-line log tails.
 static std::string trimWs(const std::string& s) {
     size_t b = s.find_first_not_of(" \t\r\n");
     if (b == std::string::npos) return "";
     size_t e = s.find_last_not_of(" \t\r\n");
     return s.substr(b, e - b + 1);
+}
+
+// ---------------------------------------------------------------------------
+// Path helpers. Byte-exact string operations, deliberately NOT fs::path round
+// trips: a narrow std::string is UTF-8 here but the Windows ANSI code page to
+// std::filesystem, so path(...).string() would throw or mangle non-ASCII
+// folder names. The derived output path stays a literal prefix of the typed
+// input. fs::path is used only where the basename is separator-free.
+// ---------------------------------------------------------------------------
+
+#ifdef _WIN32
+static constexpr bool kWinPaths = true;
+#else
+static constexpr bool kWinPaths = false;
+#endif
+
+static bool isPathSep(char c) { return c == '/' || (kWinPaths && c == '\\'); }
+static size_t lastPathSep(const std::string& s) {
+    return s.find_last_of(kWinPaths ? "/\\" : "/");
+}
+
+// Absolute-path test on the trimmed value. The panel accepts absolute paths
+// only: the converter runs with the app's CWD, not a meaningful base.
+static bool isAbsolutePath(const std::string& raw) {
+    const std::string s = trimWs(raw);
+    if (s.empty()) return false;
+    if (!kWinPaths) return s[0] == '/';
+    if (isPathSep(s[0]))   // UNC / device: "\\server", "//server", "\\?\C:"
+        return s.size() >= 3 && isPathSep(s[1]) && !isPathSep(s[2]);
+    return s.size() >= 3 && std::isalpha((unsigned char)s[0]) &&
+           s[1] == ':' && isPathSep(s[2]);   // "C:\x" / "C:/x", never "C:x"
+}
+
+// "/", "///", "\\\\" and a drive root "C:\" — a root has no parent and no name.
+static bool isRootPath(const std::string& s) {
+    if (s.empty()) return false;
+    if (kWinPaths && s.size() == 3 && s[1] == ':' && isPathSep(s[2])) return true;
+    for (char c : s) {
+        if (!isPathSep(c)) return false;
+    }
+    return true;
+}
+
+// Trailing separators dropped (never below a lone root separator).
+static std::string stripTrailingSeps(const std::string& s) {
+    size_t end = s.size();
+    while (end > 1 && isPathSep(s[end - 1])) --end;
+    return s.substr(0, end);
+}
+
+// Last path component; "" for roots and empty input.
+static std::string baseName(const std::string& raw) {
+    const std::string s = trimWs(raw);
+    if (isRootPath(s)) return "";
+    const std::string t = stripTrailingSeps(s);
+    const size_t pos = lastPathSep(t);
+    return pos == std::string::npos ? t : t.substr(pos + 1);
+}
+
+// Parent directory: "/a/b" -> "/a", "/a" -> "/", "C:\a" -> "C:\", roots keep
+// themselves. "" when there is no parent (relative path, empty input).
+static std::string parentDirOf(const std::string& raw) {
+    const std::string s = trimWs(raw);
+    if (isRootPath(s)) return s;
+    const std::string t = stripTrailingSeps(s);
+    const size_t pos = lastPathSep(t);
+    if (pos == std::string::npos) return "";
+    if (pos == 0) return t.substr(0, 1);
+    if (t[pos - 1] == ':') return t.substr(0, pos + 1);   // drive root
+    return t.substr(0, pos);
+}
+
+// The .h5 file the converter will produce: <outputDir>/<input stem>.h5
+// (directory inputs use the directory name as the stem — the file inherits
+// the input's name). Empty when either side is unset or the input has no name.
+static std::string derivedOutputH5(const ConversionScreenState& st) {
+    const std::string base = baseName(st.inputPathBuf);
+    const std::string dir = stripTrailingSeps(trimWs(st.outputDirBuf));
+    if (base.empty() || dir.empty()) return "";
+    // Directory inputs keep the directory name; file inputs drop the extension.
+    bool isDir = false;
+    try {
+        std::error_code ec;
+        isDir = fs::is_directory(st.inputPathBuf, ec);
+    } catch (...) {
+        isDir = false;
+    }
+    std::string stem = base;
+    if (!isDir) {
+        try {
+            stem = fs::path(base).stem().string();
+        } catch (...) {
+            stem = base;
+        }
+    }
+    if (stem.empty() || stem == "." || stem == "..") return "";
+    return dir + "/" + stem + ".h5";   // '/' is accepted on Windows too
+}
+
+static void saveConfigField(AppState& s) {
+    if (s.configPtr) {
+        s.configPtr->saveToFile(s.configFilePath);
+    }
 }
 
 // Input height that grows with the wrapped path/URL content (2..6 lines) so
@@ -245,20 +331,6 @@ void renderConversionScreen(AppState& s) {
     }
     if (!st.probed) {
         updateToolStatus(st, st.pyPathBuf);
-    }
-
-    // Auto-default the output directory when the input changes and it is
-    // empty: file inputs default to their parent dir, directory inputs to
-    // themselves. The produced file name follows from derivedOutputH5.
-    if (st.inputEdited) {
-        st.inputEdited = false;
-        if (st.outputDirBuf[0] == '\0' && st.inputPathBuf[0] != '\0') {
-            fs::path in(st.inputPathBuf);
-            fs::path dir = fs::is_directory(in) ? in : in.parent_path();
-            if (!dir.empty())
-                snprintf(st.outputDirBuf, sizeof(st.outputDirBuf), "%s",
-                         dir.string().c_str());
-        }
     }
 
     // Toast-style framing without width pinning: this dialog sizes itself
@@ -612,12 +684,13 @@ void renderConversionScreen(AppState& s) {
         ImGui::Text("Input");
         rowTop = ImGui::GetCursorPosY();
         float hIn = multilineH(st.inputPathBuf, lColW - browseWide - fieldPad - 6.0f);
-        if (ImGui::InputTextMultiline("##convInput", st.inputPathBuf,
-                                      sizeof(st.inputPathBuf),
-                                      ImVec2(-(browseW + ImGui::GetStyle().ItemSpacing.x + 4.0f), hIn),
-                                      ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_WordWrap)) {
-            st.inputEdited = true;
-        }
+        const bool inEnter = ImGui::InputTextMultiline(
+            "##convInput", st.inputPathBuf, sizeof(st.inputPathBuf),
+            ImVec2(-(browseW + ImGui::GetStyle().ItemSpacing.x + 4.0f), hIn),
+            ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_WordWrap);
+        // Enter alone misses "type a path, click elsewhere": focus loss after
+        // an edit counts too, so the output default is never skipped.
+        const bool inDeactivated = ImGui::IsItemDeactivatedAfterEdit();
         ImGui::SameLine();
         ImGui::SetCursorPosY(rowTop);
         if (ImGui::Button("Browse...")) {
@@ -638,15 +711,36 @@ void renderConversionScreen(AppState& s) {
                 st.inputEdited = true;
             }
         }
+        // Trim before the default/validation below so a pasted path with stray
+        // whitespace is accepted, not rejected as relative.
+        if (inEnter || inDeactivated) {
+            snprintf(st.inputPathBuf, sizeof(st.inputPathBuf), "%s",
+                     trimWs(st.inputPathBuf).c_str());
+            st.inputEdited = true;
+        }
+        // Auto-default the output directory when the input changes and the
+        // output is empty or not absolute (absolute paths are the user's:
+        // never overwritten). Both file and directory inputs default to their
+        // parent directory. The produced file name follows from derivedOutputH5.
+        if (st.inputEdited) {
+            st.inputEdited = false;
+            if (isAbsolutePath(st.inputPathBuf) &&
+                (st.outputDirBuf[0] == '\0' || !isAbsolutePath(st.outputDirBuf))) {
+                const std::string dir = parentDirOf(st.inputPathBuf);
+                if (!dir.empty() && dir.size() < sizeof(st.outputDirBuf))
+                    snprintf(st.outputDirBuf, sizeof(st.outputDirBuf), "%s", dir.c_str());
+            }
+        }
         ImGui::SetCursorPosY(rowTop + hIn);
 
         ImGui::Text("Output directory");
         rowTop = ImGui::GetCursorPosY();
         float hOut = multilineH(st.outputDirBuf, lColW - browseWide - fieldPad - 6.0f);
-        ImGui::InputTextMultiline("##convOutput", st.outputDirBuf, sizeof(st.outputDirBuf),
-                                  ImVec2(-(browseW + ImGui::GetStyle().ItemSpacing.x + 4.0f), hOut),
-                                  ImGuiInputTextFlags_EnterReturnsTrue |
-                                      ImGuiInputTextFlags_WordWrap);
+        const bool outEnter = ImGui::InputTextMultiline(
+            "##convOutput", st.outputDirBuf, sizeof(st.outputDirBuf),
+            ImVec2(-(browseW + ImGui::GetStyle().ItemSpacing.x + 4.0f), hOut),
+            ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_WordWrap);
+        const bool outDeactivated = ImGui::IsItemDeactivatedAfterEdit();
         ImGui::SameLine();
         ImGui::SetCursorPosY(rowTop);
         if (ImGui::Button("Browse...##out")) {
@@ -654,13 +748,32 @@ void renderConversionScreen(AppState& s) {
             if (!picked.empty())
                 snprintf(st.outputDirBuf, sizeof(st.outputDirBuf), "%s", picked.c_str());
         }
+        // Clearing the field self-heals to the default instead of leaving a
+        // dead end (only on deactivation, never per keystroke).
+        if (outEnter || outDeactivated) {
+            snprintf(st.outputDirBuf, sizeof(st.outputDirBuf), "%s",
+                     trimWs(st.outputDirBuf).c_str());
+            if (st.outputDirBuf[0] == '\0' && isAbsolutePath(st.inputPathBuf)) {
+                const std::string dir = parentDirOf(st.inputPathBuf);
+                if (!dir.empty() && dir.size() < sizeof(st.outputDirBuf))
+                    snprintf(st.outputDirBuf, sizeof(st.outputDirBuf), "%s", dir.c_str());
+            }
+        }
         ImGui::SetCursorPosY(rowTop + hOut);
+        const bool inputAbsolute = isAbsolutePath(st.inputPathBuf);
+        const bool outputAbsolute = isAbsolutePath(st.outputDirBuf);
         // Conflict: the derived .h5 would overwrite the currently open workspace.
         const std::string outFile = derivedOutputH5(st);
         bool outputConflicts = s.active && !s.active->workspacePath.empty() &&
                                outFile == s.active->workspacePath;
         if (outputConflicts) {
             ImGui::TextWrapped("Cannot overwrite the currently open workspace.");
+        }
+        if (outputAbsolute && !outFile.empty()) {
+            ImGui::PushStyleColor(ImGuiCol_Text,
+                                  ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+            ImGui::TextWrapped("Target: %s", outFile.c_str());
+            ImGui::PopStyleColor();
         }
 
         // ---- Actions (Convert / Convert and open, 50% taller) -------------------
@@ -669,7 +782,7 @@ void renderConversionScreen(AppState& s) {
             && st.selectedIndex >= 0
             && st.selectedIndex < static_cast<int>(converters.size())
             && !converters[st.selectedIndex].broken
-            && st.inputPathBuf[0] != '\0' && st.outputDirBuf[0] != '\0'
+            && inputAbsolute && outputAbsolute
             && !outFile.empty()
             && !outputConflicts;
         const float actionH = ImGui::GetFrameHeight() * 1.5f;
@@ -723,8 +836,12 @@ void renderConversionScreen(AppState& s) {
                 reason = "Selected converter is broken";
             else if (st.inputPathBuf[0] == '\0')
                 reason = "Set an input path";
+            else if (!inputAbsolute)
+                reason = "Input path must be absolute";
             else if (st.outputDirBuf[0] == '\0')
                 reason = "Set an output directory";
+            else if (!outputAbsolute)
+                reason = "Output directory must be absolute";
             else if (outFile.empty())
                 reason = "Input path has no file name";
             else if (outputConflicts)

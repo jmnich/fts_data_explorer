@@ -24,10 +24,13 @@ struct ConversionScreenState {
     char repoDirBuf[1024] = "";
     char pyPathBuf[256] = "";
 
-    // Conversion inputs
+    // Conversion inputs (absolute paths only — the converter runs with the
+    // app's CWD, so a relative path would resolve unpredictably).
     char inputPathBuf[1024] = "";
-    // Output directory: the converter writes <outputDir>/<input stem>.h5
-    // (directory inputs use the directory name as the stem).
+    // Output directory (absolute): the converter writes
+    // <outputDir>/<input stem>.h5 (directory inputs use the directory name as
+    // the stem). Defaults to the input's parent directory whenever the input
+    // changes and this is empty or not absolute.
     char outputDirBuf[1024] = "";
     int selectedIndex = -1;
     int lastSelectedIndex = -1;  // scroll-into-view latch: one-shot SetScrollHereY
