@@ -440,7 +440,8 @@ void renderConversionScreen(AppState& s) {
 
         // Right column: setup + converter list. Drawn first: the list fills the
         // column to its bottom, and its height (fmtH) is shared with the Input
-        // format pane in the left column so both stay at the same vertical level.
+        // format pane in the left column so both stay at the same vertical level
+        // (the left column splits that height with the log while it is shown).
         ImGui::BeginChild("##convRight", ImVec2(rightW, colH), ImGuiChildFlags_Borders,
                           ImGuiWindowFlags_NoScrollbar |
                           ImGuiWindowFlags_NoScrollWithMouse);
@@ -577,7 +578,7 @@ void renderConversionScreen(AppState& s) {
 
         // ---- Converter list (bottom block: fills the column to its bottom; the
         // height fmtH is shared with the Input format pane on the left so both
-        // stay at the same vertical level) --------------------------------------
+        // stay at the same vertical level when the log is hidden) --------------
         float fmtH = 200.0f;
         if (converters.empty()) {
             // Distinguish a misconfigured destination from an empty one: with
@@ -673,8 +674,9 @@ void renderConversionScreen(AppState& s) {
 
         ImGui::SameLine();
 
-        // ---- Left column: paths/conversion + Input format pane (bottom block =
-        // fmtH, shared with the converter list on the right — same level) --------
+        // ---- Left column: paths/conversion + log/Input format block (bottom
+        // block = fmtH shared with the converter list on the right when the log
+        // is hidden; split 50/50 between log and format when it is shown) -------
         ImGui::BeginChild("##convLeft", ImVec2(leftW, colH), ImGuiChildFlags_Borders,
                           ImGuiWindowFlags_NoScrollbar |
                           ImGuiWindowFlags_NoScrollWithMouse);
@@ -854,45 +856,67 @@ void renderConversionScreen(AppState& s) {
             }
         }
 
-        // ---- Input format block (pane height fmtH is shared with the list) ------
+        // ---- Log tail + Input format: share the remaining column height 50/50 --
+        // While the log is visible it takes half of what is left below the
+        // actions block; the Input format pane fills the other half (both keep
+        // a 40 px floor and clip when the column is too short — the column has
+        // no scrollbar, same as before). With the log hidden the format pane
+        // keeps the fmtH height shared with the converter list on the right so
+        // the two columns stay aligned at the same vertical level.
+        const bool showLog = st.showLog || st.job.running;
         const float fmtLabelH = ImGui::GetFrameHeightWithSpacing() + 4.0f;
+        float fmtPaneH = fmtH;
 
-        // ---- Log tail (yields to the format block; auto-scrolls while
-        //       the converter runs so the latest output stays in view) -------
-        if (st.showLog || st.job.running) {
+        if (showLog) {
             ImGui::Spacing();
+            // Both labels advance by one text line + ItemSpacing; the gap is
+            // the ItemSpacing that EndChild adds after the log child.
+            const float labelAdvance = ImGui::GetTextLineHeightWithSpacing();
+            const float gap = ImGui::GetStyle().ItemSpacing.y;
+            const float content = std::max(
+                0.0f, ImGui::GetContentRegionAvail().y - 2.0f * labelAdvance - gap);
+            float logH = content * 0.5f;
+            if (content >= 80.0f)
+                logH = std::clamp(logH, 40.0f, content - 40.0f);
+            logH = std::max(1.0f, logH);
             ImGui::TextDisabled("Log");
-            float logLabelH = ImGui::GetFrameHeightWithSpacing();
-            // The log yields space to the pinned format block, so the block
-            // always ends flush with the column bottom (never below the fold).
-            float logH = std::clamp(
-                ImGui::GetContentRegionAvail().y
-                    - (logLabelH + fmtLabelH + fmtH + 8.0f),
-                40.0f, 110.0f);
             ImGui::BeginChild("##convLog", ImVec2(-1, logH), ImGuiChildFlags_Borders,
                               ImGuiWindowFlags_AlwaysVerticalScrollbar);
-            ImGui::TextUnformatted(lastLogLines(st.job, 20).c_str());
-            // While the converter runs, keep the latest output in view; once
-            // it finishes the user can scroll freely through the captured log.
-            if (st.job.running) {
+            // Show up to 1000 lines of scrollback: converters log their progress
+            // and the whole run stays reviewable after it finishes. The text is
+            // clipped to the pane, so the cost is the lastLogLines() parse of
+            // the tail (1 MB cap), not the draw.
+            constexpr size_t kLogTailLines = 1000;
+            ImGui::TextUnformatted(lastLogLines(st.job, kLogTailLines).c_str());
+            // Auto-scroll: stay pinned to the bottom while the converter runs,
+            // or while the view is already at the bottom (a fresh log opens
+            // there). Scrolling up mid-run takes the view away from the bottom
+            // edge and holds it there; once the job finishes the user scrolls
+            // freely through the captured log.
+            if (st.job.running || ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) {
                 ImGui::SetScrollHereY(1.0f);
             }
             ImGui::EndChild();
+        } else {
+            // ---- Input format pane, PINNED to the bottom of the column (height
+            // fmtH shared with the converter list on the right — same level) ---
+            float spare = ImGui::GetContentRegionAvail().y;
+            if (spare > fmtLabelH + fmtH)
+                ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (spare - (fmtLabelH + fmtH)));
         }
 
-        // ---- Input format pane, PINNED to the bottom of the column (height fmtH
-        // shared with the converter list on the right — same vertical level) -----
         const ConverterDesc* sel = nullptr;
         if (st.selectedIndex >= 0 &&
             st.selectedIndex < static_cast<int>(converters.size()) &&
             !converters[st.selectedIndex].broken) {
             sel = &converters[st.selectedIndex];
         }
-        float spare = ImGui::GetContentRegionAvail().y;
-        if (spare > fmtLabelH + fmtH)
-            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (spare - (fmtLabelH + fmtH)));
         ImGui::Text("Input format");
-        ImGui::BeginChild("##convFormat", ImVec2(-1, fmtH), ImGuiChildFlags_Borders,
+        // Log visible: the pane takes whatever the log left, so the two end up
+        // at exactly half each and flush with the column bottom (no pinning).
+        if (showLog)
+            fmtPaneH = std::max(1.0f, ImGui::GetContentRegionAvail().y);
+        ImGui::BeginChild("##convFormat", ImVec2(-1, fmtPaneH), ImGuiChildFlags_Borders,
                           ImGuiWindowFlags_AlwaysVerticalScrollbar);
         if (!sel) {
             ImGui::TextDisabled("Select a converter to see its format documentation.");
