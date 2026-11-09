@@ -13,13 +13,14 @@ struct HeadlessConfig {
         SyncConverters,
         Reset,
         Template,
-        Compare
+        Compare,
+        Absorbance
     };
 
     Command command = Command::None;
     std::string listType;
     std::string path;
-    std::string referencePath;  // -cmp: reference workspace path
+    std::string referencePath;  // -cmp/-abs: reference workspace path
     std::string converter; // -c: converter id or direct .py path
     std::string configPath;
     std::string outputType;

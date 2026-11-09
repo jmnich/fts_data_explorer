@@ -1040,14 +1040,13 @@ CSV export for a single workspace happens in the Export panel. Experiment tabs h
 <tr><td>100% T transmission line</td><td><code>&lt;ds&gt;_t100_transmission_&lt;file&gt;.csv</code></td><td>X unit, T(%)</td></tr>
 <tr><td>100% T lines for all files</td><td><code>&lt;ds&gt;_t100_all_transmissions.csv</code></td><td>X unit, one T% column per ticked file</td></tr>
 <tr><td>100% T standard deviation</td><td><code>&lt;ds&gt;_t100_stddev.csv</code></td><td>X unit, Standard Deviation T(%)</td></tr>
-<tr><td>Absorbance from selected files</td><td><code>&lt;ds&gt;_absorbance_&lt;file&gt;.csv</code></td><td>X unit, Absorbance</td></tr>
-<tr><td>Transmittance from selected files</td><td><code>&lt;ds&gt;_transmittance_&lt;file&gt;.csv</code></td><td>X unit, Transmittance</td></tr>
 </table>
 
 <p>
 The two 100% T curve exports differ: <code>100% T transmission line</code> writes
 the first highlighted file, while <code>100% T lines for all files</code> writes one column
-per ticked file. Absorbance and Transmittance CSV files are produced by the command-line export path (<a href="#headless">Section 27</a>); the Export button writes only the ten artifacts above, even when one of those two checkboxes is ticked.
+per ticked file. Absorbance and transmittance curves are exported from the
+Absorbance experiment tab (<a href="#absorbance">Section 22</a>), not from this panel.
 </p>
 </section>
 <section class="page" id="multi" data-chapter="Chapter 3 - Multi-dataset work">
@@ -2350,6 +2349,7 @@ Errors are printed to standard error and the process exits with a non-zero statu
 <tr><td><code>-l [type]</code></td><td>List converters (<code>converter</code>), export artifact types (<code>output</code>), or recent datasets (<code>recent</code>).</td></tr>
 <tr><td><code>-w &lt;workspace.h5&gt; &lt;output type&gt; &lt;output dir&gt; [&lt;config.json&gt;]</code></td><td>Open a workspace, optionally apply a processing configuration, compute the requested artifact, export it as CSV, and save the workspace in place.</td></tr>
 <tr><td><code>-cmp &lt;sample.h5&gt; &lt;reference.h5&gt; Comparator spectra &lt;output dir&gt; [&lt;config.json&gt;]</code></td><td>Compute the average spectrum of both workspaces and export both curves on the shared reference grid.</td></tr>
+<tr><td><code>-abs &lt;sample.h5&gt; &lt;reference.h5&gt; &lt;output dir&gt; [&lt;config.json&gt;]</code></td><td>Absorbance experiment: average spectrum of each workspace, then T% and A = −log₁₀(T) on the reference grid (the same math as the Absorbance tab). Writes one CSV with both columns.</td></tr>
 <tr><td><code>-c &lt;converter&gt; &lt;input&gt; &lt;output.h5&gt;</code></td><td>Run one converter by id (or give a direct <code>.py</code> path) and validate the result.</td></tr>
 <tr><td><code>-sync-converters</code></td><td>Clone or update the converter repository.</td></tr>
 <tr><td><code>-t</code></td><td>Write a processing configuration template (<code>template.json</code>) to the current directory.</td></tr>

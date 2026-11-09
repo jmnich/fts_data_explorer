@@ -198,22 +198,21 @@ THRESHOLDS: dict[str, dict] = {
     },
 
     # ------------------------------------------------------------------ test9
-    # Absorbance / transmittance (A, referenceSource=Average), evaluated in the
-    # ceramicLPF signal band 200-700 cm-1 (LPF_SIGNAL_WINDOW_CM — the LPF
-    # transmits below ~1000 cm-1, so 2000-4000 has no signal). Absolute-only
-    # evaluation (compare abs_only=True) with ONLY the max-abs gate — no RMS
-    # gate of any kind. An SNR hard mask excludes unstable bins: T uses
-    # SNR>=30, A uses SNR>=70 because -log10(T) is unstable at T≈1 even in
-    # high-SNR bins.
+    # Absorbance experiment (A): -abs computes the average spectrum of each
+    # workspace, then T% = sample/reference and A = -log10(T) on the reference
+    # grid (computeAbsorbanceCurve — the same math the Absorbance tab plots).
+    # Evaluated in the ceramicLPF signal band 200-700 cm-1
+    # (LPF_SIGNAL_WINDOW_CM — the LPF transmits below ~1000 cm-1, so
+    # 2000-4000 has no signal). Absolute-only evaluation (compare
+    # abs_only=True) with ONLY the max-abs gate: the ratio clamp at 1e-15
+    # makes both curves well-defined everywhere, so no SNR mask is needed.
     "test9_absorbance_transmittance": {
         "transmittance": {
-            "max_abs": 2e-4,                 # fraction — observed 2.35e-5 (8.5x)
+            "max_abs": 1e-6,                 # T% — observed 0 (bit-exact in band)
         },
         "absorbance": {
-            "max_abs": 1e-4,                 # -log10 units — observed 7.8e-6 (13x)
+            "max_abs": 1e-8,                 # -log10 units — observed 0
         },
-        "snr_mask_threshold_transmittance": 30.0,
-        "snr_mask_threshold_absorbance": 70.0,
     },
 
     # ----------------------------------------------------------------- test10

@@ -145,9 +145,9 @@ PASS requires **both** gates within tolerance:
 There is **no weighting** — no SNR- or magnitude-weighted RMS. The original
 motivation for weighting (unweighted RMS over the full 333–10000 cm-1 window
 was dominated by noise-floor bins) was removed by the evaluation-window policy:
-comparisons run only in signal-strong bands, and the SNR hard mask excludes
-unstable bins outright. Weighted vs unweighted RMS differ by ≤1.4x on the
-clean windows, so the weighting machinery (`snr_weights`) was deleted.
+comparisons run only in signal-strong bands. Weighted vs unweighted RMS differ
+by ≤1.4x on the clean windows, so the weighting machinery (`snr_weights`) was
+deleted.
 
 ### Guarding degenerate bins
 
@@ -218,29 +218,18 @@ documented headroom. Aggressive (1.5–4x) in strong-signal regions where the
 app must be bit-stable; relaxed elsewhere. Record observed values and
 headroom in each test's `description.md`.
 
-### SNR-masked evaluation (transmittance/absorbance)
-
-Transmittance and absorbance comparisons use a **hard SNR mask**
-(`snr_mask_threshold` parameter to `compare()`): bins where the resampled
-SNR is below the threshold are excluded entirely (not downweighted). This
-restricts the comparison to strong-signal bins where the relative error is
-meaningful, avoiding the T≈0 / T≈1 instability that dominates full-window
-residuals. The SNR curve is passed via `snr_ref` (same as the weighting path)
-and the threshold is per-test (e.g. 30 for transmittance, 70 for absorbance
-where -log10 amplifies small differences).
-
 ### Absolute-only evaluation (no relative metrics)
 
 `compare(abs_only=True)` evaluates **absolute differences only** — no relative
 metrics are computed or reported. The result dict carries only absolute fields
 (`abs_rms`, `max_abs`, `threshold_max_abs`, optionally `threshold_abs_rms`).
 The `max_abs` gate is always applied; the `abs_rms` gate is optional — a
-thresholds dict without an `abs_rms` key gates on `max_abs` alone. The SNR
-hard mask still applies. Used by test9 (transmittance/absorbance):
-`-log10(T)` amplifies small differences at T≈1, so relative error is
-structurally unstable there; test9 gates on `max_abs` only. The report renders
-such comparisons with an "Abs RMS" column (observed value, not a gate), and
-their plots use the absolute residual (`residual_mode="absolute"`).
+thresholds dict without an `abs_rms` key gates on `max_abs` alone. Used by
+test9 (absorbance experiment): the experiment clamps the ratio at 1e-15, so
+T% and A are well-defined everywhere and the implementations must agree
+bin-for-bin; test9 gates on `max_abs` only. The report renders such comparisons
+with an "Abs RMS" column (observed value, not a gate), and their plots use the
+absolute residual (`residual_mode="absolute"`).
 
 ### Evaluation-window policy (signal bands only)
 
@@ -270,7 +259,7 @@ predate the band-policy (calibrated on 333–10000 cm-1) were re-calibrated
 after the restriction: residuals tighten dramatically once noise-floor bins
 are excluded (e.g. test6's self-100% line went from `max=100%` relative noise
 to bit-exact 0.0). The former SNR-weighted RMS was removed entirely — the
-band policy and SNR hard mask make it redundant (see §5).
+band policy makes it redundant (see §5).
 
 ## 6. Reference-Python standard
 

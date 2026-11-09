@@ -12,6 +12,7 @@ Mirrors (workspace/spectral_toolbox.{h,cpp}, workspace/apodization.{h,cpp}):
   snr_spectrum          ↔ SnrSpectrum (Welford, sample std N-1)
   allan_variance        ↔ AllanVariance::computeAllanVariance
   transmittance         ↔ T100Spectrum::computeTransmittanceFromVectors
+  absorbance_experiment ↔ computeAbsorbanceCurve (workspace/absorbance_math.h)
   stddev_curves         ↔ T100Spectrum stddev (RunningStats, sample N-1)
   common_grid           ↔ chooseCommonGrid + §9.2 evaluation-grid builder (D15)
 """
@@ -427,6 +428,46 @@ def allan_variance(timeseries: np.ndarray, tau: int) -> float:
         sum_sq += diff * diff
         count += 1
     return float(sum_sq / count / 2.0) if count > 0 else 0.0
+
+
+def absorbance_experiment(sample_x: np.ndarray, sample_y: np.ndarray,
+                          ref_x: np.ndarray, ref_y: np.ndarray
+                          ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Absorbance experiment math — mirrors computeAbsorbanceCurve.
+
+    The REFERENCE defines the X grid: only reference points inside the overlap
+    interval are kept, and the sample is resampled onto that grid
+    (endpoint-clamped). ratio = sample/ref, with non-finite or <= 1e-15 values
+    clamped to 0. There is NO noise floor (unlike the 100% T panel).
+
+    Returns (x, t_pct, absorbance).
+    """
+    if ref_x.size == 0 or sample_x.size == 0:
+        return np.array([]), np.array([]), np.array([])
+
+    lo = max(min(sample_x[0], sample_x[-1]), min(ref_x[0], ref_x[-1]))
+    hi = min(max(sample_x[0], sample_x[-1]), max(ref_x[0], ref_x[-1]))
+
+    keep = (ref_x >= lo) & (ref_x <= hi)
+    grid = ref_x[keep]
+    ref_on = ref_y[keep]
+    if grid.size < 2:
+        return np.array([]), np.array([]), np.array([])
+
+    si = np.argsort(sample_x)
+    sx, sy = sample_x[si], sample_y[si]
+    smp_on = np.interp(grid, sx, sy, left=sy[0], right=sy[-1])
+
+    ratio = np.zeros_like(smp_on)
+    ok = ref_on > 1e-15
+    ratio[ok] = smp_on[ok] / ref_on[ok]
+    ratio[~np.isfinite(ratio) | (ratio <= 1e-15)] = 0.0
+
+    t_pct = ratio * 100.0
+    absorbance = np.zeros_like(ratio)
+    pos = ratio > 1e-15
+    absorbance[pos] = -np.log10(ratio[pos])
+    return grid, t_pct, absorbance
 
 
 def transmittance(spec_x: np.ndarray, spec_y: np.ndarray,

@@ -16,6 +16,7 @@
 #include "version.h"
 #include "export.h"
 #include "apodization.h"
+#include "absorbance_math.h"
 #include "spectral_toolbox.h"
 #include "converter.h"
 #include "app_dirs.h"
@@ -97,6 +98,13 @@ static void handleHelp() {
               << "                 same view the UI Comparator overlay shows. The\n"
               << "                 optional processing config applies to BOTH workspaces.\n"
               << "                 Output type: Comparator spectra.\n"
+              << "  -abs <sample.h5> <reference.h5> <output dir> [<config.json>]\n"
+              << "                 Absorbance experiment: average spectrum of each\n"
+              << "                 workspace, then T% = sample/reference and\n"
+              << "                 A = -log10(T) on the reference grid (same math as\n"
+              << "                 the Absorbance tab). Writes one CSV with both\n"
+              << "                 columns. The optional config applies to BOTH\n"
+              << "                 workspaces; absorbance.xUnit selects the X unit.\n"
               << "  -sync-converters\n"
               << "                 Clone (first run) or pull the standard converter repo.\n"
               << "  -t             Generate template.json with all config settings.\n"
@@ -146,8 +154,6 @@ static void handleList(const std::string& type) {
             { "100% T transmission line" },
             { "100% T lines for all files" },
             { "100% T standard deviation" },
-            { "Absorbance from selected files" },
-            { "Transmittance from selected files" },
         };
         for (const auto& l : labels) {
             std::cout << l.name << std::endl;
@@ -608,15 +614,6 @@ static bool computeAndExport(const HeadlessConfig& cfg) {
         } else {
             computedOk = true;
         }
-    } else if (ot == "Absorbance from selected files" ||
-               ot == "Transmittance from selected files") {
-        // Reuse the T100 transmittance pipeline (T% = spec/ref × 100); the
-        // export writers convert to -log10(T) or fractional T.
-        if (!ensureT100Transmittance()) {
-            std::cerr << "Error: Transmittance computation failed" << std::endl;
-            exit(1);
-        }
-        computedOk = true;
     } else {
         std::cerr << "Error: Unknown output type '" << ot << "'. "
                   << "Available: Corrected interferograms from selected files, "
@@ -624,9 +621,7 @@ static bool computeAndExport(const HeadlessConfig& cfg) {
                   << "Average spectrum, SNR spectrum, Spectra from selected files, "
                   << "Allan-Werle 3D, Allan-Werle slice, "
                   << "100% T transmission line, 100% T lines for all files, "
-                  << "100% T standard deviation, "
-                  << "Absorbance from selected files, "
-                  << "Transmittance from selected files" << std::endl;
+                  << "100% T standard deviation" << std::endl;
         exit(1);
     }
 
@@ -993,6 +988,91 @@ static void handleCompare(const HeadlessConfig& cfg) {
 }
 
 // ---------------------------------------------------------------------------
+// Absorbance experiment (-abs): average spectrum of each workspace, then the
+// shared experiment math (T% = sample/reference, A = -log10(T)) on the
+// reference grid. Calls the same computeAbsorbanceCurve as the Absorbance tab,
+// so a regression in the experiment formula fails this command too.
+// ---------------------------------------------------------------------------
+static void handleAbsorbance(const HeadlessConfig& cfg) {
+    if (!std::filesystem::is_regular_file(cfg.path)) {
+        std::cerr << "Error: Sample workspace '" << cfg.path << "' not found" << std::endl;
+        exit(1);
+    }
+    if (!std::filesystem::is_regular_file(cfg.referencePath)) {
+        std::cerr << "Error: Reference workspace '" << cfg.referencePath << "' not found" << std::endl;
+        exit(1);
+    }
+    if (!std::filesystem::exists(cfg.outputPath)) {
+        std::cerr << "Error: Directory '" << cfg.outputPath << "' does not exist" << std::endl;
+        exit(1);
+    }
+
+    json j;
+    if (!cfg.configPath.empty()) {
+        try {
+            auto ifsPtr = openInputFile(cfg.configPath);
+            if (!ifsPtr) {
+                std::cerr << "Error: Config file '" << cfg.configPath << "' not found" << std::endl;
+                exit(1);
+            }
+            *ifsPtr >> j;
+        } catch (const std::exception& e) {
+            std::cerr << "Error: Invalid config: " << e.what() << std::endl;
+            exit(1);
+        }
+    }
+
+    // One X unit for both averages (same rule as -cmp). `absorbance.xUnit`
+    // wins, then the average panel's key, then cm-1.
+    int pinnedXUnit = 0;
+    if (!j.empty()) {
+        if (j.contains("absorbance") && j["absorbance"].contains("xUnit"))
+            pinnedXUnit = jsonXUnitToInt(jsonVal<std::string>(j["absorbance"], "xUnit", "cm-1"));
+        else if (j.contains("average") && j["average"].contains("xUnit"))
+            pinnedXUnit = jsonXUnitToInt(jsonVal<std::string>(j["average"], "xUnit", "cm-1"));
+    }
+
+    std::vector<double> sampleX, sampleY, refX, refY;
+    computeAvgSpectrum(cfg.path, sampleX, sampleY, &j, pinnedXUnit);
+    auto sampleSess = std::move(appState.sessions.back());
+    appState.sessions.pop_back();
+    sampleSess.reset();
+    computeAvgSpectrum(cfg.referencePath, refX, refY, &j, pinnedXUnit);
+    auto refSess = std::move(appState.sessions.back());
+    appState.sessions.pop_back();
+    refSess.reset();
+
+    AbsorbanceRatio curve;
+    std::string status;
+    if (!computeAbsorbanceCurve(refX, refY, sampleX, sampleY, curve, status)) {
+        std::cerr << "Error: Absorbance computation failed: " << status << std::endl;
+        exit(1);
+    }
+
+    std::string slug = std::filesystem::path(cfg.path).stem().string();
+    for (char& c : slug)
+        if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_' && c != '-')
+            c = '_';
+
+    const char* xLabel = "Wavenumber [cm-1]";
+    if (pinnedXUnit == 1) xLabel = "Wavelength [um]";
+    else if (pinnedXUnit == 2) xLabel = "Frequency [THz]";
+
+    std::string path = cfg.outputPath + "/" + slug + "_absorbance_experiment.csv";
+    auto ofsPtr = openOutputFile(path);
+    if (!ofsPtr) { std::cerr << "Error: cannot write " << path << std::endl; exit(1); }
+    std::ostream& ofs = *ofsPtr;
+    ofs << std::setprecision(15);
+    ofs << xLabel << ",T(%),Absorbance\n";
+    const std::vector<double> tPct = absorbanceYMode(curve.ratio, 0);
+    const std::vector<double> absY = absorbanceYMode(curve.ratio, 1);
+    for (size_t i = 0; i < curve.x.size(); ++i)
+        ofs << curve.x[i] << "," << tPct[i] << "," << absY[i] << "\n";
+    ofs.flush();
+    std::cout << "Exported 'Absorbance experiment' to " << cfg.outputPath << std::endl;
+}
+
+// ---------------------------------------------------------------------------
 // Public interface
 // ---------------------------------------------------------------------------
 
@@ -1075,6 +1155,20 @@ bool parseHeadlessArgs(int argc, char* argv[], HeadlessConfig& cfg) {
         return false;
     }
 
+    if (flag == "-abs") {
+        if (argc < 5 || argc > 6) {
+            std::cerr << "Error: -abs requires <sample.h5> <reference.h5> <output dir> [<config>]"
+                      << std::endl;
+            return true;
+        }
+        cfg.command = HeadlessConfig::Command::Absorbance;
+        cfg.path = argv[2];
+        cfg.referencePath = argv[3];
+        cfg.outputPath = argv[4];
+        if (argc == 6) cfg.configPath = argv[5];
+        return false;
+    }
+
     if (flag == "-sync-converters") {
         if (argc != 2) {
             std::cerr << "Error: -sync-converters takes no arguments" << std::endl;
@@ -1134,6 +1228,9 @@ bool runHeadlessCommand(const HeadlessConfig& cfg) {
             return true;
         case HeadlessConfig::Command::Compare:
             handleCompare(cfg);
+            return true;
+        case HeadlessConfig::Command::Absorbance:
+            handleAbsorbance(cfg);
             return true;
         case HeadlessConfig::Command::None:
             return false;

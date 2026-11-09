@@ -8,9 +8,8 @@
     "xCorrectionMethod": {"value": "Hilbert"},
     "xUnit": {"value": "cm-1"}
   },
-  "t100": {
-    "xUnit": {"value": "cm-1"},
-    "referenceSource": {"value": "Average"}
+  "absorbance": {
+    "xUnit": {"value": "cm-1"}
   },
   "processing": { "workerThreads": {"value": -1} }
 }

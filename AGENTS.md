@@ -137,6 +137,7 @@ Fails -> "Error: <msg>" to stderr, non-zero exit.
 | `-w <workspace.h5> <output type> <output dir> [<config.json>]` | Open workspace, compute artifact into it, save in place, export |
 | `-c <converter> <input> <output.h5>` | Run converter (id from `-l converter`, or a direct `.py` path), validate, exit 0/1. Local clone as-is — no implicit network |
 | `-cmp <sample.h5> <reference.h5> <output type> <output dir> [<config.json>]` | Compare two workspaces: compute average spectrum from each, export **both curves on the shared reference grid** (sample interpolated onto the reference axis — the same overlay the UI Comparator shows). Optional processing config applies to **both** workspaces. Output type: `Comparator spectra` |
+| `-abs <sample.h5> <reference.h5> <output dir> [<config.json>]` | Absorbance experiment: average spectrum of each workspace, then T% and A = −log₁₀(T) on the reference grid via `computeAbsorbanceCurve` (`workspace/absorbance_math.h`) — the same math the Absorbance tab plots. Writes one CSV with both columns; `absorbance.xUnit` selects the X unit |
 | `-sync-converters` | Clone (first) or pull the converter repo |
 | `-t` | Create `template.json` (config template) |
 | `-r` | Reset: delete `~/.fts_data_explorer_config` and `imgui.ini` |
@@ -220,7 +221,7 @@ python3 test_harness/run_tests.py [-v] [--only test1,test4] [--list]
 ```
 
 18 tests covering the full pipeline (spectrum, X-correction, parameter matrix,
-average, SNR, T100, T100-stddev, Allan, absorbance/transmittance, comparator),
+average, SNR, T100, T100-stddev, Allan, absorbance experiment, comparator),
 structural round-trips (HDF5 exchange layer, multi-workspace container,
 session park/resume), standalone unit checks (batch recipes, HITRAN bands,
 resample grid, text wrapping), and HDF5 conformance (converter closed loop).

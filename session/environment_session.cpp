@@ -14,6 +14,7 @@
 #include <string>
 
 #include "app_state.h"
+#include "absorbance_math.h"
 #include "config.h"
 #include "file_stream.h"
 #include "multi_workspace_store.h"
@@ -771,40 +772,16 @@ void EnvironmentSession::computeAbsorbance(AppState& s) {
         for (double& v : xR) v = SpectralToolbox::convertXValue(v, fromR, dst);
         for (double& v : xS) v = SpectralToolbox::convertXValue(v, fromS, dst);
 
-        // Overlap interval (direction-safe via front/back min/max).
-        const double lo = std::max(std::min(xR.front(), xR.back()),
-                                   std::min(xS.front(), xS.back()));
-        const double hi = std::min(std::max(xR.front(), xR.back()),
-                                   std::max(xS.front(), xS.back()));
-
-        // Grid = reference points inside [lo, hi], preserving reference order.
-        // the overlap grid uses the REFERENCE resolution only — a finer
-        // sample spectrum is resampled down onto the reference grid. This is a
-        // design choice (the reference defines the absorbance axis); a finer
-        // grid would require interpolating the reference instead.
-        std::vector<double> gridX, refY;
-        gridX.reserve(xR.size());
-        refY.reserve(xR.size());
-        for (size_t i = 0; i < xR.size(); ++i)
-            if (xR[i] >= lo && xR[i] <= hi) {
-                gridX.push_back(xR[i]);
-                refY.push_back(ref.y[i]);
-            }
-        if (gridX.size() < 2) { c.status = "No overlapping X region"; continue; }
-
-        std::vector<double> smpY = resampleToGrid(xS, smp.y, gridX);
-        if (smpY.size() != gridX.size()) { c.status = "Resample failed"; continue; }
-
-        std::vector<double> ratio(smpY.size());
-        for (size_t i = 0; i < smpY.size(); ++i) {
-            const double rv = refY[i];
-            double v = (rv > 1e-15) ? smpY[i] / rv : 0.0;
-            // non-finite or <=1e-15 ratio clamped to 0 pre-log.
-            if (!std::isfinite(v) || v <= 1e-15) v = 0.0;
-            ratio[i] = v;
+        // Overlap interval, reference grid, sample resample and ratio live in
+        // the shared math header so headless -abs exercises the same formula.
+        AbsorbanceRatio curve;
+        std::string status;
+        if (!computeAbsorbanceCurve(xR, ref.y, xS, smp.y, curve, status)) {
+            c.status = status;
+            continue;
         }
-        c.gridX = std::move(gridX);
-        c.ratioY = std::move(ratio);
+        c.gridX = std::move(curve.x);
+        c.ratioY = std::move(curve.ratio);
         any = true;
     }
     applyYMode();
@@ -820,14 +797,8 @@ void EnvironmentSession::computeAbsorbance(AppState& s) {
 
 void EnvironmentSession::applyYMode() {
     ++curvesRevision_;   // display-content mutator (cache key, additive to resultsDirty_)
-    for (auto& c : curves) {
-        c.curveY.resize(c.ratioY.size());
-        for (size_t i = 0; i < c.ratioY.size(); ++i) {
-            const double r = c.ratioY[i];
-            c.curveY[i] = (yMode == 0) ? r * 100.0
-                                       : (r > 1e-15) ? -std::log10(r) : 0.0;
-        }
-    }
+    for (auto& c : curves)
+        c.curveY = absorbanceYMode(c.ratioY, yMode);
     // Fit-affecting rewrite: keep follow-up frames flowing so the
     // EndPlot-time Y re-fit lands on screen even when the loop goes idle.
     appState.requestViewChangeRedraw();
