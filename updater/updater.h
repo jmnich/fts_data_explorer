@@ -29,6 +29,10 @@ bool takeCloseRequest();
 // True while the worker is in flight or the modal is up (redraw gate).
 bool busy();
 
+// True while the update modal (or its up-to-date toast) is on screen. The app
+// uses this to avoid opening other modal popups that would close it.
+bool modalVisible();
+
 // True when the user chose "Restart Now" and applyStaged() succeeded.
 bool restartArmed();
 

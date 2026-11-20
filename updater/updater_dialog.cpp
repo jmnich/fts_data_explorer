@@ -447,8 +447,8 @@ void applyOpenState(DialogState& st, UpdatePhase phase) {
         !st.cancelling;
     const bool failed = phase == UpdatePhase::Failed &&
                         (st.manual || st.userInitiated) && !st.cancelling;
-    st.open = (phase == UpdatePhase::Checking && st.manual) || offer ||
-              progress ||
+    st.open = (phase == UpdatePhase::Checking && st.manual && !st.cancelling) ||
+              offer || progress ||
               (phase == UpdatePhase::ReadyToApply && !st.readyDeferred) ||
               failed;
 }
@@ -529,10 +529,6 @@ void tick() {
     const UpdatePhase phase = svc.phase();
     st.lastPhase = static_cast<int>(phase);
     const bool checkEnded = prev == UpdatePhase::Checking && phase != prev;
-    if (st.cancelling && (phase == UpdatePhase::Idle ||
-                          phase == UpdatePhase::Failed)) {
-        st.cancelling = false;  // settled; a cancel-caused Failed stays hidden
-    }
     if (checkEnded && (phase == UpdatePhase::UpToDate ||
                        phase == UpdatePhase::Available)) {
         // Only a successful check starts a new cooldown; a failure retries
@@ -549,6 +545,12 @@ void tick() {
         svc.reset();
     }
     applyOpenState(st, phase);
+    if (st.cancelling && (phase == UpdatePhase::Idle ||
+                          phase == UpdatePhase::Failed)) {
+        // Settled. Cleared only after the visibility pass above ran with
+        // `cancelling` still true, so a cancel-caused Failed stays hidden.
+        st.cancelling = false;
+    }
     if (phase == UpdatePhase::RestartArmed) st.open = false;
     if (checkEnded && phase == UpdatePhase::UpToDate && st.manual) {
         st.upToDateUntil =
@@ -626,6 +628,11 @@ bool busy() {
     const DialogState& st = state();
     return st.service.busy() || st.open ||
            std::chrono::steady_clock::now() < st.upToDateUntil;
+}
+
+bool modalVisible() {
+    return state().open ||
+           std::chrono::steady_clock::now() < state().upToDateUntil;
 }
 
 bool restartArmed() { return state().service.restartArmed(); }

@@ -197,9 +197,12 @@ void runCheck(const UpdateCheckConfig cfg, std::atomic<int>& phase, std::atomic<
 
     const bool newer = compareVersions(remote, local) > 0;
     info.version = versionString(remote);
-    // Last-ditch cancel guard: never publish a terminal phase after a cancel,
-    // the cancel path already cleared the status and published Idle.
+    // Last-ditch cancel guard: never publish a terminal phase after a cancel.
+    // Cancel may land after the response but before this point; the UI can
+    // still be on Checking (cancelDownload() cannot move a busy worker), so
+    // publish Idle here too or the phase stays Checking forever.
     if (cancel.load()) {
+        clearStatusBeforeIdle(textMutex, status, phase);
         return;
     }
     std::lock_guard<std::mutex> lock(textMutex);

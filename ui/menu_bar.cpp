@@ -229,6 +229,10 @@ void renderMainMenuBar(AppConfig& config, const std::string& configFilePath,
                 }
                 
                 ImGui::EndMainMenuBar();
-                renderAboutPopup();
+                // The updater modal must not be closed by another popup: while
+                // it is visible, defer the About popup (its flag stays set and
+                // it opens as soon as the updater dialog closes).
+                if (!updater::modalVisible())
+                    renderAboutPopup();
             }
 }
