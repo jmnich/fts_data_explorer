@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Test 19: updater version/checksum logic (io/update_logic.*, io/sha256.*).
+"""Test 19: updater pure logic (updater/updater_logic.*, updater_sha256.*,
+updater_config.*).
 
 Compiles and runs the standalone C++ assert test for the pure auto-updater
 helpers: release-tag parsing, version comparison, sha256sum-line parsing,
-SHA-256 of buffers and files, and the platform asset name.
+SHA-256 of buffers and files, the platform asset name, and the updater
+config parse/serialize round trip.
 """
 import argparse, json, subprocess, sys, time
 from pathlib import Path
@@ -23,29 +25,30 @@ def main():
     workdir.mkdir(parents=True, exist_ok=True)
     t0 = time.monotonic()
 
-    cpp = HERE / "test_update_logic.cpp"
+    cpp = HERE / "test_updater_logic.cpp"
     if not cpp.is_file():
-        record = {"test": "test19_update_logic", "status": "error",
+        record = {"test": "test19_updater_logic", "status": "error",
                   "summary": f"missing {cpp.name}", "duration_s": 0.0,
                   "output_type": "", "comparisons": [], "artifacts": []}
         (workdir / "result.json").write_text(json.dumps(record, indent=2))
         return 2
 
-    binary_out = workdir / "test_update_logic"
-    cmd = ["g++", "-std=c++17", "-I.", "-Iio", str(cpp),
-           "io/update_logic.cpp", "io/sha256.cpp", "-o", str(binary_out)]
+    binary_out = workdir / "test_updater_logic"
+    cmd = ["g++", "-std=c++17", "-I.", "-Iupdater", str(cpp),
+           "updater/updater_logic.cpp", "updater/updater_sha256.cpp",
+           "updater/updater_config.cpp", "-o", str(binary_out)]
 
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60,
                               cwd=str(REPO_ROOT))
         if proc.returncode != 0:
-            record = {"test": "test19_update_logic", "status": "error",
+            record = {"test": "test19_updater_logic", "status": "error",
                       "summary": f"compile failed (rc={proc.returncode})",
                       "duration_s": round(time.monotonic() - t0, 3),
                       "output_type": "", "comparisons": [], "artifacts": []}
             (workdir / "result.json").write_text(json.dumps(record, indent=2))
             (workdir / "run.log").write_text(proc.stderr)
-            print(json.dumps({"status": "error", "test": "test19_update_logic",
+            print(json.dumps({"status": "error", "test": "test19_updater_logic",
                               "summary": "compile failed"}))
             return 2
 
@@ -57,35 +60,35 @@ def main():
         comparisons = []
         for line in proc.stdout.splitlines():
             if "all checks passed" in line:
-                comparisons.append({"name": "update_logic", "status": "pass"})
+                comparisons.append({"name": "updater_logic", "status": "pass"})
 
         if proc.returncode == 0:
             summary = "all checks passed"
-            record = {"test": "test19_update_logic", "status": "pass",
+            record = {"test": "test19_updater_logic", "status": "pass",
                       "summary": summary, "duration_s": duration,
                       "output_type": "", "comparisons": comparisons, "artifacts": []}
             (workdir / "result.json").write_text(json.dumps(record, indent=2))
-            print(json.dumps({"status": "pass", "test": "test19_update_logic",
+            print(json.dumps({"status": "pass", "test": "test19_updater_logic",
                               "summary": summary}))
             return 0
         else:
             summary = f"exit code {proc.returncode}"
-            record = {"test": "test19_update_logic", "status": "fail",
+            record = {"test": "test19_updater_logic", "status": "fail",
                       "summary": summary, "duration_s": duration,
                       "output_type": "", "comparisons": comparisons, "artifacts": []}
             (workdir / "result.json").write_text(json.dumps(record, indent=2))
-            print(json.dumps({"status": "fail", "test": "test19_update_logic",
+            print(json.dumps({"status": "fail", "test": "test19_updater_logic",
                               "summary": summary}))
             return 1
 
     except subprocess.TimeoutExpired:
-        record = {"test": "test19_update_logic", "status": "error",
+        record = {"test": "test19_updater_logic", "status": "error",
                   "summary": "timeout", "duration_s": round(time.monotonic() - t0, 3),
                   "output_type": "", "comparisons": [], "artifacts": []}
         (workdir / "result.json").write_text(json.dumps(record, indent=2))
         return 2
     except Exception as e:
-        record = {"test": "test19_update_logic", "status": "error",
+        record = {"test": "test19_updater_logic", "status": "error",
                   "summary": f"exception: {e}", "duration_s": round(time.monotonic() - t0, 3),
                   "output_type": "", "comparisons": [], "artifacts": []}
         (workdir / "result.json").write_text(json.dumps(record, indent=2))

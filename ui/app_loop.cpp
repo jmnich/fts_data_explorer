@@ -5,7 +5,7 @@
 #include "config.h"
 #include "welcome.h"
 #include "conversion_screen.h"
-#include "update_dialog.h"
+#include "updater.h"
 #include "about.h"
 #include "menu_bar.h"
 #include "theme.h"
@@ -1310,7 +1310,7 @@ bool AppLoop::runFrame() {
     if (glfwWindowShouldClose(window_)) return false;
     pollAsyncComputations();
     tickSessions();
-    tickUpdateDialog(appState);
+    updater::tick();
     scheduleRedraws();
 
     // Skip rendering when UI is static — saves CPU/GPU
@@ -1570,10 +1570,9 @@ void AppLoop::scheduleRedraws() {
             (appState.conversionScreen.open || conversionJobsInFlight(appState)))
             appState.needsRedraw = true;
 
-        // Auto-update: keep frames flowing while the worker runs or a modal
-        // is up (the check/download completes without user input).
-        if (!appState.needsRedraw &&
-            (updateDialogInFlight(appState) || appState.updateDialog.open))
+        // Updater: keep frames flowing while its worker runs or a modal is up
+        // (the check/download completes without user input).
+        if (!appState.needsRedraw && updater::busy())
             appState.needsRedraw = true;
 }
 
@@ -2102,6 +2101,12 @@ void AppLoop::renderUI() {
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
+        // Updater first: its modal must be able to present before any other
+        // screen, including the home/welcome screen, and must not depend on it.
+        const bool updaterModal = updater::render();
+        if (updater::takeCloseRequest())
+            glfwSetWindowShouldClose(glfwGetCurrentContext(), GLFW_TRUE);
+
         // Rate-limit mouse wheel to at most one notch per frame, with carry-over
         // for excess. Raw deltas are accumulated in the GLFW scroll callback
         // (before ImGui's input queue), so stale queued wheel events can never
@@ -2171,7 +2176,7 @@ void AppLoop::renderUI() {
         }
         
         // Show welcome screen if no data is loaded and we haven't initialized yet
-        if (appState.showWelcomeScreen && !appState.welcomeScreenInitialized) {
+        if (appState.showWelcomeScreen && !appState.welcomeScreenInitialized && !updaterModal) {
             // While a workspace-discard/save flow is pending, keep the welcome
             // popup suppressed: its per-frame OpenPopup would force-close the
             // Unsaved Changes / stale-drop modal (OpenPopupEx closes open
@@ -2179,7 +2184,7 @@ void AppLoop::renderUI() {
             // "disappear" and the flow look broken.
             bool showPopup = !appState.showErrorPopup
                           && !appState.conversionScreen.open
-                          && !appState.updateDialog.open
+                          && !updaterModal
                           && !appState.showUnsavedPrompt
                           && !appState.showStaleDropPrompt;
             renderWelcomeScreen(appState, config_, configFilePath_, showPopup);
@@ -2196,7 +2201,6 @@ void AppLoop::renderUI() {
             appState.needsRedraw = true;
         }
         renderConversionScreen(appState);
-        renderUpdateDialog(appState);
 
         // Render error popup
         if (appState.showErrorPopup) {

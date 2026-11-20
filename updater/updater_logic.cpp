@@ -1,10 +1,11 @@
 // Pure version/checksum helpers for the auto-updater. No platform headers,
 // no std::stoi (repo style: std::from_chars), MinGW-clean.
-#include "update_logic.h"
+#include "updater_logic.h"
 
 #include <charconv>
 #include <cctype>
 
+namespace updater {
 namespace {
 
 // Reads one non-negative decimal group at pos into value; advances pos past
@@ -133,3 +134,5 @@ bool parseSha256File(const std::string& text, std::string& outHex) {
     outHex = std::move(digest);
     return true;
 }
+
+} // namespace updater

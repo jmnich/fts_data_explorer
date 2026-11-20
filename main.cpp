@@ -41,7 +41,7 @@
 #include "user_manual.h"
 #include "file_browser.h"
 #include "welcome.h"
-#include "update_dialog.h"
+#include "updater.h"
 #include "about.h"
 #include "theme.h"
 #include "headless.h"
@@ -686,6 +686,11 @@ int main(int argc, char* argv[]) {
     appState.currentAccentColor = config.accentColor;
     appState.reconfigurePool(config.workerThreads);
 
+    // Updater: stale-file cleanup + background check (GUI only; the headless
+    // paths returned above). Starts before window creation so the check
+    // overlaps startup work; the relaunch path is handled after the loop.
+    updater::startup();
+
     // Initialize application (GLFW + ImGui contexts + backends)
     GLFWwindow* window = nullptr;
     if (!initializeApplication(config, window)) {
@@ -695,25 +700,15 @@ int main(int argc, char* argv[]) {
     // One-time UI/theme/DPI setup + config wiring
     setupApplication(config, window);
 
-    // Auto-update: stale-file cleanup + one background check (GUI only; the
-    // headless paths returned above).
-    startupUpdateCheck(appState);
-
-    // Captured before any self-update swap: after the rename-over, Linux's
-    // /proc/self/exe reads "<path> (deleted)", so the relaunch target must be
-    // the stable path recorded at startup.
-    const std::string relaunchExe = currentExecutablePath();
-
     // Main loop — encapsulated frame pipeline (Phase-1 M1.2b)
     AppLoop loop(config, configFilePath, window);
     while (loop.runFrame()) {}
 
-    // Auto-update: the new binary is already in place; relaunch it and exit
+    // Updater: the new binary is already in place; relaunch it and exit
     // instead of continuing with the old image (spawn first, exit second).
-    if (appState.updateDialog.service.restartArmed()) {
+    if (updater::restartArmed()) {
         std::vector<std::string> relaunchArgs(argv, argv + argc);
-        std::string relaunchError;
-        spawnRelaunch(relaunchExe, relaunchArgs, relaunchError);
+        updater::relaunch(relaunchArgs);
     }
 
     // Per-tab-type layout snapshots must follow the app's LAST state. They are

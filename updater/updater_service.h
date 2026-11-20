@@ -6,7 +6,9 @@
 #include <thread>
 #include <vector>
 
-#include "update_logic.h"
+#include "updater_logic.h"
+
+namespace updater {
 
 enum class UpdatePhase {
     Idle, Checking, UpToDate, Available, Downloading, Verifying,
@@ -98,3 +100,5 @@ void cleanupStaleUpdateFiles();
 // fork+execv; Windows CreateProcessW. True when the process was created.
 bool spawnRelaunch(const std::string& exePath, const std::vector<std::string>& args,
                    std::string& error);
+
+} // namespace updater

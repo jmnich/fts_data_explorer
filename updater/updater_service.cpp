@@ -1,9 +1,9 @@
-// GitHub-releases auto-update driver. Network I/O goes through io/http_client,
-// version/checksum math through io/update_logic and io/sha256; everything here
-// is ImGui-free. The worker thread writes strings under textMutex_ and the
-// phase via atomics; the UI thread only reads.
-#include "pthread_compat.h" // GCC 16+: declares pthread_cond_clockwait etc. before <mutex>
-#include "update_service.h"
+// GitHub-releases auto-update driver. Network I/O goes through updater_http,
+// version/checksum math through updater_logic and updater_sha256; everything
+// here is ImGui-free. The worker thread writes strings under textMutex_ and
+// the phase via atomics; the UI thread only reads.
+#include "updater_compat.h" // GCC 16+: declares pthread_cond_clockwait etc. before <mutex>
+#include "updater_service.h"
 
 #include <nlohmann/json.hpp>
 
@@ -27,8 +27,10 @@
 #include <unistd.h>
 #endif
 
-#include "http_client.h"
-#include "sha256.h"
+#include "updater_http.h"
+#include "updater_sha256.h"
+
+namespace updater {
 
 namespace {
 
@@ -198,8 +200,8 @@ void runDownload(const ReleaseInfo info, const std::string stagePath,
     const std::string actual = sha256FileHex(stagePath, sumError);
     const HttpGetResult sum = httpGetString(info.checksumUrl);
     std::string expected;
-    if (!actual.empty() && sum.ok && parseSha256File(sum.body, expected) &&
-        lowerCase(actual) == lowerCase(expected)) {
+    const bool parsed = sum.ok && parseSha256File(sum.body, expected);
+    if (!actual.empty() && parsed && lowerCase(actual) == lowerCase(expected)) {
 #if !defined(_WIN32)
         ::chmod(stagePath.c_str(), 0755);
 #endif
@@ -210,8 +212,18 @@ void runDownload(const ReleaseInfo info, const std::string stagePath,
     }
 
     std::remove(stagePath.c_str());
-    failWith(phase, textMutex, status, error,
-             "checksum mismatch — download discarded");
+    // Distinguish a genuine digest mismatch from a failed/unparseable
+    // checksum fetch; the stage file is discarded either way.
+    if (actual.empty()) {
+        failWith(phase, textMutex, status, error,
+                 sumError.empty() ? "checksum mismatch — download discarded" : sumError);
+    } else if (!parsed) {
+        failWith(phase, textMutex, status, error,
+                 sum.ok ? "checksum file is unreadable" : sum.error);
+    } else {
+        failWith(phase, textMutex, status, error,
+                 "checksum mismatch — download discarded");
+    }
 }
 
 #if defined(_WIN32)
@@ -578,3 +590,5 @@ bool spawnRelaunch(const std::string& exePath, const std::vector<std::string>& a
     return true;
 #endif
 }
+
+} // namespace updater

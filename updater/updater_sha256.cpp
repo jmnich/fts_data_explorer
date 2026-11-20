@@ -1,12 +1,13 @@
 // Self-contained SHA-256 (FIPS 180-4) for the auto-updater's checksum checks.
 // No OpenSSL, no platform headers — builds cleanly under MinGW as well as GCC.
-#include "sha256.h"
+#include "updater_sha256.h"
 
 #include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 
+namespace updater {
 namespace {
 
 // Compression-round constants K[0..63] (first 32 bits of the fractional parts
@@ -173,3 +174,5 @@ std::string sha256FileHex(const std::string& path, std::string& error) {
     ctx.finish(digest);
     return toHex(digest);
 }
+
+} // namespace updater

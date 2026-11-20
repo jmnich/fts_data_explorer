@@ -3,8 +3,8 @@
 // stays initialized for the process lifetime; curl_global_cleanup would race
 // with any other user of the handle pool). TLS verification stays at the
 // libcurl defaults — never disable it here.
-#include "pthread_compat.h" // GCC 16+: declares pthread_cond_clockwait etc. before <mutex>
-#include "http_client.h"
+#include "updater_compat.h" // GCC 16+: declares pthread_cond_clockwait etc. before <mutex>
+#include "updater_http.h"
 
 #include <curl/curl.h>
 
@@ -22,6 +22,8 @@
 #include <cstdio>
 #include <functional>
 #include <mutex>
+
+namespace updater {
 
 namespace {
 
@@ -187,3 +189,5 @@ bool httpDownloadFile(const std::string& url, const std::string& path,
     }
     return ok;
 }
+
+} // namespace updater

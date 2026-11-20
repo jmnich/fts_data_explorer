@@ -8,7 +8,7 @@
 #include "file_browser.h"
 #include "app_dirs.h"
 #include "user_manual.h"
-#include "update_dialog.h"
+#include "updater.h"
 #include <imgui.h>
 #include <GLFW/glfw3.h>
 #include <filesystem>
@@ -104,9 +104,10 @@ void renderMainMenuBar(AppConfig& config, const std::string& configFilePath,
                     // Display FPS toggle
                     ImGui::MenuItem("Display fps", NULL, &appState.showFPS);
                     ImGui::MenuItem("Show timestamps", NULL, &appState.showTimestamps);
+                    bool updateOnStart = updater::autoCheckEnabled();
                     if (ImGui::MenuItem("Check for updates on startup", nullptr,
-                                        &config.autoUpdateCheck)) {
-                        config.saveToFile(configFilePath);
+                                        &updateOnStart)) {
+                        updater::setAutoCheckEnabled(updateOnStart);
                     }
                     ImGui::MenuItem("Focus panels on hover", NULL,
                                     &appState.hoverFocusPanels);
@@ -216,7 +217,7 @@ void renderMainMenuBar(AppConfig& config, const std::string& configFilePath,
                 if (ImGui::BeginMenu("Help"))
                 {
                     if (ImGui::MenuItem("Check for updates...")) {
-                        openUpdateDialogManual(appState);
+                        updater::requestManualCheck();
                     }
                     if (ImGui::MenuItem("User manual")) {
                         openUserManual();

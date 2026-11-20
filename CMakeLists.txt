@@ -329,6 +329,7 @@ include_directories(
     ${CMAKE_SOURCE_DIR}/workspace
     ${CMAKE_SOURCE_DIR}/hitran
     ${CMAKE_SOURCE_DIR}/io
+    ${CMAKE_SOURCE_DIR}/updater
     ${CMAKE_SOURCE_DIR}/headless
     ${imgui_SOURCE_DIR}
     ${imgui_SOURCE_DIR}/backends
@@ -364,10 +365,11 @@ add_executable(fts_data_explorer
     panels/export.cpp
     ui/theme.cpp
     io/converter.cpp
-    io/sha256.cpp
-    io/update_logic.cpp
-    io/http_client.cpp
-    io/update_service.cpp
+    updater/updater_sha256.cpp
+    updater/updater_logic.cpp
+    updater/updater_config.cpp
+    updater/updater_http.cpp
+    updater/updater_service.cpp
     io/process_runner.cpp
     io/file_stream.cpp
     io/app_dirs.cpp
@@ -375,7 +377,7 @@ add_executable(fts_data_explorer
     io/open_default.cpp
     "${USER_MANUAL_EMBED_CPP}"
     panels/conversion_screen.cpp
-    panels/update_dialog.cpp
+    updater/updater_dialog.cpp
     ui/file_browser.cpp
     panels/welcome.cpp
     panels/about.cpp
@@ -513,12 +515,6 @@ add_executable(fts_session_roundtrip
     workspace/spectral_toolbox.cpp
     workspace/apodization.cpp
     workspace/workspace_reader.cpp
-    io/sha256.cpp
-    io/update_logic.cpp
-    io/http_client.cpp
-    io/update_service.cpp
-    io/open_default.cpp
-    panels/update_dialog.cpp
     ui/file_browser.cpp
     ui/theme.cpp
     ${PLATFORM_SOURCES}
@@ -531,7 +527,6 @@ target_link_libraries(fts_session_roundtrip
     ${OPENGL_LIBRARIES}
     glfw
     nlohmann_json::nlohmann_json
-    CURL::libcurl
 )
 if(NOT WIN32)
     target_link_libraries(fts_session_roundtrip GL X11 m pthread dl)

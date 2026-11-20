@@ -4,6 +4,8 @@
 #include <functional>
 #include <string>
 
+namespace updater {
+
 struct HttpGetResult {
     bool ok = false;
     long status = 0;
@@ -23,3 +25,5 @@ bool httpDownloadFile(const std::string& url, const std::string& path,
                       const std::atomic<bool>* cancel,
                       const std::function<void(long long, long long)>& onProgress,
                       std::string& error);
+
+} // namespace updater
