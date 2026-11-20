@@ -199,6 +199,50 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(glfw)
 
+# ── libcurl (auto-update HTTPS client, static) ──────────────────────────────
+set(BUILD_CURL_EXE OFF CACHE BOOL "No curl tool" FORCE)
+set(BUILD_LIBCURL_DOCS OFF CACHE BOOL "" FORCE)
+set(BUILD_MISC_DOCS OFF CACHE BOOL "" FORCE)
+set(ENABLE_CURL_MANUAL OFF CACHE BOOL "" FORCE)
+set(BUILD_STATIC_LIBS ON CACHE BOOL "Static libcurl" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "Static libcurl" FORCE)
+set(HTTP_ONLY ON CACHE BOOL "HTTPS only" FORCE)
+set(CURL_DISABLE_LDAP ON CACHE BOOL "" FORCE)
+set(CURL_DISABLE_TELNET ON CACHE BOOL "" FORCE)
+set(CURL_DISABLE_DICT ON CACHE BOOL "" FORCE)
+set(CURL_DISABLE_FILE ON CACHE BOOL "" FORCE)
+set(CURL_DISABLE_TFTP ON CACHE BOOL "" FORCE)
+set(CURL_DISABLE_RTSP ON CACHE BOOL "" FORCE)
+set(CURL_DISABLE_POP3 ON CACHE BOOL "" FORCE)
+set(CURL_DISABLE_IMAP ON CACHE BOOL "" FORCE)
+set(CURL_DISABLE_SMTP ON CACHE BOOL "" FORCE)
+set(CURL_DISABLE_GOPHER ON CACHE BOOL "" FORCE)
+set(CURL_USE_LIBPSL OFF CACHE BOOL "" FORCE)
+set(CURL_BROTLI OFF CACHE BOOL "" FORCE)
+set(CURL_ZSTD OFF CACHE BOOL "" FORCE)
+set(ENABLE_ARES OFF CACHE BOOL "" FORCE)
+set(USE_NGHTTP2 OFF CACHE BOOL "" FORCE)
+if(MINGW)
+    # Native Windows TLS — the cross-build must not need OpenSSL.
+    set(CURL_USE_SCHANNEL ON CACHE BOOL "Schannel TLS" FORCE)
+    set(CURL_USE_OPENSSL OFF CACHE BOOL "" FORCE)
+else()
+    find_package(OpenSSL REQUIRED)
+    set(CURL_USE_SCHANNEL OFF CACHE BOOL "" FORCE)
+    set(CURL_USE_OPENSSL ON CACHE BOOL "System OpenSSL" FORCE)
+endif()
+FetchContent_Declare(
+    curl
+    GIT_REPOSITORY https://github.com/curl/curl.git
+    GIT_TAG curl-8_23_0
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(curl)
+# curl's CMake may touch output dirs; keep artifacts in the project build dir.
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR} CACHE PATH "Executables dir" FORCE)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR} CACHE PATH "Libraries dir" FORCE)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR} CACHE PATH "Archives dir" FORCE)
+
 # Generate asset headers from binary assets (via xxd, requires vim-common)
 set(ASSET_GENERATED_DIR "${CMAKE_BINARY_DIR}/generated")
 file(MAKE_DIRECTORY "${ASSET_GENERATED_DIR}")
@@ -320,6 +364,10 @@ add_executable(fts_data_explorer
     panels/export.cpp
     ui/theme.cpp
     io/converter.cpp
+    io/sha256.cpp
+    io/update_logic.cpp
+    io/http_client.cpp
+    io/update_service.cpp
     io/process_runner.cpp
     io/file_stream.cpp
     io/app_dirs.cpp
@@ -327,6 +375,7 @@ add_executable(fts_data_explorer
     io/open_default.cpp
     "${USER_MANUAL_EMBED_CPP}"
     panels/conversion_screen.cpp
+    panels/update_dialog.cpp
     ui/file_browser.cpp
     panels/welcome.cpp
     panels/about.cpp
@@ -394,6 +443,7 @@ target_link_libraries(fts_data_explorer
     fftw3
     fftw3_threads
     nlohmann_json::nlohmann_json
+    CURL::libcurl
 )
 
 # Platform-specific libraries
@@ -409,6 +459,9 @@ else()
     target_link_libraries(fts_data_explorer
         pthread
         shell32
+        crypt32
+        ws2_32
+        advapi32
     )
 endif()
 
@@ -460,6 +513,12 @@ add_executable(fts_session_roundtrip
     workspace/spectral_toolbox.cpp
     workspace/apodization.cpp
     workspace/workspace_reader.cpp
+    io/sha256.cpp
+    io/update_logic.cpp
+    io/http_client.cpp
+    io/update_service.cpp
+    io/open_default.cpp
+    panels/update_dialog.cpp
     ui/file_browser.cpp
     ui/theme.cpp
     ${PLATFORM_SOURCES}
@@ -472,6 +531,7 @@ target_link_libraries(fts_session_roundtrip
     ${OPENGL_LIBRARIES}
     glfw
     nlohmann_json::nlohmann_json
+    CURL::libcurl
 )
 if(NOT WIN32)
     target_link_libraries(fts_session_roundtrip GL X11 m pthread dl)

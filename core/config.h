@@ -50,6 +50,12 @@ struct AppConfig {
     std::string converterRepoUrl = "https://github.com/jmnich/fts_data_explorer_converters";
     std::string converterRepoDir;   // empty = default appDataDir()/converter-repo
     std::string converterInterpreter; // empty = "python3" (posix) / "py" (Win)
+
+    // Auto-update (GitHub releases; owner/repo slug, no scheme).
+    bool autoUpdateCheck = true;
+    std::string updateRepoUrl = "jmnich/fts_data_explorer";
+    std::string skippedUpdateVersion;      // exact version the user skipped
+    long long lastUpdateCheckEpoch = 0;    // unix seconds; 0 = never checked
     
     // Docking layout: tracks whether the default layout has been applied
     bool defaultLayoutApplied = false;
@@ -189,6 +195,14 @@ struct AppConfig {
                 configFile << "repo_dir=" << converterRepoDir << "\n";
             if (!converterInterpreter.empty())
                 configFile << "interpreter=" << converterInterpreter << "\n";
+
+            // Auto-update settings (persisted in [Updates])
+            configFile << "\n[Updates]\n";
+            configFile << "enabled=" << (autoUpdateCheck ? "true" : "false") << "\n";
+            configFile << "repo=" << updateRepoUrl << "\n";
+            if (!skippedUpdateVersion.empty())
+                configFile << "skipped_version=" << skippedUpdateVersion << "\n";
+            configFile << "last_check=" << lastUpdateCheckEpoch << "\n";
             
             // Write window settings
             configFile << "\n[Window]\n";
@@ -322,6 +336,22 @@ struct AppConfig {
                             converterRepoDir = value;
                         } else if (key == "interpreter") {
                             converterInterpreter = value;
+                        }
+                    } else if (currentSection == "Updates") {
+                        if (key == "enabled") {
+                            autoUpdateCheck = (value == "true");
+                        } else if (key == "repo") {
+                            // Guard: only accept an owner/repo slug (non-empty,
+                            // contains '/', no scheme); anything else keeps the
+                            // default so a typo'd value can't redirect the check.
+                            if (!value.empty()
+                                && value.find('/') != std::string::npos
+                                && value.find("://") == std::string::npos)
+                                updateRepoUrl = value;
+                        } else if (key == "skipped_version") {
+                            skippedUpdateVersion = value;
+                        } else if (key == "last_check") {
+                            lastUpdateCheckEpoch = std::stoll(value);
                         }
                     }
                 }

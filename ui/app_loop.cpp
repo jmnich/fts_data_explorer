@@ -5,6 +5,7 @@
 #include "config.h"
 #include "welcome.h"
 #include "conversion_screen.h"
+#include "update_dialog.h"
 #include "about.h"
 #include "menu_bar.h"
 #include "theme.h"
@@ -1309,6 +1310,7 @@ bool AppLoop::runFrame() {
     if (glfwWindowShouldClose(window_)) return false;
     pollAsyncComputations();
     tickSessions();
+    tickUpdateDialog(appState);
     scheduleRedraws();
 
     // Skip rendering when UI is static — saves CPU/GPU
@@ -1566,6 +1568,12 @@ void AppLoop::scheduleRedraws() {
         // and its join-on-false-edge must not wait for an input event.
         if (!appState.needsRedraw &&
             (appState.conversionScreen.open || conversionJobsInFlight(appState)))
+            appState.needsRedraw = true;
+
+        // Auto-update: keep frames flowing while the worker runs or a modal
+        // is up (the check/download completes without user input).
+        if (!appState.needsRedraw &&
+            (updateDialogInFlight(appState) || appState.updateDialog.open))
             appState.needsRedraw = true;
 }
 
@@ -2171,6 +2179,7 @@ void AppLoop::renderUI() {
             // "disappear" and the flow look broken.
             bool showPopup = !appState.showErrorPopup
                           && !appState.conversionScreen.open
+                          && !appState.updateDialog.open
                           && !appState.showUnsavedPrompt
                           && !appState.showStaleDropPrompt;
             renderWelcomeScreen(appState, config_, configFilePath_, showPopup);
@@ -2187,6 +2196,7 @@ void AppLoop::renderUI() {
             appState.needsRedraw = true;
         }
         renderConversionScreen(appState);
+        renderUpdateDialog(appState);
 
         // Render error popup
         if (appState.showErrorPopup) {

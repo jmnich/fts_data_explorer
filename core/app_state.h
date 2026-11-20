@@ -15,6 +15,7 @@
 #include "export.h"
 #include "interferogram_data.h"
 #include "conversion_screen.h"
+#include "update_dialog.h"
 #include "session/workspace_session.h"
 #include "session/environment_session.h"
 #include "session/spectral_pool.h"
@@ -367,6 +368,9 @@ struct AppState {
 
     // Phase 5: dataset conversion screen (foreign formats -> .h5)
     ConversionScreenState conversionScreen;
+
+    // Auto-update (GitHub releases) state; owns the background worker.
+    UpdateDialogState updateDialog;
 
     // Phase 4: experiment delete confirmation (dirty or persisted experiments
     // confirm before removal; transient empty instances remove directly).

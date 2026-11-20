@@ -168,6 +168,8 @@ if [[ $IS_RELEASE -eq 1 ]]; then
     mkdir -p "$RELEASE_DIR"
     cp "${LINUX_BUILD_DIR}/${LINUX_BINARY}" "${RELEASE_DIR}/${LINUX_BINARY}"
     ok "Release artifact: ${RELEASE_DIR}/${LINUX_BINARY}"
+    ( cd "$RELEASE_DIR" && sha256sum "${LINUX_BINARY}" > "${LINUX_BINARY}.sha256" )
+    ok "Checksum: ${RELEASE_DIR}/${LINUX_BINARY}.sha256"
 
     # Windows cross-compile
     if command -v x86_64-w64-mingw32-g++ &>/dev/null; then
@@ -179,6 +181,8 @@ if [[ $IS_RELEASE -eq 1 ]]; then
 
         cp "${WIN_BUILD_DIR}/${WIN_BINARY}" "${RELEASE_DIR}/${WIN_BINARY}"
         ok "Release artifact: ${RELEASE_DIR}/${WIN_BINARY}"
+        ( cd "$RELEASE_DIR" && sha256sum "${WIN_BINARY}" > "${WIN_BINARY}.sha256" )
+        ok "Checksum: ${RELEASE_DIR}/${WIN_BINARY}.sha256"
     else
         warn "MinGW not found — skipping Windows build."
     fi
