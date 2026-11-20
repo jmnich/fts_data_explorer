@@ -13,9 +13,13 @@ struct HttpGetResult {
     std::string error;
 };
 
-// GET `url` into memory: redirects followed, 30 s timeout, fixed User-Agent
-// "fts_data_explorer-updater". ok is true only for HTTP 2xx.
-HttpGetResult httpGetString(const std::string& url);
+// GET `url` into memory: redirects followed, 30 s total timeout, fixed
+// User-Agent "fts_data_explorer-updater". The body is capped at 4 MiB — a
+// larger response fails with "response too large". `cancel` may be null;
+// when set true the transfer aborts with error "cancelled". ok is true only
+// for HTTP 2xx.
+HttpGetResult httpGetString(const std::string& url,
+                            const std::atomic<bool>* cancel = nullptr);
 
 // Download `url` into `path` (overwrites). onProgress(downloaded, total) is
 // called periodically; total <= 0 when the server sent no length. `cancel`

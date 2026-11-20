@@ -56,9 +56,9 @@ public:
     // Abort a running download; phase returns to Idle, the stage file is
     // removed.
     void cancelDownload();
-    // Cancel, and clear everything back to Idle. Non-blocking: cancels a
-    // running worker but does not wait; call only when !busy() to avoid a
-    // late phase store.
+    // Cancel, remove any staged file, and clear everything back to Idle.
+    // Non-blocking: cancels a running worker but does not wait; call only
+    // when !busy() to avoid a late phase store.
     void reset();
 
     UpdatePhase phase() const;

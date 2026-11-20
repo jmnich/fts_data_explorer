@@ -708,7 +708,12 @@ int main(int argc, char* argv[]) {
     // instead of continuing with the old image (spawn first, exit second).
     if (updater::restartArmed()) {
         std::vector<std::string> relaunchArgs(argv, argv + argc);
-        updater::relaunch(relaunchArgs);
+        if (!updater::relaunch(relaunchArgs)) {
+            tinyfd_messageBox("Update Installed",
+                "The update was installed, but FTS Data Explorer could not "
+                "restart automatically. Please start it again.",
+                "ok", "error", 1);
+        }
     }
 
     // Per-tab-type layout snapshots must follow the app's LAST state. They are

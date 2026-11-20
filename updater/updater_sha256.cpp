@@ -1,11 +1,25 @@
 // Self-contained SHA-256 (FIPS 180-4) for the auto-updater's checksum checks.
-// No OpenSSL, no platform headers — builds cleanly under MinGW as well as GCC.
+// No OpenSSL; the only platform surface is the wide-path file open on Windows.
+// Builds cleanly under MinGW as well as GCC.
 #include "updater_sha256.h"
 
+#include "updater_paths.h"
+
 #include <array>
+#include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h> // _wfopen
+#endif
 
 namespace updater {
 namespace {
@@ -146,9 +160,14 @@ std::string sha256Hex(const void* data, std::size_t size) {
 
 std::string sha256FileHex(const std::string& path, std::string& error) {
     error.clear();
+#if defined(_WIN32)
+    // Wide path: the narrow fopen cannot open non-ASCII paths.
+    FILE* f = _wfopen(pathFromUtf8(path).c_str(), L"rb");
+#else
     FILE* f = std::fopen(path.c_str(), "rb");
+#endif
     if (f == nullptr) {
-        error = "cannot open file: " + path;
+        error = "cannot open file: " + path + " (" + std::strerror(errno) + ")";
         return {};
     }
     // 64 KiB chunks: a 40 MB binary hashes with a handful of syscalls.

@@ -366,6 +366,7 @@ add_executable(fts_data_explorer
     ui/theme.cpp
     io/converter.cpp
     updater/updater_sha256.cpp
+    updater/updater_paths.cpp
     updater/updater_logic.cpp
     updater/updater_config.cpp
     updater/updater_http.cpp

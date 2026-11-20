@@ -9,9 +9,11 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <system_error>
 #include <vector>
 
 #if defined(_WIN32)
@@ -28,13 +30,29 @@
 #endif
 
 #include "updater_http.h"
+#include "updater_paths.h"
 #include "updater_sha256.h"
 
 namespace updater {
 
 namespace {
 
-constexpr const char* kStageName = ".fts_update.tmp";
+// Stage files: per-process (two instances must not collide) plus the legacy
+// fixed name kept for cleanup of pre-per-process-id builds.
+constexpr const char* kStagePrefix = ".fts_update.";
+constexpr const char* kLegacyStageName = ".fts_update.tmp";
+
+// Stale-stage age threshold for cleanupStaleUpdateFiles().
+constexpr auto kStaleStageAge = std::chrono::hours(24);
+
+// OS process id (stage-name component).
+long processId() {
+#if defined(_WIN32)
+    return static_cast<long>(GetCurrentProcessId());
+#else
+    return static_cast<long>(::getpid());
+#endif
+}
 
 UpdatePhase toPhase(int raw) {
     return static_cast<UpdatePhase>(raw);
@@ -49,13 +67,30 @@ std::string lowerCase(std::string s) {
 
 // True when the file can be created/opened for appending (left untouched).
 bool writableTest(const std::string& path) {
-    std::ofstream probe(path, std::ios::app);
+    std::ofstream probe(pathFromUtf8(path), std::ios::app);
     const bool ok = probe.is_open();
     probe.close();
     if (ok) {
-        std::remove(path.c_str()); // the probe only proved the directory accepts writes
+        std::error_code ec;
+        std::filesystem::remove(pathFromUtf8(path), ec); // only proved writability
     }
     return ok;
+}
+
+// Removes a stage file through the wide/UTF-8-aware path conversion.
+void removeStageFile(const std::string& path) {
+    std::error_code ec;
+    std::filesystem::remove(pathFromUtf8(path), ec);
+}
+
+// True for https:// and for the loopback http:// variants the local mock
+// simulation uses; everything else is rejected for release assets.
+bool isSecureUrl(const std::string& url) {
+    const std::string httpLoopback1 = "http://127.0.0.1:";
+    const std::string httpLoopback2 = "http://localhost:";
+    return url.rfind("https://", 0) == 0 ||
+           url.rfind(httpLoopback1, 0) == 0 ||
+           url.rfind(httpLoopback2, 0) == 0;
 }
 
 // Fill error/status and move to Failed; the worker's terminal state.
@@ -114,10 +149,11 @@ bool parseReleaseJson(const std::string& body, ReleaseInfo& out, std::string& re
 }
 
 // Worker body for startCheck: GET the latest release and compare versions.
-void runCheck(const UpdateCheckConfig cfg, std::atomic<int>& phase, std::mutex& textMutex,
-              std::string& status, std::string& error, ReleaseInfo& release) {
-    const HttpGetResult res =
-        httpGetString("https://api.github.com/repos/" + cfg.repoSlug + "/releases/latest");
+void runCheck(const UpdateCheckConfig cfg, std::atomic<int>& phase, std::atomic<bool>& cancel,
+              std::mutex& textMutex, std::string& status, std::string& error,
+              ReleaseInfo& release) {
+    const HttpGetResult res = httpGetString(
+        "https://api.github.com/repos/" + cfg.repoSlug + "/releases/latest", &cancel);
     if (!res.ok) {
         std::string reason;
         if (res.status == 403) {
@@ -137,6 +173,12 @@ void runCheck(const UpdateCheckConfig cfg, std::atomic<int>& phase, std::mutex& 
     std::string reason;
     if (!parseReleaseJson(res.body, info, reason)) {
         failWith(phase, textMutex, status, error, reason);
+        return;
+    }
+    // A downloaded binary is only accepted from a TLS channel (or the
+    // loopback mock used by the local simulation).
+    if (!isSecureUrl(info.assetUrl) || !isSecureUrl(info.checksumUrl)) {
+        failWith(phase, textMutex, status, error, "release assets are not served over HTTPS");
         return;
     }
     ParsedVersion remote;
@@ -159,6 +201,51 @@ void runCheck(const UpdateCheckConfig cfg, std::atomic<int>& phase, std::mutex& 
     }
 }
 
+// Verification part of runDownload, kept small: checksum the stage, fetch and
+// compare the published digest, chmod. False + reason on any failure.
+// Cancellation is passed to the checksum GET; runDownload re-checks the flag
+// afterwards and discards the stage if it fired during verification.
+bool verifyStagedFile(const ReleaseInfo& info, const std::string& stagePath,
+                      const std::atomic<bool>& cancel, std::string& reason) {
+    std::string sumError;
+    const std::string actual = sha256FileHex(stagePath, sumError);
+    const HttpGetResult sum = httpGetString(info.checksumUrl, &cancel);
+    std::string expected;
+    const bool parsed = sum.ok && parseSha256File(sum.body, expected);
+    if (cancel.load()) {
+        reason = "cancelled"; // caller maps this to Idle, not Failed
+        return false;
+    }
+    if (actual.empty() || !parsed || lowerCase(actual) != lowerCase(expected)) {
+        // Distinguish a genuine digest mismatch from a failed/unparseable
+        // checksum fetch; the stage file is discarded either way.
+        if (actual.empty()) {
+            reason = sumError.empty() ? "checksum mismatch — download discarded" : sumError;
+        } else if (!parsed) {
+            reason = sum.ok ? "checksum file is unreadable" : sum.error;
+        } else {
+            reason = "checksum mismatch — download discarded";
+        }
+        return false;
+    }
+#if !defined(_WIN32)
+    if (::chmod(stagePath.c_str(), 0755) != 0) {
+        reason = "could not mark the update executable";
+        return false;
+    }
+#endif
+    return true;
+}
+
+// Cancel bail-out: the worker owns status_, so it clears the stale
+// "Downloading…" text before publishing Idle.
+void clearStatusBeforeIdle(std::mutex& textMutex, std::string& status,
+                           std::atomic<int>& phase) {
+    std::lock_guard<std::mutex> lock(textMutex);
+    status.clear(); // no stale "Downloading…" behind the Idle phase
+    phase.store(static_cast<int>(UpdatePhase::Idle));
+}
+
 // Worker body for startDownload: stage, verify checksum, mark executable.
 void runDownload(const ReleaseInfo info, const std::string stagePath,
                  std::atomic<int>& phase, std::atomic<bool>& cancel,
@@ -179,14 +266,19 @@ void runDownload(const ReleaseInfo info, const std::string stagePath,
     std::string dlError;
     if (!httpDownloadFile(info.assetUrl, stagePath, &cancel, report, dlError)) {
         const bool cancelled = cancel.load() || dlError == "cancelled";
-        std::remove(stagePath.c_str());
+        removeStageFile(stagePath);
         if (cancelled) {
-            // UI already moved to Idle: do not overwrite it, do not set an
-            // error the cancel path would only race with.
-            phase.store(static_cast<int>(UpdatePhase::Idle));
+            // UI already moved to Idle: do not set an error the cancel path
+            // would only race with; do clear the status the worker wrote.
+            clearStatusBeforeIdle(textMutex, status, phase);
             return;
         }
         failWith(phase, textMutex, status, error, dlError);
+        return;
+    }
+    if (cancel.load()) { // cancelled in the gap before verification
+        removeStageFile(stagePath);
+        clearStatusBeforeIdle(textMutex, status, phase);
         return;
     }
 
@@ -196,34 +288,22 @@ void runDownload(const ReleaseInfo info, const std::string stagePath,
     }
     phase.store(static_cast<int>(UpdatePhase::Verifying));
 
-    std::string sumError;
-    const std::string actual = sha256FileHex(stagePath, sumError);
-    const HttpGetResult sum = httpGetString(info.checksumUrl);
-    std::string expected;
-    const bool parsed = sum.ok && parseSha256File(sum.body, expected);
-    if (!actual.empty() && parsed && lowerCase(actual) == lowerCase(expected)) {
-#if !defined(_WIN32)
-        ::chmod(stagePath.c_str(), 0755);
-#endif
+    std::string reason;
+    const bool verified = verifyStagedFile(info, stagePath, cancel, reason);
+
+    if (cancel.load()) { // never chmod/ReadyToApply after a cancel
+        removeStageFile(stagePath);
+        clearStatusBeforeIdle(textMutex, status, phase);
+        return;
+    }
+    if (verified) {
         std::lock_guard<std::mutex> lock(textMutex);
         status = "Update verified — ready to install";
         phase.store(static_cast<int>(UpdatePhase::ReadyToApply));
         return;
     }
-
-    std::remove(stagePath.c_str());
-    // Distinguish a genuine digest mismatch from a failed/unparseable
-    // checksum fetch; the stage file is discarded either way.
-    if (actual.empty()) {
-        failWith(phase, textMutex, status, error,
-                 sumError.empty() ? "checksum mismatch — download discarded" : sumError);
-    } else if (!parsed) {
-        failWith(phase, textMutex, status, error,
-                 sum.ok ? "checksum file is unreadable" : sum.error);
-    } else {
-        failWith(phase, textMutex, status, error,
-                 "checksum mismatch — download discarded");
-    }
+    removeStageFile(stagePath);
+    failWith(phase, textMutex, status, error, reason);
 }
 
 #if defined(_WIN32)
@@ -311,10 +391,15 @@ void UpdateService::startCheck(const UpdateCheckConfig& cfg) {
     }
     phase_.store(static_cast<int>(UpdatePhase::Checking));
     running_.store(true);
-    thread_ = std::thread([this, cfg] {
-        runCheck(cfg, phase_, textMutex_, status_, error_, release_);
+    try {
+        thread_ = std::thread([this, cfg] {
+            runCheck(cfg, phase_, cancel_, textMutex_, status_, error_, release_);
+            running_.store(false);
+        });
+    } catch (const std::exception&) {
         running_.store(false);
-    });
+        failWith(phase_, textMutex_, status_, error_, "could not start the updater worker");
+    }
 }
 
 void UpdateService::startDownload() {
@@ -345,15 +430,20 @@ void UpdateService::startDownload() {
         phase_.store(static_cast<int>(UpdatePhase::Failed));
         return;
     }
-    stagePath_ = dir + "/" + kStageName;
+    stagePath_ = dir + "/" + kStagePrefix + std::to_string(processId()) + ".tmp";
 
     cancel_.store(false);
     running_.store(true);
-    thread_ = std::thread([this, info] {
-        runDownload(info, stagePath_, phase_, cancel_, progressDown_, progressTotal_,
-                    textMutex_, status_, error_);
+    try {
+        thread_ = std::thread([this, info] {
+            runDownload(info, stagePath_, phase_, cancel_, progressDown_, progressTotal_,
+                        textMutex_, status_, error_);
+            running_.store(false);
+        });
+    } catch (const std::exception&) {
         running_.store(false);
-    });
+        failWith(phase_, textMutex_, status_, error_, "could not start the updater worker");
+    }
 }
 
 bool UpdateService::applyStaged() {
@@ -368,21 +458,36 @@ bool UpdateService::applyStaged() {
         phase_.store(static_cast<int>(UpdatePhase::Failed));
         return false;
     }
+    std::error_code existsEc;
+    if (!std::filesystem::exists(pathFromUtf8(stagePath_), existsEc)) {
+        std::lock_guard<std::mutex> lock(textMutex_);
+        error_ = "the staged update file is missing";
+        status_ = "Update failed";
+        phase_.store(static_cast<int>(UpdatePhase::Failed));
+        return false;
+    }
     phase_.store(static_cast<int>(UpdatePhase::Applying));
 
 #if defined(_WIN32)
     const std::string oldPath = exe + ".old";
-    if (!MoveFileExA(exe.c_str(), oldPath.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+    if (!MoveFileExW(pathFromUtf8(exe).c_str(), pathFromUtf8(oldPath).c_str(),
+                     MOVEFILE_REPLACE_EXISTING)) {
         std::lock_guard<std::mutex> lock(textMutex_);
         error_ = "could not move the running executable aside";
         status_ = "Update failed";
         phase_.store(static_cast<int>(UpdatePhase::Failed));
         return false;
     }
-    if (!MoveFileExA(stagePath_.c_str(), exe.c_str(), MOVEFILE_REPLACE_EXISTING)) {
-        MoveFileExA(oldPath.c_str(), exe.c_str(), MOVEFILE_REPLACE_EXISTING); // roll back
+    if (!MoveFileExW(pathFromUtf8(stagePath_).c_str(), pathFromUtf8(exe).c_str(),
+                     MOVEFILE_REPLACE_EXISTING)) {
+        const bool rolledBack = MoveFileExW(pathFromUtf8(oldPath).c_str(),
+                                            pathFromUtf8(exe).c_str(),
+                                            MOVEFILE_REPLACE_EXISTING);
         std::lock_guard<std::mutex> lock(textMutex_);
-        error_ = "could not install the new executable";
+        error_ = rolledBack
+                     ? std::string("could not install the new executable")
+                     : std::string("could not install the new executable and could not "
+                                   "restore the old one");
         status_ = "Update failed";
         phase_.store(static_cast<int>(UpdatePhase::Failed));
         return false;
@@ -429,6 +534,9 @@ void UpdateService::reset() {
     armed_.store(false);
     progressDown_.store(0);
     progressTotal_.store(-1);
+    if (!stagePath_.empty()) { // drop a staged file the user abandoned
+        removeStageFile(stagePath_);
+    }
     stagePath_.clear();
     phase_.store(static_cast<int>(UpdatePhase::Idle));
 }
@@ -522,8 +630,21 @@ std::string executableDirectory() {
     if (exe.empty()) {
         return {};
     }
-    const std::filesystem::path parent = std::filesystem::path(exe).parent_path();
-    return parent.string();
+    return pathToUtf8(pathFromUtf8(exe).parent_path());
+}
+
+// Deletes one stale per-process stage when it is older than kStaleStageAge;
+// fresh files may belong to another running instance and are left alone.
+void removeStaleStageIfOld(const std::filesystem::directory_entry& entry) {
+    std::error_code ec;
+    const auto written = entry.last_write_time(ec);
+    if (ec) {
+        return; // unreadable timestamp: leave the file for the next cleanup
+    }
+    const auto age = std::filesystem::file_time_type::clock::now() - written;
+    if (age > kStaleStageAge) {
+        std::filesystem::remove(entry.path(), ec);
+    }
 }
 
 void cleanupStaleUpdateFiles() {
@@ -531,10 +652,23 @@ void cleanupStaleUpdateFiles() {
     const std::string dir = executableDirectory();
     std::error_code ec;
     if (!exe.empty()) {
-        std::filesystem::remove(exe + ".old", ec);
+        std::filesystem::remove(pathFromUtf8(exe + ".old"), ec);
     }
-    if (!dir.empty()) {
-        std::filesystem::remove(dir + "/" + kStageName, ec);
+    if (dir.empty()) {
+        return;
+    }
+    std::filesystem::remove(pathFromUtf8(dir + "/" + kLegacyStageName), ec);
+    for (const auto& entry :
+         std::filesystem::directory_iterator(pathFromUtf8(dir), ec)) {
+        if (ec) {
+            break; // directory vanished mid-scan
+        }
+        const std::string name = entry.path().filename().string();
+        if (name.rfind(kStagePrefix, 0) == 0 &&
+            name.size() > std::char_traits<char>::length(kStagePrefix) &&
+            name.compare(name.size() - 4, 4, ".tmp") == 0) {
+            removeStaleStageIfOld(entry);
+        }
     }
 }
 
@@ -545,13 +679,17 @@ bool spawnRelaunch(const std::string& exePath, const std::vector<std::string>& a
         error = "nothing to relaunch";
         return false;
     }
+    // argv[0] must be the executable we actually launch: a relative caller
+    // argv[0] would resolve against the new process' PATH/CWD otherwise.
+    std::vector<std::string> argv = args;
+    argv[0] = exePath;
 #if defined(_WIN32)
     std::wstring line;
-    for (std::size_t i = 0; i < args.size(); ++i) {
+    for (std::size_t i = 0; i < argv.size(); ++i) {
         if (i != 0) {
             line += L' ';
         }
-        line += quoteArg(utf8ToWide(args[i]));
+        line += quoteArg(utf8ToWide(argv[i]));
     }
     STARTUPINFOW si;
     ZeroMemory(&si, sizeof(si));
@@ -578,13 +716,13 @@ bool spawnRelaunch(const std::string& exePath, const std::vector<std::string>& a
         return false;
     }
     if (pid == 0) {
-        std::vector<char*> argv;
-        argv.reserve(args.size() + 1);
-        for (const auto& arg : args) {
-            argv.push_back(const_cast<char*>(arg.c_str()));
+        std::vector<char*> argvPtrs;
+        argvPtrs.reserve(argv.size() + 1);
+        for (const auto& arg : argv) {
+            argvPtrs.push_back(const_cast<char*>(arg.c_str()));
         }
-        argv.push_back(nullptr);
-        ::execv(exePath.c_str(), argv.data());
+        argvPtrs.push_back(nullptr);
+        ::execv(exePath.c_str(), argvPtrs.data());
         ::_exit(127);
     }
     return true;

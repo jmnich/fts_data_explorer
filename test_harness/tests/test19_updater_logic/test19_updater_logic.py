@@ -36,7 +36,8 @@ def main():
     binary_out = workdir / "test_updater_logic"
     cmd = ["g++", "-std=c++17", "-I.", "-Iupdater", str(cpp),
            "updater/updater_logic.cpp", "updater/updater_sha256.cpp",
-           "updater/updater_config.cpp", "-o", str(binary_out)]
+           "updater/updater_config.cpp", "updater/updater_paths.cpp",
+           "-o", str(binary_out)]
 
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60,

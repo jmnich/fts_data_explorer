@@ -2107,6 +2107,13 @@ void AppLoop::renderUI() {
         if (updater::takeCloseRequest())
             glfwSetWindowShouldClose(glfwGetCurrentContext(), GLFW_TRUE);
 
+        // Exclusive updater gate: while the update dialog is up, no other UI
+        // is built (welcome/home, dockspace, panels, other modals), so a bug
+        // elsewhere cannot interfere with or dismiss it. The modal is the only
+        // content of the frame.
+        if (updaterModal)
+            return;
+
         // Rate-limit mouse wheel to at most one notch per frame, with carry-over
         // for excess. Raw deltas are accumulated in the GLFW scroll callback
         // (before ImGui's input queue), so stale queued wheel events can never

@@ -6,22 +6,30 @@
 
 #include <charconv>
 #include <cctype>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
+
+#include "updater_paths.h"
 
 namespace updater {
 namespace {
 
 const char* const kDefaultRepo = "jmnich/fts_data_explorer";
 
-// Trailing whitespace (spaces, tabs, carriage returns) removed.
-std::string trimTrailing(const std::string& s) {
+// Whitespace (spaces, tabs, carriage returns) removed from both ends.
+std::string trim(const std::string& s) {
+    std::size_t begin = 0;
     std::size_t end = s.size();
-    while (end > 0 &&
+    while (begin < end &&
+           std::isspace(static_cast<unsigned char>(s[begin])) != 0) {
+        ++begin;
+    }
+    while (end > begin &&
            std::isspace(static_cast<unsigned char>(s[end - 1])) != 0) {
         --end;
     }
-    return s.substr(0, end);
+    return s.substr(begin, end - begin);
 }
 
 // Non-negative decimal integer; false on empty/garbage/overflow, value kept.
@@ -43,8 +51,30 @@ bool parseEpoch(const std::string& text, long long& value) {
 // A repository slug is "owner/repo" with no scheme: it must contain '/' and
 // must not look like a URL.
 bool validRepoSlug(const std::string& slug) {
-    return !slug.empty() && slug.find('/') != std::string::npos &&
-           slug.find("://") == std::string::npos;
+    const std::size_t slash = slug.find('/');
+    if (slash == std::string::npos || slug.find('/', slash + 1) != std::string::npos) {
+        return false; // exactly one '/' required: "owner/repo", nothing else
+    }
+    const std::string owner = slug.substr(0, slash);
+    const std::string repo = slug.substr(slash + 1);
+    if (owner.empty() || repo.empty()) {
+        return false;
+    }
+    const auto ok = [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+               (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
+    };
+    for (char c : owner) {
+        if (!ok(c)) {
+            return false;
+        }
+    }
+    for (char c : repo) {
+        if (!ok(c)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 // "true"/"1" -> true, "false"/"0" -> false, anything else keeps currentValue.
@@ -89,7 +119,7 @@ bool parseConfigText(const std::string& text, Config& out) {
     std::istringstream stream(text);
     std::string line;
     while (std::getline(stream, line)) {
-        line = trimTrailing(line);
+        line = trim(line);
         if (line.empty() || line[0] == '#') {
             continue; // blank line or comment
         }
@@ -97,8 +127,8 @@ bool parseConfigText(const std::string& text, Config& out) {
         if (eq == std::string::npos) {
             continue; // not a key=value line
         }
-        const std::string key = line.substr(0, eq);
-        const std::string value = line.substr(eq + 1);
+        const std::string key = trim(line.substr(0, eq));
+        const std::string value = trim(line.substr(eq + 1));
         if (key == "auto_check") {
             out.autoCheck = parseBool(value, out.autoCheck);
         } else if (key == "skipped_version") {
@@ -148,11 +178,27 @@ void saveConfig(const Config& cfg) {
     if (path.empty()) {
         return;
     }
-    std::ofstream out(path, std::ios::binary | std::ios::trunc);
-    if (!out.is_open()) {
-        return;
+    // Atomic-ish write: full contents into <path>.tmp first, closed, then a
+    // single rename over the target. Any failure leaves the old file intact.
+    const std::filesystem::path target = pathFromUtf8(path);
+    std::filesystem::path tmp = target;
+    tmp += std::filesystem::u8path(".tmp");
+    {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        if (!out.is_open()) {
+            return;
+        }
+        out << serializeConfig(cfg);
+        out.flush();
+        if (!out.good()) {
+            return; // partial tmp left behind, but the real file is untouched
+        }
+    } // close before rename
+    std::error_code ec;
+    std::filesystem::rename(tmp, target, ec);
+    if (ec) {
+        std::filesystem::remove(tmp, ec); // best effort, stay silent
     }
-    out << serializeConfig(cfg);
 }
 
 } // namespace updater

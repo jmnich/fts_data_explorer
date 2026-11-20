@@ -19,12 +19,14 @@
 #include <imgui.h>
 
 #include "updater.h"
+#include "updater_paths.h"
 #include "version.h"
 
 #if defined(_WIN32)
 #include <shellapi.h>
 #else
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #endif
 
@@ -135,10 +137,21 @@ int buttonRow(const std::vector<const char*>& labels, int& focus, bool wasOpen,
     return activate;
 }
 
+// True when text[pos..] still carries a non-space character: trailing
+// whitespace must not make a clamped wrap look incomplete.
+bool hasContent(const std::string& text, size_t pos) {
+    for (size_t k = pos; k < text.size(); ++k) {
+        if (text[k] != ' ' && text[k] != '\t' && text[k] != '\n' &&
+            text[k] != '\r')
+            return true;
+    }
+    return false;
+}
+
 // Greedy word wrap into display lines: accumulate words while they fit the
-// width; a word that alone exceeds the width is kept on its own line.
-// Newlines in the text are honoured. When maxLines clamps the output, the
-// last line ends in "…".
+// width; a word that alone exceeds the width is hard-broken at the fit
+// point. Newlines in the text are honoured. When maxLines clamps the output,
+// the last line ends in "…".
 std::vector<std::string> wrapLines(const std::string& text, float width,
                                    size_t maxLines) {
     std::vector<std::string> lines;
@@ -157,26 +170,39 @@ std::vector<std::string> wrapLines(const std::string& text, float width,
                    text[i] != '\n')
                 ++i;
             const std::string word = text.substr(start, i - start);
-            const std::string candidate =
-                line.empty() ? word : line + " " + word;
-            if (ImGui::CalcTextSize(candidate.c_str()).x <= width ||
-                line.empty()) {
-                line = candidate;
-            } else {
+            std::string candidate = line.empty() ? word : line + " " + word;
+            if (ImGui::CalcTextSize(candidate.c_str()).x > width &&
+                !line.empty()) {
                 i = start;  // word starts the next line
                 break;
             }
+            if (ImGui::CalcTextSize(candidate.c_str()).x > width) {
+                // Single over-wide word: keep the longest fitting prefix and
+                // hard-break the rest onto the next line.
+                size_t keep = word.size() > 1 ? word.size() - 1 : 1;
+                while (keep > 1 &&
+                       ImGui::CalcTextSize(word.substr(0, keep).c_str()).x >
+                           width)
+                    --keep;
+                candidate = line + word.substr(0, keep);
+                i = start + keep;
+                line = candidate;
+                break;
+            }
+            line = candidate;
             while (i < n && (text[i] == ' ' || text[i] == '\t')) ++i;
         }
         lines.push_back(line);
     }
-    const bool clamped = i < n;
+    const bool clamped = hasContent(text, i);
     if (clamped && !lines.empty()) lines.back() += "\u2026";
     return lines;
 }
 
-// Open a URL in the user's browser without app helpers. POSIX: fork +
-// xdg-open in the child. Windows: ShellExecuteA.
+// Open a URL in the user's browser without app helpers. POSIX: double-fork
+// so the launcher is reaped by init (no zombies) — the first child sessions
+// off and exits, the grandchild execs xdg-open; the parent waits on the
+// first child only. Windows: ShellExecuteA.
 bool openUrl(const std::string& url) {
 #if defined(_WIN32)
     return ShellExecuteA(nullptr, "open", url.c_str(), nullptr, nullptr,
@@ -184,16 +210,23 @@ bool openUrl(const std::string& url) {
 #else
     const pid_t pid = fork();
     if (pid == 0) {
-        execlp("xdg-open", "xdg-open", url.c_str(), (char*)nullptr);
-        _exit(127);
+        setsid();
+        const pid_t grand = fork();
+        if (grand == 0) {
+            execlp("xdg-open", "xdg-open", url.c_str(), (char*)nullptr);
+            _exit(127);
+        }
+        _exit(0);
     }
+    if (pid > 0) waitpid(pid, nullptr, 0);
     return pid > 0;
 #endif
 }
 
 // Release notes: wrapped first lines, with a Show more/less toggle only when
-// the text was actually clamped (the +1-line probe detects the clamp). The
-// height change is absorbed by the modal's AlwaysAutoResize.
+// real content (not just trailing whitespace) was clamped. Expanded notes
+// render in a scrollable child capped at 360 px so 60 lines cannot push the
+// AlwaysAutoResize modal off screen.
 void drawNotes(const std::string& notes, bool& expanded) {
     const size_t maxLines = expanded ? 60 : 10;
     const float width = ImGui::GetContentRegionAvail().x;
@@ -201,7 +234,9 @@ void drawNotes(const std::string& notes, bool& expanded) {
     const bool clamped = !expanded &&
                          wrapLines(notes, width, maxLines + 1).size() >
                              lines.size();
+    if (expanded) ImGui::BeginChild("##updatenotes", ImVec2(0, 360), false);
     for (const std::string& line : lines) ImGui::TextUnformatted(line.c_str());
+    if (expanded) ImGui::EndChild();
     if (clamped && ImGui::SmallButton("Show more")) expanded = true;
     if (expanded && ImGui::SmallButton("Show less")) expanded = false;
 }
@@ -210,6 +245,29 @@ void drawNotes(const std::string& notes, bool& expanded) {
 // Bodies draw content + button row only; the single modal wrapper owns all
 // framing. Pressed branches act AND close the popup; the wrapper's
 // !shouldShow branch is the backstop for anything tick() dismisses.
+
+// Cancel pressed on any in-flight body: arm the worker cancel and hide the
+// modal now; tick() clears `cancelling` once the worker settles.
+void requestCancel(DialogState& st) {
+    st.service.cancelDownload();
+    st.cancelling = true;
+    st.open = false;
+    ImGui::CloseCurrentPopup();
+}
+
+void drawCheckingBody(DialogState& st, int& focus, bool wasOpen,
+                      const ImVec4& accent) {
+    ImGui::Text("Checking for Updates");
+    ImGui::Spacing();
+    ImGui::TextWrapped("%s", st.service.statusText().c_str());
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+    if (buttonRow({"Cancel"}, focus, wasOpen, accent) == 0 ||
+        ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        requestCancel(st);
+    }
+}
 
 void drawOfferBody(DialogState& st, int& focus, bool wasOpen,
                    const ImVec4& accent) {
@@ -233,12 +291,16 @@ void drawOfferBody(DialogState& st, int& focus, bool wasOpen,
         {"Download && Install", "Skip This Version", "Later"}, focus, wasOpen,
         accent);
     if (pressed == 0) {
+        st.userInitiated = true;  // a download failure must show for this user
         st.service.startDownload();  // next frame renders the progress body
     } else if (pressed == 1) {
         st.skipRequested = true;  // persisted by tick()
         ImGui::CloseCurrentPopup();
     } else if (pressed == 2 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-        st.offerDismissed = true;  // silent until the next manual check
+        // "Later" sticks for this exact version; the next check (manual or
+        // automatic) clears it and re-offers.
+        st.dismissedVersion = info.version;
+        st.manual = false;
         st.open = false;
         ImGui::CloseCurrentPopup();
     }
@@ -257,9 +319,9 @@ void drawProgressBody(DialogState& st, int& focus, bool wasOpen,
     ImGui::Spacing();
     ImGui::Separator();
     ImGui::Spacing();
-    if (buttonRow({"Cancel"}, focus, wasOpen, accent) == 0) {
-        st.service.cancelDownload();  // phase falls back to Idle
-        ImGui::CloseCurrentPopup();   // tick() clears open; close it now
+    if (buttonRow({"Cancel"}, focus, wasOpen, accent) == 0 ||
+        ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        requestCancel(st);
     }
 }
 
@@ -275,16 +337,19 @@ void drawReadyBody(DialogState& st, int& focus, bool wasOpen,
         buttonRow({"Restart Now", "Later"}, focus, wasOpen, accent);
     if (pressed == 0) {
         // Swap the staged binary in; the frame loop polls takeCloseRequest()
-        // and exits, then main() relaunches through relaunch().
+        // and exits, then main() relaunches through relaunch(). A failed
+        // swap lands on Failed, which must show because the user clicked.
+        st.userInitiated = true;
         if (st.service.applyStaged()) {
             st.closeRequested = true;
             ImGui::CloseCurrentPopup();
         }
     } else if (pressed == 1 || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-        // Modal only: the staged file stays for this session; the next
-        // launch's stale-file cleanup discards it.
-        st.open = false;
+        // Modal only and deferred for this session: the staged file stays
+        // for it; the next launch's stale-file cleanup discards it.
+        st.readyDeferred = true;
         st.manual = false;
+        st.open = false;
         ImGui::CloseCurrentPopup();
     }
 }
@@ -307,6 +372,7 @@ void drawFailedBody(DialogState& st, int& focus, bool wasOpen,
         st.service.reset();
         st.open = false;
         st.manual = false;
+        st.userInitiated = false;
         ImGui::CloseCurrentPopup();
     }
 }
@@ -325,6 +391,68 @@ void drawUpToDateBody(DialogState& st, int& focus, bool wasOpen,
     }
 }
 
+// Backdrop behind the modal. The frame loop skips the app UI while the
+// updater modal is up, so a flat dim over the whole viewport is the clean
+// background.
+void drawBackdrop() {
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::GetBackgroundDrawList()->AddRectFilled(
+        vp->Pos, ImVec2(vp->Pos.x + vp->Size.x, vp->Pos.y + vp->Size.y),
+        IM_COL32(0, 0, 0, 140));
+}
+
+// One modal body for the current phase. A phase change resets the button
+// focus and the wasOpen latch: focus must not leak from one body's row into
+// the next, and a held Enter must not activate the next phase's first
+// button. Returns false for a stale open (reset/cancel raced the tick).
+bool drawPhaseBody(DialogState& st, UpdatePhase phase, bool toastLive,
+                   int& focus, bool& wasOpen, const ImVec4& accent) {
+    switch (phase) {
+        case UpdatePhase::Checking:
+            drawCheckingBody(st, focus, wasOpen, accent);
+            return true;
+        case UpdatePhase::Available:
+            drawOfferBody(st, focus, wasOpen, accent);
+            return true;
+        case UpdatePhase::Downloading:  // fall through
+        case UpdatePhase::Verifying:
+            drawProgressBody(st, focus, wasOpen, accent);
+            return true;
+        case UpdatePhase::ReadyToApply:
+            drawReadyBody(st, focus, wasOpen, accent);
+            return true;
+        case UpdatePhase::Failed:
+            drawFailedBody(st, focus, wasOpen, accent);
+            return true;
+        default:
+            // UpToDate toast while live; anything else is a stale open —
+            // self-close via the wrapper's backstop.
+            if (toastLive) {
+                drawUpToDateBody(st, focus, wasOpen, accent);
+                return true;
+            }
+            return false;
+    }
+}
+
+// Whether the modal should be up for this phase. "Later" is per-version
+// (offer) and per-session (ready deferral); a fresh check clears both. A
+// cancel in flight hides everything until the worker settles.
+void applyOpenState(DialogState& st, UpdatePhase phase) {
+    const bool offer = phase == UpdatePhase::Available &&
+                       st.service.release().version != st.dismissedVersion;
+    const bool progress =
+        (phase == UpdatePhase::Downloading ||
+         phase == UpdatePhase::Verifying) &&
+        !st.cancelling;
+    const bool failed = phase == UpdatePhase::Failed &&
+                        (st.manual || st.userInitiated) && !st.cancelling;
+    st.open = (phase == UpdatePhase::Checking && st.manual) || offer ||
+              progress ||
+              (phase == UpdatePhase::ReadyToApply && !st.readyDeferred) ||
+              failed;
+}
+
 } // namespace
 
 void startCheck(bool manualCheck) {
@@ -332,8 +460,11 @@ void startCheck(bool manualCheck) {
     st.service.startCheck(UpdateCheckConfig{st.config.repoSlug, APP_VERSION});
     st.manual = manualCheck;
     st.open = false;
-    st.offerDismissed = false;
     st.notesExpanded = false;
+    st.dismissedVersion.clear();
+    st.readyDeferred = false;
+    st.cancelling = false;
+    st.userInitiated = false;
     st.lastPhase = static_cast<int>(st.service.phase());
 }
 
@@ -348,9 +479,12 @@ void startup() {
 #else
     if (st.autoStarted) return;
     if (!st.config.autoCheck) return;
-    const long long now = nowSeconds();
-    if (st.config.lastCheckEpoch != 0 && now - st.config.lastCheckEpoch < 86400)
-        return;
+    // Cooldown tolerant of a future/rolled-back clock: only a real elapsed
+    // time inside the day suppresses the check.
+    if (st.config.lastCheckEpoch != 0) {
+        const long long since = nowSeconds() - st.config.lastCheckEpoch;
+        if (since >= 0 && since < 86400) return;
+    }
     st.autoStarted = true;
     startCheck(false);  // silent: tick() only raises a modal on a real offer
 #endif
@@ -362,6 +496,7 @@ void requestManualCheck() {
         // A check/download is already in flight: just surface its modal.
         st.open = true;
         st.manual = true;
+        st.readyDeferred = false;  // "Later" yields to an explicit re-check
         return;
     }
     st.service.reset();  // safe while !busy(): joins a finished worker only
@@ -376,7 +511,7 @@ void tick() {
         // Runs while the release info is still readable (reset() clears it).
         st.config.skippedVersion = svc.release().version;
         saveConfig(st.config);
-        svc.reset();
+        svc.reset();  // cancel-armed: settles out of Checking without saving
         st.skipRequested = false;
         st.open = false;
         st.lastPhase = static_cast<int>(svc.phase());
@@ -386,7 +521,14 @@ void tick() {
     const UpdatePhase phase = svc.phase();
     st.lastPhase = static_cast<int>(phase);
     const bool checkEnded = prev == UpdatePhase::Checking && phase != prev;
-    if (checkEnded) {
+    if (st.cancelling && (phase == UpdatePhase::Idle ||
+                          phase == UpdatePhase::Failed)) {
+        st.cancelling = false;  // settled; a cancel-caused Failed stays hidden
+    }
+    if (checkEnded && (phase == UpdatePhase::UpToDate ||
+                       phase == UpdatePhase::Available)) {
+        // Only a successful check starts a new cooldown; a failure retries
+        // on the next startup.
         st.config.lastCheckEpoch = nowSeconds();
         saveConfig(st.config);
     }
@@ -398,14 +540,7 @@ void tick() {
         svc.release().version == st.config.skippedVersion) {
         svc.reset();
     }
-
-    // Offer is silent once dismissed; a manual re-check always re-offers.
-    const bool offer = phase == UpdatePhase::Available &&
-                       (st.manual || !st.offerDismissed);
-    st.open = offer || phase == UpdatePhase::Downloading ||
-              phase == UpdatePhase::Verifying ||
-              phase == UpdatePhase::ReadyToApply ||
-              (phase == UpdatePhase::Failed && st.manual);
+    applyOpenState(st, phase);
     if (phase == UpdatePhase::RestartArmed) st.open = false;
     if (checkEnded && phase == UpdatePhase::UpToDate && st.manual) {
         st.upToDateUntil =
@@ -413,59 +548,55 @@ void tick() {
     }
 }
 
+// Toast bookkeeping before the frame: live? expired (run the final wiping
+// frame, §17)? Returns whether the up-to-date toast should show.
+bool toastState(DialogState& st) {
+    if (st.upToDateUntil == std::chrono::steady_clock::time_point{}) {
+        return false;
+    }
+    if (std::chrono::steady_clock::now() < st.upToDateUntil) {
+        return true;
+    }
+    // Expired: this is the final frame that wipes the toast; the still-open
+    // popup is closed by the !shouldShow path in render().
+    st.upToDateUntil = std::chrono::steady_clock::time_point{};
+    st.manual = false;
+    return false;
+}
+
 bool render() {
     DialogState& st = state();
-    const std::chrono::steady_clock::time_point now =
-        std::chrono::steady_clock::now();
-    const bool armed =
-        st.upToDateUntil != std::chrono::steady_clock::time_point{};
-    const bool toastLive = armed && now < st.upToDateUntil;
-    if (armed && !toastLive) {
-        // Final frame after expiry so the toast is actually wiped (§17);
-        // the still-open toast popup is closed by the !shouldShow path below.
-        st.upToDateUntil = std::chrono::steady_clock::time_point{};
-        st.manual = false;
-    }
+    const bool toastLive = toastState(st);
     const bool shouldShow = st.open || toastLive;
     if (!shouldShow && !ImGui::IsPopupOpen(kPopup)) return false;
+    if (shouldShow) drawBackdrop();
 
     static int focus = 0;
     static bool wasOpen = false;
+    static int lastRenderPhase = -1;
+    const int phaseInt = static_cast<int>(st.service.phase());
+    if (phaseInt != lastRenderPhase) {
+        focus = 0;
+        wasOpen = false;
+        lastRenderPhase = phaseInt;
+    }
     const ImVec4 accent = accentColor();
     ImGui::OpenPopup(kPopup);  // idempotent while already open
     beginModalStyles(520.0f, accent);
     if (ImGui::BeginPopupModal(kPopup, nullptr,
                                ImGuiWindowFlags_AlwaysAutoResize |
                                    ImGuiWindowFlags_NoTitleBar)) {
-        if (!shouldShow) {
+        bool drew = false;
+        if (shouldShow) {
+            drew = drawPhaseBody(st, static_cast<UpdatePhase>(phaseInt),
+                                 toastLive, focus, wasOpen, accent);
+        }
+        if (!drew) {
             st.open = false;  // backstop: state dismissed it, close stale popup
             ImGui::CloseCurrentPopup();
         } else {
-            switch (st.service.phase()) {
-                case UpdatePhase::Available:
-                    drawOfferBody(st, focus, wasOpen, accent);
-                    break;
-                case UpdatePhase::Downloading:  // fall through
-                case UpdatePhase::Verifying:
-                    drawProgressBody(st, focus, wasOpen, accent);
-                    break;
-                case UpdatePhase::ReadyToApply:
-                    drawReadyBody(st, focus, wasOpen, accent);
-                    break;
-                case UpdatePhase::Failed:
-                    drawFailedBody(st, focus, wasOpen, accent);
-                    break;
-                default:
-                    // UpToDate toast while live; anything else is a stale
-                    // open (reset/cancel raced the tick) — self-close.
-                    if (toastLive)
-                        drawUpToDateBody(st, focus, wasOpen, accent);
-                    else
-                        ImGui::CloseCurrentPopup();
-                    break;
-            }
+            wasOpen = true;
         }
-        wasOpen = true;
         drawAccentFrame(accent);
         ImGui::EndPopup();
     } else {
