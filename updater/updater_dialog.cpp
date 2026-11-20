@@ -492,6 +492,14 @@ void startup() {
 
 void requestManualCheck() {
     DialogState& st = state();
+    if (st.service.phase() == UpdatePhase::ReadyToApply) {
+        // A verified update is staged: re-show the Ready body instead of
+        // reset(), which would delete the stage and discard the download.
+        st.open = true;
+        st.manual = true;
+        st.readyDeferred = false;
+        return;
+    }
     if (st.service.busy()) {
         // A check/download is already in flight: just surface its modal.
         st.open = true;
@@ -566,14 +574,20 @@ bool toastState(DialogState& st) {
 
 bool render() {
     DialogState& st = state();
-    const bool toastLive = toastState(st);
-    const bool shouldShow = st.open || toastLive;
-    if (!shouldShow && !ImGui::IsPopupOpen(kPopup)) return false;
-    if (shouldShow) drawBackdrop();
-
     static int focus = 0;
     static bool wasOpen = false;
     static int lastRenderPhase = -1;
+    const bool toastLive = toastState(st);
+    const bool shouldShow = st.open || toastLive;
+    if (!shouldShow && !ImGui::IsPopupOpen(kPopup)) {
+        // Nothing on screen: the latch must not carry a held Enter into the
+        // next offer/toast, so drop the keyboard state here too.
+        focus = 0;
+        wasOpen = false;
+        return false;
+    }
+    if (shouldShow) drawBackdrop();
+
     const int phaseInt = static_cast<int>(st.service.phase());
     if (phaseInt != lastRenderPhase) {
         focus = 0;
@@ -593,6 +607,8 @@ bool render() {
         }
         if (!drew) {
             st.open = false;  // backstop: state dismissed it, close stale popup
+            focus = 0;
+            wasOpen = false;  // no body drew: a held Enter must not survive
             ImGui::CloseCurrentPopup();
         } else {
             wasOpen = true;

@@ -200,6 +200,14 @@ void removePartialFile(const std::string& path) {
     std::filesystem::remove(pathFromUtf8(path), ec);
 }
 
+// Size of a freshly written file; false when the file is missing or the size
+// cannot be read (an error or the (uintmax_t)-1 sentinel).
+bool downloadedFileSize(const std::string& path, std::uintmax_t& size) {
+    std::error_code ec;
+    size = std::filesystem::file_size(pathFromUtf8(path), ec);
+    return !ec && size != static_cast<std::uintmax_t>(-1);
+}
+
 } // namespace
 
 bool httpDownloadFile(const std::string& url, const std::string& path,
@@ -256,6 +264,13 @@ bool httpDownloadFile(const std::string& url, const std::string& path,
         error = "HTTP " + std::to_string(status);
     } else if (fileRes.writeFailed || fileRes.syncFailed) {
         error = "could not write the downloaded file";
+    } else if (std::uintmax_t size = 0; !downloadedFileSize(path, size)) {
+        // A 2xx transfer that produced no stat-able file is not a success.
+        error = "could not verify the downloaded file";
+    } else if (size == 0) {
+        // A server may answer 200 with an empty body; a zero-byte asset is
+        // never a valid update, even though the checksum would catch it too.
+        error = "the downloaded file is empty";
     } else {
         ok = true;
     }

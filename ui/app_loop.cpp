@@ -2107,12 +2107,13 @@ void AppLoop::renderUI() {
         if (updater::takeCloseRequest())
             glfwSetWindowShouldClose(glfwGetCurrentContext(), GLFW_TRUE);
 
-        // Exclusive updater gate: while the update dialog is up, no other UI
-        // is built (welcome/home, dockspace, panels, other modals), so a bug
-        // elsewhere cannot interfere with or dismiss it. The modal is the only
-        // content of the frame.
-        if (updaterModal)
-            return;
+        // Updater modal: the rest of the UI keeps rendering for the whole frame
+        // (dock nodes must stay submitted, or DockNodeUpdateFlagsAndCollapse
+        // drops them and wrecks the saved dock layout; the wheel drain and the
+        // post-render bookkeeping must also keep running). What IS suppressed
+        // while it is up is every other modal popup: OpenPopup later in the
+        // same frame would close the updater popup. See the !updaterModal gates
+        // on the error/confirm modals and the conversion screen below.
 
         // Rate-limit mouse wheel to at most one notch per frame, with carry-over
         // for excess. Raw deltas are accumulated in the GLFW scroll callback
@@ -2202,47 +2203,57 @@ void AppLoop::renderUI() {
             renderAboutPopup();
         }
 
-        // Phase 5: dataset conversion screen (foreign formats -> .h5)
-        if (appState.conversionScreen.open) {
+        // Phase 5: dataset conversion screen (foreign formats -> .h5).
+        // Suppressed while the updater modal is up: its OpenPopup would
+        // force-close the updater popup (different id).
+        if (appState.conversionScreen.open && !updaterModal) {
             ImGui::OpenPopup("Convert Dataset##conversion");
             appState.needsRedraw = true;
         }
-        renderConversionScreen(appState);
+        if (!updaterModal)
+            renderConversionScreen(appState);
 
-        // Render error popup
-        if (appState.showErrorPopup) {
-            ImGui::OpenPopup("Error##errorPopup");
-            appState.needsRedraw = true;
-        }
-        beginModal(520.0f, modalAccent());
-        if (ImGui::BeginPopupModal("Error##errorPopup", &appState.showErrorPopup,
-                                   ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
-            // NoTitleBar: the title moves into the body so removing the
-            // header loses no information.
-            ImGui::Text("Error");
-            ImGui::Spacing();
-            ImGui::TextWrapped("%s", appState.errorMsg.c_str());
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::Spacing();
-            static int errFocus = 0;
-            static bool errWasOpen = false;
-            if (modalButtonRow({"OK"}, errFocus, errWasOpen, modalAccent()) == 0 ||
-                ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-                appState.showErrorPopup = false;
-                ImGui::CloseCurrentPopup();
+        // Render error popup: the whole block (its OpenPopup plus the
+        // beginModal/BeginPopupModal/endModal pair) is skipped while the updater
+        // modal is up; the flag stays set so the modal reappears when it closes.
+        if (!updaterModal) {
+            if (appState.showErrorPopup) {
+                ImGui::OpenPopup("Error##errorPopup");
+                appState.needsRedraw = true;
             }
-            errWasOpen = true;
-            drawModalAccentFrame(modalAccent());
-            ImGui::EndPopup();
+            beginModal(520.0f, modalAccent());
+            if (ImGui::BeginPopupModal("Error##errorPopup", &appState.showErrorPopup,
+                                       ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
+                // NoTitleBar: the title moves into the body so removing the
+                // header loses no information.
+                ImGui::Text("Error");
+                ImGui::Spacing();
+                ImGui::TextWrapped("%s", appState.errorMsg.c_str());
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+                static int errFocus = 0;
+                static bool errWasOpen = false;
+                if (modalButtonRow({"OK"}, errFocus, errWasOpen, modalAccent()) == 0 ||
+                    ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+                    appState.showErrorPopup = false;
+                    ImGui::CloseCurrentPopup();
+                }
+                errWasOpen = true;
+                drawModalAccentFrame(modalAccent());
+                ImGui::EndPopup();
+            }
+            endModal();
         }
-        endModal();
 
         // Phase 2 modals: unsaved-changes + stale-drop confirmation.
-        renderUnsavedPromptModal();
-        renderStaleDropPromptModal();
-        renderExitDirtyModal();
-        renderExperimentDeleteConfirmModal();
+        // Skipped while the updater modal is up for the same reason.
+        if (!updaterModal) {
+            renderUnsavedPromptModal();
+            renderStaleDropPromptModal();
+            renderExitDirtyModal();
+            renderExperimentDeleteConfirmModal();
+        }
         
         // Only render main docking interface if welcome screen is not active
         if (appState.welcomeScreenInitialized) {

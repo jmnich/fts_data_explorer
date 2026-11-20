@@ -4,6 +4,18 @@
 // Repo style: std::from_chars for numbers (no std::stoll), MinGW-clean.
 #include "updater_config.h"
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h> // GetCurrentProcessId
+#else
+#include <unistd.h> // getpid
+#endif
+
 #include <charconv>
 #include <cctype>
 #include <filesystem>
@@ -16,6 +28,15 @@ namespace updater {
 namespace {
 
 const char* const kDefaultRepo = "jmnich/fts_data_explorer";
+
+// OS process id (temp-file name component).
+long processId() {
+#ifdef _WIN32
+    return static_cast<long>(GetCurrentProcessId());
+#else
+    return static_cast<long>(getpid());
+#endif
+}
 
 // Whitespace (spaces, tabs, carriage returns) removed from both ends.
 std::string trim(const std::string& s) {
@@ -178,11 +199,13 @@ void saveConfig(const Config& cfg) {
     if (path.empty()) {
         return;
     }
-    // Atomic-ish write: full contents into <path>.tmp first, closed, then a
-    // single rename over the target. Any failure leaves the old file intact.
+    // Atomic-ish write: full contents into a per-process temp file first,
+    // closed, then a single rename over the target. The pid suffix keeps two
+    // running instances from writing the same temp file. Any failure leaves
+    // the old file intact.
     const std::filesystem::path target = pathFromUtf8(path);
     std::filesystem::path tmp = target;
-    tmp += std::filesystem::u8path(".tmp");
+    tmp += std::filesystem::u8path(".tmp." + std::to_string(processId()));
     {
         std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
         if (!out.is_open()) {

@@ -58,6 +58,10 @@ UpdatePhase toPhase(int raw) {
     return static_cast<UpdatePhase>(raw);
 }
 
+// Defined below with runDownload; runCheck's cancel path needs it first.
+void clearStatusBeforeIdle(std::mutex& textMutex, std::string& status,
+                           std::atomic<int>& phase);
+
 std::string lowerCase(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
         return static_cast<char>(std::tolower(c));
@@ -83,14 +87,11 @@ void removeStageFile(const std::string& path) {
     std::filesystem::remove(pathFromUtf8(path), ec);
 }
 
-// True for https:// and for the loopback http:// variants the local mock
-// simulation uses; everything else is rejected for release assets.
+// True only for https://. The http://127.0.0.1 / http://localhost exceptions a
+// local mock simulation used are gone: production accepts no plaintext asset
+// URLs. A temporary test seam for simulations is added separately, never here.
 bool isSecureUrl(const std::string& url) {
-    const std::string httpLoopback1 = "http://127.0.0.1:";
-    const std::string httpLoopback2 = "http://localhost:";
-    return url.rfind("https://", 0) == 0 ||
-           url.rfind(httpLoopback1, 0) == 0 ||
-           url.rfind(httpLoopback2, 0) == 0;
+    return url.rfind("https://", 0) == 0;
 }
 
 // Fill error/status and move to Failed; the worker's terminal state.
@@ -155,6 +156,12 @@ void runCheck(const UpdateCheckConfig cfg, std::atomic<int>& phase, std::atomic<
     const HttpGetResult res = httpGetString(
         "https://api.github.com/repos/" + cfg.repoSlug + "/releases/latest", &cancel);
     if (!res.ok) {
+        if (res.error == "cancelled" || cancel.load()) {
+            // The user pressed Cancel: the UI already moved on, so report no
+            // failure — only clear the "Checking…" text and publish Idle.
+            clearStatusBeforeIdle(textMutex, status, phase);
+            return;
+        }
         std::string reason;
         if (res.status == 403) {
             reason = "GitHub refused the check (rate limit?)";
@@ -190,6 +197,11 @@ void runCheck(const UpdateCheckConfig cfg, std::atomic<int>& phase, std::atomic<
 
     const bool newer = compareVersions(remote, local) > 0;
     info.version = versionString(remote);
+    // Last-ditch cancel guard: never publish a terminal phase after a cancel,
+    // the cancel path already cleared the status and published Idle.
+    if (cancel.load()) {
+        return;
+    }
     std::lock_guard<std::mutex> lock(textMutex);
     release = info;
     if (newer) {
